@@ -7,13 +7,40 @@
  *    and the schedulers keep the rest of the quota;
  *  - user-agents of page requests are counted per day (top list on the admin overview). No IPs anywhere.
  * The source travels with the request through AsyncLocalStorage (set in index.ts for every /api request).
+ *
+ * fix166: search-engine crawlers (the ones robots.txt lets in) are marked on the request. Team and player pages never
+ * make a provider call for them (stored copy at any age, else built from our database only — `noProviderCalls`), and
+ * the admin card splits page calls and requests into visitors / crawlers.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { db } from '../db';
 import { every } from './perf';
 
-export type AfSource = { kind: 'page' | 'admin'; ua: string };
+export type AfSource = { kind: 'page' | 'admin'; ua: string; crawler?: boolean; offline?: boolean };
 export const afSource = new AsyncLocalStorage<AfSource>();
+
+/** Search-engine crawlers we let in (robots.txt: everyone except the blocked bots); the same list for every sport. */
+export const CRAWLERS = /Googlebot|GoogleOther|bingbot|Applebot|DuckDuckBot|YandexBot/i;
+export const isCrawlerUa = (ua: string | undefined) => CRAWLERS.test(String(ua || ''));
+/** This request comes from a search-engine crawler. */
+export const isCrawlerRequest = () => !!afSource.getStore()?.crawler;
+
+/** Thrown by the provider clients inside `noProviderCalls` (the caller falls back to what is stored). */
+export class NoProviderCallError extends Error {
+  code = 'NO_PROVIDER_CALL';
+  constructor() { super('No provider call for this request (crawler: stored data only)'); }
+}
+/** Provider clients (API-Football, API-Basketball, balldontlie) call this first: refused inside `noProviderCalls`. */
+export function assertProviderCallAllowed() {
+  if (afSource.getStore()?.offline) throw new NoProviderCallError();
+}
+/** Run fn with every provider call refused: our database only. */
+export function noProviderCalls<T>(fn: () => T): T {
+  const s = afSource.getStore();
+  return afSource.run({ kind: s?.kind || 'page', ua: s?.ua || '(none)', crawler: s?.crawler, offline: true }, fn);
+}
+/** Run fn outside any request (background work a request starts is not that request's page call). */
+export const outsideRequest = <T>(fn: () => T): T => afSource.exit(fn);
 
 const PER_HOUR = parseInt(process.env.AF_PAGE_PER_HOUR || '600', 10);
 const PER_DAY = parseInt(process.env.AF_PAGE_PER_DAY || '8000', 10);
@@ -60,8 +87,14 @@ function agent(ua: string): UaRow {
   return a;
 }
 
-/** A visitor's /api request (counted per user-agent). */
-export function notePageRequest(ua: string) { roll(); agent(ua).requests++; dirty = true; }
+/** A visitor's /api request (counted per user-agent, and as visitor / crawler). */
+export function notePageRequest(ua: string, crawler = false) {
+  roll();
+  agent(ua).requests++;
+  const k = crawler ? 'req_crawler' : 'req_visitor';
+  counts[k] = (counts[k] || 0) + 1;
+  dirty = true;
+}
 /** A request refused because the user-agent is a blocked bot. */
 export function noteBlocked(ua: string) { roll(); agent(ua).blocked++; dirty = true; }
 
@@ -77,12 +110,18 @@ export class PageBudgetError extends Error {
  */
 export function beforeAfCall() {
   roll();
+  assertProviderCallAllowed();
   const s = afSource.getStore();
   const kind = s?.kind || 'scheduler';
   if (kind === 'page' && (pageHour.n >= PER_HOUR || (counts.page || 0) >= PER_DAY)) { refusedToday++; throw new PageBudgetError(); }
   // counted when allowed (not when answered), so calls started together can't all slip under the budget
   counts[kind] = (counts[kind] || 0) + 1;
-  if (kind === 'page') { pageHour.n++; agent(s!.ua).afCalls++; }
+  if (kind === 'page') {
+    pageHour.n++;
+    agent(s!.ua).afCalls++;
+    const k = s!.crawler ? 'page_crawler' : 'page_visitor';
+    counts[k] = (counts[k] || 0) + 1;
+  }
   dirty = true;
 }
 /** Page calls still allowed this hour (for background warm-ups that should give way first). */
@@ -113,6 +152,11 @@ export function afUsageToday() {
   return {
     day,
     calls: { scheduler: counts.scheduler || 0, pages: counts.page || 0, admin: counts.admin || 0 },
+    // fix166: page calls and requests split into visitors / crawlers (split counted from fix166 on)
+    pages: {
+      visitors: { calls: (counts.page || 0) - (counts.page_crawler || 0), requests: counts.req_visitor || 0 },
+      crawlers: { calls: counts.page_crawler || 0, requests: counts.req_crawler || 0 }
+    },
     pageBudget: { perHour: PER_HOUR, perDay: PER_DAY, thisHour: pageHour.n, refused: refusedToday },
     topAgents: top
   };

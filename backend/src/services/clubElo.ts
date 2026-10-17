@@ -16,7 +16,7 @@ import { every, after } from './perf';
 
 export const MODEL_EURO = 'elo-euro';
 const AF_OFFSET = 1_000_000_000;
-const CUPS: Record<number, string> = { 2: 'Champions League', 3: 'Europa League', 848: 'Conference League' };
+export const CUPS: Record<number, string> = { 2: 'Champions League', 3: 'Europa League', 848: 'Conference League' };
 const K_DOMESTIC = 18, K_CUP = 32, HA = 60;
 /**
  * Clubs with no Transfermarkt value (Oct 2026) are the small ones — Azerbaijani, Armenian, Faroese champions and the

@@ -93,7 +93,7 @@ import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { dataHealth, startDataHealthScheduler } from './services/dataHealth';
 import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeatures, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
-import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday } from './services/afUsage';
+import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerUa, isCrawlerRequest, noProviderCalls } from './services/afUsage';
 import { createHash, randomBytes } from 'node:crypto';
 import { leagueCoverage, pickForAdding } from './services/leagueCoverage';
 import { addExtraLeague, removeExtraLeague, setExtraTrial } from './services/leagueConfig';
@@ -272,13 +272,17 @@ app.use((req, _res, next) => {
 
 app.use('/api', trackVisit); // visitor counts for the admin page (hashed IPs only)
 // fix140: every API-Football call made while answering this request counts as "page" (own small budget, afUsage.ts)
-// or "admin"; the user-agent is counted per day for the admin card (no IPs).
+// or "admin"; the user-agent is counted per day for the admin card (no IPs). fix166: search-engine crawlers are marked
+// (team / player pages make no provider call for them; admin card splits visitors / crawlers).
 app.use('/api', (req, _res, next) => {
   const ua = uaKey(req.get('user-agent'));
   const admin = req.access === 'admin';
-  if (!admin) notePageRequest(ua);
-  afSource.run({ kind: admin ? 'admin' : 'page', ua }, next);
+  const crawler = !admin && isCrawlerUa(ua);
+  if (!admin) notePageRequest(ua, crawler);
+  afSource.run({ kind: admin ? 'admin' : 'page', ua, crawler }, next);
 });
+/** fix166: team / player pages of every sport make no provider call for a crawler (stored or database data only). */
+const crawlerSafe = <T>(fn: () => T): T => (isCrawlerRequest() ? noProviderCalls(fn) : fn());
 
 // No bookmakers on the site (Oct 2026): odds, bookmaker names and market comparisons are internal data only.
 // For everyone except admins, every API response is cleaned of them before it leaves the server.
@@ -1657,9 +1661,9 @@ app.get('/api/team-page/:id(\\d+)', async (req, res) => {
   try {
     const afId = resolveAfTeamId(parseInt(req.params.id, 10), req.query.c ? String(req.query.c) : undefined, req.query.n ? String(req.query.n) : undefined);
     if (!afId) return res.status(404).json({ error: 'Team not found' });
-    res.json({ data: await teamPage(afId, isPaid(req.access || 'anon')), timestamp: new Date().toISOString() });
+    res.json({ data: await crawlerSafe(() => teamPage(afId, isPaid(req.access || 'anon'))), timestamp: new Date().toISOString() });
   } catch (error: any) {
-    if (error?.code === 'PAGE_BUDGET') return res.json({ data: null, pending: true, message: 'More details soon' });
+    if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.json({ data: null, pending: true, message: 'More details soon' });
     sendError(res, error, 'Team page failed');
   }
 });
@@ -1670,19 +1674,19 @@ app.get('/api/player-page/find', async (req, res) => {
     const name = String(req.query.name || '').trim();
     const team = parseInt(String(req.query.team || ''), 10);
     if (!name || !team) return res.status(400).json({ error: 'name and team are required' });
-    const id = await findPlayer(name, team, req.query.c ? String(req.query.c) : undefined, req.query.n ? String(req.query.n) : undefined);
+    const id = await crawlerSafe(() => findPlayer(name, team, req.query.c ? String(req.query.c) : undefined, req.query.n ? String(req.query.n) : undefined));
     if (!id) return res.status(404).json({ error: 'Player not found' });
     res.json({ data: { id }, timestamp: new Date().toISOString() });
   } catch (error: any) {
-    if (error?.code === 'PAGE_BUDGET') return res.json({ data: null, pending: true, message: 'More details soon' });
+    if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.json({ data: null, pending: true, message: 'More details soon' });
     sendError(res, error, 'Player lookup failed');
   }
 });
 app.get('/api/player-page/:id(\\d+)', async (req, res) => {
   try {
-    res.json({ data: await playerPage(parseInt(req.params.id, 10), isPaid(req.access || 'anon')), timestamp: new Date().toISOString() });
+    res.json({ data: await crawlerSafe(() => playerPage(parseInt(req.params.id, 10), isPaid(req.access || 'anon'))), timestamp: new Date().toISOString() });
   } catch (error: any) {
-    if (error?.code === 'PAGE_BUDGET') return res.json({ data: null, pending: true, message: 'More details soon' });
+    if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.json({ data: null, pending: true, message: 'More details soon' });
     sendError(res, error, 'Player page failed');
   }
 });
@@ -2387,7 +2391,7 @@ app.get('/api/basketball/standings/:code([A-Za-z]{2,4})', async (req, res) => {
 });
 app.get('/api/basketball/team/:id(\\d+)', async (req, res) => {
   try {
-    const data = await bbTeam(parseInt(req.params.id, 10), isPaid(req.access || 'anon'));
+    const data = await crawlerSafe(() => bbTeam(parseInt(req.params.id, 10), isPaid(req.access || 'anon')));
     if (!data) return res.status(404).json({ error: 'Team not found' });
     res.json({ data, timestamp: new Date().toISOString() });
   } catch (error: any) {
@@ -2396,7 +2400,7 @@ app.get('/api/basketball/team/:id(\\d+)', async (req, res) => {
 });
 app.get('/api/basketball/player/:id(\\d+)', async (req, res) => {
   try {
-    const data = await bbPlayer(parseInt(req.params.id, 10));
+    const data = await crawlerSafe(() => bbPlayer(parseInt(req.params.id, 10)));
     if (!data) return res.status(404).json({ error: 'Player not found' });
     res.json({ data, timestamp: new Date().toISOString() });
   } catch (error: any) {

@@ -12,12 +12,14 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { afGet, afRemaining, afConfigured } from './apiFootball';
-import { pageBudgetLeft } from './afUsage';
-import { resolveAfTeamId } from './teamPage';
+import { pageBudgetLeft, isCrawlerRequest, noProviderCalls, outsideRequest } from './afUsage';
+import { resolveAfTeamId, competitionName, teamNameOf } from './teamPage';
 import { every } from './perf';
 
 const AF_OFFSET = 1_000_000_000;
-const PAGE_TTL = 12 * 3600 * 1000;
+// fix166: 24 h (was 12 h); 3 h while his club has played in the last 24 h (the provider's numbers catch up)
+const PAGE_TTL = 24 * 3600 * 1000;
+const PAGE_TTL_PLAYED = 3 * 3600 * 1000;
 const PAGE_VERSION = 7; // bump when the page shape changes: older stored copies are rebuilt
 const cache = new Map<number, { at: number; data: any }>();
 
@@ -269,10 +271,13 @@ function mergeRows(rows: any[]): any[] {
   });
 }
 
-async function build(pid: number) {
-  if (!afConfigured()) throw new Error('API-Football is not configured');
-  if (!buildAllowed()) throw Object.assign(new Error('Busy right now, try again in a few minutes'), { response: { status: 503 } });
-  if (afRemaining() < 200) throw new Error('Daily data budget reached, try again later');
+/** offline: crawler pages — every provider call is refused (noProviderCalls), each step uses what we stored */
+async function build(pid: number, offline = false) {
+  if (!offline) {
+    if (!afConfigured()) throw new Error('API-Football is not configured');
+    if (!buildAllowed()) throw Object.assign(new Error('Busy right now, try again in a few minutes'), { response: { status: 503 } });
+    if (afRemaining() < 200) throw new Error('Daily data budget reached, try again later');
+  }
   const S = seasonNow();
   // The whole career: every season the provider has. The three current provider seasons are fetched fresh
   // (S+1 catches this summer's tournaments and calendar-year leagues filed ahead); older ones come from our store
@@ -280,7 +285,7 @@ async function build(pid: number) {
   const years = new Set(await careerYears(pid));
   for (const y of [S - 1, S, S + 1]) years.add(y);
   const fresh = new Set([S - 1, S, S + 1]);
-  const lowBudget = afRemaining() < 2000;
+  const lowBudget = offline || afRemaining() < 2000;
   const list = [...years].sort((a, b) => b - a);
   const raws = await pool(list, 4, async y => {
     const stored = !fresh.has(y) && lowBudget ? db.prepare(`SELECT json FROM player_season_raw WHERE player_id = ? AND season = ?`).get(pid, y) as any : undefined;
@@ -433,43 +438,37 @@ async function build(pid: number) {
 }
 
 /*
- * A page is rebuilt as soon as the player's club has finished a game since it was built (2 hours after kick-off),
- * instead of waiting for the 12-hour refresh. Only the current seasons are fetched again; the rest of the career
- * comes from our store.
- * Fix (Oct 2026): 2 hours after kick-off is the final whistle — the provider updates the player's season numbers
- * later (often hours later). A page built in the 30 hours after one of his club's games is therefore rebuilt again
- * whenever it is more than 3 hours old, until the provider's numbers have caught up. (The daily data check fell from
- * 97% to 85% after a full matchday because of this: pages were saved with the numbers from before the game.)
+ * How long a page lives (fix166): 24 hours; 3 hours while his club has played in the last 24 hours — the provider
+ * updates the season numbers hours after the final whistle, so a page built around a game is rebuilt until they have
+ * caught up. (Before fix166: 12 hours, plus a rebuild after every club game and every 3 hours for 30 hours after it.)
+ * Only the current seasons are fetched again; the rest of the career comes from our store.
  */
-const playedCache = new Map<string, { at: number; v: boolean }>();
-function playedSince(data: any): boolean {
+const playedCache = new Map<number, { at: number; v: boolean }>();
+function clubPlayedRecently(data: any): boolean {
   const teamId = data?.team?.id ? data.team.id - AF_OFFSET : null;
-  if (!teamId || !data.builtAt) return false;
-  const key = `${teamId}|${data.builtAt}`;
-  const c = playedCache.get(key);
+  if (!teamId) return false;
+  const c = playedCache.get(teamId);
   if (c && Date.now() - c.at < 5 * 60 * 1000) return c.v;
   let v = false;
   try {
-    const cutoff = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
-    v = !!db.prepare(`SELECT 1 FROM af_fixtures WHERE (home_id = ? OR away_id = ?) AND status IN ('FT','AET','PEN') AND kickoff > ? AND kickoff < ? LIMIT 1`).get(teamId, teamId, data.builtAt, cutoff);
-    // built soon after a game: the provider may not have counted it yet — rebuild every 3 hours for 30 hours
-    const built = new Date(data.builtAt).getTime();
-    if (!v && Date.now() - built > 3 * 3600 * 1000) {
-      v = !!db.prepare(`SELECT 1 FROM af_fixtures WHERE (home_id = ? OR away_id = ?) AND status IN ('FT','AET','PEN') AND kickoff > ? AND kickoff <= ? LIMIT 1`)
-        .get(teamId, teamId, new Date(built - 30 * 3600 * 1000).toISOString(), data.builtAt);
-    }
+    const now = new Date().toISOString(), dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    v = !!db.prepare(`SELECT 1 FROM af_fixtures WHERE (home_id = ? OR away_id = ?) AND status IN ('FT','AET','PEN') AND kickoff > ? AND kickoff <= ? LIMIT 1`).get(teamId, teamId, dayAgo, now)
+      || !!db.prepare(`SELECT 1 FROM eur_matches WHERE (home_id = ? OR away_id = ?) AND date >= ? LIMIT 1`).get(teamId, teamId, dayAgo.slice(0, 10));
   } catch { /* table missing */ }
-  playedCache.set(key, { at: Date.now(), v });
-  if (playedCache.size > 5000) playedCache.delete(playedCache.keys().next().value as string);
+  playedCache.set(teamId, { at: Date.now(), v });
+  if (playedCache.size > 5000) playedCache.delete(playedCache.keys().next().value as number);
   return v;
 }
+const fresh = (data: any, at: number) => data?.v === PAGE_VERSION && Date.now() - at < (clubPlayedRecently(data) ? PAGE_TTL_PLAYED : PAGE_TTL);
 
 async function pageData(pid: number, wait = false) {
+  // crawlers: never a provider call (fix166) — the stored page at any age, else one built from our database only
+  if (isCrawlerRequest()) return crawlerPage(pid);
   const mem = cache.get(pid);
-  if (mem && Date.now() - mem.at < PAGE_TTL && mem.data.v === PAGE_VERSION && !playedSince(mem.data)) return mem.data;
+  if (mem && fresh(mem.data, mem.at)) return mem.data;
   const stored: any = db.prepare(`SELECT json, built_at FROM player_page_store WHERE player_id = ?`).get(pid);
   const storedData = stored ? JSON.parse(stored.json) : null;
-  if (stored && storedData.v === PAGE_VERSION && Date.now() - new Date(stored.built_at).getTime() < PAGE_TTL && !playedSince(storedData)) {
+  if (stored && fresh(storedData, new Date(stored.built_at).getTime())) {
     const data = storedData;
     cache.set(pid, { at: new Date(stored.built_at).getTime(), data });
     return data;
@@ -507,6 +506,73 @@ async function buildAndStore(pid: number, stored: any) {
 }
 
 /*
+ * Crawlers (fix166): the stored page at any age; else the page built from what we store (each season's provider
+ * answer, career years, competition dates — every provider call refused, so each step falls back to its stored copy);
+ * else a short page from the season data we keep for every player (af_player_season). Never stored: a real visitor's
+ * view builds and stores the full page.
+ */
+const crawlerCache = new Map<number, { at: number; data: any }>();
+async function crawlerPage(pid: number) {
+  const mem = cache.get(pid);
+  if (mem?.data?.v === PAGE_VERSION) return mem.data;
+  const stored: any = db.prepare(`SELECT json FROM player_page_store WHERE player_id = ?`).get(pid);
+  const storedData = stored ? JSON.parse(stored.json) : null;
+  if (storedData?.v === PAGE_VERSION) return storedData;
+  const c = crawlerCache.get(pid);
+  if (c && Date.now() - c.at < 3600 * 1000) return c.data;
+  let data: any = null;
+  try { data = await noProviderCalls(() => build(pid, true)); } catch { /* nothing stored from the provider about him */ }
+  data = data || storedData || seasonDataPage(pid);
+  if (!data) throw Object.assign(new Error('Player not found'), { response: { status: 404 } });
+  crawlerCache.set(pid, { at: Date.now(), data });
+  if (crawlerCache.size > 2000) crawlerCache.delete(crawlerCache.keys().next().value as number);
+  return data;
+}
+
+/** A short page from af_player_season (club, competitions, apps, minutes, goals, assists per season). */
+function seasonDataPage(pid: number) {
+  let rows: any[] = [];
+  try { rows = db.prepare(`SELECT * FROM af_player_season WHERE player_id = ? ORDER BY season DESC, minutes DESC`).all(pid) as any[]; } catch { return null; }
+  if (!rows.length) return null;
+  const toRow = (r: any) => ({
+    league: { id: r.league_id, code: `AF${r.league_id}`, name: competitionName(r.league_id), logo: `https://media.api-sports.io/football/leagues/${r.league_id}.png`, country: null, flag: null },
+    team: siteTeam({ id: r.team_id, name: teamNameOf(r.team_id) }),
+    position: r.position || null, number: null,
+    apps: Math.max(r.apps || 0, (r.minutes || 0) > 0 ? 1 : 0), starts: r.starts || 0, minutes: r.minutes || 0,
+    rating: r.rating && (r.minutes || 0) >= 30 ? Math.round(Number(r.rating) * 100) / 100 : null,
+    goals: r.goals || 0, assists: r.assists || 0, conceded: null, saves: null, shots: null, shotsOn: null, keyPasses: null, passAcc: null,
+    tackles: null, interceptions: null, dribbles: null, duelsWon: null, duels: null, yellow: 0, red: 0, penScored: null, penMissed: null,
+    afSeason: r.season
+  });
+  const bySeason = new Map<number, any[]>();
+  for (const r of rows.filter(r => (r.apps || 0) > 0 || (r.minutes || 0) > 0)) {
+    if (!bySeason.has(r.season)) bySeason.set(r.season, []);
+    bySeason.get(r.season)!.push(toRow(r));
+  }
+  const seasons = [...bySeason.keys()].sort((a, b) => b - a).map(y => {
+    const list = bySeason.get(y)!;
+    return { season: y, label: `${y}-${String(y + 1).slice(2)}`, rows: list, totals: totalsOf(list) };
+  });
+  const all = seasons.flatMap(s => s.rows);
+  const main = seasons[0]?.rows[0] || null;
+  const top = rows[0];
+  return {
+    player: { id: pid, name: top.name, short: top.name, firstname: null, lastname: null, age: top.age ?? null, birth: null, nationality: null, height: null, weight: null, photo: `https://media.api-sports.io/football/players/${pid}.png` },
+    team: main?.team || siteTeam({ id: top.team_id, name: teamNameOf(top.team_id) }),
+    position: main?.position || top.position || null,
+    number: null,
+    status: { out: false },
+    seasons,
+    career: { ...totalsOf(all), seasons: seasons.length, from: seasons.length ? seasons[seasons.length - 1].label : null },
+    careerPartial: true,
+    international: [], internationalTotals: [], sidelined: [], transfers: [],
+    partial: true,
+    v: PAGE_VERSION,
+    builtAt: new Date().toISOString()
+  };
+}
+
+/*
  * Warm-up: when a team page is opened, its players' pages are built in the background (three a minute,
  * only while the daily data budget is comfortable), so the first visit to a player page is instant instead of ~15 s.
  */
@@ -522,14 +588,15 @@ export function warmPlayers(ids: number[]) {
   }
   while (warmQueue.size > 2000) warmQueue.delete(warmQueue.values().next().value as number);
   if (!warmTimer && warmQueue.size) {
-    warmTimer = every('player pages warm', async () => {
+    // fix166: started outside the visitor's request — warm-ups are background work, not that visitor's page calls
+    warmTimer = outsideRequest(() => every('player pages warm', async () => {
       if (!warmQueue.size) { clearInterval(warmTimer!); warmTimer = null; return; }
       if (afRemaining() < 20000 || pageBudgetLeft() < 150) return; // fix140: visitors first, warm-ups give way
       for (const pid of [...warmQueue].slice(0, 3)) {
         warmQueue.delete(pid);
         try { await pageData(pid); } catch { /* skipped */ }
       }
-    }, 60 * 1000);
+    }, 60 * 1000));
     warmTimer.unref?.();
   }
 }

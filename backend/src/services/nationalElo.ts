@@ -20,7 +20,7 @@ export const MODEL_ELO = 'elo-intl';
 const AF_OFFSET = 1_000_000_000;
 
 /** API-Football league id → [K, home advantage]. */
-const COMPS: Record<number, { k: number; ha: number; name: string }> = {
+export const COMPS: Record<number, { k: number; ha: number; name: string }> = {
   1: { k: 60, ha: 0, name: 'World Cup' },
   4: { k: 50, ha: 0, name: 'Euro' },
   9: { k: 50, ha: 0, name: 'Copa America' },

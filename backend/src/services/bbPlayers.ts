@@ -10,6 +10,7 @@ import logger from '../utils/logger';
 import { isPreseason } from './bbModel';
 import { nbaKey } from './bbInjuries';
 import { bdlPlayerOf, bdlTeamOf, bdlSeasonNow, bdlContract, personKey } from './bdl';
+import { isCrawlerRequest } from './afUsage';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_roster (
@@ -20,12 +21,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_bb_roster_player ON bb_roster(player_id);
 `);
 
-/** A team's current squad from API-Basketball (refreshed once a day; on failure the last stored list is used). */
+// fix166: when the provider was last asked for a squad (also when it had none: an empty answer is not asked again every view)
+db.exec(`CREATE TABLE IF NOT EXISTS bb_roster_check (team_id INTEGER NOT NULL, season TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (team_id, season))`);
+
+/**
+ * A team's current squad from API-Basketball (on failure the last stored list is used). fix166: refreshed once a day,
+ * every 6 hours when the team has played in the last 24 hours; crawlers get the stored list (never a provider call).
+ */
 async function rosterOf(teamId: number, season: string) {
   const read = () => db.prepare(`SELECT * FROM bb_roster WHERE team_id = ? AND season = ? ORDER BY name`).all(teamId, season) as any[];
   const have = read();
-  const fresh = have.length && Date.now() - Date.parse(have[0].updated_at) < 24 * 3600000;
-  if (fresh) return have;
+  if (isCrawlerRequest()) return have;
+  const checked: any = db.prepare(`SELECT at FROM bb_roster_check WHERE team_id = ? AND season = ?`).get(teamId, season);
+  const at = Math.max(have.length ? Date.parse(have[0].updated_at) : 0, checked ? Date.parse(checked.at) : 0);
+  const played = !!db.prepare(`SELECT 1 FROM bb_games WHERE (home_id = ? OR away_id = ?) AND status IN ('FT','AOT') AND kickoff > ? AND kickoff <= ? LIMIT 1`)
+    .get(teamId, teamId, new Date(Date.now() - 24 * 3600000).toISOString(), new Date().toISOString());
+  if (Date.now() - at < (played ? 6 : 24) * 3600000) return have;
+  db.prepare(`INSERT OR REPLACE INTO bb_roster_check (team_id, season, at) VALUES (?, ?, ?)`).run(teamId, season, new Date().toISOString());
   try {
     const j = await bbGet('/players', { team: teamId, season });
     const list = (j.response || []) as any[];

@@ -1,9 +1,9 @@
 /**
  * Team pages and site search.
  *
- * A team page is built from API-Football: team + venue, the current domestic league and its table, squad,
- * player season stats (goals, assists, apps, minutes, rating, cards), last 10 and next 5 fixtures.
- * Cached per team for 6 hours (about 7–9 API calls per team per 6 h).
+ * A team page = a slow part from API-Football (team + venue, competitions, squad, player season stats, scorers),
+ * kept 24 h (6 h after a game), and a fast part from our own database (results, next games, form, table) read
+ * when the page is asked for (fix166, see "team page" below). Crawlers never make a provider call.
  * Free users get the basics; premium users get every player stat. (AI analysis: placeholder until an AI
  * writer is connected.)
  *
@@ -14,15 +14,13 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { afGet, afRemaining, afConfigured } from './apiFootball';
 import { groupForCompetition, fdNameFor, normalizeName } from './history';
-import { isKnownAfFixture, fdTwinOf } from './afMatches';
+import { isKnownAfFixture, fdTwinOf, afCompetitions, afStandingsCached, afWindowMatches } from './afMatches';
+import { isCrawlerRequest, noProviderCalls } from './afUsage';
 import { teamAnalysis, teamAnalysisTeaser } from './teamAnalysis';
 import { twinDupIds, warmPlayers } from './playerPage';
 
 const AF_OFFSET = 1_000_000_000;
 const TTL = 6 * 3600 * 1000; // search index
-const PAGE_TTL = 15 * 60 * 1000; // assembled page
-const SLOW = 12 * 3600 * 1000; // team profile, squad, player season stats
-const FAST = 15 * 60 * 1000; // fixtures, results, table: refreshed often so they are current after every game
 const cache = new Map<string, { at: number; data: any }>();
 const logo = (id: number) => `https://media.api-sports.io/football/teams/${id}.png`;
 
@@ -296,7 +294,31 @@ function byName(names: string[]): number | null {
 
 /* ---------------- team page ---------------- */
 
+/*
+ * fix166 (18 Oct 2026): a team page is two parts.
+ *  - Slow part, from API-Football: team + venue, competitions, squad, player season stats, scorers / assists, and a
+ *    snapshot of the table and fixtures (used for clubs outside the leagues we store). Kept 24 h, 6 h when the team
+ *    has played in the last 24 h (the provider's season numbers change after a game). Kept in team_page_store: the
+ *    page is rebuilt only when this part expires.
+ *  - Fast part, from our own database when the page is asked for (no provider call): last results, next games, form,
+ *    the league table (our record is in the team analysis). The schedulers keep those tables current, so "results and
+ *    table refresh every 15 minutes" stays true.
+ * Search-engine crawlers never make a provider call: the stored copy at any age, else a page built from our database
+ * only (no squad), which is not stored — a real visitor's view fills the store later.
+ * Before: the assembled page lived 15 minutes, so every view after that rebuilt it (3+ calls, 8–10 every 12 h).
+ */
+const SLOW_TTL = 24 * 3600 * 1000;
+const SLOW_TTL_PLAYED = 6 * 3600 * 1000;
+const CALL_TTL = 30 * 60 * 1000; // one provider answer, shared by builds running at once or retried after a failure
+const FAST_TTL = 60 * 1000; // the fast part, per team (database reads only)
+const FINISHED = new Set(['FT', 'AET', 'PEN']);
+const NOT_STARTED = new Set(['NS', 'TBD']);
+const TOP_LEAGUES: Record<number, string> = { 39: 'Premier League', 40: 'Championship', 140: 'La Liga', 135: 'Serie A', 78: 'Bundesliga', 61: 'Ligue 1', 88: 'Eredivisie', 94: 'Primeira Liga', 71: 'Serie A (Brazil)' };
+// window (Football-Data.org style) status → API-Football short status, as the team page shows it
+const WINDOW_STATUS: Record<string, string> = { FINISHED: 'FT', SCHEDULED: 'NS', TIMED: 'NS', IN_PLAY: 'LIVE', PAUSED: 'HT', POSTPONED: 'PST', CANCELLED: 'CANC', SUSPENDED: 'SUSP', AWARDED: 'AWD' };
+
 const simpleFixture = (f: any) => ({
+  fid: f.fixture.id as number,
   // prefer our Football-Data twin of the fixture (it carries the v3 prediction), else the API-Football page
   matchId: fdTwinOf(f.fixture.date, f.teams.home.name, f.teams.away.name) ?? (isKnownAfFixture(AF_OFFSET + f.fixture.id) ? AF_OFFSET + f.fixture.id : null),
   date: f.fixture.date,
@@ -307,6 +329,10 @@ const simpleFixture = (f: any) => ({
   hg: f.goals?.home ?? null,
   ag: f.goals?.away ?? null
 });
+type Fx = { fid?: number; matchId: number | null; date: string; status: string; comp: string | null; home: any; away: any; hg: number | null; ag: number | null; timed?: boolean };
+
+const gameKey = (f: Fx) => `${String(f.date).slice(0, 10)}|${f.home.id}|${f.away.id}`;
+const side = (id: number, name: string) => ({ id: AF_OFFSET + id, name, logo: logo(id) });
 
 /**
  * Home ground as it is NOW: the stadium of the team's most recent home game (fixtures are current; the provider's
@@ -315,8 +341,9 @@ const simpleFixture = (f: any) => ({
  */
 function currentVenue(afId: number, t: any, lastFixtures: any[]) {
   const ov = Object.fromEntries(teamOverrides(afId).map((o: any) => [o.field, o.value]));
+  const nowIso = new Date().toISOString();
   const lastHome = [...lastFixtures]
-    .filter(f => f.teams?.home?.id === afId && f.fixture?.venue?.name)
+    .filter(f => f.teams?.home?.id === afId && f.fixture?.venue?.name && String(f.fixture.date) <= nowIso)
     .sort((a, b) => (a.fixture.date < b.fixture.date ? 1 : -1))[0];
   const name = ov.venue || lastHome?.fixture?.venue?.name || t.venue?.name || null;
   if (!name) return null;
@@ -328,9 +355,9 @@ function currentVenue(afId: number, t: any, lastFixtures: any[]) {
   };
 }
 
-/** One API-Football call, cached with its own lifetime. */
-const g = (path: string, params: Record<string, string | number>, ttl: number) =>
-  cached<any>(`${path}?${JSON.stringify(params)}`, ttl, () => afGet(path, params));
+/** One API-Football call, cached briefly (builds running at once share it). */
+const g = (path: string, params: Record<string, string | number>) =>
+  cached<any>(`${path}?${JSON.stringify(params)}`, CALL_TTL, () => afGet(path, params));
 
 const BUILD_CAP = parseInt(process.env.TEAM_BUILDS_PER_HOUR || '600', 10);
 let builds = { hour: 0, n: 0 };
@@ -340,16 +367,15 @@ function buildAllowed() {
   return ++builds.n <= BUILD_CAP;
 }
 
-async function build(afId: number) {
+/** The slow part (API-Football): 6–10 calls, once a day per team (every 6 h after a game). */
+async function buildSlow(afId: number) {
   if (!afConfigured()) throw new Error('API-Football is not configured');
   if (!buildAllowed()) throw Object.assign(new Error('Busy right now, try again in a few minutes'), { response: { status: 503 } });
   if (afRemaining() < 200) throw new Error('Daily data budget reached, try again later');
-  const [teamRes, leaguesRes, squadRes, lastRes, nextRes] = await Promise.all([
-    g('/teams', { id: afId }, SLOW),
-    g('/leagues', { team: afId, current: 'true' }, SLOW),
-    g('/players/squads', { team: afId }, SLOW),
-    g('/fixtures', { team: afId, last: 10 }, FAST),
-    g('/fixtures', { team: afId, next: 5 }, FAST)
+  const [teamRes, leaguesRes, squadRes] = await Promise.all([
+    g('/teams', { id: afId }),
+    g('/leagues', { team: afId, current: 'true' }),
+    g('/players/squads', { team: afId })
   ]);
   const t = teamRes.response?.[0];
   if (!t) throw Object.assign(new Error('Team not found'), { response: { status: 404 } });
@@ -358,11 +384,15 @@ async function build(afId: number) {
   const leagues: any[] = leaguesRes.response || [];
   const league = leagues.find(l => l.league?.type === 'League') || leagues[0] || null;
   const season: number | null = league?.seasons?.find((s: any) => s.current)?.year ?? league?.seasons?.[0]?.year ?? null;
+  const compNames: Record<number, string> = {};
+  for (const l of leagues) if (l.league?.id && l.league?.name) compNames[l.league.id] = l.league.name;
 
+  // the table as the provider has it (snapshot: our own games bring it up to date between builds, see fastStanding)
   let standing: any = null;
-  if (league && season && league.league?.type === 'League') {
+  const standingP = (async () => {
+    if (!(league && season && league.league?.type === 'League')) return;
     try {
-      const st = await g('/standings', { league: league.league.id, season }, FAST);
+      const st = await g('/standings', { league: league.league.id, season });
       const groups: any[][] = st.response?.[0]?.league?.standings || [];
       const table = groups.find(g => g.some((r: any) => r.team?.id === afId)) || null;
       if (table) {
@@ -374,34 +404,50 @@ async function build(afId: number) {
         };
       }
     } catch (e: any) {
+      if (e?.code === 'PAGE_BUDGET') throw e;
       logger.warn(`team page standings ${afId}: ${e.message}`);
     }
-  }
+  })();
 
   // Which competitions belong to THIS season: the provider files some one-off cups under the next season's
   // number (the Spanish Super Cup of January 2026 shows up as "2026" = 2026-27). Only competitions the team
   // actually played in since the domestic season started are counted.
   const seasonStart: string | null = league?.seasons?.find((x: any) => x.current)?.start ?? null;
-  let validComps: Set<number> | null = null;
-  if (!national && season && seasonStart) {
+  let validComps = null as Set<number> | null;
+  let seasonFixtures: any[] = [];
+  const seasonP = (async () => {
+    if (national || !season || !seasonStart) return;
     try {
-      const sf = await g('/fixtures', { team: afId, season }, 3 * 3600 * 1000);
+      const sf = await g('/fixtures', { team: afId, season });
+      seasonFixtures = sf.response || [];
       // only competitions the team has actually played in since the season started (not future ones: the provider
       // files e.g. the Super Cup of Jan 2026 AND the one of Feb 2027 under the same season)
       const nowIso = new Date().toISOString();
-      validComps = new Set((sf.response || []).filter((f: any) => { const d = String(f.fixture?.date || ''); return d.slice(0, 10) >= seasonStart && d <= nowIso; }).map((f: any) => f.league?.id));
+      validComps = new Set(seasonFixtures.filter((f: any) => { const d = String(f.fixture?.date || ''); return d.slice(0, 10) >= seasonStart && d <= nowIso; }).map((f: any) => f.league?.id));
       if (!validComps.size) validComps = null;
     } catch (e: any) {
+      if (e?.code === 'PAGE_BUDGET') throw e;
       logger.warn(`team page season fixtures ${afId}: ${e.message}`);
     }
-  }
+  })();
+  await Promise.all([standingP, seasonP]);
+  for (const f of seasonFixtures) if (f.league?.id && f.league?.name) compNames[f.league.id] = f.league.name;
+
+  // fixtures snapshot: from the season's fixtures when they hold enough, else the provider's last 10 / next 5
+  const nowIso = new Date().toISOString();
+  const played = seasonFixtures.filter(f => FINISHED.has(f.fixture?.status?.short)).sort((a, b) => (a.fixture.date < b.fixture.date ? 1 : -1));
+  const coming = seasonFixtures.filter(f => NOT_STARTED.has(f.fixture?.status?.short) && String(f.fixture.date) >= nowIso).sort((a, b) => (a.fixture.date < b.fixture.date ? -1 : 1));
+  const [lastRaw, nextRaw] = await Promise.all([
+    played.length >= 10 ? played.slice(0, 10) : g('/fixtures', { team: afId, last: 10 }).then(r => r.response || []),
+    coming.length >= 5 ? coming.slice(0, 5) : g('/fixtures', { team: afId, next: 5 }).then(r => r.response || [])
+  ]);
 
   // player season stats (clubs): up to 3 pages
   const stats = new Map<number, any>();
   if (!national && season) {
     for (let page = 1; page <= 3; page++) {
       try {
-        const pr = await g('/players', { team: afId, season, page }, SLOW);
+        const pr = await g('/players', { team: afId, season, page });
         for (const it of pr.response || []) {
           // official competitions only: pre-season / club friendlies are left out, each competition counted once
           const s = { apps: 0, minutes: 0, goals: 0, assists: 0, yellow: 0, red: 0, leagueGoals: 0, leagueAssists: 0, ratingSum: 0, ratingN: 0, lRatingSum: 0, lRatingN: 0 };
@@ -435,6 +481,7 @@ async function build(afId: number) {
         }
         if ((pr.paging?.current || page) >= (pr.paging?.total || 1)) break;
       } catch (e: any) {
+        if (e?.code === 'PAGE_BUDGET') throw e;
         logger.warn(`team page players ${afId}: ${e.message}`);
         break;
       }
@@ -463,58 +510,307 @@ async function build(afId: number) {
         detail: s.byComp.filter((c: any) => c[key] > 0).map((c: any) => `${c[key]} ${c.comp}`).join(' · ')
       }));
 
-  const last = (lastRes.response || []).map(simpleFixture).sort((a: any, b: any) => (a.date < b.date ? 1 : -1));
-  const next = (nextRes.response || []).map(simpleFixture).sort((a: any, b: any) => (a.date < b.date ? -1 : 1));
-  const form = last
-    .filter((f: any) => f.hg !== null && ['FT', 'AET', 'PEN'].includes(f.status))
-    .slice(0, 6)
-    .map((f: any) => {
-      const mine = f.home.id === AF_OFFSET + afId ? f.hg - f.ag : f.ag - f.hg;
-      return mine > 0 ? 'W' : mine < 0 ? 'L' : 'D';
-    });
-
+  const last = lastRaw.map(simpleFixture).sort((a: any, b: any) => (a.date < b.date ? 1 : -1));
+  const next = nextRaw.map(simpleFixture).sort((a: any, b: any) => (a.date < b.date ? -1 : 1));
   return {
     team: (() => {
       const ov = Object.fromEntries(teamOverrides(afId).map((o: any) => [o.field, o.value]));
       return { id: AF_OFFSET + afId, afId, name: ov.name || t.team.name, logo: t.team.logo, country: t.team.country, founded: ov.founded ? Number(ov.founded) : t.team.founded, national };
     })(),
-    venue: currentVenue(afId, t, lastRes.response || []),
-    league: league ? { id: league.league.id, name: league.league.name, logo: league.league.logo, country: league.country?.name, season } : null,
-    standing, form, last, next, squad,
+    venue: currentVenue(afId, t, [...seasonFixtures, ...lastRaw]),
+    league: league ? { id: league.league.id, name: league.league.name, logo: league.league.logo, country: league.country?.name, season, type: league.league.type } : null,
+    standing, last, next, squad,
     scorers: leaders('goals'),
     assists: leaders('assists'),
+    compNames,
     builtAt: new Date().toISOString()
   };
 }
 
-/** Full team page (premium) or the free cut. */
-async function pageData(afId: number): Promise<any> {
-  const stored: any = db.prepare(`SELECT json, built_at FROM team_page_store WHERE af_id = ?`).get(afId);
+/* ---------- fast part: our database ---------- */
+
+/** A competition's name from what we know without a provider call (player pages built from our database). */
+export const competitionName = (leagueId: number) => compNamesFor(null).get(leagueId) || null;
+/** A club's name from the games we store. */
+export const teamNameOf = (afId: number) => teamIndex().find(t => t.id === afId)?.name || null;
+
+function compNamesFor(slow: any): Map<number, string> {
+  const m = new Map<number, string>(Object.entries(TOP_LEAGUES).map(([k, v]) => [Number(k), v]));
+  try { const { CUPS } = require('./clubElo') as typeof import('./clubElo'); for (const [k, v] of Object.entries(CUPS)) m.set(Number(k), v); } catch { /* not loaded */ }
+  try { const { COMPS } = require('./nationalElo') as typeof import('./nationalElo'); for (const [k, v] of Object.entries(COMPS)) m.set(Number(k), v.name); } catch { /* not loaded */ }
+  for (const c of afCompetitions()) if (c.name) m.set(c.id - AF_OFFSET, c.name);
+  for (const [k, v] of Object.entries(slow?.compNames || {})) m.set(Number(k), String(v));
+  if (slow?.league?.id) m.set(slow.league.id, slow.league.name);
+  return m;
+}
+
+/** Every game of the team we store (league fixtures, European cups, national teams, the fixture window), last ~13 months. */
+function storedGames(afId: number, names: Map<number, string>): Fx[] {
+  const since = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
+  const byFid = new Map<number, Fx & { rank: number }>();
+  const put = (f: Fx, rank: number) => {
+    const cur = f.fid ? byFid.get(f.fid) : undefined;
+    if (!cur || rank > cur.rank) byFid.set(f.fid!, { ...f, rank });
+  };
+  const fromRow = (r: any, date: string, timed: boolean, status: string): Fx => ({
+    fid: r.fixture_id, matchId: AF_OFFSET + r.fixture_id, date, timed, status, comp: names.get(r.league_id) || null,
+    home: side(r.home_id, r.home_name), away: side(r.away_id, r.away_name), hg: r.hg ?? null, ag: r.ag ?? null
+  });
+  const q = (sql: string, fn: (r: any) => void) => { try { for (const r of db.prepare(sql).all(afId, afId, since) as any[]) fn(r); } catch { /* table missing */ } };
+  q(`SELECT fixture_id, league_id, kickoff, home_id, away_id, home_name, away_name, status, hg, ag FROM af_fixtures WHERE (home_id = ? OR away_id = ?) AND kickoff >= ?`,
+    r => put(fromRow(r, r.kickoff, true, r.status || 'NS'), 2));
+  q(`SELECT fixture_id, league_id, date, home_id, away_id, home_name, away_name, hg, ag FROM eur_matches WHERE (home_id = ? OR away_id = ?) AND date >= ?`,
+    r => put(fromRow(r, r.date, false, 'FT'), 1));
+  q(`SELECT fixture_id, league_id, date, home_id, away_id, home_name, away_name, hg, ag FROM nat_matches WHERE (home_id = ? OR away_id = ?) AND date >= ?`,
+    r => put(fromRow(r, r.date, false, 'FT'), 1));
+  const me = AF_OFFSET + afId;
+  for (const m of afWindowMatches()) {
+    if (m.homeTeam?.id !== me && m.awayTeam?.id !== me) continue;
+    put({
+      fid: m.id - AF_OFFSET, matchId: m.id, date: m.utcDate, timed: true, status: WINDOW_STATUS[m.status] || m.status, comp: m.competition?.name || null,
+      home: { id: m.homeTeam.id, name: m.homeTeam.name, logo: m.homeTeam.crest || logo(m.homeTeam.id - AF_OFFSET) },
+      away: { id: m.awayTeam.id, name: m.awayTeam.name, logo: m.awayTeam.crest || logo(m.awayTeam.id - AF_OFFSET) },
+      hg: m.score?.fullTime?.home ?? null, ag: m.score?.fullTime?.away ?? null
+    }, 3);
+  }
+  return [...byFid.values()].map(({ rank, ...f }) => f);
+}
+
+/**
+ * Last results and next games: the slow part's snapshot with our stored games over it (fresher scores and status;
+ * games the snapshot doesn't have). A snapshot game that has kicked off but isn't in our data drops out of "next".
+ */
+function fastFixtures(afId: number, slow: any, names: Map<number, string>) {
+  const snap: Fx[] = [...(slow?.last || []), ...(slow?.next || [])];
+  const merged = new Map<string, Fx>();
+  const keyOf = new Map<number, string>();
+  for (const f of snap) { const k = gameKey(f); merged.set(k, f); if (f.fid) keyOf.set(f.fid, k); }
+  for (const f of storedGames(afId, names)) {
+    const k = (f.fid && keyOf.get(f.fid)) || gameKey(f);
+    const s = merged.get(k);
+    merged.set(k, s
+      ? { ...s, fid: f.fid ?? s.fid, status: f.status, hg: f.hg, ag: f.ag, date: f.timed ? f.date : s.date, comp: s.comp || f.comp, matchId: s.matchId ?? f.matchId }
+      : f);
+  }
+  const all = [...merged.values()];
+  const soon = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+  const last = all.filter(f => FINISHED.has(f.status) && f.hg !== null && f.ag !== null).sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 10);
+  const next = all.filter(f => NOT_STARTED.has(f.status) && String(f.date) >= soon).sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 5);
+  // a snapshot game that kicked off since the build, with no result in our data: played, score unknown until the rebuild
+  const playedUnknown = all.some(f => NOT_STARTED.has(f.status) && String(f.date) < new Date().toISOString() && String(f.date) > String(slow?.builtAt || ''));
+  // games only in our database: link to our match page (the Football-Data twin carries the v3 prediction)
+  const link = (f: Fx) => {
+    const { timed, ...rest } = f;
+    if (f.matchId && f.matchId >= AF_OFFSET && timed) return { ...rest, matchId: fdTwinOf(f.date, f.home.name, f.away.name) ?? f.matchId };
+    return rest;
+  };
+  const form = last.slice(0, 6).map(f => {
+    const mine = f.home.id === AF_OFFSET + afId ? f.hg! - f.ag! : f.ag! - f.hg!;
+    return mine > 0 ? 'W' : mine < 0 ? 'L' : 'D';
+  });
+  return { last: last.map(link), next: next.map(link), form, playedUnknown };
+}
+
+type TableRow = { rank: number; id: number; name: string; logo: string; played: number; gd: number; points: number; me: boolean; won?: number; drawn?: number; lost?: number; gf?: number; ga?: number };
+function standingOf(rows: TableRow[], afId: number) {
+  const me = rows.find(r => r.id === AF_OFFSET + afId);
+  if (!me) return null;
+  return {
+    rank: me.rank, points: me.points, played: me.played, won: me.won ?? null, drawn: me.drawn ?? null, lost: me.lost ?? null, gf: me.gf ?? null, ga: me.ga ?? null,
+    rows: rows.map(({ won, drawn, lost, gf, ga, ...r }) => ({ ...r, me: r.id === AF_OFFSET + afId }))
+  };
+}
+
+/** A league table from the games we store (pages built from our database only). */
+function tableFromGames(leagueId: number, season: number, afId: number) {
+  const games = db.prepare(`SELECT home_id, away_id, home_name, away_name, hg, ag FROM af_fixtures WHERE league_id = ? AND season = ? AND status IN ('FT','AET','PEN') AND hg IS NOT NULL AND ag IS NOT NULL`).all(leagueId, season) as any[];
+  if (!games.length) return null;
+  const t = new Map<number, TableRow>();
+  const row = (id: number, name: string) => {
+    let r = t.get(id);
+    if (!r) { r = { rank: 0, id: AF_OFFSET + id, name, logo: logo(id), played: 0, gd: 0, points: 0, me: id === afId, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0 }; t.set(id, r); }
+    return r;
+  };
+  for (const x of games) {
+    for (const [id, name, f, a] of [[x.home_id, x.home_name, x.hg, x.ag], [x.away_id, x.away_name, x.ag, x.hg]] as [number, string, number, number][]) {
+      const r = row(id, name);
+      r.played++; r.gf! += f; r.ga! += a; r.gd += f - a;
+      if (f > a) { r.won!++; r.points += 3; } else if (f === a) { r.drawn!++; r.points += 1; } else r.lost!++;
+    }
+  }
+  const rows = [...t.values()].sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf! - a.gf! || a.name.localeCompare(b.name));
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return standingOf(rows, afId);
+}
+
+/**
+ * The table now, without a provider call:
+ *  1. the official table the schedulers keep for the leagues in our fixture window (every 30 minutes);
+ *  2. the slow part's snapshot brought up to date with the league games we stored since (each team's newest games
+ *     beyond the number it had played in the snapshot). If our games don't add up with the snapshot (split seasons,
+ *     a missing game), the snapshot as it is;
+ *  3. no snapshot: the table from the games we store.
+ */
+function fastStanding(afId: number, slow: any) {
+  const lg = slow?.league;
+  // only league tables (pages stored before fix166 have no type: those with a table were leagues)
+  if (!lg?.id || !lg.season || (lg.type ? lg.type !== 'League' : !slow.standing)) return slow?.standing ?? null;
+  const off = afStandingsCached(`AF${lg.id}`);
+  if (off) {
+    const t = (off.standings || []).filter((x: any) => x.type === 'TOTAL').find((x: any) => x.table.some((r: any) => r.team?.id === AF_OFFSET + afId));
+    if (t) return standingOf(t.table.map((r: any) => ({
+      rank: r.position, id: r.team.id, name: r.team.name, logo: r.team.crest, played: r.playedGames, gd: r.goalDifference, points: r.points, me: false,
+      won: r.won, drawn: r.draw, lost: r.lost, gf: r.goalsFor, ga: r.goalsAgainst
+    })), afId);
+  }
+  const snap = slow.standing;
+  if (!snap?.rows?.length) {
+    if (slow.standing === undefined || slow.partial) { try { return tableFromGames(lg.id, lg.season, afId); } catch { return null; } }
+    return snap ?? null;
+  }
+  let games: any[] = [];
+  try {
+    games = db.prepare(`SELECT home_id, away_id, hg, ag FROM af_fixtures WHERE league_id = ? AND season = ? AND status IN ('FT','AET','PEN') AND hg IS NOT NULL AND ag IS NOT NULL ORDER BY kickoff DESC`).all(lg.id, lg.season) as any[];
+  } catch { return snap; }
+  if (!games.length) return snap;
+  const meRow = snap.rows.find((r: any) => r.me || r.id === AF_OFFSET + afId);
+  const rows: TableRow[] = snap.rows.map((r: any) => ({ ...r, me: false, ...(r === meRow ? { won: snap.won, drawn: snap.drawn, lost: snap.lost, gf: snap.gf, ga: snap.ga } : {}) }));
+  let changed = false;
+  for (const r of rows) {
+    const id = r.id - AF_OFFSET;
+    const mine = games.filter(x => x.home_id === id || x.away_id === id);
+    const extra = mine.length - (r.played || 0);
+    if (extra < 0 || extra > 4) return snap; // our games don't match the provider's table: keep the snapshot
+    for (const x of mine.slice(0, extra)) {
+      const f = x.home_id === id ? x.hg : x.ag, a = x.home_id === id ? x.ag : x.hg;
+      r.played++; r.gd += f - a; r.points += f > a ? 3 : f === a ? 1 : 0;
+      if (r.won !== undefined && r.won !== null) { if (f > a) r.won++; else if (f === a) r.drawn!++; else r.lost!++; r.gf! += f; r.ga! += a; }
+      changed = true;
+    }
+  }
+  if (!changed) return snap;
+  // new order: points; the provider's order (its tie-breaks) between teams level on points, unless one has new games
+  const before = new Map(snap.rows.map((r: any) => [r.id, r.points]));
+  rows.sort((a, b) => b.points - a.points
+    || (before.get(a.id) === a.points && before.get(b.id) === b.points ? a.rank - b.rank : b.gd - a.gd || a.rank - b.rank));
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return standingOf(rows, afId);
+}
+
+const fastCache = new Map<number, { at: number; slowAt: string; data: any }>();
+/** The page: the slow part with the fast part over it. */
+function assemble(afId: number, slow: any) {
+  const c = fastCache.get(afId);
+  if (c && c.slowAt === slow.builtAt && Date.now() - c.at < FAST_TTL) return c.data;
+  const names = compNamesFor(slow);
+  const { last, next, form, playedUnknown } = fastFixtures(afId, slow, names);
+  let standing: any = slow.standing ?? null;
+  try { standing = fastStanding(afId, slow); } catch (e: any) { logger.warn(`team page table ${afId}: ${e.message}`); }
+  const { compNames, ...rest } = slow;
+  const data = { ...rest, standing, form, last, next, resultsAt: new Date().toISOString(), _playedUnknown: playedUnknown };
+  fastCache.set(afId, { at: Date.now(), slowAt: slow.builtAt, data });
+  if (fastCache.size > 3000) fastCache.delete(fastCache.keys().next().value as number);
+  return data;
+}
+
+/** The slow part lives 24 h; 6 h when the team has played in the last 24 h. */
+function slowTtl(page: any) {
+  const dayAgo = Date.now() - 24 * 3600 * 1000;
+  // a game stored by day only (European cups, national teams) counts until the end of that day
+  const at = (d: string) => Date.parse(String(d).length === 10 ? `${d}T23:59:59Z` : d);
+  const played = page._playedUnknown || (page.last || []).some((f: any) => at(f.date) >= dayAgo);
+  return played ? SLOW_TTL_PLAYED : SLOW_TTL;
+}
+
+/**
+ * A page built from our database only (crawlers when nothing is stored yet): name, competition, table, results,
+ * next games, scorers from the season data we store. No squad. Not stored: a visitor's view builds the full page.
+ */
+const offlineCache = new Map<number, { at: number; data: any }>();
+function offlinePage(afId: number) {
+  const c = offlineCache.get(afId);
+  if (c && Date.now() - c.at < 3600 * 1000) return c.data;
+  const names = compNamesFor(null);
+  const games = storedGames(afId, names);
+  const any = games.sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  if (!any) throw Object.assign(new Error('Team not found'), { response: { status: 404 } });
+  const meSide = any.home.id === AF_OFFSET + afId ? any.home : any.away;
+  const lg: any = db.prepare(`SELECT league_id, season, COUNT(*) AS n FROM af_fixtures WHERE (home_id = ? OR away_id = ?) GROUP BY league_id, season ORDER BY season DESC, n DESC LIMIT 1`).get(afId, afId);
+  const national = !lg && games.some(f => /qualification|nations|friendl|cup of nations|euro|copa america|world cup|asian cup|gold cup/i.test(f.comp || ''));
+  const ov = Object.fromEntries(teamOverrides(afId).map((o: any) => [o.field, o.value]));
+  // scorers / assists: the season data we store (af_player_season), newest season
+  const leaders = (key: 'goals' | 'assists') => {
+    try {
+      const rows = db.prepare(`SELECT name, league_id, ${key} AS v FROM af_player_season WHERE team_id = ? AND season = (SELECT MAX(season) FROM af_player_season WHERE team_id = ?) AND ${key} > 0`).all(afId, afId) as any[];
+      const by = new Map<string, { name: string; value: number; parts: string[] }>();
+      for (const r of rows) {
+        const x = by.get(r.name) || { name: r.name, value: 0, parts: [] as string[] };
+        x.value += r.v; x.parts.push(`${r.v} ${names.get(r.league_id) || 'other'}`);
+        by.set(r.name, x);
+      }
+      return [...by.values()].sort((a, b) => b.value - a.value).slice(0, 8).map(x => ({ name: x.name, value: x.value, detail: x.parts.join(' · ') }));
+    } catch { return []; }
+  };
+  const slow = {
+    team: { id: AF_OFFSET + afId, afId, name: ov.name || meSide.name, logo: logo(afId), country: null, founded: ov.founded ? Number(ov.founded) : null, national },
+    venue: ov.venue ? { name: ov.venue, city: ov.city || null, capacity: ov.capacity ? Number(ov.capacity) : null, source: 'checked' } : null,
+    league: lg ? { id: lg.league_id, name: names.get(lg.league_id) || null, logo: `https://media.api-sports.io/football/leagues/${lg.league_id}.png`, country: null, season: lg.season, type: 'League' } : null,
+    standing: undefined, last: [], next: [], squad: [],
+    scorers: leaders('goals'), assists: leaders('assists'),
+    partial: true,
+    builtAt: new Date().toISOString()
+  };
+  const data = assemble(afId, slow);
+  offlineCache.set(afId, { at: Date.now(), data });
+  if (offlineCache.size > 2000) offlineCache.delete(offlineCache.keys().next().value as number);
+  return data;
+}
+
+/** The slow part we have: memory, else the stored copy (survives restarts). */
+function slowCopy(afId: number): { at: number; data: any } | null {
   const mem = cache.get(`team:${afId}`);
-  // a fresh stored copy (e.g. just after a restart) is as good as the memory one
-  if (!mem && stored && Date.now() - new Date(stored.built_at).getTime() < PAGE_TTL) {
-    const data = JSON.parse(stored.json);
-    cache.set(`team:${afId}`, { at: new Date(stored.built_at).getTime(), data });
-    return data;
+  if (mem) return mem;
+  const stored: any = db.prepare(`SELECT json, built_at FROM team_page_store WHERE af_id = ?`).get(afId);
+  if (!stored) return null;
+  const c = { at: new Date(stored.built_at).getTime(), data: JSON.parse(stored.json) };
+  cache.set(`team:${afId}`, c);
+  return c;
+}
+
+const inflight = new Map<number, Promise<any>>();
+async function pageData(afId: number): Promise<any> {
+  const have = slowCopy(afId);
+  // crawlers: never a provider call — what we have at any age, else our database only
+  if (isCrawlerRequest()) return have ? assemble(afId, have.data) : noProviderCalls(() => offlinePage(afId));
+  if (have) {
+    const page = assemble(afId, have.data);
+    if (Date.now() - have.at < slowTtl(page)) return page;
   }
   try {
-    const data = await cached(`team:${afId}`, PAGE_TTL, () => build(afId));
-    if (!stored || stored.built_at !== data.builtAt)
-      db.prepare(`INSERT OR REPLACE INTO team_page_store (af_id, json, built_at) VALUES (?, ?, ?)`).run(afId, JSON.stringify(data), data.builtAt);
-    return data;
+    let run = inflight.get(afId);
+    if (!run) {
+      run = buildSlow(afId).then(data => {
+        cache.set(`team:${afId}`, { at: Date.now(), data });
+        db.prepare(`INSERT OR REPLACE INTO team_page_store (af_id, json, built_at) VALUES (?, ?, ?)`).run(afId, JSON.stringify(data), data.builtAt);
+        return data;
+      }).finally(() => inflight.delete(afId));
+      inflight.set(afId, run);
+    }
+    return assemble(afId, await run);
   } catch (e: any) {
-    // out of API budget (or the provider is down): show the last good copy, marked with its age
-    if (stored) {
-      logger.warn(`team page ${afId}: serving the copy from ${stored.built_at} (${e.message})`);
-      return { ...JSON.parse(stored.json), stale: true };
+    // out of API budget (or the provider is down): the last slow part we have; results and table are ours anyway
+    if (have) {
+      logger.warn(`team page ${afId}: squad data from ${new Date(have.at).toISOString()} (${e.message})`);
+      return assemble(afId, have.data);
     }
     throw e;
   }
 }
 
 export async function teamPage(afId: number, full: boolean) {
-  const data: any = await pageData(afId);
-  try { warmPlayers((data.squad || []).map((p: any) => p.id).filter(Boolean)); } catch { /* optional */ }
+  const { _playedUnknown, ...data }: any = await pageData(afId);
+  // player pages of the squad are built in the background — not for crawlers (no provider calls for them)
+  if (!isCrawlerRequest()) try { warmPlayers((data.squad || []).map((p: any) => p.id).filter(Boolean)); } catch { /* optional */ }
   let analysis: any = null;
   try { analysis = teamAnalysis(afId, data); } catch (e: any) { logger.warn(`team analysis ${afId}: ${e.message}`); }
   if (full) return { ...data, analysis, premium: true };

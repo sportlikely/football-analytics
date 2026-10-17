@@ -507,6 +507,8 @@ export function afUpcoming(days = WINDOW_DAYS) {
   return windowMatches.filter(m => new Date(m.utcDate).getTime() <= cutoff && new Date(m.utcDate).getTime() >= Date.now() - 3 * 3600 * 1000);
 }
 export const afLive = () => [...liveById.values()];
+/** fix166: the fixture window as loaded (team pages read results / next games from it, no provider call). */
+export const afWindowMatches = () => windowMatches;
 export const afWindowStatus = () => ({ matches: windowMatches.length, at: windowAt ? new Date(windowAt).toISOString() : null, competitions: [...new Set(windowMatches.map(m => m.competition.name))] });
 
 export function afCompetitions() {

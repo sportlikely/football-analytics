@@ -546,12 +546,18 @@ function AfUsageCard() {
             <div className="flex items-baseline justify-between gap-2"><span className="text-muted">Used</span><span className="num text-ink font-semibold">{n(q?.used)} / {n(q?.limitDay)}</span></div>
             <div className="mt-1 h-2 rounded-full bg-surface2 overflow-hidden"><div className={`h-full rounded-full ${pct !== null && pct > 85 ? 'bg-loss' : 'bg-accent'}`} style={{ width: `${pct ?? 0}%` }} /></div>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            {[['Schedulers', d.calls.scheduler], ['Page views', d.calls.pages], ['Admin', d.calls.admin]].map(([l, v]) => (
-              <div key={l as string} className="rounded-xl bg-surface2/50 border border-line/60 px-2 py-2">
+          {/* fix166: page views split into visitors / crawlers (API calls, and requests underneath) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            {([
+              ['Schedulers', d.calls.scheduler, null],
+              ['Page views · visitors', d.pages ? d.pages.visitors.calls : d.calls.pages, d.pages?.visitors.requests ?? null],
+              ['Page views · crawlers', d.pages ? d.pages.crawlers.calls : null, d.pages?.crawlers.requests ?? null],
+              ['Admin', d.calls.admin, null]
+            ] as [string, number | null, number | null][]).map(([l, v, req]) => (
+              <div key={l} className="rounded-xl bg-surface2/50 border border-line/60 px-2 py-2">
                 <div className="text-[11px] text-faint">{l}</div>
-                <div className="num font-extrabold text-ink">{n(v as number)}</div>
-                <div className="text-[10px] text-faint">{total ? Math.round(((v as number) / total) * 100) : 0}%</div>
+                <div className="num font-extrabold text-ink">{n(v)}</div>
+                <div className="text-[10px] text-faint">{total && v !== null ? Math.round((v / total) * 100) : 0}%{req !== null ? ` · ${n(req)} requests` : ''}</div>
               </div>
             ))}
           </div>

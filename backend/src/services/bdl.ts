@@ -16,6 +16,7 @@ import logger from '../utils/logger';
 import { db } from '../db';
 import { bdlGet, nbaKey } from './bbInjuries';
 import { every, after } from './perf';
+import { isCrawlerRequest } from './afUsage';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bdl_teams (
@@ -304,6 +305,8 @@ export function bdlPlayerOf(name: string, teamName?: string | null): any | null 
 export async function bdlContract(playerId: number) {
   const row = db.prepare(`SELECT data, updated_at FROM bdl_contracts WHERE player_id = ?`).get(playerId) as any;
   if (row && Date.now() - Date.parse(row.updated_at) < 7 * 86400000) return row.data ? JSON.parse(row.data) : null;
+  // fix166: crawlers get what is stored, at any age (no provider call, and no empty answer stored for a week)
+  if (isCrawlerRequest()) return row?.data ? JSON.parse(row.data) : null;
   let data: any = null;
   for (const path of ['/v1/contracts/players', '/nba/v1/contracts/players']) {
     try {

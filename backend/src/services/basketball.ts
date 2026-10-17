@@ -15,6 +15,7 @@ import { timed, every, after } from './perf';
 import { refreshNbaInjuries, nbaInjuryStatus } from './bbInjuries';
 import { applyResultFixes, checkResults } from './bbResults';
 import { onBbExtraLeague } from './bbLeagueConfig';
+import { assertProviderCallAllowed } from './afUsage';
 
 const BASE = 'https://v1.basketball.api-sports.io';
 const KEY = () => process.env.API_BASKETBALL_KEY || process.env.API_FOOTBALL_KEY || '';
@@ -138,6 +139,7 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 async function bb(path: string, params: Record<string, string | number> = {}): Promise<any> {
   if (!KEY()) throw new Error('No API-Sports key set');
+  assertProviderCallAllowed(); // fix166: crawler pages are built from our database only
   if (path !== '/status' && remainingDay !== null && remainingDay <= 50) throw new Error('API-Basketball daily limit nearly used up');
   const wait = lastCall + MIN_GAP_MS - Date.now();
   if (wait > 0) await sleep(wait);

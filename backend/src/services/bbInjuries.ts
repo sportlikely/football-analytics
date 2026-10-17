@@ -9,6 +9,7 @@
  */
 import logger from '../utils/logger';
 import { db } from '../db';
+import { assertProviderCallAllowed } from './afUsage';
 
 const URL = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries';
 const BDL = 'https://api.balldontlie.io';
@@ -17,6 +18,7 @@ const BDL = 'https://api.balldontlie.io';
 export async function bdlGet(path: string, params: Record<string, string | string[]> = {}): Promise<any> {
   const key = process.env.BALLDONTLIE_KEY;
   if (!key) throw new Error('BALLDONTLIE_KEY not set');
+  assertProviderCallAllowed(); // fix166: crawler pages are built from our database only
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
   const res = await fetch(`${BDL}${path}${q.toString() ? `?${q}` : ''}`, { signal: AbortSignal.timeout(20000), headers: { Authorization: key } });
