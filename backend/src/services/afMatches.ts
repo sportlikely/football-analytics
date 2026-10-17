@@ -25,7 +25,7 @@ import { reportLive } from './liveScores';
 import { predictNational, isNationalTeam } from './nationalElo';
 import { predictClubEuro } from './clubElo';
 import { onExtraLeague } from './leagueConfig';
-import { every, after } from './perf';
+import { every, after, yielder } from './perf';
 
 export const AF_OFFSET = 1_000_000_000;
 export const isAfMatchId = (id: number) => id >= AF_OFFSET;
@@ -1436,8 +1436,12 @@ export async function warmMatchExtras(matches: any[], hours = 48) {
       .filter(m => { const t = new Date(m.utcDate).getTime(); return t > Date.now() - 3 * 3600 * 1000 && t <= horizon; })
       .sort((a, b) => a.utcDate.localeCompare(b.utcDate));
     const seen = new Set<number>();
+    // fix167: most of this is cached, so the awaits never gave the thread back (1,071 ms block on 17 Oct): yield
+    // every 30 ms, so a turn stays far under 300 ms
+    const step = yielder(30);
     for (const m of list) {
       if (afRemaining() < 3500) { skipped = list.length - done; break; }
+      await step();
       try {
         const teams = await afTeamsOf(m);
         if (!teams) continue;
@@ -1445,7 +1449,9 @@ export async function warmMatchExtras(matches: any[], hours = 48) {
           if (seen.has(id)) continue;
           seen.add(id);
           await teamAverages(id, 10);
+          await step();
           await probableXI(id, 5);
+          await step();
         }
         await lastMeetings(teams.home, teams.away);
         done++;

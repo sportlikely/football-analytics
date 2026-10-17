@@ -17,7 +17,7 @@
  * stored (shadow) but the site keeps showing grid-v3. See modelDaily.ts for the daily champion / challenger job.
  */
 import logger from '../utils/logger';
-import { timed, every } from './perf';
+import { timed, every, runSteps, runStepsAsync } from './perf';
 import { db } from '../db';
 import { groupForCompetition, fdNameFor } from './history';
 import { playerKey } from './squadValues';
@@ -112,14 +112,32 @@ export interface FeatState { teams: Map<string, TeamSt>; divs: Map<string, DivSt
 
 let STATE: FeatState | null = null;
 
-function loadLookups(): Lookups {
+/**
+ * fix167: a big table read in pages of `size` rows by rowid, with a yield between pages (af_lineups: ~480k rows,
+ * 373 ms in one read on a copy of the database, more on the server).
+ */
+function* rowsInPages(sql: string, size = 40000): Generator<unknown, any[]> {
+  const q = db.prepare(`${sql} AND rowid > ? ORDER BY rowid LIMIT ?`);
+  const out: any[] = [];
+  let last = 0;
+  for (;;) {
+    const page = q.all(last, size) as any[];
+    for (const r of page) out.push(r);
+    if (page.length < size) return out;
+    last = page[page.length - 1].rid;
+    yield;
+  }
+}
+
+function* loadLookups(): Generator<unknown, Lookups> {
   const squad = new Map<string, number>();
   try {
     for (const r of db.prepare(`SELECT t.grp, t.team_id, v.total_eur FROM af_teams t JOIN squad_values v ON v.grp = t.grp AND v.fd_name = t.fd_name WHERE t.fd_name IS NOT NULL`).all() as any[])
       if (r.total_eur > 0) squad.set(`${r.grp}|${r.team_id}`, r.total_eur);
   } catch { /* no squad values yet */ }
   const starters = new Map<number, Map<number, { id: number; name: string }[]>>();
-  for (const r of db.prepare(`SELECT fixture_id, team_id, player_id, player_name FROM af_lineups WHERE starter = 1`).all() as any[]) {
+  yield;
+  for (const r of yield* rowsInPages(`SELECT rowid AS rid, fixture_id, team_id, player_id, player_name FROM af_lineups WHERE starter = 1`)) {
     let f = starters.get(r.fixture_id);
     if (!f) starters.set(r.fixture_id, (f = new Map()));
     let t = f.get(r.team_id);
@@ -127,7 +145,8 @@ function loadLookups(): Lookups {
     t.push({ id: r.player_id, name: r.player_name || '' });
   }
   const injuries = new Map<number, Map<number, number[]>>();
-  for (const r of db.prepare(`SELECT fixture_id, team_id, player_id FROM af_injuries`).all() as any[]) {
+  yield;
+  for (const r of yield* rowsInPages(`SELECT rowid AS rid, fixture_id, team_id, player_id FROM af_injuries WHERE 1`)) {
     let f = injuries.get(r.fixture_id);
     if (!f) injuries.set(r.fixture_id, (f = new Map()));
     let t = f.get(r.team_id);
@@ -135,12 +154,21 @@ function loadLookups(): Lookups {
     t.push(r.player_id);
   }
   const prev = new Map<string, { min: number; rating: number; goals: number }>();
-  try {
-    for (const r of db.prepare(`SELECT player_id, season, SUM(COALESCE(minutes, 0)) AS min, SUM(COALESCE(goals, 0)) AS goals,
+  yield;
+  // fix167: by ranges of player ids (a yield between them), not one aggregate over the whole table
+  let range: { lo: number | null; hi: number | null } = { lo: null, hi: null };
+  try { range = db.prepare(`SELECT MIN(player_id) AS lo, MAX(player_id) AS hi FROM af_player_season`).get() as any; } catch { /* no player seasons yet */ }
+  if (range.lo !== null && range.hi !== null) {
+    const q = db.prepare(`SELECT player_id, season, SUM(COALESCE(minutes, 0)) AS min, SUM(COALESCE(goals, 0)) AS goals,
         SUM(CASE WHEN rating > 0 THEN rating * COALESCE(minutes, 0) ELSE 0 END) AS rm, SUM(CASE WHEN rating > 0 THEN COALESCE(minutes, 0) ELSE 0 END) AS rmin
-        FROM af_player_season GROUP BY player_id, season`).all() as any[])
-      prev.set(`${r.player_id}|${r.season}`, { min: r.min || 0, goals: r.goals || 0, rating: r.rmin > 0 ? r.rm / r.rmin : 0 });
-  } catch { /* no player seasons yet */ }
+        FROM af_player_season WHERE player_id >= ? AND player_id < ? GROUP BY player_id, season`);
+    const step = Math.max(1, Math.ceil((range.hi - range.lo + 1) / 12));
+    for (let lo = range.lo; lo <= range.hi; lo += step) {
+      for (const r of q.all(lo, lo + step) as any[])
+        prev.set(`${r.player_id}|${r.season}`, { min: r.min || 0, goals: r.goals || 0, rating: r.rmin > 0 ? r.rm / r.rmin : 0 });
+      yield;
+    }
+  }
   const value = new Map<string, number>();
   try {
     for (const r of db.prepare(`SELECT pkey, MAX(value_eur) AS v FROM squad_players GROUP BY pkey`).all() as any[]) if (r.pkey && r.v > 0) value.set(r.pkey, r.v);
@@ -258,14 +286,25 @@ function learn(st: FeatState, f: Fx) {
 }
 
 /** Walk every league fixture in kick-off order: features for finished games, then learn from them. */
-export function buildFeatures(): FeatState {
+export const buildFeatures = (): FeatState => runSteps(buildFeatureSteps());
+/**
+ * fix167: the same in slices of 40 ms (3–4 s in one block before). It builds a new state and only returns it at the
+ * end, so the live state is swapped in whole.
+ */
+export const buildFeaturesAsync = (): Promise<FeatState> => runStepsAsync(buildFeatureSteps());
+function* buildFeatureSteps(): Generator<unknown, FeatState> {
   const t0 = Date.now();
-  const look = loadLookups();
+  const look = yield* loadLookups();
+  yield;
   const fixtures = db.prepare(`SELECT fixture_id AS fid, grp, division AS div, season, kickoff, home_id AS home, away_id AS away, status, hg, ag,
       xg_h AS xh, xg_a AS xa, sot_h AS sh, sot_a AS sa FROM af_fixtures ORDER BY kickoff, fixture_id`).all() as unknown as Fx[];
+  yield;
   const st: FeatState = { teams: new Map(), divs: new Map(), rows: [], builtAt: Date.now(), look, fixtures: new Map() };
   const now = Date.now();
+  let i = 0;
+  yield;
   for (const f of fixtures) {
+    if (++i % 500 === 0) yield;
     st.fixtures.set(f.fid, f);
     const done = FINISHED.has(String(f.status)) && f.hg != null && f.ag != null;
     if (!done) continue;
@@ -304,11 +343,11 @@ const STATE_MAX_AGE_MS = 6 * 3600 * 1000; // rebuild at least every 6 h anyway (
 
 export function startFeatureModelScheduler() {
   // every 30 min, but only rebuild (3–4 s on the one thread) when the data behind it changed (fix135)
-  const refresh = () => timed('feature state', () => {
+  const refresh = () => timed('feature state', async () => {
     try {
       const sig = stateSignature();
       if (STATE && sig === stateSig && Date.now() - STATE.builtAt < STATE_MAX_AGE_MS) return;
-      STATE = buildFeatures();
+      STATE = await buildFeaturesAsync(); // fix167: in slices
       stateSig = sig;
     } catch (e: any) { logger.warn(`feature state: ${e.message}`); }
   });
@@ -533,7 +572,8 @@ export function featureModelStatus() {
 export async function ensureFeatureModel() {
   if (activeFeatureModel()) return;
   await new Promise<void>(r => setImmediate(r));
-  const st = featureState(0);
+  // fix167: the state the scheduler has just built (was built a second time here, in one block)
+  const st = STATE || (STATE = await buildFeaturesAsync());
   const cutoff = new Date().toISOString().slice(0, 10);
   const fit = await fitFeatureModel(st, cutoff);
   if (!fit) { logger.warn('feature model: too few games to fit'); return; }

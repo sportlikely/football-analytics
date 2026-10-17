@@ -32,7 +32,7 @@ import { sendEmail, emailEnabled, SITE, esc } from './email';
 import { lastDataHealth } from './dataHealth';
 import { every, after } from './perf';
 import {
-  buildFeatures, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
+  buildFeatures, buildFeaturesAsync, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
   fixtureByNames, getConfig, setConfig, mixWeight, mixMode, mixLive, setMixLive, scoreProbs, FEAT_MODEL, MIX_MODEL,
   dropFeatureState, FittedModel, FeatState
 } from './featureModel';
@@ -122,7 +122,7 @@ export async function runModelDaily(force = false): Promise<any> {
 
     // 1. state + the routine refit on every settled game (stored, not live)
     dropFeatureState();
-    const st: FeatState = buildFeatures();
+    const st: FeatState = await buildFeaturesAsync(); // fix167: in slices
     const refit = await fitFeatureModel(st, todayIso);
     const refitId = refit ? storeFeatureModel(refit.model, todayIso, refit.n, null, false) : null;
 

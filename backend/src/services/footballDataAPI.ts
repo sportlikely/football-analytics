@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { withLive } from './liveChance';
 import { cachedPredictions, clearPredictionCache, mainPrediction } from './predCache';
-import { timed, setJob, yieldLoop, every, after } from './perf';
+import { timed, setJob, yieldLoop, yielder, every, after } from './perf';
 import { freezePredictions } from './tracking';
 import logger from '../utils/logger';
 import { db } from '../db';
@@ -235,13 +235,16 @@ class FootballDataAPI {
     every('FD window', () => this.refreshWindow().catch(() => {}), intervalMs);
     // Re-sync the current season's results and refit v2 every 6 hours
     every('model v2 prepare', () => this.prepareHistoryModel().catch(() => {}), 6 * 60 * 60 * 1000);
-    // Warm the usual-XI cache for the next two days of fixtures (slowly, in the background)
+    // Warm the usual-XI cache for the next two days of fixtures (slowly, in the background).
+    // fix167: incremental — a few teams every 3 minutes (yielding between them) instead of one pass an hour over every
+    // team that stayed "running" for many minutes and was named next to every stall in that time.
     after('usual lineups', () => this.prefetchUsualLineups().catch(() => {}), 6 * 60 * 1000);
-    every('usual lineups', () => this.prefetchUsualLineups().catch(() => {}), 60 * 60 * 1000);
+    every('usual lineups', () => this.prefetchUsualLineups().catch(() => {}), 3 * 60 * 1000);
   }
 
   private prefetching = false;
-  /** Build usual XIs for every team playing in the next 48h, one team at a time. */
+  private static USUAL_PER_TICK = 6;
+  /** Build usual XIs for the teams playing in the next 48h: a few per tick, one team at a time. */
   private async prefetchUsualLineups() {
     if (this.prefetching || !this.window) return;
     this.prefetching = true;
@@ -255,17 +258,18 @@ class FootballDataAPI {
           if (m.awayTeam?.id) teamIds.add(m.awayTeam.id);
         }
       }
+      const todo = [...teamIds].filter(id => !this.getCached(`usual:${id}:5`)).slice(0, FootballDataAPI.USUAL_PER_TICK);
       let built = 0;
-      for (const id of teamIds) {
-        if (this.getCached(`usual:${id}:5`)) continue;
-        // Lowest priority: only spend quota when plenty is left this minute
-        while (this.quotaLeft < 8 && this.quotaResetAt > Date.now()) await new Promise(r => setTimeout(r, 5000));
+      for (const id of todo) {
+        // Lowest priority: only spend quota when plenty is left this minute (else the next tick goes on)
+        if (this.quotaLeft < 8 && this.quotaResetAt > Date.now()) break;
         try {
           await this.getUsualLineup(id);
           built++;
         } catch {
-          /* rate limit or transient error — next hourly pass retries */
+          /* rate limit or transient error — a later tick retries */
         }
+        await yieldLoop();
         await new Promise(r => setTimeout(r, 1500));
       }
       if (built) logger.info(`usual lineups prefetched for ${built} teams`);
@@ -613,6 +617,8 @@ class FootballDataAPI {
     // Sequential, spaced out — the API's per-minute limit is easy to hit with parallel calls
     const full: any[] = [];
     let failed = 0;
+    // fix167: the thread is given back between matches (a cached match only runs microtasks), each turn ≤ 200 ms
+    const step = yielder(200);
     for (const m of recent) {
       const wasCached = !!this.getCached(`matchfull:${m.id}`);
       try {
@@ -621,6 +627,7 @@ class FootballDataAPI {
         failed++;
       }
       if (!wasCached) await new Promise(r => setTimeout(r, 400));
+      else await yieldLoop();
     }
 
     const starts = new Map<number, { player: any; starts: number; lastDate: string }>();
@@ -628,6 +635,7 @@ class FootballDataAPI {
     let analysed = 0;
 
     for (const m of full) {
+      await step();
       if (!m) continue;
       const side = m.homeTeam?.id === teamId ? m.homeTeam : m.awayTeam?.id === teamId ? m.awayTeam : null;
       const lineup: any[] = side?.lineup || [];

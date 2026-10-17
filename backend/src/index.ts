@@ -92,7 +92,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { dataHealth, startDataHealthScheduler } from './services/dataHealth';
-import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeatures, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
+import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeatures, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerUa, isCrawlerRequest, noProviderCalls } from './services/afUsage';
 import { createHash, randomBytes } from 'node:crypto';
 import { leagueCoverage, pickForAdding } from './services/leagueCoverage';
@@ -175,9 +175,10 @@ app.use((req, res, next) => {
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, referrerPolicy: { policy: 'strict-origin-when-cross-origin' } }));
 app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
-// fix158: every API request in flight is a named job in /api/perf (a freeze inside a handler names its route)
-app.use('/api', (req, res, next) => {
-  const done = track(routeLabel(req.method, req.baseUrl + req.path));
+// fix158: every API request in flight is a named job in /api/perf (a freeze inside a handler names its route).
+// fix167: every request, not only /api (search-engine pages and sitemaps are built on this thread too)
+app.use((req, res, next) => {
+  const done = track(routeLabel(req.method, req.path));
   res.on('finish', done);
   res.on('close', done);
   next();
@@ -2979,7 +2980,11 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   });
   // files under /assets have a content hash in their name (a new version gets a new name): cache them for a year,
   // so returning visitors never download or re-check them. Other files (logo, icons) keep 7 days.
-  app.use('/assets', express.static(path.join(STATIC_DIR, 'assets'), { index: false, maxAge: '365d', immutable: true, fallthrough: false }));
+  app.use('/assets', express.static(path.join(STATIC_DIR, 'assets'), { index: false, maxAge: '365d', immutable: true }));
+  // fix167: a file that isn't there (an old version's page file, asked by a tab opened before a deploy) is a plain 404:
+  // never the HTML page (the browser would run it as a script), never an error log line; not cached, so a CDN or
+  // browser asks again. The page reloads itself for the new version (frontend lib/chunkReload.ts).
+  app.use('/assets', (_req, res) => { res.status(404).set('Cache-Control', 'no-store').type('text/plain').send('Not found'); });
   app.use(express.static(STATIC_DIR, { index: false, maxAge: '7d' }));
   const indexHtml = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, (req, res) => {
@@ -3032,12 +3037,40 @@ server.listen(PORT, () => {
       .then(ms => { if (ms.length) recordPredictions(afWithPredictions(ms)); })
       .catch(err => logger.warn('AF odds for tracking failed', { message: err.message }));
   })().catch(err => logger.warn('AF window predictions failed', { message: err.message })); });
-  // Warm the fixture window now and keep it fresh in the background
-  footballDataAPI.startBackgroundRefresh();
-  // Daily database backup (services/backup.ts)
-  startBackups();
-  // Visitor countries: DB-IP country data, refreshed monthly (services/geo.ts)
-  startGeo();
+  // fix167: the schedulers start one after another over the first 2 minutes (each under its own name in /api/perf),
+  // not all at once inside the listen callback ("boot (scheduler start)" blocked 11 s on every deploy). The site is
+  // served from the stored data meanwhile; the fixture window comes first.
+  const STARTS: [string, () => unknown][] = [
+    // Warm the fixture window now and keep it fresh in the background
+    ['FD window', () => footballDataAPI.startBackgroundRefresh()],
+    // Extra competitions (national teams, Europa/Conference League, Israel, Saudi, more European leagues)
+    ['AF matches', () => startAfMatchesScheduler()],
+    ['basketball', () => startBasketballScheduler()],
+    // NFL games (fix136): every season once, then the current season every 6 h
+    ['nfl', () => startNflScheduler()],
+    // Injuries / suspensions / confirmed lineups (API-Football) for model v3 rows #12 and #13
+    ['API-Football', () => startApiFootballScheduler()],
+    // Squad market values for model v3 (weekly; first attempt after the history sync has team names)
+    ['squad values', () => startSquadValuesScheduler(() => { prepareModelV3(); void rebuildAfFeaturesAsync(); })],
+    ['balldontlie', () => startBdlScheduler()],
+    // Live closing-line value tracking (open price + v3 at 48 h, closing price in the last 35 min)
+    ['clv', () => startClvScheduler()],
+    // National-team Elo from international results since 2014 (API-Football)
+    ['national elo', () => startNationalEloScheduler()],
+    // European club Elo (UEFA cups + domestic results + squad values)
+    ['club elo', () => startClubEloScheduler()],
+    // Feature model + v3-mix (state every 30 min), daily champion / challenger at 04:00 UTC, report at 07:00 Jerusalem
+    ['feature model', () => startFeatureModelScheduler()],
+    ['model daily', () => startModelDailyScheduler()],
+    ['news', () => startNewsScheduler()],
+    ['data audit', () => startDataAuditScheduler()],
+    ['data health', () => startDataHealthScheduler()],
+    // Visitor countries: DB-IP country data, refreshed monthly (services/geo.ts)
+    ['geo', () => startGeo()],
+    // Daily database backup (services/backup.ts)
+    ['backups', () => startBackups()]
+  ];
+  STARTS.forEach(([label, start], i) => after(`start ${label}`, start, Math.round((i * 120_000) / STARTS.length)));
   // Settle finished matches every 10 minutes (first run after 1 minute)
   const settle = () =>
     settlePending(
@@ -3057,19 +3090,6 @@ server.listen(PORT, () => {
       .catch(err => { markFailed('odds', err); logger.warn('Odds job failed', { message: err.message }); });
   after('odds', odds, 90 * 1000);
   every('odds', odds, parseInt(process.env.ODDS_TICK_MS || '600000', 10));
-  // Squad market values for model v3 (weekly; first attempt after the history sync has team names)
-  startSquadValuesScheduler(() => { prepareModelV3(); rebuildAfFeatures(); });
-  // Injuries / suspensions / confirmed lineups (API-Football) for model v3 rows #12 and #13
-  startApiFootballScheduler();
-  startDataAuditScheduler();
-  startDataHealthScheduler();
-  // Live closing-line value tracking (open price + v3 at 48 h, closing price in the last 35 min)
-  startClvScheduler();
-  // Extra competitions (national teams, Europa/Conference League, Israel, Saudi, more European leagues)
-  startAfMatchesScheduler();
-  startNewsScheduler();
-  startBasketballScheduler();
-  startBdlScheduler();
   // Match-page tabs (averages, expected XI, H2H) prepared ahead for the next 48h, every 2 hours
   const warmExtras = async () => {
     const fd = await footballDataAPI.getUpcomingMatches(3).catch(() => [] as any[]);
@@ -3077,15 +3097,6 @@ server.listen(PORT, () => {
   };
   after('warm match extras', () => warmExtras().catch(() => undefined), 4 * 60 * 1000);
   every('warm match extras', () => warmExtras().catch(() => undefined), 2 * 3600 * 1000);
-  // National-team Elo from international results since 2014 (API-Football)
-  startNationalEloScheduler();
-  // European club Elo (UEFA cups + domestic results + squad values)
-  startClubEloScheduler();
-  // Feature model + v3-mix (state every 30 min), daily champion / challenger at 04:00 UTC, report at 07:00 Jerusalem
-  startFeatureModelScheduler();
-  startModelDailyScheduler();
-  // NFL games (fix136, admin data check only): every season once, then the current season every 6 h
-  startNflScheduler();
 });
 
 export { app, io };

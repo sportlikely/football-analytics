@@ -14,7 +14,7 @@ import { afGet, afConfigured } from './apiFootball';
 import { Prediction } from './predictionModel';
 import { Meetings, commonSense, type H2H } from './h2hGuard';
 import { nationalValueFor } from './squadValues';
-import { every, after } from './perf';
+import { every, after, runSteps, runStepsAsync } from './perf';
 
 export const MODEL_ELO = 'elo-intl';
 const AF_OFFSET = 1_000_000_000;
@@ -221,7 +221,9 @@ function nll(xs: { f: Feat; o: 'H' | 'D' | 'A' }[], w: GridW) {
  * Pattern search (coordinate steps that only ever lower the log loss, step halves when nothing improves).
  * Starts from the Elo-only fit, so the grid can only end up at least as good as Elo on the training data.
  */
-function fitGrid(xs: { f: Feat; o: 'H' | 'D' | 'A' }[], start: GridW, fixed: string[] = []): GridW {
+const fitGrid = (xs: { f: Feat; o: 'H' | 'D' | 'A' }[], start: GridW, fixed: string[] = []): GridW => runSteps(fitGridSteps(xs, start, fixed));
+/** fix167: the fit as steps (a yield after each weight tried), so the scheduled rebuild gives the thread back. */
+function* fitGridSteps(xs: { f: Feat; o: 'H' | 'D' | 'A' }[], start: GridW, fixed: string[] = []): Generator<unknown, GridW> {
   const w: any = { ...start };
   let best = nll(xs, w);
   let step = 0.2;
@@ -235,6 +237,7 @@ function fitGrid(xs: { f: Feat; o: 'H' | 'D' | 'A' }[], start: GridW, fixed: str
         if (k === 'm_friendly') w[k] = Math.min(1.5, Math.max(0.3, w[k]));
         if (k.startsWith('c_')) w[k] = Math.max(0.05, w[k]);
         const v = nll(xs, w);
+        yield;
         if (v < best - 1e-7) { best = v; improved = true; break; }
         w[k] = old;
       }
@@ -313,7 +316,18 @@ export function nationalGoalsSensitivity() {
   return { testMatches: s.test.length, fittedGoalsWeight: Math.round(base * 1000) / 1000, results: out };
 }
 
-export function buildNationalElo() {
+/** The whole build at once (admin rebuild, tuning trials). */
+export const buildNationalElo = () => runSteps(buildSteps());
+/**
+ * fix167: the scheduled rebuild in slices of 40 ms (it blocked 9.5 s on a copy of the database: the parameter fits).
+ * The ratings are rebuilt in one go as before; the fitted settings are swapped in together at the end.
+ */
+let building: Promise<unknown> | null = null;
+export function buildNationalEloAsync() {
+  if (!building) building = runStepsAsync(buildSteps()).finally(() => { building = null; });
+  return building;
+}
+function* buildSteps(): Generator<unknown, { matches: number; teams: number; engine: 'grid' | 'elo' }> {
   const rows = db.prepare(`SELECT * FROM nat_matches ORDER BY date, fixture_id`).all() as any[];
   ratings.clear();
   meetings.clear();
@@ -360,16 +374,18 @@ export function buildNationalElo() {
     for (const x of xs) { const p = probs(x.d + beta * x.lv, c, s); ll -= Math.log(Math.max(1e-6, x.o === 'H' ? p.h : x.o === 'D' ? p.d : p.a)); }
     return ll;
   };
-  const fitElo = (xs: typeof pre, betas: number[]) => {
+  function* fitElo(xs: typeof pre, betas: number[]) {
     let best = { ll: Infinity, c: 60, s: 110, beta: 0 };
     for (const beta of betas)
-      for (let c = 0; c <= 300; c += 10)
+      for (let c = 0; c <= 300; c += 10) {
         for (let s = 60; s <= 400; s += 10) {
           const ll = llOf(xs, c, s, beta);
           if (ll < best.ll) best = { ll, c, s, beta };
         }
+        yield; // fix167: a safe point every 35 settings
+      }
     return best;
-  };
+  }
   const BETAS = [0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 350];
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   const score = (pf: (x: (typeof pre)[number]) => { h: number; d: number; a: number }) => {
@@ -393,21 +409,25 @@ export function buildNationalElo() {
     return { brier: r3(brier / n), logLoss: r3(ll / n), hitRate: Math.round((hits / n) * 1000) / 10, predDraw: Math.round((pd / n) * 1000) / 10, realDraw: Math.round((rd / n) * 1000) / 10, byKind };
   };
   // honest comparison: both engines fitted on 2018 → two years ago, scored on the last two years
-  const eloOld = fitElo(trainOld, BETAS);
+  // fix167: the new settings are kept in locals and swapped in together at the end (the steps may be spread over turns)
+  const eloOld = yield* fitElo(trainOld, BETAS);
   // head-to-head row: fitted with and without it, kept only if it does not make the test worse
-  const gridNoH2H = fitGrid(trainOld, gridFromElo(eloOld), ['w_h2h']);
-  const gridWithH2H = fitGrid(trainOld, gridFromElo(eloOld));
+  const gridNoH2H = yield* fitGridSteps(trainOld, gridFromElo(eloOld), ['w_h2h']);
+  const gridWithH2H = yield* fitGridSteps(trainOld, gridFromElo(eloOld));
   const testNoH2H = score(x => gridProbs(x.f, gridNoH2H)), testWithH2H = score(x => gridProbs(x.f, gridWithH2H));
-  h2hUsed = testWithH2H.logLoss <= testNoH2H.logLoss + 0.0005 && (gridWithH2H.w_h2h || 0) > 0; // a negative H2H weight is noise, not a pattern
-  const gridOld = h2hUsed ? gridWithH2H : gridNoH2H;
+  yield;
+  const useH2H = testWithH2H.logLoss <= testNoH2H.logLoss + 0.0005 && (gridWithH2H.w_h2h || 0) > 0; // a negative H2H weight is noise, not a pattern
+  const gridOld = useH2H ? gridWithH2H : gridNoH2H;
   const eloTest = score(x => probs(x.d + eloOld.beta * x.lv, eloOld.c, eloOld.s));
-  lastSplit = { trainOld, test, gridOld, eloOld, score };
+  const split = { trainOld, test, gridOld, eloOld, score };
   const gridTest = score(x => gridProbs(x.f, gridOld));
-  engine = test.length >= 300 && gridTest.logLoss < eloTest.logLoss ? 'grid' : 'elo';
+  yield;
+  const eng: 'grid' | 'elo' = test.length >= 300 && gridTest.logLoss < eloTest.logLoss ? 'grid' : 'elo';
   // live parameters: refit on everything since 2018
-  const eloAll = fitElo(trainAll, BETAS);
-  fit = { c: eloAll.c, s: eloAll.s, beta: eloAll.beta };
-  gridW = engine === 'grid' ? fitGrid(trainAll, gridFromElo(eloAll), h2hUsed ? [] : ['w_h2h']) : gridOld;
+  const eloAll = yield* fitElo(trainAll, BETAS);
+  const newGridW = eng === 'grid' ? yield* fitGridSteps(trainAll, gridFromElo(eloAll), useH2H ? [] : ['w_h2h']) : gridOld;
+  // swapped in together; from here to the end the build runs in one go
+  h2hUsed = useH2H; lastSplit = split; fit = { c: eloAll.c, s: eloAll.s, beta: eloAll.beta }; gridW = newGridW; engine = eng;
   // common-sense check: on when it does not make the test clearly worse (Yarin, Oct 2026: picks must make sense)
   const baseP = (x: (typeof pre)[number]) => (engine === 'grid' ? gridProbs(x.f, gridOld) : probs(x.d + eloOld.beta * x.lv, eloOld.c, eloOld.s));
   const facOf = (x: (typeof pre)[number]) => (engine === 'grid' ? factorsOf(x.f, gridOld) : x.d - (COMPS[x.league] || COMPS[10]).ha);
@@ -645,8 +665,9 @@ export function nationalEloStatus() {
 
 export function startNationalEloScheduler() {
   if (!afConfigured()) return;
-  try { buildNationalElo(); } catch { /* empty table on first boot */ }
-  const run = () => syncNationalHistory().then(r => { if (r.requests) buildNationalElo(); }).catch(() => undefined);
+  // fix167: built in slices (was one synchronous build at start-up and after every sync)
+  after('national elo build', () => buildNationalEloAsync().catch(() => undefined /* empty table on first boot */), 0);
+  const run = () => syncNationalHistory().then(r => (r.requests ? buildNationalEloAsync() : undefined)).catch(() => undefined);
   after('national elo', run, 3 * 60 * 1000);
   every('national elo', run, 12 * 3600 * 1000);
 }

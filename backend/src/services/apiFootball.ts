@@ -677,7 +677,8 @@ export function startApiFootballScheduler(onUpdated?: () => void) {
     logger.info('API_FOOTBALL_KEY not set — injuries/lineups feed disabled');
     return;
   }
-  try { rebuildAfFeatures(); } catch { /* tables may be empty */ }
+  // fix167: one league group per turn (the all-at-once rebuild blocked 2.3 s when the scheduler started)
+  after('AF features', () => rebuildAfFeaturesAsync().catch(() => undefined /* tables may be empty */), 0);
   const tick = () => afTick().then(() => onUpdated?.()).catch(() => undefined);
   after('AF lineups/injuries', tick, 2 * 60 * 1000);
   every('AF lineups/injuries', tick, TICK_MS);

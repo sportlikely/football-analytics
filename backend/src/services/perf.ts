@@ -6,7 +6,30 @@
  * fix155: every running job is tracked (several can be in flight at once), a stall names all of them, each job keeps
  * the worst stall seen while it ran, and the live jobs (30 s / 60 s ticks) get an hourly "live ticks: max X ms" line.
  */
+import { PerformanceObserver, performance } from 'node:perf_hooks';
 import logger from '../utils/logger';
+
+/*
+ * fix167: a fully synchronous job finishes BEFORE the stall it caused is noticed (the timer below only runs once the
+ * job has given the thread back), so it was no longer "running" and the stall had no label ("Event loop blocked
+ * 3090 ms" on 17 Oct). Jobs and requests that ran 50 ms or more are remembered for a few seconds, and garbage-collection
+ * pauses too (perf_hooks 'gc'): a stall names everything that ran during it, with how long ("gc major 812 ms").
+ */
+const recent: { label: string; start: number; end: number }[] = [];
+const noteRun = (label: string, start: number, end: number) => {
+  if (end - start < 50) return;
+  recent.push({ label, start, end });
+  if (recent.length > 64) recent.shift();
+};
+try {
+  const kinds: Record<number, string> = { 1: 'minor', 2: 'major', 4: 'incremental', 8: 'weak callbacks' };
+  new PerformanceObserver(list => {
+    for (const e of list.getEntries()) {
+      const start = performance.timeOrigin + e.startTime;
+      noteRun(`gc ${kinds[(e as any).detail?.kind ?? (e as any).kind] || ''}`.trim(), start, start + e.duration);
+    }
+  }).observe({ entryTypes: ['gc'] });
+} catch { /* gc entries not available */ }
 
 const STEP = 500;
 const stalls: { at: string; ms: number; job: string | null }[] = [];
@@ -30,19 +53,24 @@ const runningLabel = () => {
 setInterval(() => {
   const now = Date.now();
   const lag = now - last - STEP;
+  const since = last;
   last = now;
   if (lag > maxLag) maxLag = lag;
-  if (lag > 50) for (const label of active.keys()) {
+  // what ran (and ended) since the last tick: the synchronous jobs, requests and gc pauses behind this stall
+  const ended = lag > 50 ? recent.filter(r => r.end >= since && !active.has(r.label)).sort((a, b) => (b.end - b.start) - (a.end - a.start)) : [];
+  if (lag > 50) for (const label of new Set([...active.keys(), ...ended.map(r => r.label)])) {
     const j = jobs.get(label);
     if (j && lag > j.maxStallMs) j.maxStallMs = lag;
     if (LIVE_JOBS.has(label)) liveHour.set(label, Math.max(liveHour.get(label) || 0, lag));
   }
   if (lag > 300) {
-    const job = runningLabel();
+    const running = runningLabel();
+    const done = ended.slice(0, 4).map(r => `${r.label} ${Math.round(r.end - r.start)} ms`).join(' + ');
+    const job = [running, done].filter(Boolean).join(' + ') || null;
     stalls.push({ at: new Date(now).toISOString(), ms: lag, job });
     if (stalls.length > 100) stalls.shift();
-    const live = [...active.keys()].some(l => LIVE_JOBS.has(l));
-    if (lag > 2000 || (lag > 500 && live)) logger.warn(`Event loop blocked ${lag} ms${job ? ` (${job})` : ''}`);
+    // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
+    if (lag > 500) logger.warn(`Event loop blocked ${lag} ms${job ? ` (${job})` : ''}`);
   }
 }, STEP).unref();
 
@@ -56,6 +84,37 @@ setInterval(() => {
 }, 3600 * 1000).unref();
 
 export const yieldLoop = () => new Promise<void>(r => setImmediate(r));
+/**
+ * fix167: a loop over cached work never gives the thread back (each await on a ready value only runs microtasks), so
+ * hundreds of items run as one block. `const step = yielder(50)` … `await step()` in the loop yields once 50 ms have
+ * passed since the last yield.
+ */
+/**
+ * fix167: a heavy computation written as a generator (`yield` at safe points) runs to the end at once (runSteps, for
+ * callers that need the answer now) or in slices of `budgetMs`, giving the thread back between them (runStepsAsync).
+ */
+export function runSteps<T>(g: Generator<unknown, T>): T {
+  let r = g.next();
+  while (!r.done) r = g.next();
+  return r.value;
+}
+export async function runStepsAsync<T>(g: Generator<unknown, T>, budgetMs = 40): Promise<T> {
+  let t = Date.now();
+  let r = g.next();
+  while (!r.done) {
+    if (Date.now() - t >= budgetMs) { await yieldLoop(); t = Date.now(); }
+    r = g.next();
+  }
+  return r.value;
+}
+export function yielder(budgetMs = 50) {
+  let since = Date.now();
+  return async () => {
+    if (Date.now() - since < budgetMs) return;
+    await yieldLoop();
+    since = Date.now();
+  };
+}
 
 /** Time a job (sync or async); the label shows up next to any stall it causes. */
 export async function timed<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
@@ -70,9 +129,14 @@ export async function timed<T>(label: string, fn: () => T | Promise<T>): Promise
     jobs.set(label, j);
     const n = (active.get(label) || 1) - 1;
     if (n > 0) active.set(label, n); else active.delete(label);
+    noteRun(label, t0, t0 + ms);
   }
 }
-export const setJob = (label: string | null) => { manual = label; };
+let manualAt = 0;
+export const setJob = (label: string | null) => {
+  if (manual) noteRun(manual, manualAt, Date.now());
+  manual = label; manualAt = Date.now();
+};
 
 /**
  * fix158: an API request in flight counts as a running job ("http GET /api/nfl/games"), so a freeze inside a request
@@ -92,9 +156,13 @@ export function track(label: string): () => void {
     if (jobs.size > 400) for (const k of [...jobs.keys()].filter(k => k.startsWith('http ')).slice(0, 100)) jobs.delete(k);
     const n = (active.get(label) || 1) - 1;
     if (n > 0) active.set(label, n); else active.delete(label);
+    noteRun(label, t0, t0 + ms);
   };
 }
-export const routeLabel = (method: string, path: string) => `http ${method} ${path.replace(/\/\d+(?=\/|$)/g, '/:id').slice(0, 80)}`;
+/** fix167: pages outside /api (search-engine HTML, sitemaps, files) go by their first part: "http GET /team/*" */
+export const routeLabel = (method: string, path: string) => path.startsWith('/api/')
+  ? `http ${method} ${path.replace(/\/\d+(?=\/|$)/g, '/:id').slice(0, 80)}`
+  : `http ${method} ${path.replace(/^(\/[^/]*)(\/.+)?$/, (_m, a: string, b?: string) => (b ? `${a}/*` : a)).slice(0, 80)}`;
 
 /** fix165: setTimeout with a name (start-up jobs), so no freeze is unlabelled. */
 export function after(label: string, fn: () => unknown, ms: number): NodeJS.Timeout {

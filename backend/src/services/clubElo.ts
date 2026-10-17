@@ -12,7 +12,7 @@ import { afGet, afConfigured } from './apiFootball';
 import { similarity, normalizeName } from './history';
 import { Meetings, commonSense, type H2H } from './h2hGuard';
 import { Prediction } from './predictionModel';
-import { every, after } from './perf';
+import { every, after, runSteps, runStepsAsync } from './perf';
 
 export const MODEL_EURO = 'elo-euro';
 const AF_OFFSET = 1_000_000_000;
@@ -285,7 +285,8 @@ function cupNll(xs: { f: CFeat; o: 'H' | 'D' | 'A' }[], w: CupW) {
 }
 /** The factors' verdict without home advantage (> 0 favours the home side). */
 const factorsOf = (f: CFeat, w: CupW) => w.w_elo * f.dElo + w.w_squad * f.lv + w.w_goals * f.gl + w.w_form * f.form + w.w_rest * f.rest + (w.w_h2h || 0) * f.h2h;
-function fitCup(xs: { f: CFeat; o: 'H' | 'D' | 'A' }[], start: CupW, fixed: string[] = []): CupW {
+/** fix167: the fit as steps (a yield after each weight tried), so the scheduled rebuild gives the thread back. */
+function* fitCup(xs: { f: CFeat; o: 'H' | 'D' | 'A' }[], start: CupW, fixed: string[] = []): Generator<unknown, CupW> {
   const w: any = { ...start };
   let best = cupNll(xs, w), step = 0.2;
   for (let pass = 0; pass < 80 && step > 0.002; pass++) {
@@ -296,6 +297,7 @@ function fitCup(xs: { f: CFeat; o: 'H' | 'D' | 'A' }[], start: CupW, fixed: stri
       w[k] = old + dir * step;
       if (k.startsWith('c_')) w[k] = Math.max(0.05, w[k]);
       const v = cupNll(xs, w);
+      yield;
       if (v < best - 1e-7) { best = v; improved = true; break; }
       w[k] = old;
     }
@@ -307,7 +309,18 @@ const cupFromElo = (e: { c: number; s: number; beta: number }): CupW => ({
   w_elo: 100 / e.s, w_squad: e.beta / e.s, w_goals: 0, w_form: 0, w_rest: 0, w_home: HA / e.s, c_cl: e.c / e.s, c_el: e.c / e.s, c_ecl: e.c / e.s, g_draw: 0, w_h2h: 0
 });
 
-export function buildClubElo() {
+/** The whole build at once (admin rebuild). */
+export const buildClubElo = () => runSteps(buildSteps());
+/**
+ * fix167: the scheduled rebuild in slices of 40 ms (2–3 s in one block on a copy of the database: the parameter fits).
+ * The ratings are rebuilt in one go as before; the fitted settings are swapped in together at the end.
+ */
+let building: Promise<unknown> | null = null;
+export function buildClubEloAsync() {
+  if (!building) building = runStepsAsync(buildSteps()).finally(() => { building = null; });
+  return building;
+}
+function* buildSteps(): Generator<unknown, { matches: number; cupMatches: number; clubs: number; engine: 'grid' | 'elo' }> {
   loadClubValues();
   valueByName.clear();
   const domestic = db.prepare(`
@@ -364,14 +377,17 @@ export function buildClubElo() {
     for (const x of xs) { const p = probs(x.d + b * x.lv, c, s); ll -= Math.log(Math.max(1e-6, x.o === 'H' ? p.h : x.o === 'D' ? p.d : p.a)); }
     return ll;
   };
-  const grid = (xs: typeof pre, betas: number[]) => {
+  function* grid(xs: typeof pre, betas: number[]) {
     let best = { ll: Infinity, c: 60, s: 110, beta: 0 };
-    for (const b of betas) for (let c = 0; c <= 300; c += 10) for (let s = 60; s <= 400; s += 10) {
-      const ll = llOf(xs, c, s, b);
-      if (ll < best.ll) best = { ll, c, s, beta: b };
+    for (const b of betas) for (let c = 0; c <= 300; c += 10) {
+      for (let s = 60; s <= 400; s += 10) {
+        const ll = llOf(xs, c, s, b);
+        if (ll < best.ll) best = { ll, c, s, beta: b };
+      }
+      yield; // fix167: a safe point every 35 settings
     }
     return best;
-  };
+  }
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   const score = (pf: (x: (typeof pre)[number]) => { h: number; d: number; a: number }) => {
     let brier = 0, ll = 0, hits = 0, pd = 0, rd = 0;
@@ -389,21 +405,24 @@ export function buildClubElo() {
   };
   const BETAS = [0, 25, 50, 75, 100, 125, 150, 200, 250];
   if (train.length >= 100) {
-    const base = grid(train, [0]);
-    const withV = grid(train, BETAS);
+    // fix167: the new settings are kept in locals and swapped in together (the steps may be spread over turns)
+    const base = yield* grid(train, [0]);
+    const withV = yield* grid(train, BETAS);
     // head-to-head row: fitted with and without, kept only if it does not make the test worse
-    const cupNoH2H = fitCup(train, cupFromElo(withV), ['w_h2h']);
-    const cupWithH2H = fitCup(train, cupFromElo(withV));
+    const cupNoH2H = yield* fitCup(train, cupFromElo(withV), ['w_h2h']);
+    const cupWithH2H = yield* fitCup(train, cupFromElo(withV));
     const tNo = score(x => cupProbs(x.f, cupNoH2H)), tWith = score(x => cupProbs(x.f, cupWithH2H));
-    h2hUsed = !!(tNo && tWith && tWith.logLoss <= tNo.logLoss + 0.0005 && (cupWithH2H.w_h2h || 0) > 0); // a negative H2H weight is noise, not a pattern
-    const cupTrain = h2hUsed ? cupWithH2H : cupNoH2H;
+    const useH2H = !!(tNo && tWith && tWith.logLoss <= tNo.logLoss + 0.0005 && (cupWithH2H.w_h2h || 0) > 0); // a negative H2H weight is noise, not a pattern
+    const cupTrain = useH2H ? cupWithH2H : cupNoH2H;
     const eloTest = score(x => probs(x.d + withV.beta * x.lv, withV.c, withV.s));
     const gridTest = score(x => cupProbs(x.f, cupTrain));
-    engine = test.length >= 300 && gridTest && eloTest && gridTest.logLoss < eloTest.logLoss ? 'grid' : 'elo';
+    yield;
+    const eng: 'grid' | 'elo' = test.length >= 300 && gridTest && eloTest && gridTest.logLoss < eloTest.logLoss ? 'grid' : 'elo';
     // live parameters from every cup match
-    const allV = grid(pre, BETAS);
-    fit = { c: allV.c, s: allV.s, beta: allV.beta };
-    cupW = engine === 'grid' ? fitCup(pre, cupFromElo(allV), h2hUsed ? [] : ['w_h2h']) : cupTrain;
+    const allV = yield* grid(pre, BETAS);
+    const newCupW = eng === 'grid' ? yield* fitCup(pre, cupFromElo(allV), useH2H ? [] : ['w_h2h']) : cupTrain;
+    // swapped in together; from here to the end the build runs in one go
+    h2hUsed = useH2H; engine = eng; fit = { c: allV.c, s: allV.s, beta: allV.beta }; cupW = newCupW;
     // common-sense check: on when it does not make the test clearly worse
     const baseP = (x: (typeof pre)[number]) => (engine === 'grid' ? cupProbs(x.f, cupTrain) : probs(x.d + withV.beta * x.lv, withV.c, withV.s));
     const facOf = (x: (typeof pre)[number]) => (engine === 'grid' ? factorsOf(x.f, cupTrain) : x.d - HA);
@@ -594,8 +613,9 @@ export function clubEloStatus() {
 
 export function startClubEloScheduler() {
   if (!afConfigured()) return;
-  try { buildClubElo(); } catch { /* tables may be empty on first boot */ }
-  const run = () => syncEuropeanCups().then(() => buildClubElo()).catch(() => undefined);
+  // fix167: built in slices (was one synchronous build at start-up and after every sync)
+  after('club elo build', () => buildClubEloAsync().catch(() => undefined /* tables may be empty on first boot */), 0);
+  const run = () => syncEuropeanCups().then(() => buildClubEloAsync()).catch(() => undefined);
   after('club elo', run, 4 * 60 * 1000);
   every('club elo', run, 12 * 3600 * 1000);
 }

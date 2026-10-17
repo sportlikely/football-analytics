@@ -18,6 +18,7 @@ import { socket } from './lib/socket'
 import { useTheme } from './lib/theme'
 import { useUnlocks, resetDay } from './lib/unlocks'
 import { reportError } from './lib/report'
+import { isChunkError, isReloading, reloadForNewVersion } from './lib/chunkReload'
 import { HUBS } from './lib/hubs'
 import { SOCIAL, type SocialId } from './lib/social'
 import { t as tt, basename, applyHeadLang, LANGS, lang, setLang, type Lang } from './lib/i18n'
@@ -27,17 +28,21 @@ import { t as tt, basename, applyHeadLang, LANGS, lang, setLang, type Lang } fro
  * downloads the whole site (admin, CRM, basketball…) before showing anything. The most visited pages are fetched
  * quietly in the background a moment after the first page is up.
  * After a new version is deployed, the old page files no longer exist: a tab that was open from before reloads once
- * and gets the new version (instead of a blank page).
+ * and gets the new version (instead of a blank page). fix167: at most once a minute (lib/chunkReload.ts), so a page
+ * that really can't load shows its error instead of looping, and a later deploy in the same tab reloads again.
  */
-const RELOAD_KEY = 'sl-chunk-reload'
 function page<T extends ComponentType<any>>(load: () => Promise<{ default: T }>) {
+  const never = () => new Promise<{ default: T }>(() => undefined) // the page is reloading: keep showing the loader
   return lazy(() =>
     load().then(
-      m => { try { sessionStorage.removeItem(RELOAD_KEY) } catch { /* ignore */ } return m },
+      m => {
+        if (m?.default) return m
+        // Vite's loader returns nothing when its vite:preloadError was handled (lib/chunkReload.ts reloads)
+        if (isReloading() || reloadForNewVersion()) return never()
+        throw new Error('Failed to fetch dynamically imported module (empty)')
+      },
       err => {
-        let tried = false
-        try { tried = sessionStorage.getItem(RELOAD_KEY) === '1'; sessionStorage.setItem(RELOAD_KEY, '1') } catch { /* ignore */ }
-        if (!tried) { window.location.reload(); return new Promise<{ default: T }>(() => undefined) }
+        if (isReloading() || (isChunkError(err) && reloadForNewVersion())) return never()
         throw err
       }
     )
