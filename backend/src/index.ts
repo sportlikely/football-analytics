@@ -3,6 +3,8 @@ import { joinWaitlist, waitlistStats } from './services/waitlist';
 import { slimForList, clearPredictionCache } from './services/predCache';
 import { withLiveScore, liveBookStatus } from './services/liveScores';
 import { runLinkCheck, lastLinkCheck, linkCheckTick } from './services/linkCheck';
+import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
+import { sendMail as sendMailFix168 } from './services/email';
 import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -100,7 +102,7 @@ import { addExtraLeague, removeExtraLeague, setExtraTrial } from './services/lea
 import { bbLeagueCoverage, bbPickForAdding } from './services/bbLeagueCoverage';
 import { addBbExtraLeague, removeBbExtraLeague, setBbExtraTrial } from './services/bbLeagueConfig';
 import {
-  signup, login, changePassword, setPlan, adminResetPassword, listUsers, userStats, createSession, destroySession, userForToken,
+  signup, login, loginNeedsCheck, changePassword, setPlan, adminResetPassword, listUsers, userStats, createSession, destroySession, userForToken,
   parseCookies, setSessionCookie, clearSessionCookie, SESSION_COOKIE, staffOf, permsOf, setRole, Staff, userById, checkPassword, sessionHash, startEmailChange, confirmEmailChange, accessOf, canSeeFull, isPaid, teaseDeep, teaseDeepExcept, AuthError, Access, User,
   sendVerification, verifyEmail, requestPasswordReset, resetPassword, setMarketingOptIn, usersCsv, verificationRequired, exportUserData, deleteAccount, cancelPlan, resumePlan, leaveFeedback
 } from './services/auth';
@@ -421,9 +423,30 @@ app.get('/api/auth/me', (req, res) => {
   res.json(sessionPayload(req.user || null));
 });
 
+// fix168: the sign-up form's config (Turnstile site key when it is on) and its signed "shown at" token
+app.get('/api/auth/config', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json({ turnstileSiteKey: turnstileSiteKey() });
+});
+app.get('/api/auth/signup-token', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ token: signupToken() });
+});
+
 app.post('/api/auth/signup', jsonOnly, async (req, res) => {
   try {
+    // fix168: the hidden "website" field filled in = a bot: the normal answer, nothing created
+    if (honeypotHit(req.body)) {
+      logger.info('signup honeypot');
+      securityLog(req, 'signup_honeypot', { email: String(req.body?.email || '').trim().slice(0, 254) || null });
+      return res.status(201).json({ user: null, codeSent: true });
+    }
+    const why = checkSignupToken(req.body?.formToken);
+    if (why) { logger.info(`signup refused: ${why}`); return res.status(400).json({ error: 'Please try again' }); }
+    if (!(await turnstileOk(req.body?.turnstile, req.ip || ''))) return res.status(400).json({ error: 'Please try again', captcha: true });
     const user = signup(req.body?.email, req.body?.password, req.body?.name, req.ip || '', req.body?.optIn === true, req.body?.adult === true);
+    securityLog(req, 'signup', user); // the network, for the CRM trust grade (security log, 90 days)
+    void checkSignupSurge(sendMailFix168);
     const s = createSession(user.id, req.headers['user-agent']);
     setSessionCookie(res, s.token, s.expires, req.secure);
     // Send the confirmation code; if the email fails the account still exists and the code can be re-sent
@@ -648,7 +671,7 @@ app.post('/api/crm/inbox/:id(\\d+)/assign', need('inbox.reply'), jsonOnly, (req,
 });
 // Customers
 app.get('/api/crm/customers', need('customers.view'), (req, res) => {
-  try { res.set('Cache-Control', 'no-store'); res.json({ data: searchCustomers(req.query.q) }); } catch (e) { crmFail(res, e); }
+  try { res.set('Cache-Control', 'no-store'); res.json({ data: searchCustomers(req.query.q, req.query.trust) }); } catch (e) { crmFail(res, e); }
 });
 app.get('/api/crm/customers/:id(\\d+)', need('customers.view'), (req, res) => {
   try {
@@ -1042,8 +1065,13 @@ app.get('/api/admin/waitlist', (_req, res) => res.json({ data: waitlistStats() }
 app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: visitorStats() }); });
 app.get('/api/admin/news', (_req, res) => res.json({ data: newsStatus() }));
 
-app.post('/api/auth/login', jsonOnly, (req, res) => {
+app.post('/api/auth/login', jsonOnly, async (req, res) => {
   try {
+    // fix168: the hidden field filled in: the same answer as a wrong password
+    if (honeypotHit(req.body)) { logger.info('login honeypot'); return res.status(401).json({ error: 'Wrong email or password.' }); }
+    // after 3 failed attempts: Cloudflare Turnstile (when it is on)
+    if (turnstileSiteKey() && loginNeedsCheck(req.body?.email, req.ip || '') && !(await turnstileOk(req.body?.turnstile, req.ip || '')))
+      return res.status(400).json({ error: 'Please confirm you are not a robot.', captcha: true });
     const user = login(req.body?.email, req.body?.password, req.ip || '');
     // two-step login on: no session yet, only a short ticket for the code step
     if (twoFactorEnabled(user.id)) {
@@ -1057,6 +1085,8 @@ app.post('/api/auth/login', jsonOnly, (req, res) => {
   } catch (e) {
     if (e instanceof AuthError && (e.status === 401 || e.status === 429))
       securityLog(req, 'login_fail', { email: String(req.body?.email || '').trim().slice(0, 254) || null }, e.status === 429 ? 'rate limited' : 'wrong email or password');
+    // fix168: the next try needs the Turnstile check: tell the form to show it
+    if (e instanceof AuthError && e.status === 401 && turnstileSiteKey() && loginNeedsCheck(req.body?.email, req.ip || '')) return res.status(401).json({ error: e.message, captcha: true });
     authFail(res, e);
   }
 });

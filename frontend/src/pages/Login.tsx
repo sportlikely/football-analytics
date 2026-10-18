@@ -4,6 +4,9 @@ import { errorText, useAuth } from '../lib/auth'
 import { safeNext } from '../lib/nav'
 import { t } from '../lib/i18n'
 import { TwoFactorStep } from '../components/TwoFactor'
+import Turnstile, { useTurnstileKey } from '../components/Turnstile'
+import axios from 'axios'
+import { API_URL } from '../lib/socket'
 
 /** Sign in and create account on one page: /login and /signup. */
 export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
@@ -21,6 +24,18 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ticket, setTicket] = useState<string | null>(null) // password OK, two-step code still needed
+  // fix168: bot checks — the hidden field, the signed "form shown at" token, Cloudflare Turnstile (when it is on)
+  const [website, setWebsite] = useState('')
+  const [formToken, setFormToken] = useState<string | null>(null)
+  const [cfToken, setCfToken] = useState('')
+  const [cfKey, setCfKey] = useState(0) // a Turnstile token works once: a new widget after a failed try
+  const [needCheck, setNeedCheck] = useState(false) // login: after 3 failed attempts the server asks for it
+  const siteKey = useTurnstileKey()
+  useEffect(() => {
+    if (mode !== 'signup') return
+    axios.get(`${API_URL}/auth/signup-token`).then(r => setFormToken(r.data?.token || null)).catch(() => setFormToken(null))
+  }, [mode])
+  const showCheck = !!siteKey && (mode === 'signup' || needCheck)
 
   useEffect(() => setMode(initial), [initial])
   useEffect(() => {
@@ -37,11 +52,16 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
     if (mode === 'signup' && !adult) return setError(t("Please confirm you are 18 or older and accept the terms."))
     setBusy(true)
     try {
+      const guard = { website, formToken, turnstile: cfToken || null }
       if (mode === 'login') {
-        const step = await login(email, password)
+        const step = await login(email, password, guard)
         if (step.ticket) { setTicket(step.ticket); setPassword('') }
-      } else await signup(email, password, name, optIn, adult)
-    } catch (err) {
+      } else await signup(email, password, name, optIn, adult, guard)
+    } catch (err: any) {
+      if (err?.response?.data?.captcha) setNeedCheck(true)
+      setCfToken(''); setCfKey(k => k + 1)
+      // a fresh form token for the next try (the old one stays valid, but a stale page may have kept one past its hour)
+      if (mode === 'signup') axios.get(`${API_URL}/auth/signup-token`).then(r => setFormToken(r.data?.token || null)).catch(() => undefined)
       setError(errorText(err))
     } finally {
       setBusy(false)
@@ -133,6 +153,12 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
               </span>
             </label>
           )}
+
+          {/* fix168: hidden from people (off-screen, not focusable); bots fill it */}
+          <div aria-hidden="true" style={{ position: 'absolute', left: '-10000px', width: 1, height: 1, overflow: 'hidden' }}>
+            <label>Website<input type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={e => setWebsite(e.target.value)} /></label>
+          </div>
+          {showCheck && <Turnstile key={cfKey} siteKey={siteKey} onToken={setCfToken} />}
 
           {error && <div className="rounded-xl border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-loss">{error}</div>}
 

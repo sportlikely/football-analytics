@@ -59,10 +59,11 @@ interface AuthState {
   paid: boolean
   /** signed in but the email is not confirmed yet */
   needsVerification: boolean
-  login: (email: string, password: string) => Promise<SignInStep>
+  /** fix168: guard = the hidden field, the form token and the Turnstile token (bot checks) */
+  login: (email: string, password: string, guard?: AuthGuard) => Promise<SignInStep>
   /** two-step login: the ticket from login / reset + a 6-digit code or a recovery code */
   loginCode: (ticket: string, code: string) => Promise<void>
-  signup: (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean) => Promise<void>
+  signup: (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean, guard?: AuthGuard) => Promise<void>
   verify: (code: string) => Promise<void>
   resendCode: () => Promise<void>
   resetPassword: (email: string, code: string, password: string) => Promise<SignInStep>
@@ -137,8 +138,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     reconnectSocket()
   }, [access])
 
-  const login = async (email: string, password: string): Promise<SignInStep> => {
-    const r = await axios.post(`${API_URL}/auth/login`, { email, password })
+  const login = async (email: string, password: string, guard?: AuthGuard): Promise<SignInStep> => {
+    const r = await axios.post(`${API_URL}/auth/login`, { email, password, ...(guard || {}) })
     if (r.data?.twoFactor) return { ticket: r.data.ticket }
     apply(r.data)
     return {}
@@ -149,8 +150,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apply(r.data)
   }
 
-  const signup = async (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean) => {
-    const r = await axios.post(`${API_URL}/auth/signup`, { email, password, name, optIn: !!optIn, adult: !!adult })
+  const signup = async (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean, guard?: AuthGuard) => {
+    const r = await axios.post(`${API_URL}/auth/signup`, { email, password, name, optIn: !!optIn, adult: !!adult, ...(guard || {}) })
     apply(r.data)
   }
 
@@ -196,6 +197,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     </AuthContext.Provider>
   )
 }
+
+/** fix168: the bot checks a sign-in / sign-up form sends (website = the hidden honeypot field). */
+export interface AuthGuard { website?: string; formToken?: string | null; turnstile?: string | null }
 
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext)

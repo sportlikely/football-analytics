@@ -16,6 +16,7 @@
  */
 import crypto from 'crypto';
 import { db } from '../db';
+import { trustOf } from './signupGuard';
 import logger from '../utils/logger';
 import { sendMail, emailEnabled, layout, esc, SITE } from './email';
 import { PLANS } from './billing';
@@ -150,13 +151,18 @@ export function assign(id: number, to: number | null, v: Viewer, staffIds: Set<n
 /* Customers                                                          */
 /* ================================================================== */
 
-export function searchCustomers(q: unknown) {
+/** fix168: trust = Real / Unsure / Bot (signupGuard.trustOf); with a trust filter the newest 1,000 accounts are graded and 50 shown. */
+export function searchCustomers(q: unknown, trustIn?: unknown) {
   const term = String(q || '').trim().toLowerCase().slice(0, 100);
+  const want = ['real', 'unsure', 'bot'].includes(String(trustIn)) ? String(trustIn) : null;
+  const lim = want ? 1000 : 50;
   const rows = term
-    ? db.prepare(`SELECT id, email, name, plan, premium_until, created_at, last_login_at, cancel_at, email_verified FROM users WHERE lower(email) LIKE ? OR lower(COALESCE(name, '')) LIKE ? ORDER BY last_login_at DESC LIMIT 50`).all(`%${term}%`, `%${term}%`)
-    : db.prepare(`SELECT id, email, name, plan, premium_until, created_at, last_login_at, cancel_at, email_verified FROM users ORDER BY created_at DESC LIMIT 50`).all();
+    ? db.prepare(`SELECT id, email, name, plan, premium_until, created_at, last_login_at, cancel_at, email_verified FROM users WHERE lower(email) LIKE ? OR lower(COALESCE(name, '')) LIKE ? ORDER BY last_login_at DESC LIMIT ?`).all(`%${term}%`, `%${term}%`, lim)
+    : db.prepare(`SELECT id, email, name, plan, premium_until, created_at, last_login_at, cancel_at, email_verified FROM users ORDER BY created_at DESC LIMIT ?`).all(lim);
   const nowIso = now();
-  return (rows as any[]).map(r => ({
+  const graded = (rows as any[]).map(r => ({ r, t: trustOf(r) })).filter(x => !want || x.t.trust === want).slice(0, 50);
+  return graded.map(({ r, t }) => ({
+    trust: t.trust, trustReasons: t.reasons,
     id: r.id, email: r.email, name: r.name || null,
     plan: (r.plan === 'premium' || r.plan === 'pro') && (!r.premium_until || r.premium_until > nowIso) ? r.plan : 'free',
     premiumUntil: r.premium_until || null, createdAt: r.created_at, lastLoginAt: r.last_login_at || null, cancelAt: r.cancel_at || null, emailVerified: !!r.email_verified

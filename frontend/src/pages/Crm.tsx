@@ -490,7 +490,7 @@ function Revenue() {
 /* Customers                                                          */
 /* ================================================================== */
 
-interface CustRow { id: number; email: string; name: string | null; plan: string; premiumUntil: string | null; createdAt: string; lastLoginAt: string | null; cancelAt: string | null; emailVerified: boolean }
+interface CustRow { trust?: 'real' | 'unsure' | 'bot'; trustReasons?: string[]; id: number; email: string; name: string | null; plan: string; premiumUntil: string | null; createdAt: string; lastLoginAt: string | null; cancelAt: string | null; emailVerified: boolean }
 interface CustProfile extends CustRow {
   role: string | null; emailUpdates: boolean; twoFactor: boolean; devices: number; unlocksThisMonth: number; favorites: number
   planHistory: { at: string; fromPlan: string | null; toPlan: string; until: string | null; source: string }[]
@@ -498,22 +498,31 @@ interface CustProfile extends CustRow {
   security: { at: string; event: string; ip: string | null; ua: string | null }[] | null
   staffActivity?: ActRow[]
 }
+// fix168: Real / Unsure / Bot (reasons on hover)
+const TRUST_TONE: Record<string, string> = { real: 'bg-win/15 text-win', unsure: 'bg-draw/15 text-draw', bot: 'bg-loss/15 text-loss' }
+const TRUST_LABEL: Record<string, string> = { real: 'Real', unsure: 'Unsure', bot: 'Bot' }
 const PLAN_TONE: Record<string, string> = { free: 'text-muted', premium: 'text-accent', pro: 'text-accent font-bold' }
 
 function Customers() {
   const [q, setQ] = useState('')
+  const [trust, setTrust] = useState<'' | 'real' | 'unsure' | 'bot'>('')
   const [rows, setRows] = useState<CustRow[] | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
-    const t = setTimeout(() => { axios.get(`${API_URL}/crm/customers`, { params: { q } }).then(r => { setRows(r.data.data); setError(null) }).catch(e => setError(errorText(e))) }, 250)
+    const t = setTimeout(() => { axios.get(`${API_URL}/crm/customers`, { params: { q, ...(trust ? { trust } : {}) } }).then(r => { setRows(r.data.data); setError(null) }).catch(e => setError(errorText(e))) }, 250)
     return () => clearTimeout(t)
-  }, [q])
+  }, [q, trust])
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,380px)_1fr] items-start">
       <section className="card overflow-hidden">
         <div className="p-2 border-b border-line/60">
           <input className={input} value={q} onChange={e => setQ(e.target.value)} placeholder="Search email or name" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+          <div className="seg mt-2">
+            {([['', 'All'], ['real', 'Real'], ['unsure', 'Unsure'], ['bot', 'Bot']] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setTrust(k)} className={`seg-btn ${trust === k ? 'seg-btn-active' : ''}`}>{l}</button>
+            ))}
+          </div>
         </div>
         <Err e={error} />
         {!rows ? <div className="p-6 text-sm text-faint">Loading…</div> : rows.length === 0 ? <div className="p-6 text-sm text-faint">No accounts found.</div> : (
@@ -523,6 +532,7 @@ function Customers() {
                 <button type="button" onClick={() => setOpenId(r.id)} className={`w-full text-left px-4 py-2.5 hover:bg-surface2/50 ${openId === r.id ? 'bg-surface2/70' : ''}`}>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-ink truncate flex-1">{r.email}</span>
+                    {r.trust && <span title={(r.trustReasons || []).join(' · ')} className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${TRUST_TONE[r.trust]}`}>{TRUST_LABEL[r.trust]}</span>}
                     <span className={`text-[11px] uppercase ${PLAN_TONE[r.plan] || ''}`}>{r.plan}</span>
                   </div>
                   <div className="text-[11px] text-faint">{r.name ? `${r.name} · ` : ''}joined {fmtDay(r.createdAt)} · last seen {fmtDay(r.lastLoginAt)}{r.cancelAt ? ' · cancelled' : ''}</div>

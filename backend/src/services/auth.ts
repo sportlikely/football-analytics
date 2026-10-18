@@ -16,6 +16,7 @@ import { roleByKey, ALL_PERMS, type Perm } from './roles';
 import { doubleChance } from '../utils/doubleChance';
 import { emailEnabled, sendVerificationCode, sendResetCode, sendEmailChangeCode, sendEmailChangedNotice } from './email';
 import { every } from './perf';
+import { isDisposable } from './disposableDomains';
 
 /** premium = $15 plan with a monthly allowance of match unlocks; pro = $30 plan, unlimited (see services/billing.ts) */
 export type Plan = 'free' | 'premium' | 'pro';
@@ -254,31 +255,44 @@ export class AuthError extends Error {
 export function signup(emailIn: unknown, password: unknown, nameIn: unknown, ip: string, optIn = false, adult = false): User {
   const email = normEmail(emailIn);
   if (!adult) throw new AuthError(400, 'Please confirm you are 18 or older and accept the terms.');
-  if (limited(`signup:${ip}`, 10)) throw new AuthError(429, 'Too many sign-ups from this network. Try again later.');
+  // fix168: 10 an hour and 3 per 10 minutes per network; one account per email address per day
+  if (over(`signup:${ip}`, 10) || over(`signup10:${ip}`, 3)) throw new AuthError(429, 'Too many sign-ups from this network. Try again later.');
+  if (over(`signup-email:${email}`, 1)) throw new AuthError(429, 'An account was already created with this email today. Try signing in.');
   const bad = checkCredentials(email, password);
   if (bad) throw new AuthError(400, bad);
+  if (isDisposable(email)) throw new AuthError(400, 'Please use a permanent email address');
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) throw new AuthError(409, 'An account with this email already exists. Try signing in.');
   const name = String(nameIn || '').trim().slice(0, 80) || null;
   const now = new Date().toISOString();
   const r = db
     .prepare('INSERT INTO users (email, name, pass_hash, plan, created_at, email_verified, marketing_opt_in, marketing_opt_in_at, terms_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(email, name, hashPassword(String(password)), 'free', now, verificationRequired ? 0 : 1, optIn ? 1 : 0, optIn ? now : null, now);
+  limited(`signup:${ip}`, 10, 3600 * 1000);
+  limited(`signup10:${ip}`, 3, 10 * 60 * 1000);
+  limited(`signup-email:${email}`, 1, 24 * 3600 * 1000);
   logger.info(`New account #${r.lastInsertRowid}`);
   return rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(Number(r.lastInsertRowid)));
+}
+
+/** fix168: Turnstile is asked for on login after 3 failed attempts (this network + email, or the email). */
+export function loginNeedsCheck(emailIn: unknown, ip: string): boolean {
+  const email = normEmail(emailIn);
+  return over(`login-ip-email:${ip}:${email}`, 3) || over(`login-email:${email}`, 3);
 }
 
 export function login(emailIn: unknown, password: unknown, ip: string): User {
   const email = normEmail(emailIn);
   // Only failed attempts count, so nobody can lock a user out by spamming their email from elsewhere
   // unless they are also guessing wrong from many networks (per-email cap is higher than per-IP+email)
-  if (over(`login-ip:${ip}`, 30) || over(`login-ip-email:${ip}:${email}`, 8) || over(`login-email:${email}`, 50))
+  // fix168: 10 failed attempts per email per 15 minutes (was 50)
+  if (over(`login-ip:${ip}`, 30) || over(`login-ip-email:${ip}:${email}`, 8) || over(`login-email:${email}`, 10))
     throw new AuthError(429, 'Too many attempts. Wait 15 minutes and try again.');
   const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   const ok = verifyPassword(String(password || ''), row ? row.pass_hash : DUMMY_HASH);
   if (!row || !ok) {
     limited(`login-ip:${ip}`, 30);
     limited(`login-ip-email:${ip}:${email}`, 8);
-    limited(`login-email:${email}`, 50);
+    limited(`login-email:${email}`, 10);
     throw new AuthError(401, 'Wrong email or password.');
   }
   db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(new Date().toISOString(), row.id);
