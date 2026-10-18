@@ -7,7 +7,7 @@ import { Card, Tick, pct, type AccuracyAdapter, type AccData } from '../Accuracy
  * Accuracy adapter of the sports where our pick is the winner (basketball, NFL + college; it was WinnerAccuracy until
  * fix152b): the record from /basketball/record or /nfl/accuracy turned into the shared page's shape.
  */
-interface Rec { n: number; hits: number; hitRate: number | null; strongN: number; strongHits: number; strongHitRate: number | null }
+interface Rec { n: number; hits: number; hitRate: number | null; strongN: number; strongHits: number; strongHitRate: number | null; marginOff?: number | null; totalOff?: number | null }
 interface Row { gameId: number; code: string; kickoff: string; home: string; away: string; homeLogo: string | null; awayLogo: string | null; score: [number, number]; pick: 'H' | 'A'; pHome: number; hit: boolean }
 interface Pending { gameId: number; code: string; kickoff: string; home: string; away: string; homeLogo: string | null; awayLogo: string | null; status: string | null; live: boolean; score: [number, number] | null; pick: 'H' | 'A'; preseason: boolean }
 interface WinnerRecord {
@@ -20,6 +20,8 @@ interface WinnerRecord {
   recent: Row[]
   calibration?: AccData['calibration']
   byConfidence?: AccData['byConfidence']
+  /** fix174: how far the expected margin and total were off */
+  scores?: { marginOff: number | null; totalOff: number | null; scoreN: number }
 }
 
 export interface WinnerOpts {
@@ -60,7 +62,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
     url: o.url,
     calibrationText: t("Every chance we gave, for both teams of every game, grouped by the number we said. If our numbers are honest, the dots sit on the dashed line."),
     confidenceLabel: t("Winner picks, by how sure we were"),
-    leagueCols: { main: t("Our pick"), cols: [] },
+    leagueCols: { main: t("Our pick"), cols: [t("Strong picks"), t("Margin off"), t("Total off")] },
     leagueNote: t("Under 20 games is too few to judge a league: pick a longer period for a fairer picture."),
     recentCols: [t("Our pick")],
     footnote: o.footnote,
@@ -72,10 +74,22 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
         bands: (d.bands || []).filter(b => b.min > 0).map(b => ({ label: `${b.min}%+`, pct: b.pct, n: b.n })),
         strong: { label: o.strongLabel, hitRate: d.total.strongHitRate, hits: d.total.strongHits, n: d.total.strongN }
       },
+      // fix174: football's extra cards, for a points sport: how far our score numbers were off
+      extra: d.scores && d.scores.scoreN ? (
+        <Card>
+          <h2 className="font-display text-xl font-bold text-ink">{t('Score predictions')}</h2>
+          <p className="text-sm text-muted mt-1 mb-4">{t('How far our expected margin and total points were from the final score, on average, over {0} games.', { 0: d.scores.scoreN })}</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl bg-surface2/60 p-4"><div className="text-[11px] text-faint">{t('Margin off by')}</div><div className="num text-3xl font-extrabold text-ink mt-1">{d.scores.marginOff ?? '–'}</div><div className="text-[11px] text-muted">{t('points a game')}</div></div>
+            <div className="rounded-2xl bg-surface2/60 p-4"><div className="text-[11px] text-faint">{t('Total off by')}</div><div className="num text-3xl font-extrabold text-ink mt-1">{d.scores.totalOff ?? '–'}</div><div className="text-[11px] text-muted">{t('points a game')}</div></div>
+          </div>
+        </Card>
+      ) : undefined,
       calibration: d.calibration,
       byConfidence: d.byConfidence,
       leagues: d.leagues.map(l => ({
-        key: l.code, name: o.leagueName(l.code), href: o.leagueHref?.(l.code) || null, n: l.n, main: l.hitRate, cols: [],
+        key: l.code, name: o.leagueName(l.code), href: o.leagueHref?.(l.code) || null, n: l.n, main: l.hitRate,
+        cols: [l.strongHitRate ?? null, l.marginOff != null ? `±${l.marginOff}` : null, l.totalOff != null ? `±${l.totalOff}` : null],
         note: l.trial ? <span className="shrink-0 text-[10px] font-bold uppercase text-accent" title={t("We added this league recently. Its predictions are being tested and don’t count in our public record yet.")}>{t('in testing')}</span> : null
       })),
       recent: d.recent.map(r => ({

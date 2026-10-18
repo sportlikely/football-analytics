@@ -871,8 +871,19 @@ export function nflRecord(days = 30, league: LeagueId = 1) {
  * basketball record's shape — total, per league (NFL / NCAA), confidence bands, the latest checked picks and the ones
  * waiting. Strong = the league's own line (NFL 70%, college 75%). Ties (no winner) left out.
  */
+/** fix174: mean miss of the expected margin and of the total points (finished games with a saved prediction). */
+export function scoreOff(rows: { margin: number | null; total: number | null; hs: number; as_: number }[]) {
+  const m = rows.filter(r => typeof r.margin === 'number'), t = rows.filter(r => typeof r.total === 'number');
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  return {
+    marginOff: m.length ? r1(m.reduce((s, r) => s + Math.abs(r.margin! - (r.hs - r.as_)), 0) / m.length) : null,
+    totalOff: t.length ? r1(t.reduce((s, r) => s + Math.abs(r.total! - (r.hs + r.as_)), 0) / t.length) : null,
+    scoreN: m.length
+  };
+}
+
 export function nflAccuracy(days = 3650) {
-  const rows = db.prepare(`SELECT p.game_id, p.kickoff, p.p_home, g.league, g.home_name, g.away_name, g.home_logo, g.away_logo, g.home_pts AS hs, g.away_pts AS as_
+  const rows = db.prepare(`SELECT p.game_id, p.kickoff, p.p_home, p.margin, p.total, g.league, g.home_name, g.away_name, g.home_logo, g.away_logo, g.home_pts AS hs, g.away_pts AS as_
     FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
     WHERE p.kickoff >= ? AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.home_pts != g.away_pts ORDER BY p.kickoff DESC`)
     .all(new Date(Date.now() - days * 86400000).toISOString()) as any[];
@@ -902,7 +913,9 @@ export function nflAccuracy(days = 3650) {
     // fix152b: the shared Accuracy page (football's layout)
     calibration: winnerCalibration(rows.map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))),
     byConfidence: winnerByConfidence(rows.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: hit(r) }))),
-    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN) })),
+    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(rows.filter(r => code(r.league) === c)) })),
+    // fix174: how far the expected margin and the total were off (football's goals numbers, for a points sport)
+    scores: scoreOff(rows),
     recent: rows.slice(0, 50).map(r => ({
       gameId: r.game_id, code: code(r.league), kickoff: r.kickoff, home: r.home_name || 'TBD', away: r.away_name || 'TBD', homeLogo: r.home_logo, awayLogo: r.away_logo,
       score: [r.hs, r.as_], pick: r.p_home >= 0.5 ? 'H' : 'A', pHome: r.p_home, hit: hit(r)

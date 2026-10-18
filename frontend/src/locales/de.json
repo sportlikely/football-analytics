@@ -1957,5 +1957,11 @@
  "Leaders": "Bestenliste",
  "No table for this league yet.": "Noch keine Tabelle für diese Liga.",
  "Bench": "Bank",
- "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Voraussichtliche Starter: die Startfünf des letzten Spiels, ohne die als ausfallend gemeldeten Spieler. Die Zahl = Punkte pro Spiel (letzte 10 Spiele)."
+ "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Voraussichtliche Starter: die Startfünf des letzten Spiels, ohne die als ausfallend gemeldeten Spieler. Die Zahl = Punkte pro Spiel (letzte 10 Spiele).",
+ "Margin off": "Abstand daneben",
+ "Total off": "Summe daneben",
+ "Score predictions": "Ergebnisprognosen",
+ "How far our expected margin and total points were from the final score, on average, over {0} games.": "Wie weit unser erwarteter Abstand und die erwartete Punktsumme im Schnitt vom Endstand entfernt waren, über {0} Spiele.",
+ "Margin off by": "Abstand daneben um",
+ "Total off by": "Summe daneben um"
 }

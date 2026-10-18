@@ -760,6 +760,17 @@ export function recordBbPredictions(codes?: string[]) {
   return n;
 }
 
+/** fix174: mean miss of the expected margin and of the total points. */
+function scoreOff(rows: { margin: number | null; total: number | null; hs: number; as_: number }[]) {
+  const m = rows.filter(r => typeof r.margin === 'number'), t = rows.filter(r => typeof r.total === 'number');
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  return {
+    marginOff: m.length ? r1(m.reduce((s, r) => s + Math.abs(r.margin! - (r.hs - r.as_)), 0) / m.length) : null,
+    totalOff: t.length ? r1(t.reduce((s, r) => s + Math.abs(r.total! - (r.hs + r.as_)), 0) / t.length) : null,
+    scoreN: m.length
+  };
+}
+
 /** The public record: every saved prediction of a finished game (pre-season left out). */
 export function bbRecord(days = 3650, code?: string) {
   const rows = db.prepare(`
@@ -809,7 +820,9 @@ export function bbRecord(days = 3650, code?: string) {
     // fix152b: the shared Accuracy page (football's layout): calibration and picks by how sure we were
     calibration: winnerCalibration(list.filter(r => code || !BB_TRIAL.has(r.code)).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))),
     byConfidence: winnerByConfidence(list.filter(r => code || !BB_TRIAL.has(r.code)).map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))),
-    leagues: [...by.entries()].map(([c, b]) => ({ code: c, trial: BB_TRIAL.has(c), ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN) })),
+    leagues: [...by.entries()].map(([c, b]) => ({ code: c, trial: BB_TRIAL.has(c), ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(list.filter(r => r.code === c)) })),
+    // fix174: how far the expected margin and the total were off (leagues in testing left out, like the total)
+    scores: scoreOff(list.filter(r => code || !BB_TRIAL.has(r.code))),
     recent: list.slice(0, 50).map(r => ({
       gameId: r.game_id, code: r.code, kickoff: r.kickoff, home: r.home_name, away: r.away_name, homeLogo: r.home_logo, awayLogo: r.away_logo,
       score: [r.hs, r.as_], pick: r.p_home >= 0.5 ? 'H' : 'A', pHome: r.p_home, hit: (r.p_home >= 0.5) === (r.hs > r.as_)

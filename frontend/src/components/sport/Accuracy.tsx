@@ -14,7 +14,8 @@ import { t, LOCALE } from '../../lib/i18n'
  */
 export interface AccBin { lo: number; hi: number; n: number; said: number; happened: number | null }
 export interface AccConf { id: string; label: string; n: number; hitRate: number | null; said: number | null }
-export interface AccLeague { key: string; name: ReactNode; href?: string | null; n: number; main: number | null; cols: (number | null)[]; note?: ReactNode }
+/** cols: a number is a % (football's markets); a string is shown as it is (fix174: winner sports' "± points") */
+export interface AccLeague { key: string; name: ReactNode; href?: string | null; n: number; main: number | null; cols: (number | string | null)[]; note?: ReactNode }
 export interface AccRecent { id: number | string; href: string; date: string; comp: string | null; compHref?: string | null; home: string; away: string; score: string; cells: ReactNode[] }
 export interface AccData {
   headline: {
@@ -249,14 +250,14 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
                             </span>
                           </td>
                           <td className="py-2 px-1 text-right num text-muted">{c.n}</td>
-                          {c.cols.length > 0 && <td className="py-2 px-1 text-right num font-bold text-ink">{pct(c.cols[0])}</td>}
+                          {c.cols.length > 0 && <td className="py-2 px-1 text-right num font-bold text-ink">{typeof c.cols[0] === 'string' ? c.cols[0] : pct(c.cols[0])}</td>}
                           <td className="py-2 px-2">
                             <span className="flex items-center gap-2">
                               <span className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><span className={`block h-full rounded-full ${few ? 'bg-accent/50' : 'bg-accent'}`} style={{ width: `${Math.min(100, c.main ?? 0)}%` }} /></span>
                               <span className={`num font-bold w-11 text-right ${few ? 'text-muted' : 'text-accent'}`}>{pct(c.main)}</span>
                             </span>
                           </td>
-                          {c.cols.slice(1).map((v, i) => <td key={i} className="py-2 px-1 text-right num text-muted">{pct(v)}</td>)}
+                          {c.cols.slice(1).map((v, i) => <td key={i} className="py-2 px-1 text-right num text-muted">{typeof v === 'string' ? v : pct(v)}</td>)}
                         </tr>
                       )
                     })}

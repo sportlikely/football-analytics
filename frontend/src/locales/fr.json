@@ -1957,5 +1957,11 @@
  "Leaders": "Leaders",
  "No table for this league yet.": "Pas encore de classement pour cette ligue.",
  "Bench": "Banc",
- "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Titulaires probables : le cinq de départ du dernier match, sans les joueurs déclarés absents. Le nombre = points par match (10 derniers matchs)."
+ "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Titulaires probables : le cinq de départ du dernier match, sans les joueurs déclarés absents. Le nombre = points par match (10 derniers matchs).",
+ "Margin off": "Écart manqué",
+ "Total off": "Total manqué",
+ "Score predictions": "Prédictions du score",
+ "How far our expected margin and total points were from the final score, on average, over {0} games.": "De combien notre écart attendu et notre total de points se sont éloignés du score final, en moyenne, sur {0} matchs.",
+ "Margin off by": "Écart manqué de",
+ "Total off by": "Total manqué de"
 }

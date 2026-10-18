@@ -1957,5 +1957,11 @@
  "Leaders": "Liderler",
  "No table for this league yet.": "Bu lig için henüz tablo yok.",
  "Bench": "Yedekler",
- "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Muhtemel ilk beş: son maçın ilk beşi, eksik olarak bildirilen oyuncular hariç. Sayı = maç başına sayı (son 10 maç)."
+ "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Muhtemel ilk beş: son maçın ilk beşi, eksik olarak bildirilen oyuncular hariç. Sayı = maç başına sayı (son 10 maç).",
+ "Margin off": "Fark sapması",
+ "Total off": "Toplam sapması",
+ "Score predictions": "Skor tahminleri",
+ "How far our expected margin and total points were from the final score, on average, over {0} games.": "Beklenen farkımız ve toplam sayımız, {0} maçta ortalama olarak son skordan ne kadar uzaktı.",
+ "Margin off by": "Fark sapması",
+ "Total off by": "Toplam sapması"
 }
