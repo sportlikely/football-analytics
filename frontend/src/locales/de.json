@@ -1950,5 +1950,12 @@
  "QB": "QB",
  "RB": "RB",
  "WR": "WR",
- "TE": "TE"
+ "TE": "TE",
+ "Line-ups": "Aufstellungen",
+ "Probable starting five, bench and players out": "Voraussichtliche Startfünf, Bank und Ausfälle",
+ "Probable line-ups": "Voraussichtliche Aufstellungen",
+ "Leaders": "Bestenliste",
+ "No table for this league yet.": "Noch keine Tabelle für diese Liga.",
+ "Bench": "Bank",
+ "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Voraussichtliche Starter: die Startfünf des letzten Spiels, ohne die als ausfallend gemeldeten Spieler. Die Zahl = Punkte pro Spiel (letzte 10 Spiele)."
 }

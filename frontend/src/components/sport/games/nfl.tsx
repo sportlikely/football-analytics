@@ -6,7 +6,7 @@ import { useAuth } from '../../../lib/auth'
 import { useFavorites, type Favorite } from '../../../lib/favorites'
 import { useNflFavorites, useNflLeague, nflLeagueName, nflBase, type NflGame, type NflLeague } from '../../../lib/nfl'
 import { toGame, toResult } from '../../SportHome/nfl'
-import { LeagueSwitch } from '../../../pages/nfl/parts'
+import { LeagueSwitch, NflLeaguePanel } from '../../../pages/nfl/parts'
 import { winnerChips } from './basketball'
 import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 
@@ -71,6 +71,8 @@ export function useNflGames(): GamesAdapter {
     defaultPinned: [league === 2 ? 'NCAA' : 'NFL'],
     favoritesHref: '/american-football/favorites',
     top: <LeagueSwitch />,
+    // fix174: the chosen league's standings (football's league panel)
+    leaguePanel: () => <NflLeaguePanel league={league} />,
     useData
   }
 }

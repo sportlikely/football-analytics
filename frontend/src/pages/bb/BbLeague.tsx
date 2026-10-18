@@ -89,7 +89,8 @@ export default function BbLeague() {
   }, [code])
   useEffect(() => {
     setLeaders(null)
-    if (code.toUpperCase() === 'NBA') axios.get(`${API_URL}/basketball/leaders`).then(r => setLeaders(r.data.data || null)).catch(() => undefined)
+    // fix174: every league with player stats (none: the card stays hidden)
+    axios.get(`${API_URL}/basketball/leaders`, { params: { league: code.toUpperCase() } }).then(r => setLeaders(r.data.data || null)).catch(() => undefined)
   }, [code])
 
   useEffect(() => {
@@ -151,8 +152,8 @@ export default function BbLeague() {
 interface Leaders { season: string; lists: { stat: string; top: { id: number | null; name: string; value: number; games: number; rank: number }[] }[] }
 const STAT_LABEL: Record<string, string> = { pts: 'Points', reb: 'Rebounds', ast: 'Assists', stl: 'Steals', blk: 'Blocks' }
 
-/** NBA league leaders per game (balldontlie). */
-function LeadersCard({ data }: { data: Leaders }) {
+/** League leaders per game (NBA: balldontlie; other leagues: our box scores, fix174). */
+export function LeadersCard({ data }: { data: Leaders }) {
   const [stat, setStat] = useState(data.lists[0].stat)
   const list = data.lists.find(l => l.stat === stat) || data.lists[0]
   return (
@@ -172,5 +173,36 @@ function LeadersCard({ data }: { data: Leaders }) {
       </ol>
       <p className="mt-2 text-[11px] text-faint">{t('Per game, regular season.')}</p>
     </Card>
+  )
+}
+
+/**
+ * fix174: the "one chosen league" panel of the Games page (football's LeaguePanel, basketball's data): the table and
+ * the league leaders, with a link to the league page.
+ */
+export function BbLeaguePanel({ code }: { code: string }) {
+  const [tab, setTab] = useState<'table' | 'leaders'>('table')
+  const [table, setTable] = useState<Standings | null | undefined>(undefined)
+  const [leaders, setLeaders] = useState<Leaders | null>(null)
+  useEffect(() => {
+    setTable(undefined); setLeaders(null)
+    axios.get(`${API_URL}/basketball/standings/${code}`).then(r => setTable(r.data.data || null)).catch(() => setTable(null))
+    axios.get(`${API_URL}/basketball/leaders`, { params: { league: code } }).then(r => setLeaders(r.data.data || null)).catch(() => undefined)
+  }, [code])
+  const hasLeaders = !!leaders && leaders.lists.length > 0
+  return (
+    <aside className="xl:sticky xl:top-20 space-y-4">
+      {hasLeaders && (
+        <div className="seg w-full">
+          {(['table', 'leaders'] as const).map(x => <button key={x} onClick={() => setTab(x)} className={`seg-btn flex-1 ${tab === x ? 'seg-btn-active' : ''}`}>{x === 'table' ? t('Table') : t('Leaders')}</button>)}
+        </div>
+      )}
+      {tab === 'leaders' && hasLeaders ? <LeadersCard data={leaders!} /> : (
+        <section className="card p-3">
+          {table === undefined ? <Skeleton rows={8} h="h-6" /> : table ? <StandingsTable data={table} /> : <p className="text-xs text-faint p-2">{t('No table for this league yet.')}</p>}
+        </section>
+      )}
+      <Link to={`/basketball/league/${code}`} className="block text-center text-xs font-bold text-accent">{t('League page →')}</Link>
+    </aside>
   )
 }

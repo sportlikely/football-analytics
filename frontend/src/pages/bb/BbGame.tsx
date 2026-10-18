@@ -18,6 +18,9 @@ import { MarketsCard, CompareCard, PlayersCard, ModelTable, type Markets, type M
 import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import GamePreview from '../../components/sport/game/GamePreview'
+import Court, { type CourtPlayer } from '../../components/sport/game/Court'
+import NewsChange from '../../components/sport/game/NewsChange'
+import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 
 export interface Avg {
@@ -47,7 +50,11 @@ interface Detail {
   players?: { home: GamePlayer[]; away: GamePlayer[] }
   /** fix124: English text preview (the same text search engines get; no pick, no %) */
   writeup?: string | null
+  /** fix174: probable starting five, bench and players out; NBA: the prediction before the injury report */
+  lineups?: { home: LineupSide | null; away: LineupSide | null } | null
+  beforeAfter?: { before: { pHome: number; pAway: number }; after: { pHome: number; pAway: number }; players: { id: number; name: string; status: string; points: number; side: 'H' | 'A' }[] } | null
 }
+interface LineupSide { from: string; starters: CourtPlayer[]; bench: CourtPlayer[]; out: CourtPlayer[] }
 export interface H2H { id: number; kickoff: string; home: string; away: string; homeId: number; score: [number, number]; league: string }
 interface Profile { games: number; fgPct: number | null; threePct: number | null; threeAttempts: number | null; ftPct: number | null; rebounds: number | null; assists: number | null; turnovers: number | null; steals: number | null; blocks: number | null }
 interface PreviewSide {
@@ -61,7 +68,7 @@ interface PreviewSide {
 }
 interface Injury { name: string; status: string; weight: number; comment: string | null; minutes: number | null; playerId: number | null }
 
-const TABS = ['prediction', 'box', 'stats', 'players', 'rest', 'h2h', 'table', 'highlights']
+const TABS = ['prediction', 'lineups', 'box', 'stats', 'players', 'quarters', 'rest', 'h2h', 'table', 'highlights']
 
 /** A basketball game: the shared game page (football's match page, fix152c) with basketball's data and tabs. */
 export default function BbGame() {
@@ -121,6 +128,10 @@ export default function BbGame() {
             badges={g.resultCheck ? <span title={t('The final score from our data provider looks wrong. This game doesn’t count in our record until it is checked.')} className="ml-auto rounded-full px-3 py-1 text-xs font-bold bg-draw/15 text-draw">{t('Result being checked')}</span> : undefined}
             noPrediction={t('No prediction for this game.')}
           />
+          {d.beforeAfter && (
+            <NewsChange home={g.home.name} away={g.away.name} before={d.beforeAfter.before} after={d.beforeAfter.after}
+              players={d.beforeAfter.players.map(p => ({ id: p.id, name: p.name, side: p.side, href: href.bbPlayer(p.id), detail: `${p.status} · −${p.points.toFixed(1)} ${t('pts')}` }))} />
+          )}
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
           <YourPicks sport="bb" gameId={g.id} home={g.home.name} away={g.away.name} />
           <MarketsGate d={d} />
@@ -142,6 +153,20 @@ export default function BbGame() {
         </>
       )
     },
+    ...(d.lineups && (d.lineups.home || d.lineups.away) ? [{
+      id: 'lineups', label: t('Line-ups'), short: t('Line-ups'), hint: t('Probable starting five, bench and players out'),
+      render: () => (
+        <Card title={t('Probable line-ups')}>
+          <Court
+            home={{ name: g.home.name, starters: d.lineups!.home?.starters || [], bench: d.lineups!.home?.bench || [], out: d.lineups!.home?.out || [] }}
+            away={{ name: g.away.name, starters: d.lineups!.away?.starters || [], bench: d.lineups!.away?.bench || [], out: d.lineups!.away?.out || [] }}
+            playerHref={pid => `/basketball/player/${pid}`}
+          />
+        </Card>
+      )
+    }] : []),
+    // fix174: the provider has no play-by-play — the game by quarter (points, who won it, the running margin)
+    ...(done && g.quarters && g.quarters.home.some(x => x !== null) ? [{ id: 'quarters', label: t('By quarter'), short: t('Quarters'), hint: t('Points and margin per quarter'), render: () => <Card title={t('By quarter')}><QuarterStrip home={g.home.name} away={g.away.name} q={g.quarters!} /></Card> }] : []),
     { id: 'rest', label: t('Schedule & rest'), short: t('Rest'), hint: t('Back-to-backs, rest days and the next game'), render: () => <RestTab g={g} home={d.schedule.home} away={d.schedule.away} /> },
     { id: 'h2h', label: t('H2H'), hint: t('Last meetings and recent form'), render: () => <H2HTab g={g} list={d.h2h} /> },
     ...(d.standings ? [{ id: 'table', label: t('Standings'), short: t('Table'), hint: t('{0} table', { 0: g.league.name }), render: () => <StandingsTab g={g} data={d.standings!} /> }] : []),

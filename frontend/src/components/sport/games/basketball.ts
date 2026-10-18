@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { createElement, useEffect, useMemo, useState } from 'react'
+import { BbLeaguePanel } from '../../../pages/bb/BbLeague'
 import axios from 'axios'
 import { API_URL } from '../../../lib/socket'
 import { t as tt } from '../../../lib/i18n'
@@ -64,6 +65,8 @@ function useData(): GamesData {
 
 export const basketballGames: GamesAdapter = {
   title: tt("Games"),
+  // fix174: the chosen league's table and leaders (football's league panel)
+  leaguePanel: code => createElement(BbLeaguePanel, { code }),
   countLine: (n, days) => tt("{0} games in the next {1} days", { 0: n, 1: days }),
   noLive: tt("No games in play right now."),
   defaultPinned: ['NBA', 'EL', 'ACB', 'BSL', 'EC'],

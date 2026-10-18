@@ -163,6 +163,27 @@ export function nbaInjuries(teamId: number, teamName: string, before: string) {
 }
 
 const KA = 0.3, MIN_REG = 12, REPL = 0.8, CAP = 8;
+/** fix174: injuryLoss with each regular's share (the game page's "numbers changed" card): points per player, same cap. */
+export function injuryLossDetail(teamId: number, teamName: string, before: string) {
+  const inj = db.prepare(`SELECT player, status FROM bb_injuries WHERE team = ?`).all(nbaKey(teamName)) as any[];
+  const none = { points: 0, players: [] as { id: number; name: string; status: string; points: number }[] };
+  if (!inj.length) return none;
+  const r = roster(teamId, before);
+  if (!r) return none;
+  const byKey = new Map(r.players.map(p => [playerKey(p.name), p]));
+  let tot = 0;
+  const list: { id: number; name: string; status: string; v: number }[] = [];
+  for (const x of inj) {
+    const w = STATUS_WEIGHT(x.status);
+    const p = byKey.get(playerKey(x.player));
+    if (!w || !p || p.min < MIN_REG) continue;
+    const v = w * p.min * Math.max(0, p.rate - r.avgRate * REPL);
+    if (v > 0) { tot += v; list.push({ id: p.id, name: x.player, status: x.status, v }); }
+  }
+  const points = Math.round(Math.min(CAP, KA * tot) * 10) / 10;
+  return { points, players: list.map(x => ({ id: x.id, name: x.name, status: x.status, points: tot ? Math.round(((x.v / tot) * points) * 10) / 10 : 0 })) };
+}
+
 /** Points an NBA team is expected to lose to its injuries (regulars only, weighted by status). */
 export function injuryLoss(teamId: number, teamName: string, before: string) {
   const inj = db.prepare(`SELECT player, status FROM bb_injuries WHERE team = ?`).all(nbaKey(teamName)) as any[];

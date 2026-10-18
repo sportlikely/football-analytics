@@ -69,7 +69,7 @@ import { bbGet, bbStatus, bbSyncNow, startBasketballScheduler } from './services
 import { adminResult, resultChecksList, checkResults, openCheck, resultFix, ResultError } from './services/bbResults';
 import { bdlGet, refreshNbaInjuries, nbaInjuryStatus } from './services/bbInjuries';
 import { bbPublic, bbLeagues, bbGames, bbGame, bbStandings, bbTeam } from './services/bbSite';
-import { bbPlayer, nbaLeaders, bbSearch } from './services/bbPlayers';
+import { bbPlayer, nbaLeaders, bbSearch, bbLeagueLeaders } from './services/bbPlayers';
 import { bdlStatus, startBdlScheduler } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { bbLiveQuarterTest } from './services/bbLive';
@@ -2566,9 +2566,11 @@ app.get('/api/basketball/player/:id(\\d+)', async (req, res) => {
     sendError(res, error, 'Failed to load player');
   }
 });
-app.get('/api/basketball/leaders', (_req, res) => {
+app.get('/api/basketball/leaders', (req, res) => {
   try {
-    res.json({ data: nbaLeaders(), timestamp: new Date().toISOString() });
+    // fix174: every league with box scores (?league=CODE); the NBA keeps balldontlie's leaders
+    const code = typeof req.query.league === 'string' && /^[A-Z0-9]{2,10}$/.test(req.query.league) ? req.query.league : 'NBA';
+    res.json({ data: code === 'NBA' ? nbaLeaders() : bbLeagueLeaders(code), timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to load leaders');
   }

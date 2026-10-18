@@ -1950,5 +1950,12 @@
  "QB": "QB",
  "RB": "RB",
  "WR": "WR",
- "TE": "TE"
+ "TE": "TE",
+ "Line-ups": "Kadrolar",
+ "Probable starting five, bench and players out": "Muhtemel ilk beş, yedekler ve eksikler",
+ "Probable line-ups": "Muhtemel kadrolar",
+ "Leaders": "Liderler",
+ "No table for this league yet.": "Bu lig için henüz tablo yok.",
+ "Bench": "Yedekler",
+ "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Muhtemel ilk beş: son maçın ilk beşi, eksik olarak bildirilen oyuncular hariç. Sayı = maç başına sayı (son 10 maç)."
 }

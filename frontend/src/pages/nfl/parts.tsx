@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import axios from 'axios'
+import { API_URL } from '../../lib/socket'
 import { useNflLeague, nflBase, type NflLeague } from '../../lib/nfl'
 import { t, LOCALE } from '../../lib/i18n'
 import { NFL_STATUS, timeOf, nick, record, useNflFavorites, nflRid, nflRstatus, type NflGame, type StandRow, type Standings } from '../../lib/nfl'
@@ -245,5 +248,27 @@ export function StatBars({ label, home, away, fmt = (v: number) => String(v), lo
         <div className="flex-1 bg-surface2 rounded-full overflow-hidden"><div className={`h-full rounded-full ${ab ? 'bg-away' : 'bg-away/40'}`} style={{ width: `${(100 * Math.abs(a)) / tot}%` }} /></div>
       </div>
     </div>
+  )
+}
+
+/**
+ * fix174: the "one chosen league" panel of the Games page (football's LeaguePanel, NFL + college data): the division /
+ * conference tables (compact) and a link to the standings page.
+ */
+export function NflLeaguePanel({ league }: { league: NflLeague }) {
+  const [d, setD] = useState<Standings | null | undefined>(undefined)
+  useEffect(() => {
+    setD(undefined)
+    axios.get(`${API_URL}/nfl/standings`, { params: { league } }).then(r => setD(r.data.data || null)).catch(() => setD(null))
+  }, [league])
+  return (
+    <aside className="xl:sticky xl:top-20 space-y-4">
+      <section className="card p-3 max-h-[70vh] overflow-y-auto overscroll-contain">
+        {d === undefined ? <div className="space-y-2">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-6 rounded-lg bg-surface2/60 animate-pulse" />)}</div>
+          : !d || !d.conferences.length ? <p className="text-xs text-faint p-2">{t('Standings appear once the season has started.')}</p>
+          : <div className="space-y-4">{d.conferences.flatMap(c => c.divisions.map(dv => <StandTable key={`${c.name}|${dv.name}`} title={dv.name !== c.name ? `${c.name} · ${dv.name}` : c.name} rows={dv.rows} compact league={league} />))}</div>}
+      </section>
+      <Link to={league === 2 ? '/american-football/college/league' : '/american-football/league'} className="block text-center text-xs font-bold text-accent">{t('Full table →')}</Link>
+    </aside>
   )
 }

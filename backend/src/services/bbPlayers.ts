@@ -291,6 +291,31 @@ export function nbaLeaders() {
   return null;
 }
 
+/**
+ * fix174: league leaders for every league with box scores (the NBA keeps balldontlie's): points, rebounds and assists a
+ * game this season, players with at least 40% of the most games anyone played (min 3). Cached 30 minutes; null when
+ * the league has no player stats (the page hides the card).
+ */
+const leadersCache = new Map<string, { at: number; v: any }>();
+export function bbLeagueLeaders(code: string) {
+  const c = leadersCache.get(code);
+  if (c && Date.now() - c.at < 30 * 60 * 1000) return c.v;
+  let v: any = null;
+  const s = db.prepare(`SELECT season FROM bb_games WHERE code = ? AND stats = 1 ORDER BY kickoff DESC LIMIT 1`).get(code) as any;
+  if (s) {
+    const rows = db.prepare(`SELECT ps.player_id AS id, MAX(ps.name) AS name, MAX(ps.team_id) AS teamId, COUNT(*) AS gp, AVG(ps.pts) AS pts, AVG(ps.reb) AS reb, AVG(ps.ast) AS ast
+      FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.code = ? AND g.season = ? AND ps.minutes > 0 GROUP BY ps.player_id`).all(code, s.season) as any[];
+    const most = Math.max(0, ...rows.map(r => r.gp));
+    const ok = rows.filter(r => r.gp >= Math.max(3, Math.ceil(most * 0.4)));
+    if (ok.length >= 5) {
+      const list = (stat: 'pts' | 'reb' | 'ast') => ({ stat, top: [...ok].filter(r => r[stat] != null).sort((a, b) => b[stat] - a[stat]).slice(0, 5).map((r, i) => ({ id: r.id, name: r.name, value: Math.round(r[stat] * 10) / 10, games: r.gp, rank: i + 1, teamId: r.teamId })) });
+      v = { season: String(s.season), lists: [list('pts'), list('reb'), list('ast')].filter(l => l.top.length) };
+    }
+  }
+  leadersCache.set(code, { at: Date.now(), v });
+  return v;
+}
+
 /* ---------- search (the site's search box) ---------- */
 
 type SearchPlayer = { id: number; name: string; tokens: string[]; teamId: number; team: string; logo: string | null; code: string; last: string };

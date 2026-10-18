@@ -15,6 +15,7 @@ import { nbaInjuries } from './bbInjuries';
 import { bbSquad, nbaBoxExtras } from './bbPlayers';
 import { personKey } from './bdl';
 import { bbLiveFor, periodLen } from './bbLive';
+import { bbProbableLineup, bbBeforeAfter } from './bbLineups';
 
 export const bbPublic = () => process.env.BASKETBALL_PUBLIC === '1';
 
@@ -369,6 +370,10 @@ export async function bbGame(id: number, full: boolean) {
   mark('writeup');
   const injuries = g.code === 'NBA' ? { home: nbaInjuries(g.home_id, g.home_name, g.kickoff), away: nbaInjuries(g.away_id, g.away_name, g.kickoff) } : null;
   mark('injuries');
+  // fix174: probable starting five + bench + players out (football's line-ups, basketball's way); NBA: numbers changed
+  const lineups = game.state === 'done' ? null : { home: bbProbableLineup(g.home_id, g.home_name, g.code, g.kickoff), away: bbProbableLineup(g.away_id, g.away_name, g.code, g.kickoff) };
+  const beforeAfter = open && game.state === 'upcoming' ? bbBeforeAfter(g, gp.pHome) : null;
+  mark('lineups');
   const syncMs = parts.reduce((x, [, ms]) => x + ms, 0);
   if (syncMs > 300) logger.warn(`bb game page ${id}: ${Math.round(syncMs)} ms (${parts.filter(([, ms]) => ms >= 30).sort((a, b) => b[1] - a[1]).map(([n, ms]) => `${n} ${Math.round(ms)} ms`).join(', ')}; total with waits ${Math.round(performance.now() - t0)} ms)`);
   return {
@@ -384,6 +389,8 @@ export async function bbGame(id: number, full: boolean) {
     box,
     standings,
     markets: mk,
+    lineups: lineups && (lineups.home || lineups.away) ? lineups : null,
+    beforeAfter,
     model: info ? { version: info.version, avgPoints: Math.round(info.avgPoints * 10) / 10, homeEdge: Math.round(((pr as any)?.hca ?? info.homeEdge) * 10) / 10, b2b: info.b2b, gamesRated: info.gamesRated } : null,
     players
   };

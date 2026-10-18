@@ -1950,5 +1950,12 @@
  "QB": "QB",
  "RB": "RB",
  "WR": "WR",
- "TE": "TE"
+ "TE": "TE",
+ "Line-ups": "Formazioni",
+ "Probable starting five, bench and players out": "Quintetto base probabile, panchina e assenti",
+ "Probable line-ups": "Formazioni probabili",
+ "Leaders": "Migliori",
+ "No table for this league yet.": "Ancora nessuna classifica per questo campionato.",
+ "Bench": "Panchina",
+ "Probable starters: the last game’s starting five, without the players listed as out. The number = points a game (last 10 games).": "Titolari probabili: il quintetto base dell'ultima partita, senza i giocatori indicati come assenti. Il numero = punti a partita (ultime 10 partite)."
 }
