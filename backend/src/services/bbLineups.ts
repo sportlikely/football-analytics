@@ -1,7 +1,7 @@
 /**
  * Basketball line-ups (fix174), football's line-ups in basketball's own way:
  *  - probable starting five per team: the starters of the team's last game with a box score (the provider's "starters"
- *    flag), minus the players on the injury report as out, filled up from the bench by minutes; bench = the next
+ *    flag) who play 12+ minutes a game, minus the players on the injury report as out, filled up from the bench by minutes; bench = the next
  *    players by minutes over the last 10 games; the players out listed apart;
  *  - before vs after (NBA): the prediction without the injury report against the one with it, with each injured
  *    regular's points (bbInjuries.injuryLoss prices them).
@@ -32,7 +32,9 @@ export function bbProbableLineup(teamId: number, teamName: string, code: string,
   const injured = code === 'NBA' ? nbaInjuries(teamId, teamName, before) : [];
   const status = new Map(injured.map(i => [key(i.name), i.status as string]));
   const isOut = (name: string) => OUT(status.get(key(name)))
-  let starters = last.filter(r => r.starter).map(r => per(r.player_id)).filter(p => !isOut(p.name));
+  // a last-game starter counts when he is a regular (12+ minutes a game over the last 10): a pre-season or rest-day
+  // line-up does not make a 2-minute player a starter
+  let starters = last.filter(r => r.starter).map(r => per(r.player_id)).filter(p => !isOut(p.name) && (p.min ?? 0) >= 12);
   const byMin = [...avg.values()].sort((a, b) => b.min - a.min).map(x => per(x.id));
   for (const p of byMin) { if (starters.length >= 5) break; if (!starters.some(s => s.id === p.id) && !isOut(p.name)) starters.push(p); }
   starters = starters.slice(0, 5).map(p => ({ ...p, status: status.get(key(p.name)) || null }));

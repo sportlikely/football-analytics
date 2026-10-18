@@ -35,10 +35,10 @@ export default function NflLeague() {
       .then(r => { const all = (r.data.data?.bands || []).find((b: any) => b.min === 0); setRecord(all && all.n > 0 && all.pct !== null ? { hitRate: all.pct, n: all.n } : null) })
       .catch(() => undefined)
   }, [league])
-  // fix174: the league's mark from the provider, the favorite star and the weekly hub, like every league page
+  // fix174: the favorite star and the weekly hub, like every league page (no league mark: the provider's NFL and
+  // college league images are its "image not available" placeholder)
   const code = league === 2 ? 'NCAA' : 'NFL'
-  const logo = `https://media.api-sports.io/american-football/leagues/${league}.png`
-  const fav: Favorite = { kind: 'nfl-league', ref: code, code, name, img: logo }
+  const fav: Favorite = { kind: 'nfl-league', ref: code, code, name, img: null }
 
   const live = (games || []).filter(g => g.state === 'live')
   const next = (games || []).filter(g => g.state === 'upcoming').sort((a, b) => a.kickoff.localeCompare(b.kickoff)).slice(0, 12)
@@ -48,7 +48,7 @@ export default function NflLeague() {
   return (
     <LeaguePage
       top={<LeagueSwitch />}
-      logo={logo}
+      logo={null}
       country={{ name: league === 2 ? t('USA · college') : t('USA') }}
       name={name}
       sub={d ? (league === 2 ? t('{0} season · by conference, FBS first', { 0: d.season }) : t('{0} season · regular season', { 0: d.season })) : null}

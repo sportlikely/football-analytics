@@ -79,7 +79,8 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   tables nfl_games / nfl_teams / nfl_team_stats / nfl_player_stats / nfl_players / nfl_injuries / nfl_standings; games every
   30 min, live every 30 s during games, box scores after full time, standings 6 h, injuries 2 h, rosters daily; every job
   checks the day's quota), `nflSite.ts` (pages: weeks, game, standings, team + rule-based team analysis, player, leaders),
-  `/api/nfl/*`, `/api/admin/nfl-probe`. **`NFL_PUBLIC=1`** opens /american-football to everyone (admins see it before);
+  `/api/nfl/*`, `/api/admin/nfl-probe`. fix174: `nflLive.ts` (live win chance, projected score, swing-chart samples per live tick),
+  `nflGameExtras.ts` (schedule & rest, standings, likely starters, numbers changed, written preview, scoring plays), `nfl_player_games` (career index). **`NFL_PUBLIC=1`** opens /american-football to everyone (admins see it before);
   past seasons stay admin-only. Frontend `pages/nfl/*`, `lib/nfl.ts`.
 - Accounts & admin: `auth.ts`, `twoFactor.ts`, `roles.ts`, `staffConsole.ts`, `securityLog.ts`, `crm.ts`, `billing.ts`
   (plans since fix147: Premium $8.99 / 6 months $48.49 / year $86.29 (60 unlocks a month), Pro $14.99 / $80.99 / $143.99
@@ -90,6 +91,10 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
 - `OPEN_API` in `index.ts` lists the public routes; everything else is admin/staff only.
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):
+- Shared game-page parts (fix174): `components/sport/game/` LiveChance (live box + swing chart), ModelParts ("how it was calculated"),
+  NewsChange ("numbers changed"), QuarterStrip, Highlights, GamePreview, Court (basketball line-ups); `components/sport/NameLink.tsx` (every
+  team / player / competition name is a link, `href` helpers per sport), `lib/tNodes.tsx` (links inside translated sentences).
+  Basketball: `bbLineups.ts` (probable five, NBA numbers changed).
 - `App.tsx` routes (lazy pages). Football pages in `pages/`, basketball in `pages/bb/`. `components/` shared cards.
 - `lib/i18n.ts` (t, LOCALE), `lib/bb.ts` (basketball types, `BB_COUNTRY`), `lib/fame.ts` (how big a club is: used for
   Spotlight and the featured carousel), `lib/reveal.ts` (free users reveal 2 picks a week).

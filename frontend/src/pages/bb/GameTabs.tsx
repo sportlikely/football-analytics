@@ -209,7 +209,7 @@ export function RestTab({ g, home, away, sport = 'basketball' }: { g: Pick<Game,
   if (home.backToBack && away.backToBack) edge = nfl ? t('Both teams play on a short week.') : t('Both teams play the second night of a back-to-back.')
   else if (rh !== null && ra !== null && rh !== ra) {
     const s: Side = rh > ra ? 'H' : 'A'
-    edge = <><b className={TEXT[s]}>{s === 'H' ? g.home.name : g.away.name}</b> {t('come in with {0} more days of rest', { 0: Math.abs(rh - ra) })}{(s === 'H' ? away : home).backToBack ? ` · ${nfl ? t('the other side is on a short week') : t('the other side is on a back-to-back')}` : ''}.</>
+    edge = <><b className={TEXT[s]}>{s === 'H' ? g.home.name : g.away.name}</b> {Math.abs(rh - ra) === 1 ? t('come in with one more day of rest') : t('come in with {0} more days of rest', { 0: Math.abs(rh - ra) })}{(s === 'H' ? away : home).backToBack ? ` · ${nfl ? t('the other side is on a short week') : t('the other side is on a back-to-back')}` : ''}.</>
   } else if (rh !== null && ra !== null) edge = t('Same rest for both teams.')
 
   const panel = (s: Side, x: Sched) => {
