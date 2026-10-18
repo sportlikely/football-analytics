@@ -259,6 +259,23 @@ export function seoPage(rawPath: string): SeoInfo {
     }
     // fix169: a football player the provider doesn't have (old links): not found, never indexed
     if ((m = path.match(/^\/player\/(\d+)$/)) && isMissingPlayer(Number(m[1]))) return page(`Player not found | ${BRAND}`, 'This player does not exist.', '', { noindex: true });
+    // fix174: a football player's crawler page from the season numbers we store (no provider call): club, competitions
+    if ((m = path.match(/^\/player\/(\d+)$/))) {
+      const rows = db.prepare(`SELECT season, team_id, league_id, name, age, position, apps, goals, assists, minutes FROM af_player_season WHERE player_id = ? ORDER BY season DESC, apps DESC`).all(Number(m[1])) as any[];
+      if (rows.length) {
+        const p = rows[0], cur = rows.filter(r => r.season === p.season);
+        const club = (() => { try { return require('./teamPage').teamNameOf(p.team_id) as string | null; } catch { return null; } })();
+        const comp = (id: number) => { try { return (require('./teamPage').competitionName(id) as string | null) || 'Other competition'; } catch { return 'Other competition'; } };
+        const tot = cur.reduce((a, r) => ({ apps: a.apps + (r.apps || 0), goals: a.goals + (r.goals || 0), assists: a.assists + (r.assists || 0) }), { apps: 0, goals: 0, assists: 0 });
+        const season = `${p.season}-${String(p.season + 1).slice(2)}`;
+        return page(`${p.name}${p.position ? ` (${p.position})` : ''}: ${season} stats${club ? ` · ${club}` : ''} | ${BRAND}`,
+          `${p.name}${club ? `, ${club}` : ''}: ${tot.apps} games, ${tot.goals} goals and ${tot.assists} assists in ${season}, by competition, and the seasons before.`,
+          `<h1>${esc(p.name)}</h1><p>${esc([p.position, club, p.age ? `age ${p.age}` : null].filter(Boolean).join(' · '))}</p>`
+          + (club ? `<p><a href="${link(lang, `/team/${1_000_000_000 + p.team_id}`)}">${esc(club)}</a></p>` : '')
+          + `<h2>${season}</h2><ul>${cur.map(r => `<li><a href="${link(lang, `/league/AF${r.league_id}`)}">${esc(comp(r.league_id))}</a>: ${r.apps || 0} games, ${r.goals || 0} goals, ${r.assists || 0} assists</li>`).join('')}</ul>`
+          + (rows.some(r => r.season !== p.season) ? `<h2>Earlier seasons</h2><ul>${rows.filter(r => r.season !== p.season).slice(0, 12).map(r => `<li>${r.season}-${String(r.season + 1).slice(2)} · ${esc(comp(r.league_id))}: ${r.apps || 0} games, ${r.goals || 0} goals</li>`).join('')}</ul>` : ''));
+      }
+    }
     if (path === '/predictions/today') {
       const t = todayGroups('football', lang);
       return page(`${pk.today} · ${titleDate(new Date().toISOString(), lang)} | ${BRAND}`, S('today'),
@@ -461,6 +478,19 @@ export function seoPage(rawPath: string): SeoInfo {
           `<h1>${esc(pk.todayBb)}</h1><p>${esc(longDate(new Date().toISOString(), lang))}</p>${t.groups.map(gr => `<h2><a href="${link(lang, `/basketball/league/${gr.code}`)}">${esc(gr.league)}</a></h2><ul>${gr.games.map(g =>
             `<li><a href="${link(lang, `/basketball/game/${g.id}`)}">${esc(g.home)} vs ${esc(g.away)}</a>${g.line ? ` — ${esc(g.line)}` : ''}</li>`).join('')}</ul>`).join('') || '<p>No games today.</p>'}`);
       }
+      // fix174: a basketball player's crawler page: this season's averages from our box scores, the team, the league
+      if ((m = path.match(/^\/basketball\/player\/(\d+)$/))) {
+        const rows = db.prepare(`SELECT ps.name, ps.team_id, ps.minutes, ps.pts, ps.reb, ps.ast, g.code, g.season, g.kickoff, CASE WHEN g.home_id = ps.team_id THEN g.home_name ELSE g.away_name END AS team
+          FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE ps.player_id = ? ORDER BY g.kickoff DESC LIMIT 120`).all(Number(m[1])) as any[];
+        if (!rows.length) return page(`Player not found | ${BRAND}`, 'This player does not exist.', '', { noindex: true });
+        const p = rows[0], cur = rows.filter(r => r.season === p.season && r.code === p.code && r.minutes > 0);
+        const avg = (k: string) => cur.length ? (cur.reduce((s, r) => s + (r[k] || 0), 0) / cur.length).toFixed(1) : '–';
+        const lg = BB_LEAGUES.find(l => l.code === p.code)?.name || p.code;
+        return page(`${p.name}: ${p.season} stats · ${p.team} | ${BRAND}`,
+          `${p.name} (${p.team}, ${lg}): ${avg('pts')} points, ${avg('reb')} rebounds and ${avg('ast')} assists a game in ${cur.length} games this season.`,
+          `<h1>${esc(p.name)}</h1><p><a href="${link(lang, `/basketball/team/${p.team_id}`)}">${esc(p.team)}</a> · <a href="${link(lang, `/basketball/league/${p.code}`)}">${esc(lg)}</a></p>`
+          + `<h2>${esc(String(p.season))} season</h2><p>${cur.length} games · ${avg('pts')} points · ${avg('reb')} rebounds · ${avg('ast')} assists a game</p>`);
+      }
       if ((m = path.match(/^\/basketball\/game\/(\d+)$/))) {
         const g = bbGameById(Number(m[1]));
         if (g) {
@@ -653,9 +683,44 @@ function sitemapTeams(): string {
   return urlset(urls);
 }
 
+/**
+ * fix174: player pages of every sport — current-season players only, capped per sport so the file stays sane
+ * (football 4,000 by games played, basketball 2,500, NFL + college 2,500). Football players the provider does not have
+ * are left out.
+ */
+let playersMap: { at: number; xml: string } | null = null;
+function sitemapPlayers(): string {
+  // built at most every 6 hours (the queries group a season of box scores)
+  if (playersMap && Date.now() - playersMap.at < 6 * 3600 * 1000) return playersMap.xml;
+  const urls: SmUrl[] = [];
+  const today = isoDay();
+  try {
+    const s = (db.prepare(`SELECT MAX(season) AS s FROM af_player_season`).get() as any)?.s;
+    if (s) for (const r of db.prepare(`SELECT player_id, SUM(apps) AS a FROM af_player_season WHERE season = ? AND apps > 0 GROUP BY player_id ORDER BY a DESC LIMIT 4000`).all(s) as any[])
+      if (!isMissingPlayer(r.player_id)) urls.push({ loc: `/player/${r.player_id}`, freq: 'weekly', pri: '0.4', mod: today });
+  } catch { /* table missing */ }
+  if (bbPublic()) {
+    const since = new Date(Date.now() - SEASON_DAYS * 86400000).toISOString();
+    for (const r of db.prepare(`SELECT ps.player_id, COUNT(*) AS n, MAX(g.kickoff) AS d FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff >= ? AND ps.minutes > 0 GROUP BY ps.player_id ORDER BY n DESC LIMIT 2500`).all(since) as any[])
+      urls.push({ loc: `/basketball/player/${r.player_id}`, freq: 'weekly', pri: '0.3', mod: isoDay(r.d) });
+  }
+  if (nflPublic()) {
+    try {
+      for (const lg of [1, 2] as const) {
+        const season = nflCurrentSeason(lg);
+        if (!season) continue;
+        for (const r of db.prepare(`SELECT x.player_id, COUNT(*) AS n FROM nfl_player_games x JOIN nfl_games g ON g.game_id = x.game_id WHERE g.league = ? AND g.season = ? GROUP BY x.player_id ORDER BY n DESC LIMIT ?`).all(lg, season, lg === 1 ? 1500 : 1000) as any[])
+          urls.push({ loc: `/american-football/player/${r.player_id}`, freq: 'weekly', pri: '0.3', mod: today, enOnly: true });
+      }
+    } catch { /* table missing */ }
+  }
+  playersMap = { at: Date.now(), xml: urlset(urls) };
+  return playersMap.xml;
+}
+
 export const SITEMAPS: Record<string, () => string> = {
   'sitemap-football.xml': sitemapFootball, 'sitemap-basketball.xml': sitemapBasketball, 'sitemap-nfl.xml': sitemapNfl,
-  'sitemap-teams.xml': sitemapTeams, 'sitemap-leagues.xml': sitemapLeagues
+  'sitemap-teams.xml': sitemapTeams, 'sitemap-leagues.xml': sitemapLeagues, 'sitemap-players.xml': sitemapPlayers
 };
 /** sitemap.xml: the index of the four sitemaps. */
 export function sitemapXml(): string {

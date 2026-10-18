@@ -34,6 +34,10 @@ When a double chance reaches 85% or more, we mark it as a strong pick.
 
 It tells you least when one team is a huge favourite: the double chance is then almost certain, but it adds little to the plain result.
 
+## Basketball and American football
+
+There is no double chance in basketball or American football: a basketball game always has a winner (overtime decides a tie), and an NFL tie is very rare. So our pick there is simply the **winner**, with its percentage. A strong pick is a winner at **70% or more** (in college football **75% or more**, where mismatches are more common).
+
 ## How we check ourselves
 
 Every prediction is saved before kick-off and never edited. After the final whistle it is scored: a double chance is right when the result is one of its two outcomes. {{dc_30d}} {{dc_90}}

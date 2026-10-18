@@ -1,7 +1,7 @@
 ---
 slug: how-it-works
 title: How SportLikely's predictions work | SportLikely
-description: What our model looks at before every football and basketball game, how it turns that into percentages, and how we test it in public.
+description: What our model looks at before every football, basketball and American football game, how it turns that into percentages, and how we test it in public.
 related: double-chance, win-percentages
 ---
 # How our predictions work
@@ -22,9 +22,13 @@ Before every game, our model rates both teams from data and turns those ratings 
 
 Points scored and allowed per possession, pace, the quality of the players each team actually uses, home court, rest and back-to-back games, and the NBA injury report.
 
+## What the model looks at (American football)
+
+A rating for each team that moves after every result (home field, neutral sites and the opponent's strength taken into account), the starting quarterback and how much better or worse he is than the usual starter, rest (a bye week or a short week), yards per play and the turnover battle, and the injury report. College football has its own model.
+
 ## From ratings to percentages
 
-Each football match gets three percentages (home win, draw, away win) that add up to 100. From those come our double-chance pick (the two most likely results) and our goals numbers: over 2.5 goals and both teams to score. In basketball we give the winner's chance, the expected margin and the total points.
+Each football match gets three percentages (home win, draw, away win) that add up to 100. From those come our double-chance pick (the two most likely results) and our goals numbers: over 2.5 goals and both teams to score. In basketball and American football we give the winner's chance, the expected margin, the predicted score and the total points; while a game is on, the win chance and the projected final score move with the score and the clock.
 
 ## A model that keeps learning
 
