@@ -77,7 +77,7 @@ import { highlightsFor, highlightsStatus, lastCandidates } from './services/high
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
 import { db } from './db';
 import { trackVisit, visitorStats } from './services/visitors';
-import { startGeo, geoCredit } from './services/geo';
+import { startGeo, geoCredit, countryOf } from './services/geo';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
 import { hubBySlug, hubByOld, hubOpen, buildHub, warmHubs, HUBS } from './services/hubs';
@@ -96,7 +96,7 @@ import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { dataHealth, startDataHealthScheduler } from './services/dataHealth';
 import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
-import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerUa, isCrawlerRequest, noProviderCalls } from './services/afUsage';
+import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
 import { createHash, randomBytes } from 'node:crypto';
 import { leagueCoverage, pickForAdding } from './services/leagueCoverage';
 import { addExtraLeague, removeExtraLeague, setExtraTrial } from './services/leagueConfig';
@@ -275,15 +275,43 @@ app.use((req, _res, next) => {
 });
 
 app.use('/api', trackVisit); // visitor counts for the admin page (hashed IPs only)
+// keys are salted hashes (salt new at every start), so not even the memory holds a visitor's IP (fix140)
+const RL_SALT = randomBytes(16).toString('hex');
+const ipKey = (req: express.Request) => createHash('sha256').update(RL_SALT + (req.ip || 'unknown')).digest('hex').slice(0, 20);
 // fix140: every API-Football call made while answering this request counts as "page" (own small budget, afUsage.ts)
 // or "admin"; the user-agent is counted per day for the admin card (no IPs). fix166: search-engine crawlers are marked
 // (team / player pages make no provider call for them; admin card splits visitors / crawlers).
+// fix173: a crawler-looking user-agent counts as a crawler only once DNS confirms it (Google / Bing / Apple / Yandex);
+// until then, or when the check fails, the request makes no provider call and every visitor limit applies. Every
+// visitor's provider calls are counted per day (IP hash, user-agent hash, paid account): over the cap, the rest of the
+// day runs on stored data only. One security-log line per key and day (IP there only, per the privacy rule).
+const scraperLogged = { day: '', keys: new Set<string>() };
+const logScraperOnce = (key: string, req: express.Request, detail: string) => {
+  const d = new Date().toISOString().slice(0, 10);
+  if (scraperLogged.day !== d) { scraperLogged.day = d; scraperLogged.keys.clear(); }
+  if (scraperLogged.keys.has(key)) return;
+  scraperLogged.keys.add(key);
+  const country = (req.ip && countryOf(req.ip)) || 'unknown country';
+  securityLog(req, 'scraper', req.user, `${detail}; ${country}`);
+  logger.warn(`scraper: ${detail} (${country}; ${uaKey(req.get('user-agent')).slice(0, 120)})`);
+};
+const uaHash = (ua: string) => createHash('sha256').update(RL_SALT + ua).digest('hex').slice(0, 20);
 app.use('/api', (req, _res, next) => {
   const ua = uaKey(req.get('user-agent'));
-  const admin = req.access === 'admin';
-  const crawler = !admin && isCrawlerUa(ua);
-  if (!admin) notePageRequest(ua, crawler);
-  afSource.run({ kind: admin ? 'admin' : 'page', ua, crawler }, next);
+  if (req.access === 'admin') return afSource.run({ kind: 'admin', ua }, next);
+  const ipH = ipKey(req);
+  const claims = claimsCrawler(ua);
+  const verdict = claims ? crawlerVerdict(ipH, req.ip) : false;
+  const crawler = verdict === true;
+  (req as any).verifiedCrawler = crawler;
+  notePageRequest(ua, crawler);
+  if (claims && verdict === false) logScraperOnce(`fake:${ipH}`, req, 'crawler user-agent from an address that is not the search engine (DNS check failed): stored data only');
+  const paid = req.access === 'premium' || req.access === 'pro';
+  const keys = { ip: ipH, ua: uaHash(ua), user: paid && req.user ? String(req.user.id) : null };
+  const cap = costCapped(keys);
+  if (cap) logScraperOnce(`cap:${cap.key}:${cap.key === 'ip' ? ipH : cap.key === 'ua' ? keys.ua : keys.user}`, req,
+    `provider-cost cap: ${cap.calls} provider calls today by this ${cap.key === 'ip' ? 'address' : cap.key === 'ua' ? 'user-agent' : 'account'} (cap ${cap.cap}): stored data only until midnight UTC`);
+  afSource.run({ kind: 'page', ua, crawler, keys, ...(cap || (claims && !crawler) ? { offline: true } : {}) }, next);
 });
 /** fix166: team / player pages of every sport make no provider call for a crawler (stored or database data only). */
 const crawlerSafe = <T>(fn: () => T): T => (isCrawlerRequest() ? noProviderCalls(fn) : fn());
@@ -327,19 +355,16 @@ every('rate-limit cleanup', () => {
   const now = Date.now();
   for (const [k, b] of buckets) if (b.reset < now) buckets.delete(k);
 }, 60000).unref();
-// keys are salted hashes (salt new at every start), so not even the memory holds a visitor's IP (fix140)
-const RL_SALT = randomBytes(16).toString('hex');
-const ipKey = (req: express.Request) => createHash('sha256').update(RL_SALT + (req.ip || 'unknown')).digest('hex').slice(0, 20);
-function rateLimit(name: string, max: number, windowMs: number, key: (req: express.Request) => string = ipKey) {
+function rateLimit(name: string, max: number | ((req: express.Request) => number), windowMs: number, key: (req: express.Request) => string = ipKey) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (req.access === 'admin') return next();
     const k = `${name}:${key(req)}`;
     const now = Date.now();
     const b = buckets.get(k);
     if (!b || b.reset < now) buckets.set(k, { n: 1, reset: now + windowMs });
-    else if (++b.n > max) {
+    else if (++b.n > (typeof max === 'number' ? max : max(req))) {
       res.set('Retry-After', String(Math.ceil((b.reset - now) / 1000)));
-      return res.status(429).json({ error: 'Too many requests. Please slow down and try again in a minute.' });
+      return res.status(429).json({ error: windowMs >= 3600000 ? 'Too many pages opened today. Please try again tomorrow.' : 'Too many requests. Please slow down and try again in a minute.' });
     }
     next();
   };
@@ -349,6 +374,10 @@ app.use('/api', rateLimit('api', 600, 60000)); // ~10 a second, far above a pers
 app.use(['/api/team-page', '/api/player-page'], rateLimit('pages', 60, 10 * 60000));
 // fix140: pages that can cost API-Football calls: at most 60 requests a minute per visitor
 app.use(['/api/team-page', '/api/player-page', '/api/search'], rateLimit('page-min', 60, 60000));
+// fix173: pages a scraper walks (team / player / search / match details): 400 a day per address, 2,000 for paid
+// members; search engines that passed the DNS check are not counted (they make no provider calls)
+const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.access === 'pro' ? 2000 : 400), 24 * 3600000);
+app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
 const OPEN_API = /^\/api\/(health$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|hub(\/|$)|basketball\/|nfl\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
@@ -1364,6 +1393,8 @@ app.post('/api/admin/users/:id(\\d+)/password', jsonOnly, (req, res) => {
 });
 
 function sendError(res: express.Response, error: any, fallback: string) {
+  // fix173: no provider call allowed for this request (crawler, scraper cap, page budget): stored data only, not a failure
+  if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.status(503).set('Retry-After', '3600').json({ error: 'More details soon', pending: true });
   const status = error?.response?.status || 500;
   const message = error?.response?.data?.message || error?.message || fallback;
   logger.error(fallback, { status, message });

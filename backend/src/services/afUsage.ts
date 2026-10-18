@@ -11,17 +11,70 @@
  * fix166: search-engine crawlers (the ones robots.txt lets in) are marked on the request. Team and player pages never
  * make a provider call for them (stored copy at any age, else built from our database only — `noProviderCalls`), and
  * the admin card splits page calls and requests into visitors / crawlers.
+ *
+ * fix173: scrapers. One user-agent (a copy of Googlebot-smartphone's device string without the "Googlebot" token) made
+ * 17,596 provider calls in a day, 6 requests a minute — under every per-minute limit. Now:
+ *  - provider calls are counted per day per visitor: the salted IP hash, a hash of the user-agent, and (paid members)
+ *    the account. Over 150 a day for an IP, 600 for a user-agent or 600 for a paid account, every further request of
+ *    that visitor runs with no provider call (stored data only) until midnight UTC. Admins are never capped.
+ *  - a user-agent that looks like a search-engine crawler (its name or Googlebot's device string) is only trusted after
+ *    a reverse-DNS check of the address (and a forward lookup back to it); until then, and when it fails, the request
+ *    makes no provider call and counts as a visitor for every limit.
+ * Only salted hashes are kept in memory; the address itself is written only to the security log (90 days).
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { promises as dns } from 'node:dns';
 import { db } from '../db';
 import { every } from './perf';
 
-export type AfSource = { kind: 'page' | 'admin'; ua: string; crawler?: boolean; offline?: boolean };
+/** fix173: keys = the visitor's salted hashes (IP, user-agent) and, for a paid member, the account (provider-cost caps). */
+export type VisitorKeys = { ip: string; ua: string; user?: string | null };
+export type AfSource = { kind: 'page' | 'admin'; ua: string; crawler?: boolean; offline?: boolean; keys?: VisitorKeys };
 export const afSource = new AsyncLocalStorage<AfSource>();
 
 /** Search-engine crawlers we let in (robots.txt: everyone except the blocked bots); the same list for every sport. */
 export const CRAWLERS = /Googlebot|GoogleOther|bingbot|Applebot|DuckDuckBot|YandexBot/i;
 export const isCrawlerUa = (ua: string | undefined) => CRAWLERS.test(String(ua || ''));
+
+/* ---------- fix173: crawler verification (reverse DNS, then forward DNS back to the same address) ---------- */
+
+/** User-agents that claim to be (or copy the device of) a crawler we can verify by DNS. */
+const VERIFIABLE = /Googlebot|GoogleOther|Google-InspectionTool|bingbot|BingPreview|Applebot|YandexBot|Nexus 5X Build\/MMB29P/i;
+/** The hosts each crawler's addresses resolve to (published by Google, Microsoft, Apple, Yandex). */
+const CRAWLER_HOSTS = /\.(googlebot\.com|google\.com|search\.msn\.com|applebot\.apple\.com|yandex\.(ru|net|com))$/i;
+export const claimsCrawler = (ua: string | undefined) => VERIFIABLE.test(String(ua || '')) || isCrawlerUa(ua);
+/** key = salted IP hash → verdict (kept 24 h, at most 5,000) */
+const verified = new Map<string, { ok: boolean; at: number }>();
+const verifying = new Set<string>();
+let fakeToday = 0;
+const withTimeout = <T>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error('dns timeout')), ms).unref())]);
+async function verifyCrawler(ipHash: string, ip: string): Promise<void> {
+  let ok = false;
+  try {
+    const names = await withTimeout(dns.reverse(ip), 5000);
+    for (const name of names.filter(n => CRAWLER_HOSTS.test(n.replace(/\.$/, '')))) {
+      const back = await withTimeout(dns.lookup(name, { all: true }), 5000);
+      if (back.some(a => a.address === ip)) { ok = true; break; }
+    }
+  } catch { ok = false; }
+  if (verified.size >= 5000) verified.delete(verified.keys().next().value as string);
+  verified.set(ipHash, { ok, at: Date.now() });
+  if (!ok) fakeToday++;
+}
+/**
+ * fix173: is this crawler-looking request really the search engine? true / false once checked (24 h), null while the
+ * check runs (it is started here; the caller treats null like false: no provider call, visitor limits).
+ */
+export function crawlerVerdict(ipHash: string, ip: string | undefined): boolean | null {
+  const v = verified.get(ipHash);
+  if (v && Date.now() - v.at < 86400000) return v.ok;
+  if (!ip) return false;
+  if (!verifying.has(ipHash)) {
+    verifying.add(ipHash);
+    void verifyCrawler(ipHash, ip).finally(() => verifying.delete(ipHash));
+  }
+  return null;
+}
 /** This request comes from a search-engine crawler. */
 export const isCrawlerRequest = () => !!afSource.getStore()?.crawler;
 
@@ -37,7 +90,7 @@ export function assertProviderCallAllowed() {
 /** Run fn with every provider call refused: our database only. */
 export function noProviderCalls<T>(fn: () => T): T {
   const s = afSource.getStore();
-  return afSource.run({ kind: s?.kind || 'page', ua: s?.ua || '(none)', crawler: s?.crawler, offline: true }, fn);
+  return afSource.run({ kind: s?.kind || 'page', ua: s?.ua || '(none)', crawler: s?.crawler, offline: true, keys: s?.keys }, fn);
 }
 /** Run fn outside any request (background work a request starts is not that request's page call). */
 export const outsideRequest = <T>(fn: () => T): T => afSource.exit(fn);
@@ -59,6 +112,43 @@ let pageHour = { h: hourNow(), n: 0 };
 let refusedToday = 0;
 let dirty = false;
 
+/* ---------- fix173: provider-cost caps per visitor and day ---------- */
+const CAP = {
+  ip: parseInt(process.env.AF_CAP_IP || '150', 10),
+  ua: parseInt(process.env.AF_CAP_UA || '600', 10),
+  user: parseInt(process.env.AF_CAP_USER || '600', 10)
+};
+/** 'ip:<hash>' / 'ua:<hash>' / 'user:<id>' → provider calls today (memory only; a restart starts again at 0) */
+let visitorCalls = new Map<string, number>();
+/** keys that went over their cap today, and whether that was logged yet */
+let capped = new Map<string, boolean>();
+const capKeys = (k: VisitorKeys) => (k.user ? [`user:${k.user}`] : [`ip:${k.ip}`, `ua:${k.ua}`]);
+const capOf = (key: string) => (key.startsWith('ip:') ? CAP.ip : key.startsWith('ua:') ? CAP.ua : CAP.user);
+/**
+ * The visitor's key that is over its daily provider-call cap (the request then runs with no provider call), or null.
+ * `firstTime` is true once per key and day (log it then).
+ */
+export function costCapped(k: VisitorKeys): { key: string; calls: number; cap: number; firstTime: boolean } | null {
+  roll();
+  for (const key of capKeys(k)) {
+    if (!capped.has(key)) continue;
+    const firstTime = capped.get(key) === false;
+    if (firstTime) capped.set(key, true);
+    return { key: key.split(':')[0], calls: visitorCalls.get(key) || 0, cap: capOf(key), firstTime };
+  }
+  return null;
+}
+function countVisitorCall(k: VisitorKeys) {
+  for (const key of capKeys(k)) {
+    const n = (visitorCalls.get(key) || 0) + 1;
+    visitorCalls.set(key, n);
+    if (n >= capOf(key) && !capped.has(key)) capped.set(key, false);
+  }
+  if (visitorCalls.size > 50000) { // a flood of one-off visitors: keep the ones near a cap
+    for (const [key, n] of visitorCalls) if (n < 20 && !capped.has(key)) visitorCalls.delete(key);
+  }
+}
+
 // a restart keeps the day's numbers
 for (const r of db.prepare(`SELECT kind, n FROM af_usage WHERE day = ?`).all(day) as any[]) counts[r.kind] = r.n;
 for (const r of db.prepare(`SELECT ua, requests, af_calls, blocked FROM af_usage_ua WHERE day = ?`).all(day) as any[])
@@ -66,7 +156,7 @@ for (const r of db.prepare(`SELECT ua, requests, af_calls, blocked FROM af_usage
 
 function roll() {
   const d = today();
-  if (d !== day) { flush(); day = d; counts = {}; agents = new Map(); refusedToday = 0; }
+  if (d !== day) { flush(); day = d; counts = {}; agents = new Map(); refusedToday = 0; visitorCalls = new Map(); capped = new Map(); fakeToday = 0; }
   const h = hourNow();
   if (pageHour.h !== h) pageHour = { h, n: 0 };
 }
@@ -119,6 +209,7 @@ export function beforeAfCall() {
   if (kind === 'page') {
     pageHour.n++;
     agent(s!.ua).afCalls++;
+    if (s!.keys) countVisitorCall(s!.keys); // fix173
     const k = s!.crawler ? 'page_crawler' : 'page_visitor';
     counts[k] = (counts[k] || 0) + 1;
   }
@@ -158,6 +249,9 @@ export function afUsageToday() {
       crawlers: { calls: counts.page_crawler || 0, requests: counts.req_crawler || 0 }
     },
     pageBudget: { perHour: PER_HOUR, perDay: PER_DAY, thisHour: pageHour.n, refused: refusedToday },
+    // fix173: visitors over their daily provider-call cap (by kind of key) and crawler-looking visitors that failed the DNS check
+    caps: { ...CAP, capped: { ip: [...capped.keys()].filter(k => k.startsWith('ip:')).length, ua: [...capped.keys()].filter(k => k.startsWith('ua:')).length, user: [...capped.keys()].filter(k => k.startsWith('user:')).length } },
+    fakeCrawlers: fakeToday,
     topAgents: top
   };
 }
