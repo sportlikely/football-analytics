@@ -158,29 +158,29 @@ const Ico = {
   next: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
 }
 
-function Result({ b }: { b: Brief }) {
+function Result({ b, base }: { b: Brief; base: string }) {
   const [x, y] = (b.score || '').split('-').map(Number)
   const margin = Number.isFinite(x) && Number.isFinite(y) ? Math.abs(x - y) : null
   return (
     <li>
-      <Link to={`/basketball/game/${b.id}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
-        <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${b.result === 'W' ? 'bg-win/15 text-win' : b.result === 'L' ? 'bg-loss/15 text-loss' : 'bg-surface2 text-faint'}`}>{b.result === 'W' ? t('W') : b.result === 'L' ? t('L') : '–'}</span>
+      <Link to={`${base}/game/${b.id}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
+        <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${b.result === 'W' ? 'bg-win/15 text-win' : b.result === 'L' ? 'bg-loss/15 text-loss' : 'bg-surface2 text-faint'}`}>{b.result === 'W' ? t('W') : b.result === 'L' ? t('L') : b.result === 'T' ? t('T') : '–'}</span>
         <span className="num text-faint w-12 shrink-0">{new Date(b.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
         <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${b.home ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{b.home ? t('H') : t('A')}</span>
         {b.opponentLogo ? <img src={b.opponentLogo} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
         <span className="text-ink font-medium truncate">{b.opponent}</span>
         {b.score && <span className="ml-auto num font-bold text-ink shrink-0">{b.score}</span>}
-        {margin !== null && <span className={`num text-[10px] w-8 text-right shrink-0 ${b.result === 'W' ? 'text-win' : 'text-loss'}`}>{b.result === 'W' ? '+' : '−'}{margin}</span>}
+        {margin !== null && b.result !== 'T' && <span className={`num text-[10px] w-8 text-right shrink-0 ${b.result === 'W' ? 'text-win' : 'text-loss'}`}>{b.result === 'W' ? '+' : '−'}{margin}</span>}
       </Link>
     </li>
   )
 }
 
-function Upcoming({ b, from }: { b: Brief; from: number }) {
+function Upcoming({ b, from, base }: { b: Brief; from: number; base: string }) {
   const days = Math.max(0, Math.round((new Date(b.kickoff).getTime() - from) / DAY))
   return (
     <li>
-      <Link to={`/basketball/game/${b.id}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
+      <Link to={`${base}/game/${b.id}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
         <span className="w-6 h-6 rounded-md grid place-items-center border border-dashed border-line text-faint shrink-0">
           <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></svg>
         </span>
@@ -194,7 +194,11 @@ function Upcoming({ b, from }: { b: Brief; from: number }) {
   )
 }
 
-export function RestTab({ g, home, away }: { g: Game; home: Sched; away: Sched }) {
+/** Schedule & rest — basketball (back-to-backs) and, since fix174, NFL + college (short weeks and byes). */
+export function RestTab({ g, home, away, sport = 'basketball' }: { g: Pick<Game, 'kickoff' | 'home' | 'away'>; home: Sched; away: Sched; sport?: 'basketball' | 'nfl' }) {
+  const nfl = sport === 'nfl', base = nfl ? '/american-football' : '/basketball'
+  const teamHref = (id: number) => (nfl ? href.nflTeam(id) : href.bbTeam(id))
+  const shortLabel = nfl ? t('Short week') : t('B2B')
   const from = new Date(g.kickoff).getTime()
   const restTone = (s: Sched): Tone => (s.restDays === null ? 'none' : s.backToBack ? 'bad' : s.restDays < 2 ? 'mid' : 'good')
   const loadTone = (s: Sched): Tone => (s.games7 >= 4 ? 'bad' : s.games7 === 3 ? 'mid' : 'none')
@@ -202,10 +206,10 @@ export function RestTab({ g, home, away }: { g: Game; home: Sched; away: Sched }
   const rest = (s: Sched) => (s.backToBack ? 0 : s.restDays === null ? null : Math.floor(s.restDays))
   const rh = rest(home), ra = rest(away)
   let edge: ReactNode = null
-  if (home.backToBack && away.backToBack) edge = t('Both teams play the second night of a back-to-back.')
+  if (home.backToBack && away.backToBack) edge = nfl ? t('Both teams play on a short week.') : t('Both teams play the second night of a back-to-back.')
   else if (rh !== null && ra !== null && rh !== ra) {
     const s: Side = rh > ra ? 'H' : 'A'
-    edge = <><b className={TEXT[s]}>{s === 'H' ? g.home.name : g.away.name}</b> {t('come in with {0} more days of rest', { 0: Math.abs(rh - ra) })}{(s === 'H' ? away : home).backToBack ? ` · ${t('the other side is on a back-to-back')}` : ''}.</>
+    edge = <><b className={TEXT[s]}>{s === 'H' ? g.home.name : g.away.name}</b> {t('come in with {0} more days of rest', { 0: Math.abs(rh - ra) })}{(s === 'H' ? away : home).backToBack ? ` · ${nfl ? t('the other side is on a short week') : t('the other side is on a back-to-back')}` : ''}.</>
   } else if (rh !== null && ra !== null) edge = t('Same rest for both teams.')
 
   const panel = (s: Side, x: Sched) => {
@@ -215,24 +219,25 @@ export function RestTab({ g, home, away }: { g: Game; home: Sched; away: Sched }
         <div className="flex items-center gap-2 mb-3">
           <span className={`w-1 h-6 rounded-full ${BG[s]}`} />
           <TeamLogo team={team} size={22} />
-          <NameLink to={href.bbTeam(team.id)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
-          {x.backToBack && <span className="ml-auto rounded-full bg-loss/15 text-loss px-2 py-0.5 text-[10px] font-extrabold">{t('B2B')}</span>}
+          <NameLink to={teamHref(team.id)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
+          {x.backToBack && <span className="ml-auto rounded-full bg-loss/15 text-loss px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{shortLabel}</span>}
+          {x.offBye && <span className="ml-auto rounded-full bg-win/15 text-win px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{t('Off a bye')}</span>}
         </div>
         <div className="grid grid-cols-3 gap-2 mb-4">
-          <Tile icon={Ico.bed} label={t('Rest')} tone={restTone(x)} value={x.restDays === null ? '–' : x.backToBack ? t('B2B') : t('{0} d', { 0: Math.floor(x.restDays) })} />
-          <Tile icon={Ico.cal} label={t('Last 7 days')} tone={loadTone(x)} value={x.games7} />
+          <Tile icon={Ico.bed} label={t('Rest')} tone={nfl ? (x.restDays === null ? 'none' : x.backToBack ? 'bad' : x.offBye ? 'good' : 'none') : restTone(x)} value={x.restDays === null ? '–' : x.backToBack && !nfl ? t('B2B') : t('{0} d', { 0: Math.floor(x.restDays) })} />
+          {nfl ? <Tile icon={Ico.cal} label={t('Bye week')} tone="none" value={x.bye ? x.bye.replace(/^Week /, t('Wk') + ' ') : '–'} /> : <Tile icon={Ico.cal} label={t('Last 7 days')} tone={loadTone(x)} value={x.games7} />}
           <Tile icon={Ico.next} label={t('Next game')} tone={nextTone(x)} value={x.nextIn === null ? '–' : t('{0} d', { 0: Math.round(x.nextIn) })} />
         </div>
         {x.recent.length > 0 && (
           <>
             <div className="label pb-1 px-2">{t('Before this game')}</div>
-            <ul className="mb-3">{x.recent.map(b => <Result key={b.id} b={b} />)}</ul>
+            <ul className="mb-3">{x.recent.map(b => <Result key={b.id} b={b} base={base} />)}</ul>
           </>
         )}
         {x.upcoming.length > 0 && (
           <>
             <div className="label pb-1 px-2">{t('After this game')}</div>
-            <ul>{x.upcoming.map(b => <Upcoming key={b.id} b={b} from={from} />)}</ul>
+            <ul>{x.upcoming.map(b => <Upcoming key={b.id} b={b} from={from} base={base} />)}</ul>
           </>
         )}
       </div>

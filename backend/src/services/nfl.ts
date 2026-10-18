@@ -206,7 +206,7 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS nfl_standings (season INTEGER NOT NULL, team_id INTEGER NOT NULL, json TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (season, team_id));
 `);
-for (const col of ['home_logo TEXT', 'away_logo TEXT', 'quarters TEXT', 'stats INTEGER DEFAULT 0', 'league INTEGER NOT NULL DEFAULT 1']) {
+for (const col of ['home_logo TEXT', 'away_logo TEXT', 'quarters TEXT', 'stats INTEGER DEFAULT 0', 'league INTEGER NOT NULL DEFAULT 1', 'clock TEXT']) {
   try { db.exec(`ALTER TABLE nfl_games ADD COLUMN ${col}`); } catch { /* already there */ }
 }
 // fix142: the league of every team (1 NFL, 2 NCAA) and, for college teams, FBS / FCS
@@ -275,13 +275,17 @@ export const NFL_DONE = ['FT', 'AOT'];
 const RESERVE = 25;
 const budget = () => (remainingDay === null ? Infinity : remainingDay - RESERVE);
 
-const upsert = db.prepare(`INSERT INTO nfl_games (game_id, season, week, stage, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo, status, home_pts, away_pts, quarters, venue, updated_at, league)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+const upsert = db.prepare(`INSERT INTO nfl_games (game_id, season, week, stage, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo, status, home_pts, away_pts, quarters, venue, updated_at, league, clock)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(game_id) DO UPDATE SET league = excluded.league, season = excluded.season, week = excluded.week, stage = excluded.stage, kickoff = excluded.kickoff,
     home_id = excluded.home_id, home_name = excluded.home_name, home_logo = COALESCE(excluded.home_logo, home_logo),
     away_id = excluded.away_id, away_name = excluded.away_name, away_logo = COALESCE(excluded.away_logo, away_logo),
     status = excluded.status, home_pts = excluded.home_pts, away_pts = excluded.away_pts,
-    quarters = COALESCE(excluded.quarters, quarters), venue = COALESCE(excluded.venue, venue), updated_at = excluded.updated_at`);
+    quarters = COALESCE(excluded.quarters, quarters), venue = COALESCE(excluded.venue, venue), updated_at = excluded.updated_at, clock = excluded.clock`);
+
+/** fix174: called after every store of games (nflLive.ts keeps the live win-chance samples); set once at start-up. */
+let storedHook: ((ids: number[]) => void) | null = null;
+export const setNflStoredHook = (fn: (ids: number[]) => void) => { storedHook = fn; };
 
 /** Quarter scores [[q1..q4, ot], [q1..q4, ot]] (null where the provider has none). */
 function quartersOf(g: any): string | null {
@@ -302,10 +306,16 @@ export function storeGames(list: any[], season?: number, league: LeagueId = 1) {
       upsert.run(id, num(g?.league?.season) ?? season ?? 0, g?.game?.week != null ? String(g.game.week) : null, g?.game?.stage || null, kickoffOf(g),
         num(g?.teams?.home?.id), g?.teams?.home?.name || null, g?.teams?.home?.logo || null,
         num(g?.teams?.away?.id), g?.teams?.away?.name || null, g?.teams?.away?.logo || null,
-        g?.game?.status?.short || null, num(g?.scores?.home?.total), num(g?.scores?.away?.total), quartersOf(g), venue, at, lg);
+        g?.game?.status?.short || null, num(g?.scores?.home?.total), num(g?.scores?.away?.total), quartersOf(g), venue, at, lg,
+        g?.game?.status?.timer != null && g.game.status.timer !== '' ? String(g.game.status.timer) : null);
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+  // live and just-finished games: one win-chance sample each (the swing chart)
+  if (storedHook) {
+    const ids = list.filter(g => [...LIVE_STATUS, ...NFL_DONE].includes(g?.game?.status?.short)).map(g => num(g?.game?.id)).filter((x): x is number => !!x);
+    if (ids.length) storedHook(ids);
+  }
   // fix158: only this batch's games without a name (the live tick used to rescan the whole table every 30 s)
   const noName = list.filter(g => !g?.teams?.home?.name || !g?.teams?.away?.name).map(g => num(g?.game?.id)).filter((x): x is number => !!x);
   if (noName.length) fillNamesOf(noName);
@@ -433,10 +443,24 @@ export async function nflLiveTick(): Promise<number> {
 
 /* ---------- box scores ---------- */
 
-/** Team + player statistics of one finished game (2 calls). */
+db.exec(`CREATE TABLE IF NOT EXISTS nfl_events (game_id INTEGER PRIMARY KEY, json TEXT, updated_at TEXT NOT NULL)`);
+/** fix174: the scoring plays of a game (games/events), stored as we show them; [] when the provider has none. */
+function storeEvents(gameId: number, list: any[]) {
+  const rows = (Array.isArray(list) ? list : []).map((e: any) => ({
+    quarter: e?.quarter ?? null, minute: e?.minute ?? null, team: num(e?.team?.id), teamName: e?.team?.name || null, player: e?.player?.name || null, playerId: num(e?.player?.id),
+    type: e?.type || null, comment: e?.comment || null, score: e?.score ? [num(e.score.home), num(e.score.away)] : null
+  }));
+  db.prepare(`INSERT OR REPLACE INTO nfl_events (game_id, json, updated_at) VALUES (?, ?, ?)`).run(gameId, JSON.stringify(rows), new Date().toISOString());
+}
+
+/** Team + player statistics of one finished game (2 calls; the current season also its scoring plays, 1 more). */
 export async function syncBoxScore(gameId: number): Promise<boolean> {
   const teams = (await nfl('/games/statistics/teams', { id: gameId })).response || [];
   const players = (await nfl('/games/statistics/players', { id: gameId })).response || [];
+  const row = db.prepare(`SELECT season, league FROM nfl_games WHERE game_id = ?`).get(gameId) as any;
+  if (row && row.season === nflCurrentSeason(row.league === 2 ? 2 : 1) && budget() >= 1) {
+    try { storeEvents(gameId, (await nfl('/games/events', { id: gameId })).response || []); } catch (e: any) { logger.warn(`NFL events ${gameId}: ${e.message}`); }
+  }
   db.exec('BEGIN');
   try {
     for (const t of teams) { const tid = num(t?.team?.id); if (tid) db.prepare(`INSERT OR REPLACE INTO nfl_team_stats (game_id, team_id, json) VALUES (?, ?, ?)`).run(gameId, tid, JSON.stringify(t.statistics || {})); }

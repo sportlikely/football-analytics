@@ -92,6 +92,8 @@ import { nflProbe, startNflScheduler, nflCurrentSeason, asLeague, LEAGUES } from
 import { winnerUpsetReport } from './services/winnerUpsets';
 import { withNflPrediction, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame, nflStandings, nflTeam, nflPlayer, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch } from './services/nflSite';
+import { nflLiveNow, nflLiveCurve } from './services/nflLive';
+import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents } from './services/nflGameExtras';
 import { askAssistant, assistantConfigured, messagesToday, assistantStats } from './services/assistant';
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
@@ -2315,7 +2317,15 @@ const nflFull = (req: express.Request) => isPaid(req.access || 'anon');
 /** fix142: ?league=1|2|college (default NFL) */
 const nflLg = (req: express.Request) => asLeague(req.query.league);
 const nflRid = (id: number) => -(2e9 + id); // frontend lib/nfl.ts nflRid
-const nflWith = <T extends { id: number; state: string }>(req: express.Request, games: T[]) => { const f = fullFor(req, nflRid); return games.map(g => withNflPrediction(g as any, typeof f === 'function' ? f(g.id) : f) as unknown as T & { prediction: any }); };
+const nflWith = <T extends { id: number; state: string }>(req: express.Request, games: T[]) => {
+  const f = fullFor(req, nflRid);
+  return games.map(g => {
+    const x = withNflPrediction(g as any, typeof f === 'function' ? f(g.id) : f) as unknown as T & { prediction: any };
+    // fix174: live win chance + projected score on live rows (numbers unlocked), like basketball
+    if (g.state === 'live' && x.prediction && !x.prediction.locked) { const live = nflLiveNow(g.id); if (live) x.prediction = { ...x.prediction, live }; }
+    return x;
+  });
+};
 app.get('/api/nfl/config', (req, res) => {
   const league = nflLg(req);
   res.json({ data: { public: nflPublic(), open: nflPublic() || nflAdmin(req), league, season: nflCurrentSeason(league), seasons: nflSeasonsHeld(nflAdmin(req), league),
@@ -2358,8 +2368,38 @@ app.get('/api/nfl/game/:id(\\d+)', (req, res) => {
     const d = nflGame(parseInt(req.params.id, 10), nflAdmin(req));
     if (!d) return res.status(404).json({ error: 'Game not found' });
     const game = withNflPrediction(d.game, fullOne(req, nflRid(d.game.id)));
-    res.json({ data: { ...d, game, prediction: game.prediction } });
+    // fix174: football's game-page parts — live win chance + swing chart (numbers unlocked), schedule & rest, the
+    // division / conference table, likely starters, before vs after, the written preview, scoring plays
+    const g = d.game, p: any = game.prediction, open = !!p && !p.locked;
+    const qbNames = (p?.why?.qb || []).map((q: any) => q?.name || null) as [string | null, string | null];
+    res.json({ data: { ...d, game, prediction: p,
+      live: open ? { now: g.state === 'live' ? nflLiveNow(g.id) : null, curve: g.state === 'upcoming' ? [] : nflLiveCurve(g.id) } : null,
+      schedule: { home: nflSchedule(g.home.id, g), away: nflSchedule(g.away.id, g) },
+      standings: nflGameStandings(g),
+      starters: g.state === 'done' ? null : { home: nflStarters(g.home.id, g.season), away: nflStarters(g.away.id, g.season) },
+      beforeAfter: open ? nflBeforeAfter(g, p) : null,
+      writeup: nflPreview(g.id, qbNames),
+      events: g.state === 'done' ? nflEvents(g.id) : null
+    } });
   } catch (e) { sendError(res, e, 'Failed to load game'); }
+});
+// fix174: official highlights (YouTube, the league's / teams' own channels) for a finished NFL or college game
+app.get('/api/nfl/game/:id(\\d+)/highlights', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = db.prepare(`SELECT kickoff, home_name, away_name, status, league FROM nfl_games WHERE game_id = ?`).get(id) as any;
+    if (!r || !['FT', 'AOT'].includes(r.status)) return res.json({ data: null });
+    const nickOf = (s: string) => (r.league === 2 ? s : String(s || '').split(/\s+/).pop() || s);
+    res.json({ data: await highlightsFor({ id: 4_000_000_000 + id, status: 'FINISHED', utcDate: r.kickoff, homeTeam: { name: r.home_name, shortName: nickOf(r.home_name) }, awayTeam: { name: r.away_name, shortName: nickOf(r.away_name) } }) });
+  } catch (e) { sendError(res, e, 'Failed to fetch highlights'); }
+});
+app.get('/api/basketball/game/:id(\\d+)/highlights', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = db.prepare(`SELECT kickoff, home_name, away_name, status FROM bb_games WHERE game_id = ?`).get(id) as any;
+    if (!r || !['FT', 'AOT'].includes(r.status)) return res.json({ data: null });
+    res.json({ data: await highlightsFor({ id: 5_000_000_000 + id, status: 'FINISHED', utcDate: r.kickoff, homeTeam: { name: r.home_name }, awayTeam: { name: r.away_name } }) });
+  } catch (e) { sendError(res, e, 'Failed to fetch highlights'); }
 });
 app.get('/api/nfl/standings', (req, res) => {
   try {

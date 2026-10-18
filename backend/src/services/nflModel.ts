@@ -31,6 +31,7 @@ import { winnerBands, winnerCalibration, winnerByConfidence } from '../utils/win
 import logger from '../utils/logger';
 import { yieldLoop, timed, slicer } from './perf';
 import { teamBox, NflGame } from './nflSite';
+import { rememberFirstPrediction } from './nflGameExtras';
 import { HIDE_OTHER, type LeagueId } from './nfl';
 
 export const NFL_MODEL = 'nfl-v1';
@@ -801,7 +802,7 @@ export function predictNfl(gameId: number): NflPred | null {
  */
 export async function saveNflPredictions(): Promise<number> {
   const now = new Date();
-  const rows = db.prepare(`SELECT game_id, season, kickoff FROM nfl_games WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS') AND (stage IS NULL OR stage NOT LIKE 'Pre%')`)
+  const rows = db.prepare(`SELECT game_id, season, kickoff, home_id, away_id FROM nfl_games WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS') AND (stage IS NULL OR stage NOT LIKE 'Pre%')`)
     .all(now.toISOString(), new Date(now.getTime() + 9 * DAY).toISOString()) as any[];
   const out: { r: any; pr: NflPred }[] = [];
   let i = 0;
@@ -815,7 +816,11 @@ export async function saveNflPredictions(): Promise<number> {
   db.exec('BEGIN');
   try {
     // a game that kicked off while we were computing keeps the prediction it had at kick-off
-    for (const { r, pr } of out) if (Date.parse(r.kickoff) > Date.now()) up.run(r.game_id, r.season, r.kickoff, pr.model, pr.pHome / 100, pr.margin, pr.total, pr.homePts, pr.awayPts, JSON.stringify(pr.why), at);
+    for (const { r, pr } of out) if (Date.parse(r.kickoff) > Date.now()) {
+      up.run(r.game_id, r.season, r.kickoff, pr.model, pr.pHome / 100, pr.margin, pr.total, pr.homePts, pr.awayPts, JSON.stringify(pr.why), at);
+      // fix174: the first version of each game (who was out then), for "numbers changed because…"
+      try { rememberFirstPrediction(r.game_id, r.home_id, r.away_id, pr.pHome / 100, pr.margin, pr.why?.qb, at); } catch { /* optional */ }
+    }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   return out.length;

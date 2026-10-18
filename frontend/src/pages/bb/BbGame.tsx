@@ -17,6 +17,8 @@ import { StatsTab, RestTab, H2HTab, StandingsTab } from './GameTabs'
 import { MarketsCard, CompareCard, PlayersCard, ModelTable, type Markets, type ModelInfo, type GamePlayer } from './GameExtras'
 import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
+import GamePreview from '../../components/sport/game/GamePreview'
+import Highlights from '../../components/sport/game/Highlights'
 
 export interface Avg {
   games: number; won: number; lost: number; pointsFor: number; pointsAgainst: number
@@ -24,8 +26,9 @@ export interface Avg {
   rebounds: number | null; assists: number | null; steals: number | null; blocks: number | null; turnovers: number | null
   withStats: number; form: ('W' | 'L')[]
 }
-export interface Brief { id: number; kickoff: string; league: string; home: boolean; opponent: string; opponentLogo: string | null; score: string | null; result: 'W' | 'L' | null }
-export interface Sched { restDays: number | null; backToBack: boolean; games7: number; away7: number; nextIn: number | null; recent: Brief[]; upcoming: Brief[] }
+export interface Brief { id: number; kickoff: string; league: string; home: boolean; opponent: string; opponentLogo: string | null; score: string | null; result: 'W' | 'L' | 'T' | null }
+/** fix174: NFL + college use the same tab — backToBack = a short week, offBye / bye = the bye week */
+export interface Sched { restDays: number | null; backToBack: boolean; games7: number; away7: number; nextIn: number | null; recent: Brief[]; upcoming: Brief[]; offBye?: boolean; bye?: string | null }
 interface BoxPlayer { id: number; name: string; starter: boolean; minutes: number | null; points: number | null; fgm: number | null; fga: number | null; tpm: number | null; tpa: number | null; ftm: number | null; fta: number | null; rebounds: number | null; assists: number | null; steals?: number | null; blocks?: number | null; turnovers?: number | null; plusMinus?: number | null }
 interface BoxSide { team: any; players: BoxPlayer[] }
 interface Detail {
@@ -58,7 +61,7 @@ interface PreviewSide {
 }
 interface Injury { name: string; status: string; weight: number; comment: string | null; minutes: number | null; playerId: number | null }
 
-const TABS = ['prediction', 'box', 'stats', 'players', 'rest', 'h2h', 'table']
+const TABS = ['prediction', 'box', 'stats', 'players', 'rest', 'h2h', 'table', 'highlights']
 
 /** A basketball game: the shared game page (football's match page, fix152c) with basketball's data and tabs. */
 export default function BbGame() {
@@ -141,7 +144,9 @@ export default function BbGame() {
     },
     { id: 'rest', label: t('Schedule & rest'), short: t('Rest'), hint: t('Back-to-backs, rest days and the next game'), render: () => <RestTab g={g} home={d.schedule.home} away={d.schedule.away} /> },
     { id: 'h2h', label: t('H2H'), hint: t('Last meetings and recent form'), render: () => <H2HTab g={g} list={d.h2h} /> },
-    ...(d.standings ? [{ id: 'table', label: t('Standings'), short: t('Table'), hint: t('{0} table', { 0: g.league.name }), render: () => <StandingsTab g={g} data={d.standings!} /> }] : [])
+    ...(d.standings ? [{ id: 'table', label: t('Standings'), short: t('Table'), hint: t('{0} table', { 0: g.league.name }), render: () => <StandingsTab g={g} data={d.standings!} /> }] : []),
+    // fix174: official highlights after the final buzzer (the league's / clubs' own YouTube channels)
+    ...(done ? [{ id: 'highlights', label: t('Highlights'), short: t('Video'), hint: t('Official video'), render: () => <Highlights url={`${API_URL}/basketball/game/${g.id}/highlights`} /> }] : [])
   ]
 
   return (
@@ -243,22 +248,6 @@ function bbWhy(d: Detail): WhyRow[] {
   })
 }
 
-/**
- * "Game preview" (fix124, like the football match preview of fix121): the same English text search engines get (no
- * pick, no %). Open on wider screens, folded on phones. English pages only for now.
- */
-function GamePreview({ text }: { text: string }) {
-  const [open, setOpen] = useState(() => typeof window === 'undefined' || window.matchMedia('(min-width: 640px)').matches)
-  return (
-    <details open={open} onToggle={e => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="group card px-4 sm:px-5 py-3">
-      <summary className="flex items-center justify-between gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-        <h2 className="font-display text-base font-bold text-ink">Game preview</h2>
-        <svg viewBox="0 0 24 24" className="w-4 h-4 text-muted transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 9l6 6 6-6" /></svg>
-      </summary>
-      <p className="mt-2 text-sm text-muted leading-relaxed">{text}</p>
-    </details>
-  )
-}
 
 /** Written preview: form, home/away record, ratings, rest, shooting, meetings and our verdict — in plain sentences. */
 function AnalysisCard({ d }: { d: Detail }) {

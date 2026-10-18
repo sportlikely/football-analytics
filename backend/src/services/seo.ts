@@ -7,6 +7,7 @@ import { getPreview, firstSentence, matchTitle, previewDates, previewFacts as pr
 import { bbPreview } from './bbPreview';
 import { nflCurrentSeason, schoolName, HIDE_OTHER } from './nfl';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame as nflGameRaw, nflStandings, nflTeam as nflTeamRaw, nflPlayer as nflPlayerRaw, leagueOfTeamId, type NflGame } from './nflSite';
+import { nflPreview } from './nflGameExtras';
 import { listGuides, getGuide } from './guides';
 import { HUBS, hubBySlug, hubByOld, hubForCode, hubOpen, buildHub, hubDescription, hubRange } from './hubs';
 import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, ui, longDate } from './seoText';
@@ -421,6 +422,7 @@ export function seoPage(rawPath: string): SeoInfo {
         return page(title, desc,
           `${nflNav}<h1>${esc(g.home.name)} vs ${esc(g.away.name)}</h1><p>${LN} ${esc(wk)} · ${esc(when)}${g.venue ? ` · ${esc(g.venue)}` : ''}</p>${g.score ? `<p>Final score ${g.score.home}–${g.score.away}</p>` : ''}`
           + `<p>${esc(g.home.name)} last 5: ${form('home') || '–'} · ${esc(g.away.name)} last 5: ${form('away') || '–'}.</p>`
+          + (() => { const w = nflPreview(g.id); return w ? `<h2>Preview</h2><p>${esc(w)}</p>` : ''; })()
           + (d.h2h.length ? `<h2>Last meetings</h2>${nflList(d.h2h)}` : '')
           + `<ul><li><a href="/american-football/team/${g.home.id}">${esc(g.home.name)}</a></li><li><a href="/american-football/team/${g.away.id}">${esc(g.away.name)}</a></li><li><a href="${g.league === 2 ? '/american-football/college' : '/american-football'}/league">${LN} standings</a></li></ul>`,
           { ...extra, jsonld: [sportsEvent(`${g.home.name} vs ${g.away.name}`, g.kickoff, g.home.name, g.away.name, `${SITE}/american-football/game/${g.id}`, LN, 'American Football', desc)] });

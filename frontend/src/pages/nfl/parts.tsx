@@ -169,7 +169,8 @@ export function NflLiveCard({ g }: { g: NflGame }) {
 }
 
 /** Standings of one division (or a conference snapshot): W-L-T, PCT, PF, PA, diff, streak. */
-export function StandTable({ title, rows, compact = false, highlight, league = 1 }: { title?: string; rows: StandRow[]; compact?: boolean; highlight?: number; league?: NflLeague }) {
+export function StandTable({ title, rows, compact = false, highlight, league = 1 }: { title?: string; rows: StandRow[]; compact?: boolean; highlight?: number | number[]; league?: NflLeague }) {
+  const marked = (id: number) => (Array.isArray(highlight) ? highlight.includes(id) : highlight === id)
   const conf = league === 2 && !compact // college: conference record first (the order of the table)
   return (
     <div>
@@ -190,7 +191,7 @@ export function StandTable({ title, rows, compact = false, highlight, league = 1
           </thead>
           <tbody>
             {rows.map(r => (
-              <tr key={r.team.id} className={`border-t border-line/50 ${highlight === r.team.id ? 'bg-accent/10' : ''}`}>
+              <tr key={r.team.id} className={`border-t border-line/50 ${marked(r.team.id) ? 'bg-accent/10' : ''}`}>
                 <td className="py-1.5 px-1">
                   <Link to={`/american-football/team/${r.team.id}`} className="flex items-center gap-2 min-w-0 hover:text-accent">
                     <TeamLogo team={r.team} size={18} />

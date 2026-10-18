@@ -6,6 +6,7 @@ import CountUp from '../../components/CountUp'
 import { LeagueBar } from '../../components/LeagueSidebar'
 import { BB_STATUS, BB_COUNTRY, liveLabel, bbRank, timeOf, useBbFavorites, type BbGame, type BbSide } from '../../lib/bb'
 import { useStuck, stuckBg } from '../../lib/useStuck'
+import { LiveChancePanel } from '../../components/sport/game/LiveChance'
 
 /** Shared pieces of the basketball pages — the same look as the football pages. */
 
@@ -306,48 +307,8 @@ export function LiveChanceBox({ g }: { g: BbGame }) {
   const l = useLiveChance(g)
   const p = g.prediction
   if (!l || !p || typeof p.pHome !== 'number') return null
-  const cap = (v: number) => Math.min(99, Math.max(1, Math.round(v)))
-  const rows = [
-    { k: 'H' as const, label: g.home.name, now: l.pHome, before: p.pHome, bar: 'bg-home', pts: l.score.home },
-    { k: 'A' as const, label: g.away.name, now: l.pAway, before: p.pAway ?? 100 - p.pHome, bar: 'bg-away', pts: l.score.away }
-  ]
-  const top = l.pHome >= 50 ? 'H' : 'A'
-  return (
-    <div className="mt-4 rounded-2xl border border-live/40 bg-live/[0.06] p-3 sm:p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-live animate-pulseDot" aria-hidden />
-          <span className="text-sm font-bold text-ink">{t('Live win chance')}</span>
-        </div>
-        <span className="num text-xs font-semibold text-live">{liveLabel(g, true)} · {g.score?.home ?? 0}-{g.score?.away ?? 0}</span>
-      </div>
-      <div className="grid grid-cols-2 gap-2 mt-3">
-        {rows.map(r => {
-          const diff = Math.round(r.now) - Math.round(r.before)
-          return (
-            <div key={r.k} className={`rounded-xl px-2 py-2 text-center ${r.k === top ? 'bg-surface border border-line' : ''}`}>
-              <div className="text-[11px] text-muted truncate">{r.label}</div>
-              <div className="num text-xl sm:text-2xl font-extrabold text-ink">{cap(r.now)}%</div>
-              <div className={`num text-[11px] font-semibold ${diff > 0 ? 'text-win' : diff < 0 ? 'text-loss' : 'text-faint'}`}>
-                {diff > 0 ? '▲' : diff < 0 ? '▼' : '='} {Math.abs(diff)} <span className="text-faint font-normal">· {t('was {0}%', { 0: Math.round(r.before) })}</span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <div className="flex h-2 gap-[3px] mt-3" aria-hidden>
-        {rows.map(r => <div key={r.k} className={`rounded-full ${r.bar} transition-all duration-700`} style={{ width: `calc(${Math.max(1, r.now)}% - 3px)` }} />)}
-      </div>
-      <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-surface/70 border border-line/60 px-3 py-2">
-        <span className="text-xs text-muted">{t('Projected final score')}</span>
-        <span className="text-right leading-tight">
-          <span className="block num text-sm font-extrabold text-ink whitespace-nowrap">{l.score.home} – {l.score.away}</span>
-          <span className="block num text-[11px] text-faint whitespace-nowrap">{t('{0} points in total', { 0: l.total })}</span>
-        </span>
-      </div>
-      <p className="text-[11px] text-faint mt-2">{t('Updated every minute from our prediction at tip-off, the score and the time left.')}</p>
-    </div>
-  )
+  // fix174: the shared block (NFL + college use it too)
+  return <LiveChancePanel home={g.home.name} away={g.away.name} now={l} before={{ pHome: p.pHome, pAway: p.pAway ?? 100 - p.pHome }} status={`${liveLabel(g, true)} · ${g.score?.home ?? 0}-${g.score?.away ?? 0}`} />
 }
 
 export function Skeleton({ rows = 4, h = 'h-12' }: { rows?: number; h?: string }) {

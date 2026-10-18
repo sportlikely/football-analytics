@@ -35,12 +35,17 @@ const LEAGUES = [
   'premier league', 'efl', 'laliga', 'laliga ea sports', 'laliga hypermotion', 'laliga en espanol', 'serie a', 'lega serie b',
   'bundesliga', '2. bundesliga', 'ligue 1 mcdonalds', 'ligue 1', 'ligue 2 bkt', 'eredivisie', 'liga portugal', 'liga portugal betclic',
   'spfl', 'trendyol super lig', 'super lig', 'pro league', 'jupiler pro league', 'super league greece', 'uefa', 'uefa champions league',
-  'uefa europa league', 'uefa conference league', 'fifa', 'concacaf', 'caf tv', 'the afc channel', 'afc asian cup', 'conmebol'
+  'uefa europa league', 'uefa conference league', 'fifa', 'concacaf', 'caf tv', 'the afc channel', 'afc asian cup', 'conmebol',
+  // fix174: American football and basketball (the league's own channel)
+  'nfl', 'nba', 'euroleague basketball', 'eurocup basketball', 'fiba', 'basketball champions league', 'liga endesa', 'lnb pro a', 'easycredit bbl',
+  'lega basket serie a', 'nbl', 'ncaa'
 ];
 const BROADCASTERS = [
   'sky sports premier league', 'sky sports football', 'sky sports football league', 'nbc sports', 'cbs sports golazo', 'tnt sports football',
   'dazn football', 'dazn', 'canal+ sport', 'bein sports', 'bein sports usa', 'bein sports france', 'espn fc', 'espn nl', 'espn deportes',
-  'espn brasil', 'fox soccer', 'tudn usa', 'viaplay football'
+  'espn brasil', 'fox soccer', 'tudn usa', 'viaplay football',
+  // fix174: college football's licensed broadcasters
+  'espn college football', 'sec network', 'big ten network', 'acc digital network', 'big 12 conference', 'cbs sports', 'fox college football'
 ];
 
 // apostrophes of any kind are dropped, so "Ligue 1 McDonald’s" = "ligue 1 mcdonalds"

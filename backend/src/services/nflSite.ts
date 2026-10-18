@@ -58,7 +58,7 @@ export function shapeGame(r: any): NflGame {
   };
 }
 
-const GAME_COLS = `game_id, season, week, stage, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo, status, home_pts, away_pts, quarters, venue, league`;
+export const GAME_COLS = `game_id, season, week, stage, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo, status, home_pts, away_pts, quarters, venue, league`;
 export const leagueOfTeamId = (id: number): LeagueId => ((db.prepare(`SELECT league FROM nfl_teams WHERE team_id = ?`).get(id) as any)?.league === 2 ? 2 : 1);
 
 /** Seasons we hold (admins see all; everyone else only the current one). */
@@ -224,7 +224,7 @@ export function teamBox(s: any) {
 }
 
 /** Player lines of one team in one game: { group: [{ id, name, image, stats: { name: value } }] }. */
-function playerGroups(json: string | null): Record<string, { id: number; name: string; image: string | null; stats: Record<string, string> }[]> {
+export function playerGroups(json: string | null): Record<string, { id: number; name: string; image: string | null; stats: Record<string, string> }[]> {
   const groups = parseJson(json) || [];
   const out: Record<string, any[]> = {};
   for (const g of Array.isArray(groups) ? groups : []) {

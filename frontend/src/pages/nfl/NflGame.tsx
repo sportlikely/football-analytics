@@ -3,16 +3,25 @@ import { Link, useParams } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
-import { t, LOCALE } from '../../lib/i18n'
+import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
-import { NFL_STATUS, weekLabel, nick, nflTeamFav, nflRid, nflRstatus, setNflLeague, nflBase, nflLeagueName, nflModelOf, nflStrongAt, type NflGame as Game, type NflSide, type NflPred } from '../../lib/nfl'
+import { useReveal } from '../../lib/reveal'
+import { NFL_STATUS, weekLabel, nick, nflTeamFav, nflRid, nflRstatus, setNflLeague, nflBase, nflLeagueName, nflModelOf, nflStrongAt, type NflGame as Game, type NflSide, type NflPred, type StandRow } from '../../lib/nfl'
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import YourPicks from '../../components/YourPicks'
 import { newerWinnerLive } from '../../lib/liveState'
-import { StatBars, LeagueSwitch } from './parts'
+import { StatBars, LeagueSwitch, StandTable } from './parts'
 import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
+import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
+import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts'
+import NewsChange from '../../components/sport/game/NewsChange'
+import QuarterStrip from '../../components/sport/game/QuarterStrip'
+import Highlights from '../../components/sport/game/Highlights'
+import GamePreview from '../../components/sport/game/GamePreview'
+import { RestTab } from '../bb/GameTabs'
+import type { Sched } from '../bb/BbGame'
 
 type Box = {
   firstDowns: number | null; plays: number | null; yards: number | null; yardsPerPlay: number | null; passYards: number | null; rushYards: number | null; rushAttempts: number | null
@@ -22,24 +31,44 @@ type Box = {
 type Groups = Record<string, { id: number; name: string; image: string | null; stats: Record<string, string> }[]>
 interface FormRow { id: number; kickoff: string; opponent: NflSide; home: boolean; for: number; against: number; result: 'W' | 'L' | 'T' }
 interface Injury { id: number; name: string; image: string | null; status: string | null; description: string | null; date: string | null }
+interface Starter { id: number; name: string; position: string; image: string | null; line: string | null; status: string | null; out: boolean }
+interface Play { quarter: string | number | null; minute: string | null; team: number | null; teamName: string | null; player: string | null; playerId: number | null; type: string | null; comment: string | null; score: [number | null, number | null] | null }
+interface BeforeAfter {
+  before: { pHome: number; pAway: number; at: string }; after: { pHome: number; pAway: number }
+  players: { id: number; name: string; position: string | null; status: string | null; side: 'H' | 'A' }[]
+  qb: { side: 'H' | 'A'; was: string; now: string }[]
+}
 interface Data {
   game: Game; form: { home: FormRow[]; away: FormRow[] }; h2h: Game[]; teamStats: { home: Box | null; away: Box | null } | null
   players: { home: Groups; away: Groups } | null; injuries: { home: Injury[]; away: Injury[] } | null; prediction: NflPred | null
+  // fix174
+  live?: { now: { pHome: number; pAway: number; score: { home: number; away: number }; total: number } | null; curve: { t: number; p: number }[] } | null
+  schedule?: { home: Sched; away: Sched }
+  standings?: { season: number; league: number; tables: { conference: string; name: string; rows: StandRow[] }[] } | null
+  starters?: { home: Starter[]; away: Starter[] } | null
+  beforeAfter?: BeforeAfter | null
+  writeup?: string | null
+  events?: Play[] | null
 }
-const TABS = ['prediction', 'stats', 'players', 'h2h']
+const TABS = ['prediction', 'stats', 'players', 'table', 'rest', 'h2h', 'plays', 'highlights']
+const OUT = /out|ir|reserve|doubtful/i
 
 /**
  * NFL + college game page: the shared game page (football's match page, fix152c) — Prediction · Statistics ·
- * Players & injuries · H2H, the score by quarter under the hero.
+ * Players & injuries · Standings · Schedule & rest · H2H, and after full time the scoring plays (or the game by
+ * quarter) and the official highlights. fix174: live win chance + swing chart, "how it was calculated", the written
+ * preview, likely starters and "numbers changed" when injury news moved the prediction.
  */
 export default function NflGame() {
   const { id } = useParams()
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
-  const [tab, pickTab] = useGameTab(TABS, { overview: 'h2h', injuries: 'players' })
+  const [tab, pickTab] = useGameTab(TABS, { overview: 'h2h', injuries: 'players', standings: 'table', video: 'highlights' })
   useEffect(() => {
     setD(null); setMissing(false)
-    const load = () => axios.get(`${API_URL}/nfl/game/${id}`).then(r => setD(prev => (prev && prev.game.id === r.data.data?.game?.id ? { ...r.data.data, game: newerWinnerLive(prev.game, r.data.data.game) } : r.data.data))) // fix165: never backwards.catch(e => { if (e?.response?.status === 404) setMissing(true) })
+    const load = () => axios.get(`${API_URL}/nfl/game/${id}`)
+      .then(r => setD(prev => (prev && prev.game.id === r.data.data?.game?.id ? { ...r.data.data, game: newerWinnerLive(prev.game, r.data.data.game) } : r.data.data))) // fix165: never backwards
+      .catch(e => { if (e?.response?.status === 404) setMissing(true) })
     load()
     const iv = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30 * 1000)
     window.addEventListener(GAME_RELOAD, load) // fix144: a free pick opened this game
@@ -67,7 +96,8 @@ export default function NflGame() {
     name: team.name, logo: <TeamLogo team={team} size={72} />, href: `/american-football/team/${team.id}`,
     title: t('{0}: team page', { 0: team.name }), linkLabel: t('Team page →'), star: <FavStar fav={nflTeamFav(team)} size="sm" />
   })
-  const hasPlayers = !!(d.players || d.injuries)
+  const hasPlayers = !!(d.players || d.injuries || d.starters)
+  const plays = d.events && d.events.length ? d.events : null
 
   const tabs: GameTab[] = [
     {
@@ -83,8 +113,12 @@ export default function NflGame() {
               { label: t('Total points'), value: typeof p?.total === 'number' ? p.total.toFixed(1) : '–' }
             ]}
             why={p ? whyRows(g, p) : []}
+            howCalc={p && p.why && !p.locked ? <NflModelParts g={g} p={p} injuries={d.injuries} /> : undefined}
             noPrediction={g.state === 'upcoming' ? t('Our prediction for this game is saved in the week of the game, before kick-off.') : t('No prediction for this game.')}
           />
+          {d.beforeAfter && <ChangeCard g={g} x={d.beforeAfter} />}
+          {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
+          {d.starters && (d.starters.home.length > 0 || d.starters.away.length > 0) && <Starters g={g} data={d.starters} />}
           <YourPicks sport="nfl" gameId={g.id} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />
           <GameNews home={{ sport: 'american-football', teamId: g.home.id }} away={{ sport: 'american-football', teamId: g.away.id }} />
         </>
@@ -92,15 +126,20 @@ export default function NflGame() {
     },
     ...(d.teamStats ? [{ id: 'stats', label: t('Statistics'), short: t('Stats'), hint: live ? t('Live team stats') : t('Yards, downs, red zone and turnovers'), live, render: () => <TeamStats g={g} home={d.teamStats!.home} away={d.teamStats!.away} /> }] : []),
     ...(hasPlayers ? [{
-      id: 'players', label: d.injuries ? t('Players & injuries') : t('Players'), short: t('Players'), hint: d.injuries ? t('Player stats and the injury reports') : t('Passing, rushing, receiving and defense'),
+      id: 'players', label: d.injuries ? t('Players & injuries') : t('Players'), short: t('Players'), hint: d.injuries ? t('Likely starters, player stats and the injury reports') : t('Passing, rushing, receiving and defense'),
       render: () => (
         <>
+          {d.starters && <Starters g={g} data={d.starters} />}
           {d.injuries && <Injuries g={g} data={d.injuries} />}
           {d.players && <Players g={g} data={d.players} />}
         </>
       )
     }] : []),
-    { id: 'h2h', label: t('H2H'), hint: t('Last meetings and recent form'), render: () => <H2HForm d={d} /> }
+    ...(d.standings && d.standings.tables.length ? [{ id: 'table', label: t('Standings'), short: t('Table'), hint: lg === 2 ? t('The conference tables') : t('The division tables'), render: () => <StandingsTab g={g} data={d.standings!} /> }] : []),
+    ...(d.schedule ? [{ id: 'rest', label: t('Schedule & rest'), short: t('Rest'), hint: t('Short weeks, byes and the next games'), render: () => <RestTab g={g} home={d.schedule!.home} away={d.schedule!.away} sport="nfl" /> }] : []),
+    { id: 'h2h', label: t('H2H'), hint: t('Last meetings and recent form'), render: () => <H2HForm d={d} /> },
+    ...(done && (plays || showQ) ? [{ id: 'plays', label: plays ? t('Scoring plays') : t('By quarter'), short: plays ? t('Plays') : t('Quarters'), hint: plays ? t('Every score in order') : t('Points and margin per quarter'), render: () => (plays ? <ScoringPlays g={g} list={plays} /> : <Card title={t('By quarter')}><QuarterStrip home={nick(g.home.name, lg)} away={nick(g.away.name, lg)} q={q!} /></Card>) }] : []),
+    ...(done ? [{ id: 'highlights', label: t('Highlights'), short: t('Video'), hint: t('Official video'), render: () => <Highlights url={`${API_URL}/nfl/game/${g.id}/highlights`} /> }] : [])
   ]
 
   return (
@@ -146,10 +185,162 @@ export default function NflGame() {
           {g.venue && <p className={`text-center text-xs text-faint ${showQ ? 'mt-3' : ''}`}>{t('Venue')} <span className="text-muted">{g.venue}</span></p>}
         </>
       ) : undefined}
+      afterHero={<LiveBlock d={d} />}
       tabs={tabs}
       tab={tab}
       onTab={pickTab}
     />
+  )
+}
+
+/** Live win chance + projected score while the game is on; the swing chart live and after full time (numbers unlocked). */
+function LiveBlock({ d }: { d: Data }) {
+  const g = d.game, p = g.prediction
+  const { hidden } = useReveal(nflRid(g), nflRstatus(g), !!p && !p.locked)
+  if (!d.live || !p || p.locked || hidden || typeof p.pHome !== 'number') return null
+  const lg = g.league || 1
+  const live = g.state === 'live'
+  const now = live ? (d.live.now || p.live || null) : null
+  // the curve's samples are stored on every live tick (30 s), so its last point is the chance now
+  const curve = d.live.curve
+  if (!now && curve.length < 2) return null
+  return (
+    <>
+      {now && <LiveChancePanel home={nick(g.home.name, lg)} away={nick(g.away.name, lg)} now={now} before={{ pHome: p.pHome, pAway: p.pAway ?? 100 - p.pHome }} status={`${NFL_STATUS[g.status] || g.status} · ${g.score?.home ?? 0}-${g.score?.away ?? 0}`} />}
+      {curve.length >= 2 && (
+        <div className="mt-3 rounded-2xl border border-line/60 bg-surface/60 p-3 sm:p-4">
+          <SwingChart points={curve} home={nick(g.home.name, lg)} away={nick(g.away.name, lg)} live={live} />
+        </div>
+      )}
+    </>
+  )
+}
+
+/** "How it was calculated": the model's parts per team (Elo, home field, rest, quarterbacks, efficiency, injuries). */
+function NflModelParts({ g, p, injuries }: { g: Game; p: NflPred; injuries: Data['injuries'] }) {
+  const w = p.why!
+  const pts = (elo: number) => elo / 25
+  const f = (x: number) => `${x > 0 ? '+' : ''}${x.toFixed(1)}`
+  const edge = pts(w.eloGap)
+  const rows: PartRow[] = [
+    { label: t('Elo rating'), h: String(w.eloHome), a: String(w.eloAway) },
+    { label: t('Rating edge (points)'), h: edge > 0 ? f(edge) : '0.0', a: edge < 0 ? f(-edge) : '0.0' },
+    { label: t('Home field (points)'), h: w.neutral ? '0.0' : f(pts(w.homeField)), a: '0.0' }
+  ]
+  if (w.restAdj[0] || w.restAdj[1]) rows.push({ label: t('Rest: bye or short week (points)'), h: f(pts(w.restAdj[0])), a: f(pts(w.restAdj[1])) })
+  if (w.qb[0] || w.qb[1]) rows.push({ label: t('Quarterback change (points)'), h: w.qb[0] && w.qb[0].reason !== 'same' ? f(pts(w.qb[0].adj)) : '0.0', a: w.qb[1] && w.qb[1].reason !== 'same' ? f(pts(w.qb[1].adj)) : '0.0' })
+  if (w.eff) {
+    rows.push({ label: t('Yards per play, gained minus allowed'), h: f(w.eff.yppHome), a: f(w.eff.yppAway) })
+    rows.push({ label: t('Turnover margin per game'), h: f(w.eff.toHome), a: f(w.eff.toAway) })
+  }
+  if (injuries) rows.push({ label: t('Players out (injury report)'), h: String(injuries.home.filter(i => OUT.test(i.status || '')).length), a: String(injuries.away.filter(i => OUT.test(i.status || '')).length) })
+  if (typeof p.margin === 'number') rows.push({ label: t('Expected margin'), h: f(p.margin), a: f(-p.margin) })
+  if (typeof p.pHome === 'number') rows.push({ label: t('Win chance'), h: `${Math.round(p.pHome)}%`, a: `${Math.round(p.pAway ?? 100 - p.pHome)}%` })
+  const lg = g.league || 1
+  return (
+    <ModelParts
+      home={<NameLink to={href.nflTeam(g.home.id)}>{nick(g.home.name, lg)}</NameLink>} away={<NameLink to={href.nflTeam(g.away.id)}>{nick(g.away.name, lg)}</NameLink>}
+      rows={rows}
+      total={typeof p.homePts === 'number' ? { label: t('Predicted points'), h: String(Math.round(p.homePts)), a: String(Math.round(p.awayPts ?? 0)) } : null}
+      note={w.blend
+        ? t('25 Elo points ≈ 1 point on the scoreboard. The rating margin is blended with efficiency (yards per play, turnovers) into the final margin; win chance from the margin. Model {0}.', { 0: p.model || nflModelOf(lg) })
+        : t('25 Elo points ≈ 1 point on the scoreboard; win chance from the expected margin. Model {0}.', { 0: p.model || nflModelOf(lg) })}
+    />
+  )
+}
+
+/** Before vs after: injury news or a new starting quarterback since our first prediction. */
+function ChangeCard({ g, x }: { g: Game; x: BeforeAfter }) {
+  const lg = g.league || 1
+  return (
+    <NewsChange
+      home={nick(g.home.name, lg)} away={nick(g.away.name, lg)} before={x.before} after={x.after}
+      players={x.players.map(pl => ({ id: pl.id, name: pl.name, side: pl.side, detail: [pl.position, pl.status].filter(Boolean).join(' · '), href: href.nflPlayer(pl.id) }))}
+      extra={x.qb.length ? (
+        <ul className="space-y-1">
+          {x.qb.map(c => <li key={c.side} className="text-sm text-ink"><span className={c.side === 'H' ? 'text-home font-semibold' : 'text-away font-semibold'}>{nick((c.side === 'H' ? g.home : g.away).name, lg)}</span> · {t('{0} starts at quarterback instead of {1}', { 0: c.now, 1: c.was })}</li>)}
+        </ul>
+      ) : undefined}
+    />
+  )
+}
+
+/** Likely starters: QB, RB, WR1-2, TE and the defence leaders, with the injury report status. */
+function Starters({ g, data }: { g: Game; data: { home: Starter[]; away: Starter[] } }) {
+  const lg = g.league || 1
+  return (
+    <Card title={t('Likely starters')} action={<span className="text-xs text-faint">{t('Season leaders by position')}</span>}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+        {(['home', 'away'] as const).map(s => (
+          <div key={s} className="min-w-0">
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`w-1 h-6 rounded-full ${s === 'home' ? 'bg-home' : 'bg-away'}`} />
+              <TeamLogo team={g[s]} size={22} />
+              <NameLink to={href.nflTeam(g[s].id)} className="font-display font-bold text-ink truncate">{nick(g[s].name, lg)}</NameLink>
+            </div>
+            {data[s].length === 0 ? <p className="text-sm text-faint">{t('No player stats yet this season.')}</p> : (
+              <ul className="divide-y divide-line/50">
+                {data[s].map(pl => (
+                  <li key={`${pl.position}${pl.id}`} className={`flex items-center gap-2.5 py-1.5 text-sm min-w-0 ${pl.out ? 'opacity-60' : ''}`}>
+                    <span className="w-14 shrink-0 text-[10px] font-bold uppercase tracking-wide text-faint">{t(pl.position)}</span>
+                    <span className="min-w-0 flex-1">
+                      <NameLink to={href.nflPlayer(pl.id)} className={`block truncate font-semibold ${pl.out ? 'line-through text-muted' : 'text-ink'}`}>{pl.name}</NameLink>
+                      {pl.line && <span className="block text-[11px] text-faint truncate">{pl.line}</span>}
+                    </span>
+                    {pl.status && <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${pl.out ? 'bg-loss/15 text-loss' : 'bg-draw/15 text-draw'}`}>{pl.status}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+/** Standings tab: the division (NFL) or conference (college) tables with both teams marked. */
+function StandingsTab({ g, data }: { g: Game; data: NonNullable<Data['standings']> }) {
+  const lg = g.league || 1
+  return (
+    <Card title={t('Standings')} action={<Link to={href.nflStandings(lg)} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
+      <div className="space-y-5">
+        {data.tables.map(tb => <StandTable key={`${tb.conference}|${tb.name}`} title={tb.name !== tb.conference ? `${tb.conference} · ${tb.name}` : tb.name} rows={tb.rows} highlight={[g.home.id, g.away.id]} league={lg} />)}
+      </div>
+    </Card>
+  )
+}
+
+/** Scoring plays (the provider's game events), in order with the running score. */
+function ScoringPlays({ g, list }: { g: Game; list: Play[] }) {
+  const lg = g.league || 1
+  let lastQ: string | null = null
+  return (
+    <Card title={t('Scoring plays')}>
+      <ul className="divide-y divide-line/50">
+        {list.map((e, i) => {
+          const qLabel = String(e.quarter ?? '')
+          const head = qLabel && qLabel !== lastQ ? qLabel : null
+          lastQ = qLabel
+          const sideH = e.team === g.home.id
+          return (
+            <li key={i} className="py-2">
+              {head && <div className="label pb-1">{/^\d$/.test(head) ? t('Q{0}', { 0: head }) : head}</div>}
+              <div className="flex items-start gap-3 text-sm min-w-0">
+                <span className="num w-12 shrink-0 text-xs text-faint pt-0.5">{e.minute || ''}</span>
+                <span className={`w-1.5 self-stretch rounded-full shrink-0 ${sideH ? 'bg-home' : 'bg-away'}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-ink font-semibold">{e.type || t('Score')}{e.player ? <> · <NameLink to={e.playerId ? href.nflPlayer(e.playerId) : null}>{e.player}</NameLink></> : null}</span>
+                  {e.comment && <span className="block text-xs text-muted">{e.comment}</span>}
+                  <span className="block text-[11px] text-faint">{e.teamName ? nick(e.teamName, lg) : ''}</span>
+                </span>
+                {e.score && <span className="num font-bold text-ink shrink-0">{e.score[0] ?? '–'}–{e.score[1] ?? '–'}</span>}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </Card>
   )
 }
 

@@ -3,6 +3,7 @@ import NameLink, { href } from '../../components/sport/NameLink'
 import { t } from '../../lib/i18n'
 import type { BbGame as Game } from '../../lib/bb'
 import { Card, TeamLogo } from './parts'
+import ModelParts from '../../components/sport/game/ModelParts'
 
 /** Extra sections of the basketball game page (Oct 2026): points markets, team comparison, players, model table. */
 
@@ -302,18 +303,12 @@ export function ModelTable({ g, model, ratings }: {
   rows.push({ label: t('Home court'), h: f(half), a: f(-half) })
   if (p.b2bHome || p.b2bAway) rows.push({ label: t('Back-to-back'), h: p.b2bHome ? f(-model.b2b / 2) : '0.0', a: p.b2bAway ? f(-model.b2b / 2) : '0.0' })
   if (p.injHome || p.injAway) rows.push({ label: t('Injuries'), h: f(-(p.injHome || 0)), a: f(-(p.injAway || 0)) })
+  // fix174: the shared parts table (NFL + college use it too)
   return (
-    <div className="mt-3">
-      <table className="w-full text-xs num">
-        <thead>
-          <tr className="text-faint"><th className="text-left font-semibold py-1">{t('Part')}</th><th className="text-right font-semibold w-20 truncate"><NameLink to={href.bbTeam(g.home.id)}>{g.home.name}</NameLink></th><th className="text-right font-semibold w-20 truncate"><NameLink to={href.bbTeam(g.away.id)}>{g.away.name}</NameLink></th></tr>
-        </thead>
-        <tbody>
-          {rows.map(x => <tr key={x.label} className="border-t border-line/40"><td className="py-1 text-muted font-sans">{x.label}</td><td className="text-right text-ink">{x.h}</td><td className="text-right text-ink">{x.a}</td></tr>)}
-          {p.score && <tr className="border-t border-line"><td className="py-1.5 font-sans font-bold text-ink">{t('Predicted points')}</td><td className="text-right font-bold text-home">{p.score.home}</td><td className="text-right font-bold text-away">{p.score.away}</td></tr>}
-        </tbody>
-      </table>
-      <p className="mt-2 text-[11px] text-faint">{t('Ratings are points per game compared with an average team. Model {0}, {1} games rated; possession ratings and pace adjust the final numbers slightly.', { 0: model.version, 1: model.gamesRated })}</p>
-    </div>
+    <ModelParts
+      home={<NameLink to={href.bbTeam(g.home.id)}>{g.home.name}</NameLink>} away={<NameLink to={href.bbTeam(g.away.id)}>{g.away.name}</NameLink>}
+      rows={rows} total={p.score ? { label: t('Predicted points'), h: String(p.score.home), a: String(p.score.away) } : null}
+      note={t('Ratings are points per game compared with an average team. Model {0}, {1} games rated; possession ratings and pace adjust the final numbers slightly.', { 0: model.version, 1: model.gamesRated })}
+    />
   )
 }

@@ -48,6 +48,8 @@ export interface NflPred {
   margin?: number; total?: number; homePts?: number; awayPts?: number
   strong?: boolean; hit?: boolean | null
   why?: NflWhy | null
+  /** fix174: live win chance + projected score while the game is on (numbers unlocked) */
+  live?: { pHome: number; pAway: number; score: { home: number; away: number }; total: number } | null
 }
 export interface NflWeek { key: string; label: string; first: string; last: string; games: number }
 export interface StandRow { team: NflSide; conference: string | null; division: string | null; level?: string | null; confW?: number; confL?: number; w: number; l: number; t: number; pct: number; pf: number; pa: number; diff: number; streak: string | null; games: number }

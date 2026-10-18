@@ -9,6 +9,7 @@ import { getPreview } from './matchPreview';
 import { bbPreview } from './bbPreview';
 import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
+import { nflPreview } from './nflGameExtras';
 import { slicer, yieldLoop } from './perf';
 
 /** slug = the URL (/predictions/<slug>); old = the fix125 URL, answered with a 301 to the slug (fix134) */
@@ -103,7 +104,11 @@ function* hubSteps(h: HubDef): Generator<void, Hub> {
     const fbs = league === 2 ? `AND (home_id IN (SELECT team_id FROM nfl_teams WHERE league = 2 AND level = 'FBS') OR away_id IN (SELECT team_id FROM nfl_teams WHERE league = 2 AND level = 'FBS'))` : '';
     const rows = db.prepare(`SELECT game_id AS id, kickoff, home_id AS hid, away_id AS aid, home_name AS home, away_name AS away, home_pts AS hs, away_pts AS as_, status FROM nfl_games
       WHERE league = ? AND kickoff >= ? AND kickoff <= ? AND (stage IS NULL OR stage NOT LIKE 'Pre%') AND (status IS NULL OR status NOT IN ('CANC','PST')) ${fbs} ORDER BY kickoff`).all(league, from, to) as any[];
-    games = rows.map(r => ({ id: r.id, kickoff: r.kickoff, home: r.home || 'TBD', away: r.away || 'TBD', score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null, preview: null, url: `/american-football/game/${r.id}`, homeUrl: r.hid ? `/american-football/team/${r.hid}` : null, awayUrl: r.aid ? `/american-football/team/${r.aid}` : null }));
+    // fix174: a preview per game, a yield between games (college weeks have 60+ games)
+    for (const r of rows) {
+      games.push({ id: r.id, kickoff: r.kickoff, home: r.home || 'TBD', away: r.away || 'TBD', score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null, preview: nflPreview(r.id), url: `/american-football/game/${r.id}`, homeUrl: r.hid ? `/american-football/team/${r.hid}` : null, awayUrl: r.aid ? `/american-football/team/${r.aid}` : null });
+      yield;
+    }
     if (!games.length) next = (db.prepare(`SELECT MIN(kickoff) AS d FROM nfl_games WHERE league = ? AND kickoff > ? AND (stage IS NULL OR stage NOT LIKE 'Pre%')`).get(league, to) as any)?.d || null;
   } else {
     const rows = db.prepare(`SELECT game_id AS id, kickoff, home_id AS hid, away_id AS aid, home_name AS home, away_name AS away, hs, as_, status FROM bb_games
