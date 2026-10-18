@@ -15,160 +15,16 @@ export const PARITY_REPORT: ParityReport = {
  "problems": [],
  "todo": [
   {
-   "key": "home.introStats",
-   "label": "First-visit stat tiles",
-   "sport": "basketball",
-   "reason": "the adapter passes no stat tiles (the record bands exist)"
-  },
-  {
-   "key": "home.introStats",
-   "label": "First-visit stat tiles",
-   "sport": "nfl",
-   "reason": "the adapter passes no stat tiles (record not public yet)"
-  },
-  {
-   "key": "games.leaguePanel",
-   "label": "League panel",
-   "sport": "basketball",
-   "reason": "no league panel in the games adapter (standings exist)"
-  },
-  {
-   "key": "games.leaguePanel",
-   "label": "League panel",
-   "sport": "nfl",
-   "reason": "no league panel in the games adapter (standings exist)"
-  },
-  {
-   "key": "game.howCalculated",
-   "label": "How we calculated it",
-   "sport": "nfl",
-   "reason": "no 'how we calculated' box (the model inputs are in the reasons)"
-  },
-  {
-   "key": "game.preview",
-   "label": "Match / game preview text",
-   "sport": "nfl",
-   "reason": "no written preview service for American football"
-  },
-  {
-   "key": "game.restTab",
-   "label": "Rest tab",
-   "sport": "nfl",
-   "reason": "no rest tab (rest days and bye / short week are in the model's reasons)"
-  },
-  {
-   "key": "game.standingsTab",
-   "label": "Standings tab",
-   "sport": "nfl",
-   "reason": "no standings tab (standings exist)"
-  },
-  {
-   "key": "game.liveChance",
-   "label": "Live win chance",
-   "sport": "nfl",
-   "reason": "no in-game win-chance model for American football yet"
-  },
-  {
    "key": "game.swingChart",
    "label": "Win-chance swing chart",
    "sport": "basketball",
    "reason": "no swing chart (bbLive's quarter model could feed one)"
   },
   {
-   "key": "game.swingChart",
-   "label": "Win-chance swing chart",
-   "sport": "nfl",
-   "reason": "needs an in-game model first"
-  },
-  {
-   "key": "game.highlights",
-   "label": "Video highlights",
-   "sport": "basketball",
-   "reason": "the highlights search is football-only"
-  },
-  {
-   "key": "game.highlights",
-   "label": "Video highlights",
-   "sport": "nfl",
-   "reason": "the highlights search is football-only"
-  },
-  {
-   "key": "team.ourRecord",
-   "label": "Our record on the team",
-   "sport": "nfl",
-   "reason": "admin-only until the NFL record goes public"
-  },
-  {
    "key": "team.miniTable",
    "label": "Mini table",
    "sport": "basketball",
    "reason": "only a link to the table (standings exist)"
-  },
-  {
-   "key": "team.miniTable",
-   "label": "Mini table",
-   "sport": "nfl",
-   "reason": "only the record line (standings exist)"
-  },
-  {
-   "key": "player.career",
-   "label": "Career",
-   "sport": "nfl",
-   "reason": "current season only (older seasons are admin-only data)"
-  },
-  {
-   "key": "player.injuries",
-   "label": "Injury history",
-   "sport": "nfl",
-   "reason": "the player page doesn't show the injury report (nfl_injuries has it)"
-  },
-  {
-   "key": "league.recordTile",
-   "label": "Record tile",
-   "sport": "nfl",
-   "reason": "admin-only until the NFL record goes public"
-  },
-  {
-   "key": "league.logo",
-   "label": "League logo",
-   "sport": "nfl",
-   "reason": "no league logo stored (the provider's /leagues has one)"
-  },
-  {
-   "key": "search.leagues",
-   "label": "Search: leagues",
-   "sport": "nfl",
-   "reason": "search returns no NFL / college league"
-  },
-  {
-   "key": "seo.crawler.player",
-   "label": "Crawler page: player",
-   "sport": "football",
-   "reason": "no player crawler page (only the not-found one)"
-  },
-  {
-   "key": "seo.crawler.player",
-   "label": "Crawler page: player",
-   "sport": "basketball",
-   "reason": "player pages get the generic basketball page"
-  },
-  {
-   "key": "seo.sitemap.player",
-   "label": "Sitemap: players",
-   "sport": "football",
-   "reason": "no player sitemap"
-  },
-  {
-   "key": "seo.sitemap.player",
-   "label": "Sitemap: players",
-   "sport": "basketball",
-   "reason": "no player sitemap"
-  },
-  {
-   "key": "seo.sitemap.player",
-   "label": "Sitemap: players",
-   "sport": "nfl",
-   "reason": "no player sitemap"
   }
  ],
  "na": [
@@ -191,6 +47,11 @@ export const PARITY_REPORT: ParityReport = {
    "key": "game.lineups",
    "sport": "nfl",
    "reason": "the providers have no line-ups (basketball box scores only flag starters; American football only the starting QB, shown in the reasons)"
+  },
+  {
+   "key": "league.logo",
+   "sport": "nfl",
+   "reason": "the provider's NFL / college league images are its 'image not available' placeholder"
   }
  ]
 }

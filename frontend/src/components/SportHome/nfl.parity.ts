@@ -4,6 +4,7 @@ import type { ParityProvides } from '../../lib/sportParity'
 export const PARITY_PROVIDES: ParityProvides = {
   sport: 'nfl',
   keys: [
+    'home.introStats',
     'home.record',
     'home.results',
     'home.special',

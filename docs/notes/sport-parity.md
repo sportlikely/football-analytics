@@ -1,5 +1,7 @@
 # Sport parity (fix175, 18 Oct 2026)
 
+**fix174 (19 Oct) closed 24 of the 26 known gaps** (NFL game page: how we calculated, preview, rest + standings tabs, live chance + swing chart, highlights; NFL record on team / league, mini table, player career + injuries, search leagues; first-visit tiles and league panel for basketball + NFL; highlights for basketball; player crawler pages + player sitemap). NFL league logo is now 'na' (the provider has only a placeholder). Still open: basketball swing chart, basketball team mini table.
+
 Football is the template: every block on a football page exists on the same page of every sport. The list of blocks is
 `frontend/src/lib/sportParity.ts`; each sport says what it feeds in `*.parity.ts` files next to its adapters
 (`components/SportHome/<sport>.parity.ts`, `components/sport/games/<sport>.parity.ts`, `pages/football.parity.ts`,
