@@ -14,7 +14,7 @@ import { predictGameCached, teamRating, isPreseason, leagueRatings, BB_MODEL, le
 import { nbaInjuries } from './bbInjuries';
 import { bbSquad, nbaBoxExtras } from './bbPlayers';
 import { personKey } from './bdl';
-import { bbLiveFor, periodLen } from './bbLive';
+import { bbLiveFor, periodLen, bbLiveCurve } from './bbLive';
 import { bbProbableLineup, bbBeforeAfter } from './bbLineups';
 
 export const bbPublic = () => process.env.BASKETBALL_PUBLIC === '1';
@@ -390,6 +390,8 @@ export async function bbGame(id: number, full: boolean) {
     standings,
     markets: mk,
     lineups: lineups && (lineups.home || lineups.away) ? lineups : null,
+    // fix178: the swing chart (live and finished games; numbers unlocked)
+    liveCurve: open && game.state !== 'upcoming' ? bbLiveCurve(id) : [],
     beforeAfter,
     model: info ? { version: info.version, avgPoints: Math.round(info.avgPoints * 10) / 10, homeEdge: Math.round(((pr as any)?.hca ?? info.homeEdge) * 10) / 10, b2b: info.b2b, gamesRated: info.gamesRated } : null,
     players

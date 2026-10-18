@@ -192,6 +192,10 @@ async function syncLeague(l: (typeof BB_LEAGUES)[number]) {
 const FINISHED = new Set(['FT', 'AOT']);
 
 /** Store games from API-Basketball (insert or update; the box-score flag of a stored game is kept). */
+/** fix178: called after every store of games (bbLive.ts keeps the swing-chart samples); set once at start-up. */
+let storedHook: ((ids: number[]) => void) | null = null;
+export const setBbStoredHook = (fn: (ids: number[]) => void) => { storedHook = fn; };
+
 function upsertGames(code: string, leagueId: number, season: string, list: any[]) {
   const up = db.prepare(`
     INSERT INTO bb_games (game_id, code, league_id, season, stage, kickoff, status, home_id, home_name, home_logo,
@@ -225,6 +229,11 @@ function upsertGames(code: string, leagueId: number, season: string, list: any[]
     throw e;
   }
   applyResultFixes(); // our corrections win over the provider's numbers (services/bbResults.ts)
+  // live and just-finished games: one win-chance sample each (the swing chart)
+  if (storedHook) {
+    const ids = list.filter(g => g.id && !['NS', 'TBD', 'POST', 'CANC', 'ABD', 'AWD'].includes(g.status?.short)).map(g => Number(g.id));
+    if (ids.length) { try { storedHook(ids); } catch { /* optional */ } }
+  }
   return { n, done };
 }
 

@@ -41,7 +41,7 @@ export const PARITY = [
   { key: 'game.restTab', label: 'Rest tab', football: true, basketball: true, nfl: true },
   { key: 'game.standingsTab', label: 'Standings tab', football: true, basketball: true, nfl: true },
   { key: 'game.liveChance', label: 'Live win chance', football: true, basketball: true, nfl: true },
-  { key: 'game.swingChart', label: 'Win-chance swing chart', football: true, basketball: "todo: no swing chart (bbLive's quarter model could feed one)", nfl: true },
+  { key: 'game.swingChart', label: 'Win-chance swing chart', football: true, basketball: true, nfl: true },
   { key: 'game.events', label: 'Events / quarter strip', football: true, basketball: true, nfl: true },
   { key: 'game.stats', label: 'Game stats', football: true, basketball: true, nfl: true },
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true },
@@ -54,7 +54,7 @@ export const PARITY = [
   { key: 'team.ourRecord', label: 'Our record on the team', football: true, basketball: true, nfl: true },
   { key: 'team.squad', label: 'Squad', football: true, basketball: true, nfl: true },
   { key: 'team.fixtures', label: 'Fixtures', football: true, basketball: true, nfl: true },
-  { key: 'team.miniTable', label: 'Mini table', football: true, basketball: 'todo: only a link to the table (standings exist)', nfl: true },
+  { key: 'team.miniTable', label: 'Mini table', football: true, basketball: true, nfl: true },
   { key: 'team.news', label: 'Team news', football: true, basketball: true, nfl: true },
   /* ---------- player page ---------- */
   { key: 'player.stats', label: 'Player stats', football: true, basketball: true, nfl: true },

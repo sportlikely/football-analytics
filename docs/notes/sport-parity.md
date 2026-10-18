@@ -1,6 +1,22 @@
 # Sport parity (fix175, 18 Oct 2026)
 
-**fix174 (19 Oct) closed 24 of the 26 known gaps** (NFL game page: how we calculated, preview, rest + standings tabs, live chance + swing chart, highlights; NFL record on team / league, mini table, player career + injuries, search leagues; first-visit tiles and league panel for basketball + NFL; highlights for basketball; player crawler pages + player sitemap). NFL league logo is now 'na' (the provider has only a placeholder). Still open: basketball swing chart, basketball team mini table.
+**Status 19 Oct (fix174 + fix178): zero known gaps (no 'todo' left).** fix174 closed 24 of fix175's 26 gaps; fix178 the last two
+(basketball swing chart from live samples, basketball team mini table).
+
+## Not applicable — for Yarin to approve
+
+| Block | Sport | Why |
+|---|---|---|
+| League logo | NFL + college | The provider's NFL and college league images are its 'image not available' placeholder (the same 29 KB file for both); we have no licensed mark. The pages show no logo rather than the placeholder. |
+
+## Built in the closest way the data allows (provider gaps)
+
+- **Line-ups:** no provider has basketball or American-football line-ups. Basketball: probable starting five = the last game's starters (box-score flag) who play 12+ min, minus players out, on a court. NFL / college: likely starters = season leaders by position from our box scores (no depth chart).
+- **College FCS rosters:** the provider has none (Lehigh, UT Martin, Montana State…); the team page shows the team's season leaders from box scores instead.
+- **Events:** basketball has no play-by-play → the game by quarter (points + running margin). NFL / college: scoring plays from games/events when the provider has them (current season, fetched with the box score), else the quarter strip.
+- **Injuries:** reports exist for the NBA (ESPN) and the NFL / college (provider); other basketball leagues show no injury block (hidden, never empty).
+- **Highlights:** YouTube via the official league / club / broadcaster channels (needs YOUTUBE_API_KEY); a game without an official video shows "no official highlight yet".
+
 
 Football is the template: every block on a football page exists on the same page of every sport. The list of blocks is
 `frontend/src/lib/sportParity.ts`; each sport says what it feeds in `*.parity.ts` files next to its adapters

@@ -80,7 +80,8 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   30 min, live every 30 s during games, box scores after full time, standings 6 h, injuries 2 h, rosters daily; every job
   checks the day's quota), `nflSite.ts` (pages: weeks, game, standings, team + rule-based team analysis, player, leaders),
   `/api/nfl/*`, `/api/admin/nfl-probe`. fix174: `nflLive.ts` (live win chance, projected score, swing-chart samples per live tick),
-  `nflGameExtras.ts` (schedule & rest, standings, likely starters, numbers changed, written preview, scoring plays), `nfl_player_games` (career index). **`NFL_PUBLIC=1`** opens /american-football to everyone (admins see it before);
+  `nflGameExtras.ts` (schedule & rest, standings, likely starters, numbers changed, written preview, scoring plays), `nfl_player_games` (career index).
+  Basketball swing chart: `bbLive.ts` keeps `bb_live_samples` (fix178). `npm run parity` (frontend) must show zero 'todo'. **`NFL_PUBLIC=1`** opens /american-football to everyone (admins see it before);
   past seasons stay admin-only. Frontend `pages/nfl/*`, `lib/nfl.ts`.
 - Accounts & admin: `auth.ts`, `twoFactor.ts`, `roles.ts`, `staffConsole.ts`, `securityLog.ts`, `crm.ts`, `billing.ts`
   (plans since fix147: Premium $8.99 / 6 months $48.49 / year $86.29 (60 unlocks a month), Pro $14.99 / $80.99 / $143.99

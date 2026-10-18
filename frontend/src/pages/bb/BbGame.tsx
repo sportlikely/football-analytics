@@ -20,6 +20,7 @@ import WinnerPrediction, { type WhyRow } from '../../components/sport/game/Winne
 import GamePreview from '../../components/sport/game/GamePreview'
 import Court, { type CourtPlayer } from '../../components/sport/game/Court'
 import NewsChange from '../../components/sport/game/NewsChange'
+import { SwingChart } from '../../components/sport/game/LiveChance'
 import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 
@@ -52,6 +53,8 @@ interface Detail {
   writeup?: string | null
   /** fix174: probable starting five, bench and players out; NBA: the prediction before the injury report */
   lineups?: { home: LineupSide | null; away: LineupSide | null } | null
+  /** fix178: the swing chart (home win % through the game; numbers unlocked) */
+  liveCurve?: { t: number; p: number }[]
   beforeAfter?: { before: { pHome: number; pAway: number }; after: { pHome: number; pAway: number }; players: { id: number; name: string; status: string; points: number; side: 'H' | 'A' }[] } | null
 }
 interface LineupSide { from: string; starters: CourtPlayer[]; bench: CourtPlayer[]; out: CourtPlayer[] }
@@ -221,6 +224,7 @@ export default function BbGame() {
       ) : undefined}
       afterHero={<>
         {live && <LiveChanceBox g={g} />}
+        <BbSwing d={d} />
         {g.corrected && done && <p className="mt-2 text-center text-[11px] text-faint">{t('Final score corrected by us: our data provider had it wrong.')}</p>}
         {access === 'admin' && done && <ResultAdmin game={g} onDone={() => axios.get(`${API_URL}/basketball/game/${id}`).then(r => setD(r.data.data)).catch(() => undefined)} />}
       </>}
@@ -491,6 +495,19 @@ function ResultAdmin({ game, onDone }: { game: Game; onDone: () => void }) {
           {msg && <span className="text-muted">{msg}</span>}
         </div>
       )}
+    </div>
+  )
+}
+
+/** fix178: the swing chart — the home team's win chance through the game (live and after the final buzzer). */
+function BbSwing({ d }: { d: Detail }) {
+  const g = d.game
+  const { hidden } = useReveal(rid(g), rstatus(g), !!g.prediction && !g.prediction.locked)
+  const curve = d.liveCurve || []
+  if (hidden || !g.prediction || g.prediction.locked || curve.length < 2) return null
+  return (
+    <div className="mt-3 rounded-2xl border border-line/60 bg-surface/60 p-3 sm:p-4">
+      <SwingChart points={curve} home={g.home.name} away={g.away.name} live={g.state === 'live'} />
     </div>
   )
 }

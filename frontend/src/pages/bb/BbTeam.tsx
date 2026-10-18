@@ -7,6 +7,7 @@ import { t, LOCALE } from '../../lib/i18n'
 import { useBbConfig, bbTeamFav, type BbGame } from '../../lib/bb'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { GameList, Skeleton } from './parts'
+import { StandingsTable, type Standings } from './BbLeague'
 import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
 import { BbTeamAnalysisCard, TeamRecordCard, type BbAnalysis } from '../../components/TeamAnalysis'
 
@@ -133,6 +134,7 @@ export default function BbTeam() {
           </>
         )}
         {d.teamAnalysis && <TeamRecordCard rec={d.teamAnalysis.record} teamName={d.team.name} sport="basketball" />}
+        <MiniTable code={league?.code ?? d.team.league} teamId={d.team.id} name={league?.name ?? d.team.league} />
         <Card title={t('Next games')}><GameList games={d.next} empty={t('No games scheduled.')} /></Card>
         <Card title={t('Latest results')}><GameList games={d.recent.filter(g => g.state === 'done')} empty={t('No results yet.')} /></Card>
         {(news === null || news === undefined || news.length > 0) && (
@@ -232,6 +234,26 @@ function SquadCard({ players }: { players: SquadPlayer[] }) {
         </table>
       </div>
       <p className="mt-3 text-[11px] text-faint">{t('Grey tag: no games this season yet, so the numbers are from his last season in our leagues. Tap a player for his page.')}{adv ? ' ' + t('PIE, usage and net rating: season figures from the NBA (last season until the new one starts).') : ''}</p>
+    </Card>
+  )
+}
+
+/** fix178: the team's place in its league table (football's mini table): the group holding it, a few rows around. */
+function MiniTable({ code, teamId, name }: { code: string; teamId: number; name: string }) {
+  const [data, setData] = useState<Standings | null>(null)
+  useEffect(() => {
+    let off = false
+    setData(null)
+    axios.get(`${API_URL}/basketball/standings/${code}`).then(r => { if (!off) setData(r.data.data || null) }).catch(() => undefined)
+    return () => { off = true }
+  }, [code])
+  const gr = data?.groups.find(x => x.rows.some(r => r.team.id === teamId))
+  if (!gr) return null
+  const i = gr.rows.findIndex(r => r.team.id === teamId)
+  const from = Math.max(0, Math.min(i - 3, gr.rows.length - 7))
+  return (
+    <Card title={<NameLink to={href.bbLeague(code)}>{gr.name && gr.name !== name ? `${name} · ${gr.name}` : name}</NameLink>} action={<Link to={`/basketball/league/${code}`} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
+      <StandingsTable data={{ season: data!.season, groups: [{ ...gr, rows: gr.rows.slice(from, from + 7) }] }} mark={[teamId]} />
     </Card>
   )
 }

@@ -16,7 +16,7 @@
  * The same test on every league with bb-v3's own walk-forward predictions: /api/bb/live-test (admin).
  */
 import { db } from '../db';
-import { BB_LEAGUES } from './basketball';
+import { BB_LEAGUES, setBbStoredHook } from './basketball';
 import { bbWalkForward, leagueModelInfo, normCdf, normInv } from './bbModel';
 
 export const BB_LIVE_CONF = { a: 0.7, b: -0.4 };
@@ -73,6 +73,49 @@ export function bbLiveFor(g: { code: string; status: string | null; timer: numbe
   const ph = Math.round(r.pHome * 1000) / 10;
   return { pHome: ph, pAway: r1(100 - ph), score: { home: Math.round(r.home), away: Math.round(r.away) }, total: Math.round(r.home + r.away), left: Math.round(left * 1000) / 1000 };
 }
+
+/* ---------------- fix178: swing chart (samples per live tick) ---------------- */
+
+db.exec(`CREATE TABLE IF NOT EXISTS bb_live_samples (game_id INTEGER NOT NULL, t REAL NOT NULL, p REAL NOT NULL, hs INTEGER, as_ INTEGER, PRIMARY KEY (game_id, t))`);
+const BB_DONE = new Set(['FT', 'AOT']);
+function preOf(id: number): BbLiveIn | null {
+  const p = db.prepare(`SELECT p_home, home_pts, away_pts FROM bb_predictions WHERE game_id = ?`).get(id) as any;
+  return p ? { pHome: p.p_home, home: p.home_pts, away: p.away_pts } : null;
+}
+/** One sample per game and store of games: t = share of regulation played (overtime past 1), p = home win %. */
+function sampleBb(ids: number[]) {
+  const row = db.prepare(`SELECT game_id, code, status, timer, quarters, hs, as_ FROM bb_games WHERE game_id = ?`);
+  const put = db.prepare(`INSERT OR REPLACE INTO bb_live_samples (game_id, t, p, hs, as_) VALUES (?, ?, ?, ?, ?)`);
+  const hasAny = db.prepare(`SELECT MAX(t) AS t FROM bb_live_samples WHERE game_id = ?`);
+  for (const id of ids) {
+    const g = row.get(id) as any;
+    if (!g) continue;
+    const pre = preOf(id);
+    if (!pre) continue;
+    let q: any = null; try { q = JSON.parse(g.quarters || 'null'); } catch { q = null; }
+    if (BB_DONE.has(g.status)) {
+      // the final point, once, and only for a game sampled live (no made-up curves)
+      const last = (hasAny.get(id) as any)?.t;
+      if (last == null) continue;
+      const won = Number(g.hs) > Number(g.as_);
+      put.run(id, Math.round((Math.max(1, last) + 0.001) * 1000) / 1000, won ? 99.9 : 0.1, g.hs, g.as_);
+      continue;
+    }
+    const live = bbLiveFor({ code: g.code, status: g.status, timer: g.timer, quarters: q, hs: g.hs, as_: g.as_ }, pre);
+    if (!live) continue;
+    // overtime (5 min) sits just past 1: the further into it, the further right
+    const t = g.status === 'OT' ? 1 + Math.max(0, 5 / (4 * periodLen(g.code)) - live.left) : 1 - live.left;
+    put.run(id, Math.round(t * 1000) / 1000, live.pHome, g.hs, g.as_);
+  }
+}
+/** The swing chart of a game: tip-off (the saved prediction), the samples, the result. */
+export function bbLiveCurve(id: number): { t: number; p: number }[] {
+  const pre = preOf(id);
+  if (!pre) return [];
+  const rows = db.prepare(`SELECT t, p FROM bb_live_samples WHERE game_id = ? ORDER BY t`).all(id) as any[];
+  return rows.length ? [{ t: 0, p: Math.round(pre.pHome * 1000) / 10 }, ...rows.map(r => ({ t: r.t, p: r.p }))] : [];
+}
+setBbStoredHook(ids => { try { sampleBb(ids); } catch { /* optional */ } });
 
 /* ---------------- quarter test (admin) ---------------- */
 

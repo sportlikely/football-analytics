@@ -13,20 +13,7 @@ export const PARITY_REPORT: ParityReport = {
  "gaps": [],
  "propGaps": [],
  "problems": [],
- "todo": [
-  {
-   "key": "game.swingChart",
-   "label": "Win-chance swing chart",
-   "sport": "basketball",
-   "reason": "no swing chart (bbLive's quarter model could feed one)"
-  },
-  {
-   "key": "team.miniTable",
-   "label": "Mini table",
-   "sport": "basketball",
-   "reason": "only a link to the table (standings exist)"
-  }
- ],
+ "todo": [],
  "na": [
   {
    "key": "league.logo",
