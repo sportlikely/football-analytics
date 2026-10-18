@@ -10,7 +10,7 @@ import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import YourPicks from '../../components/YourPicks'
 import { newerWinnerLive } from '../../lib/liveState'
 import { StatBars, LeagueSwitch } from './parts'
-import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, type GameTab } from '../../components/sport/game/GamePage'
+import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 
 type Box = {
@@ -117,6 +117,12 @@ export default function NflGame() {
         kind: live ? 'live' : done ? 'done' : g.state === 'off' ? 'halted' : 'upcoming',
         text: NFL_STATUS[g.status] || (g.state === 'upcoming' ? t('KICK-OFF') : g.status)
       }}
+      scoreSub={(() => { const ht = live || done ? halfTimeOf(g.quarters) : null; return ht ? <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div> : undefined })()}
+      statusNote={g.state === 'off' ? (
+        <p className="mt-2 max-w-[260px] mx-auto text-[11px] text-muted">
+          {/CANC/.test(g.status) ? t('This game was cancelled. It does not count in our record.') : t('This game was postponed. Our prediction stays until the new date.')}
+        </p>
+      ) : undefined}
       pickVar={p && !p.locked && p.pick ? (p.pick === 'H' ? '--home' : '--away') : null}
       footer={(showQ || g.venue) ? (
         <>

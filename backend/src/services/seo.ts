@@ -3,14 +3,37 @@ import { isMissingPlayer } from './missingPlayers';
 import { BB_LEAGUES } from './basketball';
 import { bbPublic } from './bbSite';
 import { FONT_HEAD } from './fonts';
-import { getPreview, firstSentence, matchTitle, previewDates, previewFacts } from './matchPreview';
+import { getPreview, firstSentence, matchTitle, previewDates, previewFacts as previewFactsRaw } from './matchPreview';
 import { bbPreview } from './bbPreview';
 import { nflCurrentSeason, schoolName, HIDE_OTHER } from './nfl';
-import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame, nflStandings, nflTeam, nflPlayer, leagueOfTeamId, type NflGame } from './nflSite';
+import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame as nflGameRaw, nflStandings, nflTeam as nflTeamRaw, nflPlayer as nflPlayerRaw, leagueOfTeamId, type NflGame } from './nflSite';
 import { listGuides, getGuide } from './guides';
 import { HUBS, hubBySlug, hubByOld, hubForCode, hubOpen, buildHub, hubDescription, hubRange } from './hubs';
 import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, ui, longDate } from './seoText';
-import { fbLast, fbNext, fbH2h, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById, bbLast, bbNext, bbH2h, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName, BbGameRow } from './seoFacts';
+import { fbLast as fbLastRaw, fbNext as fbNextRaw, fbH2h as fbH2hRaw, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById as bbGameByIdRaw, bbLast as bbLastRaw, bbNext as bbNextRaw, bbH2h as bbH2hRaw, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName as bbTeamNameRaw, BbGameRow } from './seoFacts';
+
+/*
+ * fix175: the crawler pages' data, cached 10 minutes by function + arguments — never by language, so /it/match/1,
+ * /de/match/1 and /match/1 share one lookup (18 Oct 19:02: one /it/match page blocked the server 3.7 s). Only the
+ * text differs per language and that part is cheap.
+ */
+const MEMO_TTL = 10 * 60 * 1000;
+const memoStore = new Map<string, { at: number; v: unknown }>();
+function memo<A extends unknown[], R>(name: string, fn: (...a: A) => R): (...a: A) => R {
+  return (...a: A) => {
+    const key = `${name}|${JSON.stringify(a)}`;
+    const hit = memoStore.get(key), now = Date.now();
+    if (hit && now - hit.at < MEMO_TTL) return hit.v as R;
+    const v = fn(...a);
+    memoStore.set(key, { at: now, v });
+    if (memoStore.size > 6000) for (const [k, x] of memoStore) { if (now - x.at >= MEMO_TTL || memoStore.size > 5000) memoStore.delete(k); else break; }
+    return v;
+  };
+}
+const fbLast = memo('fbLast', fbLastRaw), fbNext = memo('fbNext', fbNextRaw), fbH2h = memo('fbH2h', fbH2hRaw);
+const bbGameById = memo('bbGameById', bbGameByIdRaw), bbLast = memo('bbLast', bbLastRaw), bbNext = memo('bbNext', bbNextRaw), bbH2h = memo('bbH2h', bbH2hRaw), bbTeamName = memo('bbTeamName', bbTeamNameRaw);
+const previewFacts = memo('previewFacts', previewFactsRaw);
+const nflGame = memo('nflGame', nflGameRaw), nflTeam = memo('nflTeam', nflTeamRaw), nflPlayer = memo('nflPlayer', nflPlayerRaw);
 
 /**
  * Search engines (Oct 2026). The site is a single-page app, so every address used to send the same empty page with
@@ -63,7 +86,8 @@ const fbRow = (r: any): FbMatch => ({ id: r.match_id, date: r.utc_date, code: r.
 const FB_COLS = `match_id, MAX(utc_date) AS utc_date, MAX(competition_code) AS competition_code, MAX(competition_name) AS competition_name,
   MAX(home_team_id) AS home_team_id, MAX(home_team) AS home_team, MAX(away_team_id) AS away_team_id, MAX(away_team) AS away_team`;
 
-function fbMatch(id: number): FbMatch | null {
+const fbMatch = memo('fbMatch', fbMatchRaw);
+function fbMatchRaw(id: number): FbMatch | null {
   const r = db.prepare(`SELECT ${FB_COLS} FROM predictions WHERE match_id = ? GROUP BY match_id`).get(id) as any;
   return r && r.home_team ? fbRow(r) : null;
 }
@@ -81,7 +105,8 @@ function fbCompetitions(): { code: string; name: string }[] {
   const from = new Date(Date.now() - 120 * 86400000).toISOString();
   return (db.prepare(`SELECT competition_code AS code, MAX(competition_name) AS name FROM predictions WHERE utc_date >= ? AND competition_code IS NOT NULL GROUP BY competition_code ORDER BY COUNT(*) DESC`).all(from) as any[]).filter(r => r.name);
 }
-function fbTeamName(id: number): string | null {
+const fbTeamName = memo('fbTeamName', fbTeamNameRaw);
+function fbTeamNameRaw(id: number): string | null {
   const r = db.prepare(`SELECT CASE WHEN home_team_id = ? THEN home_team ELSE away_team END AS name FROM predictions WHERE home_team_id = ? OR away_team_id = ? ORDER BY utc_date DESC LIMIT 1`).get(id, id, id) as any;
   return r?.name || null;
 }

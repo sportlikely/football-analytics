@@ -28,7 +28,7 @@ export interface Database {
 const sqlite = require('node:sqlite') as { DatabaseSync: new (file: string) => Database };
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
-const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'bet-to-beat.sqlite');
+export const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'bet-to-beat.sqlite');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 

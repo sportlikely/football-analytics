@@ -198,3 +198,11 @@ export default function GamePage(p: GamePageProps) {
     </div>
   )
 }
+
+/** fix175: half-time score from quarter scores (basketball, NFL), shown under the score like football's "HT 1–0". */
+export function halfTimeOf(q: { home: (number | null)[]; away: (number | null)[] } | null | undefined): { home: number; away: number } | null {
+  if (!q || q.home.length < 2 || q.away.length < 2 || [q.home[0], q.home[1], q.away[0], q.away[1]].some(x => x === null || x === undefined)) return null
+  // only once the third quarter has started (or the game is over): the caller passes the quarters it shows
+  if (q.home[2] === null || q.home[2] === undefined) return null
+  return { home: (q.home[0] as number) + (q.home[1] as number), away: (q.away[0] as number) + (q.away[1] as number) }
+}

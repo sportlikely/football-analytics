@@ -6,7 +6,7 @@ import { runLinkCheck, lastLinkCheck, linkCheckTick } from './services/linkCheck
 import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
 import { sendMail as sendMailFix168 } from './services/email';
-import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches } from './services/perf';
+import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
 import { Server } from 'socket.io';
@@ -78,6 +78,7 @@ import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuali
 import { db } from './db';
 import { trackVisit, visitorStats } from './services/visitors';
 import { startGeo, geoCredit, countryOf } from './services/geo';
+import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
 import { hubBySlug, hubByOld, hubOpen, buildHub, warmHubs, HUBS } from './services/hubs';
@@ -181,7 +182,7 @@ app.use(express.json());
 // fix158: every API request in flight is a named job in /api/perf (a freeze inside a handler names its route).
 // fix167: every request, not only /api (search-engine pages and sitemaps are built on this thread too)
 app.use((req, res, next) => {
-  const done = track(routeLabel(req.method, req.path));
+  const done = track(routeLabel(req.method, req.path), requestDetail(req.path, req.query as any));
   res.on('finish', done);
   res.on('close', done);
   next();
@@ -2657,6 +2658,8 @@ app.get('/api/admin/link-check', async (req, res) => {
 every('link check', linkCheckTick, 3600 * 1000).unref();
 // fix169: the weekly prediction hubs are rebuilt in the background (visitors and crawlers get the cached copy)
 every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
+// fix175: indexes for the crawler pages, built off the main thread
+after('db indexes', () => ensureIndexes(), 20 * 1000).unref();
 after('hub warm', () => warmHubs(), 60 * 1000).unref();
 after('link check', () => linkCheckTick(), 10 * 60 * 1000).unref();
 

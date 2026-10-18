@@ -1881,5 +1881,7 @@
  "Buy": "Acheter",
  "Pack picks never expire and work in every sport. They are used after your free picks (and Premium's monthly unlocks). A pick that was used is not refunded.": "Les pronostics des packs n'expirent jamais et valent pour tous les sports. Ils sont utilisés après tes pronostics gratuits (et les déblocages mensuels de Premium). Un pronostic utilisé n'est pas remboursé.",
  "One pick at {0}, or {1} with Premium.": "Un pronostic à {0}, ou {1} avec Premium.",
- "Packs of {0} picks.": "Packs de {0} pronostics."
+ "Packs of {0} picks.": "Packs de {0} pronostics.",
+ "This game was cancelled. It does not count in our record.": "Ce match a été annulé. Il ne compte pas dans notre bilan.",
+ "This game was postponed. Our prediction stays until the new date.": "Ce match a été reporté. Notre pronostic reste valable jusqu'à la nouvelle date."
 }

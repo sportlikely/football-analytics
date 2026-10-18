@@ -15,10 +15,10 @@ import logger from '../utils/logger';
  * 3090 ms" on 17 Oct). Jobs and requests that ran 50 ms or more are remembered for a few seconds, and garbage-collection
  * pauses too (perf_hooks 'gc'): a stall names everything that ran during it, with how long ("gc major 812 ms").
  */
-const recent: { label: string; start: number; end: number }[] = [];
-const noteRun = (label: string, start: number, end: number) => {
+const recent: { label: string; start: number; end: number; detail?: string }[] = [];
+const noteRun = (label: string, start: number, end: number, detail?: string) => {
   if (end - start < 50) return;
-  recent.push({ label, start, end });
+  recent.push({ label, start, end, detail });
   if (recent.length > 64) recent.shift();
 };
 try {
@@ -65,7 +65,8 @@ setInterval(() => {
   }
   if (lag > 300) {
     const running = runningLabel();
-    const done = ended.slice(0, 4).map(r => `${r.label} ${Math.round(r.end - r.start)} ms`).join(' + ');
+    // fix175: a request carries its full path (ids kept, only the c / n query values) — "http GET /it/* [/it/team/86] 3773 ms"
+    const done = ended.slice(0, 4).map(r => `${r.label}${r.detail ? ` [${r.detail}]` : ''} ${Math.round(r.end - r.start)} ms`).join(' + ');
     const job = [running, done].filter(Boolean).join(' + ') || null;
     stalls.push({ at: new Date(now).toISOString(), ms: lag, job });
     if (stalls.length > 100) stalls.shift();
@@ -155,7 +156,7 @@ export const setJob = (label: string | null) => {
  * fix158: an API request in flight counts as a running job ("http GET /api/nfl/games"), so a freeze inside a request
  * handler is named too. Ids in the path become ":id" (one label per route). Returns the "done" call.
  */
-export function track(label: string): () => void {
+export function track(label: string, detail?: string): () => void {
   active.set(label, (active.get(label) || 0) + 1);
   const t0 = Date.now();
   let ended = false;
@@ -169,8 +170,13 @@ export function track(label: string): () => void {
     if (jobs.size > 400) for (const k of [...jobs.keys()].filter(k => k.startsWith('http ')).slice(0, 100)) jobs.delete(k);
     const n = (active.get(label) || 1) - 1;
     if (n > 0) active.set(label, n); else active.delete(label);
-    noteRun(label, t0, t0 + ms);
+    noteRun(label, t0, t0 + ms, detail);
   };
+}
+/** fix175: the path of a request for the slow-request log: ids stay, query values only for c and n (team page). */
+export function requestDetail(path: string, query: Record<string, unknown>): string {
+  const q = ['c', 'n'].filter(k => typeof query[k] === 'string' && query[k]).map(k => `${k}=${String(query[k]).slice(0, 40)}`).join('&');
+  return `${path.slice(0, 160)}${q ? `?${q}` : ''}`;
 }
 /** fix167: pages outside /api (search-engine HTML, sitemaps, files) go by their first part: "http GET /team/*" */
 export const routeLabel = (method: string, path: string) => path.startsWith('/api/')

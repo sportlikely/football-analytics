@@ -14,7 +14,7 @@ import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import type { Standings } from './BbLeague'
 import { StatsTab, RestTab, H2HTab, StandingsTab } from './GameTabs'
 import { MarketsCard, CompareCard, PlayersCard, ModelTable, type Markets, type ModelInfo, type GamePlayer } from './GameExtras'
-import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, type GameTab } from '../../components/sport/game/GamePage'
+import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 
 export interface Avg {
@@ -165,6 +165,12 @@ export default function BbGame() {
         kind: live ? 'live' : done ? 'done' : g.state === 'off' ? 'halted' : 'upcoming',
         text: live ? liveLabel(g) : done ? (BB_STATUS[g.status] || t('Final')) : g.state === 'off' ? (BB_STATUS[g.status] || g.status) : t('TIP-OFF')
       }}
+      scoreSub={(() => { const ht = live || done ? halfTimeOf(g.quarters) : null; return ht ? <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div> : undefined })()}
+      statusNote={g.state === 'off' ? (
+        <p className="mt-2 max-w-[260px] mx-auto text-[11px] text-muted">
+          {/CANC|ABD/.test(g.status) ? t('This game was cancelled. It does not count in our record.') : t('This game was postponed. Our prediction stays until the new date.')}
+        </p>
+      ) : undefined}
       pickVar={pick === 'H' ? '--home' : pick === 'A' ? '--away' : null}
       footer={showQ ? (
         <div className="overflow-x-auto">

@@ -1881,5 +1881,7 @@
  "Buy": "Satın al",
  "Pack picks never expire and work in every sport. They are used after your free picks (and Premium's monthly unlocks). A pick that was used is not refunded.": "Paket tahminlerinin süresi dolmaz ve her sporda geçerlidir. Ücretsiz tahminlerinden (ve Premium'un aylık açma haklarından) sonra kullanılır. Kullanılan bir tahmin iade edilmez.",
  "One pick at {0}, or {1} with Premium.": "Bir tahmin {0}, Premium ile {1}.",
- "Packs of {0} picks.": "{0} tahminlik paketler."
+ "Packs of {0} picks.": "{0} tahminlik paketler.",
+ "This game was cancelled. It does not count in our record.": "Bu maç iptal edildi. Sicilimize sayılmaz.",
+ "This game was postponed. Our prediction stays until the new date.": "Bu maç ertelendi. Tahminimiz yeni tarihe kadar geçerli."
 }

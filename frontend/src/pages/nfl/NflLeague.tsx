@@ -49,6 +49,9 @@ export default function NflLeague() {
       name={name}
       sub={d ? (league === 2 ? t('{0} season · by conference, FBS first', { 0: d.season }) : t('{0} season · regular season', { 0: d.season })) : null}
       record={record}
+      // fix175 (parity): favorite star and the weekly hub, like football and basketball
+      fav={{ kind: 'nfl-league', ref: league === 2 ? 'NCAA' : 'NFL', code: league === 2 ? 'NCAA' : 'NFL', name, img: null }}
+      hub={{ to: `/predictions/${league === 2 ? 'college-football' : 'nfl'}`, label: t("This week's predictions →") }}
       left={<>
         <Card title={t('Table')}>
           {d === undefined ? <Skeleton rows={10} h="h-7" /> : !d || !d.conferences.length ? <p className="text-sm text-faint">{t('Standings appear once the season has started.')}</p> : <StandingsBlock data={d} />}

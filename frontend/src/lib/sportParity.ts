@@ -1,0 +1,96 @@
+/**
+ * Sport parity (fix175). Football is the template: every block on a football page exists on the same page of every
+ * sport. One entry per feature block, a claim per sport:
+ *  - true: the sport feeds it (one of its *.parity.ts files lists the key);
+ *  - 'na: <reason>': doesn't exist in that sport / no provider data — Yarin approves every one (docs/notes/sport-parity.md);
+ *  - 'todo: <reason>': a known gap from the fix175 audit (18 Oct 2026), red on the admin card and listed in
+ *    sport-parity.md until it is built.
+ *
+ * `npm run parity` (scripts/parity-check.ts) fails when a sport neither provides a key nor explains it, when a sport now
+ * provides a key marked 'na' / 'todo' (flip it to true), and when a shared component gets a prop from football that no
+ * other sport passes. Keep this file plain data (the check script runs it with Node's type stripping): no imports.
+ */
+
+export const PARITY_SPORTS = ['football', 'basketball', 'nfl'] as const
+export type ParitySport = (typeof PARITY_SPORTS)[number]
+type Claim = true | `na: ${string}` | `todo: ${string}`
+export interface ParityEntry { key: string; label: string; football: true | `todo: ${string}`; basketball: Claim; nfl: Claim }
+
+export const PARITY = [
+  /* ---------- home ---------- */
+  { key: 'home.record', label: 'Our record card + link', football: true, basketball: true, nfl: true },
+  { key: 'home.results', label: 'Latest results + link', football: true, basketball: true, nfl: true },
+  { key: 'home.introStats', label: 'First-visit stat tiles', football: true, basketball: 'todo: the adapter passes no stat tiles (the record bands exist)', nfl: 'todo: the adapter passes no stat tiles (record not public yet)' },
+  { key: 'home.special', label: 'Special card (draw picks / upset watch)', football: true, basketball: true, nfl: true },
+  { key: 'home.favorites', label: 'Your favorites rail', football: true, basketball: true, nfl: true },
+  { key: 'home.news', label: 'News', football: true, basketball: true, nfl: true },
+  /* ---------- games list ---------- */
+  { key: 'games.liveBox', label: 'Live box on the games list', football: true, basketball: true, nfl: true },
+  { key: 'games.spotlight', label: 'Spotlight', football: true, basketball: true, nfl: true },
+  { key: 'games.leaguePanel', label: 'League panel', football: true, basketball: 'todo: no league panel in the games adapter (standings exist)', nfl: 'todo: no league panel in the games adapter (standings exist)' },
+  /* ---------- game page ---------- */
+  { key: 'game.prediction', label: 'Prediction', football: true, basketball: true, nfl: true },
+  { key: 'game.why', label: 'Why we think so', football: true, basketball: true, nfl: true },
+  { key: 'game.howCalculated', label: 'How we calculated it', football: true, basketball: true, nfl: "todo: no 'how we calculated' box (the model inputs are in the reasons)" },
+  { key: 'game.preview', label: 'Match / game preview text', football: true, basketball: true, nfl: 'todo: no written preview service for American football' },
+  { key: 'game.beforeAfter', label: 'Before / after (saved prediction vs result)', football: true, basketball: "na: no line-up announcement to compare around (live 'was X%' is in the live chance)", nfl: 'na: no line-up announcement to compare around' },
+  { key: 'game.lineups', label: 'Starters / line-ups', football: true, basketball: 'na: the providers have no line-ups (basketball box scores only flag starters; American football only the starting QB, shown in the reasons)', nfl: 'na: the providers have no line-ups (basketball box scores only flag starters; American football only the starting QB, shown in the reasons)' },
+  { key: 'game.injuries', label: 'Injuries', football: true, basketball: true, nfl: true },
+  { key: 'game.h2h', label: 'Head-to-head', football: true, basketball: true, nfl: true },
+  { key: 'game.form', label: 'Form', football: true, basketball: true, nfl: true },
+  { key: 'game.restTab', label: 'Rest tab', football: true, basketball: true, nfl: "todo: no rest tab (rest days and bye / short week are in the model's reasons)" },
+  { key: 'game.standingsTab', label: 'Standings tab', football: true, basketball: true, nfl: 'todo: no standings tab (standings exist)' },
+  { key: 'game.liveChance', label: 'Live win chance', football: true, basketball: true, nfl: 'todo: no in-game win-chance model for American football yet' },
+  { key: 'game.swingChart', label: 'Win-chance swing chart', football: true, basketball: "todo: no swing chart (bbLive's quarter model could feed one)", nfl: 'todo: needs an in-game model first' },
+  { key: 'game.events', label: 'Events / quarter strip', football: true, basketball: true, nfl: true },
+  { key: 'game.stats', label: 'Game stats', football: true, basketball: true, nfl: true },
+  { key: 'game.highlights', label: 'Video highlights', football: true, basketball: 'todo: the highlights search is football-only', nfl: 'todo: the highlights search is football-only' },
+  { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true },
+  /* ---------- team page ---------- */
+  { key: 'team.analysis', label: 'Strengths & weaknesses', football: true, basketball: true, nfl: true },
+  { key: 'team.ratingTiles', label: 'Model rating tiles', football: true, basketball: true, nfl: true },
+  { key: 'team.scores', label: '1–10 league scores', football: true, basketball: true, nfl: true },
+  { key: 'team.rankOverTime', label: 'Rank over time', football: true, basketball: true, nfl: true },
+  { key: 'team.ourRecord', label: 'Our record on the team', football: true, basketball: true, nfl: 'todo: admin-only until the NFL record goes public' },
+  { key: 'team.squad', label: 'Squad', football: true, basketball: true, nfl: true },
+  { key: 'team.fixtures', label: 'Fixtures', football: true, basketball: true, nfl: true },
+  { key: 'team.miniTable', label: 'Mini table', football: true, basketball: 'todo: only a link to the table (standings exist)', nfl: 'todo: only the record line (standings exist)' },
+  { key: 'team.news', label: 'Team news', football: true, basketball: true, nfl: true },
+  /* ---------- player page ---------- */
+  { key: 'player.stats', label: 'Player stats', football: true, basketball: true, nfl: true },
+  { key: 'player.career', label: 'Career', football: true, basketball: true, nfl: 'todo: current season only (older seasons are admin-only data)' },
+  { key: 'player.injuries', label: 'Injury history', football: true, basketball: true, nfl: "todo: the player page doesn't show the injury report (nfl_injuries has it)" },
+  /* ---------- league page ---------- */
+  { key: 'league.table', label: 'Table', football: true, basketball: true, nfl: true },
+  { key: 'league.leaders', label: 'Leaders', football: true, basketball: true, nfl: true },
+  { key: 'league.favoriteStar', label: 'Favorite star', football: true, basketball: true, nfl: true },
+  { key: 'league.hubLink', label: 'Weekly hub link', football: true, basketball: true, nfl: true },
+  { key: 'league.recordTile', label: 'Record tile', football: true, basketball: true, nfl: 'todo: admin-only until the NFL record goes public' },
+  { key: 'league.logo', label: 'League logo', football: true, basketball: true, nfl: "todo: no league logo stored (the provider's /leagues has one)" },
+  { key: 'league.liveNextResults', label: 'Live / next / results', football: true, basketball: true, nfl: true },
+  /* ---------- search ---------- */
+  { key: 'search.teams', label: 'Search: teams', football: true, basketball: true, nfl: true },
+  { key: 'search.players', label: 'Search: players', football: true, basketball: true, nfl: true },
+  { key: 'search.leagues', label: 'Search: leagues', football: true, basketball: true, nfl: 'todo: search returns no NFL / college league' },
+  { key: 'search.games', label: 'Search: games', football: true, basketball: true, nfl: true },
+  /* ---------- search engines ---------- */
+  { key: 'seo.crawler.home', label: 'Crawler page: home', football: true, basketball: true, nfl: true },
+  { key: 'seo.crawler.game', label: 'Crawler page: game', football: true, basketball: true, nfl: true },
+  { key: 'seo.crawler.team', label: 'Crawler page: team', football: true, basketball: true, nfl: true },
+  { key: 'seo.crawler.player', label: 'Crawler page: player', football: 'todo: no player crawler page (only the not-found one)', basketball: 'todo: player pages get the generic basketball page', nfl: true },
+  { key: 'seo.crawler.league', label: 'Crawler page: league', football: true, basketball: true, nfl: true },
+  { key: 'seo.sitemap.game', label: 'Sitemap: games', football: true, basketball: true, nfl: true },
+  { key: 'seo.sitemap.team', label: 'Sitemap: teams', football: true, basketball: true, nfl: true },
+  { key: 'seo.sitemap.player', label: 'Sitemap: players', football: 'todo: no player sitemap', basketball: 'todo: no player sitemap', nfl: 'todo: no player sitemap' },
+  { key: 'seo.sitemap.league', label: 'Sitemap: leagues', football: true, basketball: true, nfl: true }
+] as const satisfies readonly ParityEntry[]
+
+export type ParityKey = (typeof PARITY)[number]['key']
+/** What one sport's adapter feeds (exported as PARITY_PROVIDES from a *.parity.ts file next to it). */
+export interface ParityProvides { sport: ParitySport; keys: readonly ParityKey[] }
+
+/**
+ * Props of a shared component that only football passes, with the reason (Component.prop → reason). Anything not
+ * listed here fails the check when basketball and NFL don't pass it too.
+ */
+export const FOOTBALL_ONLY_PROPS: Record<string, string> = {}

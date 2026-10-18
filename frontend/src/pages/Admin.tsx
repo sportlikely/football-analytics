@@ -6,6 +6,7 @@ import { errorText, useAuth, type User } from '../lib/auth'
 import DataHealth from '../components/DataHealth'
 import VisitorsCard from '../components/VisitorsCard'
 import LeaguesCard from '../components/LeaguesCard'
+import { PARITY_REPORT } from '../lib/sportParity.report'
 
 type Row = User & { lastLoginAt: string | null }
 
@@ -102,6 +103,7 @@ export default function Admin() {
           <BbResultsCard />
           <LeaguesCard />
           <LeaguesCard sport="basketball" />
+          <SportParityCard />
           <AfUsageCard />
           <NflCard />
           <section className="card p-5 sm:p-6 mb-8">
@@ -517,6 +519,45 @@ function SiteErrorsCard() {
         <button type="button" onClick={() => setShowFixed(v => !v)} className="mt-3 text-xs text-muted hover:text-ink underline">
           {showFixed ? 'Hide fixed' : `Show fixed (${fixed})`}
         </button>
+      )}
+    </section>
+  )
+}
+
+/** Sport parity (fix175): football is the template — every block fed by every sport, or an approved 'na' (lib/sportParity.ts). */
+function SportParityCard() {
+  const r = PARITY_REPORT
+  const green = r.ok && !r.todo.length
+  const [open, setOpen] = useState(false)
+  const SPORT: Record<string, string> = { football: 'Football', basketball: 'Basketball', nfl: 'NFL' }
+  return (
+    <section className={`card p-5 sm:p-6 mb-8 border ${green ? 'border-win/40' : 'border-loss/40'}`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <h2 className="font-display text-lg font-bold text-ink">Sport parity</h2>
+        <span className={`text-xs font-bold ${green ? 'text-win' : 'text-loss'}`}>{green ? `All ${r.keys} blocks fed by every sport` : !r.ok ? `${r.gaps.length + r.propGaps.length + r.problems.length} unexplained gaps` : `${r.todo.length} gaps to build`}</span>
+      </div>
+      <p className="text-xs text-muted">Football is the template. Built from lib/sportParity.ts by npm run parity (this view is from the last check before the deploy).</p>
+      {!r.ok && (
+        <ul className="mt-3 space-y-1 text-sm">
+          {r.gaps.map(g => <li key={g.key} className="text-ink"><b>{g.key}</b> <span className="text-muted">— {g.label}</span>{g.missing.length > 0 && <span className="text-loss"> · missing in {g.missing.map(s => SPORT[s] || s).join(', ')}</span>}{g.note ? <span className="text-faint"> · {g.note}</span> : null}</li>)}
+          {r.propGaps.map(p => <li key={`${p.comp}.${p.prop}`} className="text-ink"><b>{p.comp}.{p.prop}</b> <span className="text-loss">· football only</span></li>)}
+          {r.problems.map(p => <li key={p} className="text-loss">{p}</li>)}
+        </ul>
+      )}
+      {r.todo.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm">
+          {r.todo.map(x => <li key={`${x.key}-${x.sport}`} className="text-ink"><b>{x.key}</b> <span className="text-loss">· missing in {SPORT[x.sport] || x.sport}</span> <span className="text-muted">— {x.reason}</span></li>)}
+        </ul>
+      )}
+      {r.na.length > 0 && (
+        <div className="mt-3">
+          <button type="button" onClick={() => setOpen(o => !o)} className="text-xs font-bold text-accent">{open ? 'Hide' : 'Show'} {r.na.length} blocks marked not applicable</button>
+          {open && (
+            <ul className="mt-2 space-y-1 text-xs text-muted">
+              {r.na.map(n => <li key={`${n.key}-${n.sport}`}><b className="text-ink">{n.key}</b> · {SPORT[n.sport] || n.sport}: {n.reason}</li>)}
+            </ul>
+          )}
+        </div>
       )}
     </section>
   )

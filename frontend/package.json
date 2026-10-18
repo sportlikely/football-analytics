@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && npm run parity && vite build",
+    "parity": "node --experimental-strip-types --no-warnings scripts/parity-check.ts",
     "preview": "vite preview",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && npm run parity",
     "lint": "eslint src/**/*.{ts,tsx}"
   },
   "dependencies": {

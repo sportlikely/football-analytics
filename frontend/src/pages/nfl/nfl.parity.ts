@@ -1,0 +1,32 @@
+import type { ParityProvides } from '../../lib/sportParity'
+
+/** fix175: the parity keys the game, team, player and league pages (pages/nfl/*) and search feeds for nfl (checked by npm run parity). */
+export const PARITY_PROVIDES: ParityProvides = {
+  sport: 'nfl',
+  keys: [
+    'game.prediction',
+    'game.why',
+    'game.injuries',
+    'game.h2h',
+    'game.form',
+    'game.events',
+    'game.stats',
+    'game.savedBadge',
+    'team.analysis',
+    'team.ratingTiles',
+    'team.scores',
+    'team.rankOverTime',
+    'team.squad',
+    'team.fixtures',
+    'team.news',
+    'player.stats',
+    'league.table',
+    'league.leaders',
+    'league.favoriteStar',
+    'league.hubLink',
+    'league.liveNextResults',
+    'search.teams',
+    'search.players',
+    'search.games'
+  ]
+}

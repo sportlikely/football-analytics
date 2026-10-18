@@ -44,6 +44,9 @@ is model work, the matching note, in the same commit.
   counter going.
 - Before pushing: `cd backend && npx tsc --noEmit -p .` and `cd frontend && npx tsc --noEmit -p .` must pass
   (frontend has `noUnusedLocals` / `noUnusedParameters` on). Don't commit `node_modules`, `dist`, `.env`, `*.sqlite`.
+- Before pushing: `cd frontend && npm run parity` must pass (also part of `npm run type-check` / `npm run build`). A new
+  football block means a parity key in `frontend/src/lib/sportParity.ts` + the basketball and NFL versions in the same
+  commit (listed in their `*.parity.ts` files), or an 'na: <reason>' Yarin approved (`docs/notes/sport-parity.md`).
 - Copy: short, plain English, no jargon. Six locales in `frontend/src/locales/*.json` (de, es, fr, it, pt, tr; English
   is the key). A new UI string needs the key used through `t("...")` and a translation in all six files
   (`json.dumps(..., ensure_ascii=False, indent=1)` keeps the file format).
