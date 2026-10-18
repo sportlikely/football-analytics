@@ -649,6 +649,12 @@ function tidySeasons(data: any) {
 export async function playerPage(rawId: number, full: boolean, wait = false) {
   const pid = rawId >= AF_OFFSET ? rawId - AF_OFFSET : rawId;
   const data: any = tidySeasons(await pageData(pid, wait));
+  // fix176: builtAt = the last refresh of the page's numbers — a season answer fetched since the page was stored counts
+  // (the audit found builtAt 30 Sep on a page with data to 17 Oct; the admin data-health check reads it)
+  try {
+    const last = (db.prepare(`SELECT MAX(fetched_at) AS at FROM player_season_raw WHERE player_id = ? AND season >= ?`).get(pid, seasonNow() - 1) as any)?.at as string | undefined;
+    if (last && (!data.builtAt || last > data.builtAt)) data.builtAt = last;
+  } catch { /* table missing */ }
   if (full) return { ...data, premium: true };
   const lite = (r: any) => ({ league: r.league, team: r.team, position: r.position, apps: r.apps, goals: r.goals });
   return {

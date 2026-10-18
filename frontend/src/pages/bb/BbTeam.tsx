@@ -132,9 +132,11 @@ export default function BbTeam() {
         {d.teamAnalysis && <TeamRecordCard rec={d.teamAnalysis.record} teamName={d.team.name} sport="basketball" />}
         <Card title={t('Next games')}><GameList games={d.next} empty={t('No games scheduled.')} /></Card>
         <Card title={t('Latest results')}><GameList games={d.recent.filter(g => g.state === 'done')} empty={t('No results yet.')} /></Card>
+        {(news === null || news === undefined || news.length > 0) && (
         <Card title={t('{0} news', { 0: d.team.name })}>
           {news === null ? <Skeleton rows={3} h="h-14" /> : news.length ? <div className="-mx-2"><NewsRows items={news} /></div> : <p className="text-sm text-faint">{t('No news about this team in the last month.')}</p>}
         </Card>
+        )}
       </>}
     />
   )

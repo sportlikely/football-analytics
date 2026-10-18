@@ -79,7 +79,7 @@ import { db } from './db';
 import { trackVisit, visitorStats } from './services/visitors';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
-import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect } from './services/seo';
+import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
 import { hubBySlug, hubByOld, hubOpen, buildHub, warmHubs, HUBS } from './services/hubs';
 import { refreshFromDetails } from './services/matchPreview';
@@ -1694,17 +1694,29 @@ app.get('/api/matches/:id(\\d+)/head2head', async (req, res) => {
 
 app.get('/api/leagues', async (_req, res) => {
   try {
-    const leagues = [...(await footballDataAPI.getLeagues()), ...afCompetitions()];
+    // fix176: a league listed by both providers appears once (BSA → AF71, the one with the predictions)
+    const leagues = [...(await footballDataAPI.getLeagues()), ...afCompetitions()].filter((l: any) => !MERGED_LEAGUES[l.code]);
     res.json({ data: leagues, count: leagues.length, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to fetch leagues');
   }
 });
 
+/**
+ * fix176: Football-Data.org tournaments between editions (EC, WC) answer 404: their API-Football twin then gives the
+ * latest edition, and the page never gets an error (no table = data null).
+ */
+const AF_TWIN: Record<string, string> = { EC: 'AF4', WC: 'AF1' };
 app.get('/api/leagues/:code/standings', async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
-    const standings = isAfCode(code) ? await getAfStandings(code) : await footballDataAPI.getStandings(code);
+    let standings: any;
+    try { standings = isAfCode(code) ? await getAfStandings(code) : await footballDataAPI.getStandings(code); }
+    catch (e: any) {
+      if (!AF_TWIN[code]) throw e;
+      standings = await getAfStandings(AF_TWIN[code]).catch(() => null);
+    }
+    if (!standings) return res.json({ data: null, timestamp: new Date().toISOString() });
     // Football-Data.org tables come without form on our plan: add it from the finished matches (newest first)
     if (!isAfCode(code) && standings?.standings?.some((t: any) => t.table?.some((r: any) => !r.form))) {
       try {
@@ -1724,8 +1736,9 @@ app.get('/api/leagues/:code/standings', async (req, res) => {
 app.get('/api/leagues/:code/results', async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
-    if (!isAfCode(code)) return res.json({ data: null, timestamp: new Date().toISOString() });
-    res.json({ data: await getAfRecent(code), timestamp: new Date().toISOString() });
+    const af = isAfCode(code) ? code : AF_TWIN[code]; // fix176: EC / WC → their latest edition
+    if (!af) return res.json({ data: null, timestamp: new Date().toISOString() });
+    res.json({ data: await getAfRecent(af), timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to fetch results');
   }
@@ -1735,7 +1748,12 @@ app.get('/api/leagues/:code/scorers', async (req, res) => {
   try {
     const limit = parseInt(String(req.query.limit || '40'), 10) || 40;
     const code = req.params.code.toUpperCase();
-    const scorers = isAfCode(code) ? await getAfScorers(code, limit) : await footballDataAPI.getScorers(code, limit);
+    let scorers: any;
+    try { scorers = isAfCode(code) ? await getAfScorers(code, limit) : await footballDataAPI.getScorers(code, limit); }
+    catch (e: any) {
+      if (!AF_TWIN[code]) throw e;
+      scorers = await getAfScorers(AF_TWIN[code], limit).catch(() => ({ scorers: [] })); // fix176: between editions
+    }
     res.json({ data: scorers, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to fetch scorers');
@@ -1883,7 +1901,7 @@ app.get('/api/search', async (req, res) => {
     }
     const norm = normalizeName(q);
     // competitions: every league / cup / national-team competition on the site (name, code or country)
-    const leagues: any[] = [...(await footballDataAPI.getLeagues().catch(() => [] as any[])), ...afCompetitions()];
+    const leagues: any[] = [...(await footballDataAPI.getLeagues().catch(() => [] as any[])), ...afCompetitions()].filter((l: any) => !MERGED_LEAGUES[l.code]);
     const competitions = leagues
       .map((l: any) => {
         const hay = [l.name, l.code, l.area?.name, l.country].filter(Boolean).map((x: string) => normalizeName(x));
@@ -2486,7 +2504,7 @@ app.get('/api/basketball/games', (req, res) => {
   try {
     const now = Math.floor(Date.now() / 30000) * 30000; // fix159: 30-s steps, so the list cache (bbSite) is reused
     const day = 86400000;
-    const code = typeof req.query.league === 'string' && /^[A-Z]{2,4}$/.test(req.query.league) ? req.query.league : undefined;
+    const code = typeof req.query.league === 'string' && /^[A-Za-z0-9]{2,8}$/.test(req.query.league) ? req.query.league.toUpperCase() : undefined;
     const results = req.query.results === '1';
     const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || '3'), 10) || 3));
     let from = results ? new Date(now - days * day) : new Date(now - 4 * 3600 * 1000);
@@ -2541,7 +2559,7 @@ app.post('/api/admin/bb/game/:id(\\d+)/result', jsonOnly, (req, res) => {
     sendError(res, e, 'Correction failed');
   }
 });
-app.get('/api/basketball/standings/:code([A-Za-z]{2,4})', async (req, res) => {
+app.get('/api/basketball/standings/:code([A-Za-z0-9]{2,8})', async (req, res) => {
   try {
     res.json({ data: await bbStandings(req.params.code.toUpperCase()), timestamp: new Date().toISOString() });
   } catch (error: any) {
@@ -2569,7 +2587,7 @@ app.get('/api/basketball/player/:id(\\d+)', async (req, res) => {
 app.get('/api/basketball/leaders', (req, res) => {
   try {
     // fix174: every league with box scores (?league=CODE); the NBA keeps balldontlie's leaders
-    const code = typeof req.query.league === 'string' && /^[A-Z0-9]{2,10}$/.test(req.query.league) ? req.query.league : 'NBA';
+    const code = typeof req.query.league === 'string' && /^[A-Za-z0-9]{2,8}$/.test(req.query.league) ? req.query.league.toUpperCase() : 'NBA';
     res.json({ data: code === 'NBA' ? nbaLeaders() : bbLeagueLeaders(code), timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to load leaders');
@@ -2577,7 +2595,7 @@ app.get('/api/basketball/leaders', (req, res) => {
 });
 app.get('/api/basketball/record', (req, res) => {
   try {
-    const code = typeof req.query.league === 'string' && /^[A-Z]{2,4}$/.test(req.query.league) ? req.query.league : undefined;
+    const code = typeof req.query.league === 'string' && /^[A-Za-z0-9]{2,8}$/.test(req.query.league) ? req.query.league.toUpperCase() : undefined;
     res.json({ data: bbRecord(Math.min(3650, parseInt(String(req.query.days || '3650'), 10) || 3650), code), timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to load record');
@@ -2640,7 +2658,7 @@ app.get('/api/bb/live-test', (req, res) => {
 // Admin: research export of one league's games (model research in the browser)
 app.get('/api/bb/export', (req, res) => {
   const code = String(req.query.code || '').toUpperCase();
-  if (!/^[A-Z]{2,4}$/.test(code)) return res.status(400).json({ error: 'code' });
+  if (!/^[A-Z0-9]{2,8}$/.test(code)) return res.status(400).json({ error: 'code' });
   res.json({ data: req.query.players ? bbExportPlayers(code) : bbExport(code), timestamp: new Date().toISOString() });
 });
 
@@ -3156,7 +3174,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   const indexHtml = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, (req, res) => {
     // old hub URLs (fix134): /predictions/PL → /predictions/premier-league, permanently
-    const moved = hubRedirect(req.path);
+    const moved = hubRedirect(req.path) || leagueRedirect(req.path); // fix176: /league/BSA → /league/AF71
     if (moved) return res.redirect(301, moved + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''));
     res.set('Cache-Control', 'no-cache');
     try {

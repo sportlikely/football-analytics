@@ -443,12 +443,39 @@ async function buildSlow(afId: number) {
     coming.length >= 5 ? coming.slice(0, 5) : g('/fixtures', { team: afId, next: 5 }).then(r => r.response || [])
   ]);
 
-  // player season stats (clubs): up to 3 pages
+  // fix176: national teams — the competition of the next (else the last) official game: its group table and the
+  // team's players' numbers in it (scorers); friendlies have neither
+  let natComp: { id: number; name: string; logo: string | null; season: number } | null = null;
+  if (national) {
+    const f0 = [...nextRaw, ...lastRaw].find((f: any) => f.league?.id && !/friendl/i.test(f.league?.name || '')) || nextRaw[0] || lastRaw[0];
+    if (f0?.league?.id && f0.league.season) {
+      natComp = { id: f0.league.id, name: f0.league.name, logo: f0.league.logo || null, season: f0.league.season };
+      compNames[natComp.id] = natComp.name;
+      if (!/friendl/i.test(natComp.name)) {
+        try {
+          const st = await g('/standings', { league: natComp.id, season: natComp.season });
+          const groups: any[][] = st.response?.[0]?.league?.standings || [];
+          const table = groups.find(x => x.some((r: any) => r.team?.id === afId)) || null;
+          const me = table?.find((r: any) => r.team?.id === afId);
+          if (table && me) standing = {
+            rank: me.rank, points: me.points, played: me.all?.played, won: me.all?.win, drawn: me.all?.draw, lost: me.all?.lose,
+            gf: me.all?.goals?.for, ga: me.all?.goals?.against, group: me.group || null,
+            rows: table.map((r: any) => ({ rank: r.rank, id: AF_OFFSET + r.team.id, name: r.team.name, logo: r.team.logo, played: r.all?.played, gd: r.goalsDiff, points: r.points, me: r.team.id === afId }))
+          };
+        } catch (e: any) {
+          if (e?.code === 'PAGE_BUDGET') throw e;
+          logger.warn(`team page national table ${afId}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  // player season stats (clubs; fix176: national teams in their current competition): up to 3 pages
   const stats = new Map<number, any>();
-  if (!national && season) {
+  if ((!national && season) || natComp) {
     for (let page = 1; page <= 3; page++) {
       try {
-        const pr = await g('/players', { team: afId, season, page });
+        const pr = await g('/players', natComp ? { team: afId, season: natComp.season, league: natComp.id, page } : { team: afId, season: season!, page });
         for (const it of pr.response || []) {
           // official competitions only: pre-season / club friendlies are left out, each competition counted once
           const s = { apps: 0, minutes: 0, goals: 0, assists: 0, yellow: 0, red: 0, leagueGoals: 0, leagueAssists: 0, ratingSum: 0, ratingN: 0, lRatingSum: 0, lRatingN: 0 };
@@ -520,7 +547,8 @@ async function buildSlow(afId: number) {
       return { id: AF_OFFSET + afId, afId, name: ov.name || t.team.name, logo: t.team.logo, country: t.team.country, founded: ov.founded ? Number(ov.founded) : t.team.founded, national };
     })(),
     venue: currentVenue(afId, t, [...seasonFixtures, ...lastRaw]),
-    league: league ? { id: league.league.id, name: league.league.name, logo: league.league.logo, country: league.country?.name, season, type: league.league.type } : null,
+    league: natComp ? { id: natComp.id, name: natComp.name, logo: natComp.logo, country: null, season: natComp.season, type: 'National' }
+      : league ? { id: league.league.id, name: league.league.name, logo: league.league.logo, country: league.country?.name, season, type: league.league.type } : null,
     standing, last, next, squad,
     scorers: leaders('goals'),
     assists: leaders('assists'),
@@ -809,8 +837,21 @@ async function pageData(afId: number): Promise<any> {
   }
 }
 
+/** fix176: a national team's players — each one's club this season (the club with most games) from our stored stats. */
+function clubSeasons(afId: number, squad: any[]) {
+  const q = db.prepare(`SELECT team_id, season, SUM(apps) AS apps, SUM(goals) AS goals, SUM(assists) AS assists FROM af_player_season
+    WHERE player_id = ? AND team_id != ? AND season = (SELECT MAX(season) FROM af_player_season WHERE player_id = ? AND team_id != ?) GROUP BY team_id ORDER BY apps DESC LIMIT 1`);
+  return squad.map(p => {
+    try {
+      const r = q.get(p.id, afId, p.id, afId) as any;
+      return r ? { ...p, club: { id: AF_OFFSET + r.team_id, name: teamNameOf(r.team_id) || null, season: r.season, apps: r.apps ?? null, goals: r.goals ?? null, assists: r.assists ?? null } } : p;
+    } catch { return p; }
+  });
+}
+
 export async function teamPage(afId: number, full: boolean) {
-  const { _playedUnknown, ...data }: any = await pageData(afId);
+  const { _playedUnknown, ...raw }: any = await pageData(afId);
+  const data = raw.team?.national && Array.isArray(raw.squad) ? { ...raw, squad: clubSeasons(afId, raw.squad) } : raw;
   // player pages of the squad are built in the background — not for crawlers (no provider calls for them)
   if (!isCrawlerRequest()) try { warmPlayers((data.squad || []).map((p: any) => p.id).filter(Boolean)); } catch { /* optional */ }
   let analysis: any = null;
@@ -820,7 +861,7 @@ export async function teamPage(afId: number, full: boolean) {
     ...data,
     analysis: analysis ? teamAnalysisTeaser(analysis) : null,
     premium: false,
-    squad: data.squad.map((p: any) => ({ id: p.id, name: p.name, number: p.number, pos: p.pos, age: p.age, photo: p.photo, goals: p.goals })),
+    squad: data.squad.map((p: any) => ({ id: p.id, name: p.name, number: p.number, pos: p.pos, age: p.age, photo: p.photo, goals: p.goals, club: p.club })),
     scorers: data.scorers.slice(0, 3),
     assists: [],
     locked: ['Assists, appearances, minutes, cards and ratings for every player', 'Full top-scorer and assist lists', 'AI analysis of the team']

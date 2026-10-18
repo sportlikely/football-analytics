@@ -16,7 +16,7 @@ import { db } from '../db';
 import { every, after } from './perf';
 
 type Sport = 'football' | 'basketball' | 'american-football';
-type Feed = { source: string; url: string; league?: string; sport?: Sport };
+type Feed = { source: string; url: string; league?: string; sport?: Sport; search?: boolean };
 
 const UA = { 'User-Agent': 'SportLikely/1.0 (+https://sportlikely.com)' };
 const BBC = (path: string) => `https://feeds.bbci.co.uk/sport/football/${path}/rss.xml`;
@@ -120,7 +120,7 @@ export const NEWS_LEAGUES: { code: string; name: string; af?: number; phrases: s
   { code: 'AF179', name: 'Scottish Premiership', af: 179, phrases: ['Scottish Premiership'] },
   { code: 'AF180', name: 'Scottish Championship', af: 180, phrases: ['Scottish Championship'] },
   { code: 'AF197', name: 'Greek Super League', af: 197, phrases: ['Greek Super League', 'Super League Greece'] },
-  { code: 'BSA', name: 'Brasileirão', af: 71, phrases: ['Brasileirão', 'Brasileirao', 'Brazilian Serie A', 'Brazilian league'] },
+  { code: 'AF71', name: 'Brasileirão', af: 71, phrases: ['Brasileirão', 'Brasileirao', 'Brazilian Serie A', 'Brazilian league'] },
   { code: 'AF128', name: 'Liga Profesional (Argentina)', af: 128, phrases: ['Liga Profesional', 'Argentine Primera', 'Argentine league'] },
   { code: 'AF253', name: 'MLS', af: 253, phrases: ['MLS', 'Major League Soccer'] },
   { code: 'AF262', name: 'Liga MX', af: 262, phrases: ['Liga MX'] },
@@ -239,6 +239,9 @@ async function fetchFeed(f: Feed): Promise<Raw[]> {
     const title = tag(b, 'title');
     const link = tag(b, 'link') || (b.match(/<guid[^>]*>(https?:[^<]+)<\/guid>/i)?.[1] ?? '');
     if (!title || !/^https:\/\//.test(link)) continue;
+    // fix176: search feeds (Google News) name the real outlet in <source> and add " - Outlet" to the headline
+    const outlet = f.search ? tag(b, 'source') : '';
+    const cleanTitle = outlet && title.endsWith(` - ${outlet}`) ? title.slice(0, -(outlet.length + 3)) : title;
     if (isBettingStory({ title, summary: tag(b, 'description'), link })) continue;
     // football feeds: football only (some feeds mix in other sports: tennis, F1, cricket…)
     if ((!f.sport || f.sport === 'football') && /\/(tennis|f1|formula-1|cricket|golf|boxing|rugby-union|rugby-league|nfl|nba|darts|racing|cycling|snooker|netball|athletics)\//i.test(link)) continue;
@@ -259,7 +262,7 @@ async function fetchFeed(f: Feed): Promise<Raw[]> {
     if (image && /ichef\.bbci\.co\.uk\/.*\/240\//.test(image)) image = image.replace('/240/', '/480/');
     const summary = tag(b, 'description').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); // some feeds escape their HTML
     items.push({
-      title, link, source: f.source, feedLeague: f.league, sport: f.sport || 'football',
+      title: cleanTitle, link, source: outlet || f.source, feedLeague: f.league, sport: f.sport || 'football',
       published: d && !isNaN(d.getTime()) && d.getTime() <= Date.now() + 5 * 60000 ? d.toISOString() : null,
       summary: summary.length > 180 ? summary.slice(0, 177) + '…' : summary, image
     });
@@ -448,11 +451,13 @@ let refreshing: Promise<void> | null = null;
 
 async function refresh() {
   const t0 = Date.now();
-  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
+  const feeds = [...FEEDS, ...searchFeedsOf()]; // fix176: plus a few league searches each time
+  const results = await Promise.allSettled(feeds.map(fetchFeed));
+  markSearched(feeds);
   const now = new Date().toISOString();
   const raws: Raw[] = [];
   results.forEach((r, i) => {
-    const f = FEEDS[i];
+    const f = feeds[i];
     if (r.status === 'fulfilled') {
       raws.push(...r.value);
       const cut = Date.now() - 14 * 86400000;
@@ -491,7 +496,7 @@ async function refresh() {
       if (titles.has(tkey)) continue; // same story twice in one refresh under two links
       titles.add(tkey);
       ins.run(it.link, it.title, it.source, it.published, it.summary, it.image, codes.length ? `,${codes.join(',')},` : '', now, it.sport);
-      if (!it.image) fresh.push(it.link);
+      if (!it.image && !/news\.google\.com/.test(it.link)) fresh.push(it.link);
     }
     db.prepare(`DELETE FROM news_items WHERE seen_at < ? AND (leagues = '' OR seen_at < ?)`)
       .run(new Date(Date.now() - 21 * 86400000).toISOString(), new Date(Date.now() - 60 * 86400000).toISOString());
@@ -507,8 +512,62 @@ async function refresh() {
     await Promise.all(todo.slice(i, i + 5).map(async link => { const img = await previewImage(link); if (img) setImg.run(img, link); }));
   }
   lastRefresh = now;
-  logger.info(`News refreshed: ${raws.length} stories from ${results.filter(r => r.status === 'fulfilled').length}/${FEEDS.length} feeds, ${fresh.length} new pictures looked up, ${Math.round((Date.now() - t0) / 1000)}s`);
+  logger.info(`News refreshed: ${raws.length} stories from ${results.filter(r => r.status === 'fulfilled').length}/${feeds.length} feeds, ${fresh.length} new pictures looked up, ${Math.round((Date.now() - t0) / 1000)}s`);
 }
+
+/* ------------------------------------------------------------------ */
+/* fix176: a search feed for every league                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The general feeds above never name many leagues (Saudi Pro League, Austria, Switzerland, J1, Brazil, Nations League,
+ * qualifiers, NBB…), so every league also gets a news search (Google News RSS, last 14 days): the query is built from
+ * the league's name + country + sport, or from the hand-written phrase lists (NEWS_LEAGUES, BB_NEWS_LEAGUES) when the
+ * league has one; national-team competitions by their name. Every league added from admin gets one automatically.
+ * Each league is searched at most every 3 hours, 12 searches per 15-minute refresh; its stories are filed under it.
+ */
+const SEARCH_EVERY = 3 * 3600 * 1000, SEARCH_PER_TICK = 12;
+const searchedAt = new Map<string, number>();
+const quote = (s: string) => `"${String(s).replace(/"/g, '').trim()}"`;
+const searchFeed = (q: string): string => `https://news.google.com/rss/search?${new URLSearchParams({ q: `${q} when:14d`, hl: 'en-US', gl: 'US', ceid: 'US:en' })}`;
+export interface LeagueTopic { code: string; sport: Sport; query: string }
+/** The news search of every league we cover (hand-written phrases first, then the name + country + sport rule). */
+export function leagueTopics(): LeagueTopic[] {
+  const out = new Map<string, LeagueTopic>();
+  const add = (code: string, sport: Sport, query: string) => { const k = `${sport}|${code}`; if (!out.has(k)) out.set(k, { code, sport, query }); };
+  const place = (name: string, country?: string | null) => (country && !/world|europe|international/i.test(country) && !name.toLowerCase().includes(country.toLowerCase()) ? ` ${country}` : '');
+  const fed = new Set(FEEDS.filter(f => f.league).map(f => `${f.sport || 'football'}|${f.league}`)); // leagues with their own section feed
+  for (const l of NEWS_LEAGUES) if (!fed.has(`football|${l.code}`)) add(l.code, 'football', `${quote(l.phrases[0])} football`);
+  for (const l of BB_NEWS_LEAGUES) if (!fed.has(`basketball|${l.code}`) && l.phrases[0].length >= 5) add(l.code, 'basketball', `${quote(l.phrases[0])} basketball`);
+  try {
+    const { afCompetitions } = require('./afMatches') as typeof import('./afMatches');
+    for (const c of afCompetitions()) {
+      if (fed.has(`football|${c.code}`)) continue;
+      // national-team competitions and cups: by their name; leagues: name + country
+      add(c.code, 'football', c.type === 'LEAGUE' ? `${quote(c.name)}${place(c.name, c.area?.name)} football` : `${quote(c.name)} football`);
+    }
+  } catch { /* fixtures not loaded */ }
+  try {
+    for (const r of db.prepare(`SELECT competition_code AS code, MAX(competition_name) AS name FROM predictions WHERE utc_date >= ? AND competition_code IS NOT NULL GROUP BY competition_code`).all(new Date(Date.now() - 120 * 86400000).toISOString()) as any[])
+      if (r.name && !fed.has(`football|${r.code}`)) add(r.code, 'football', `${quote(r.name)} football`);
+  } catch { /* table missing */ }
+  add('EC', 'football', `${quote('UEFA European Championship')} OR ${quote('Euro 2028')} football`);
+  add('WC', 'football', `${quote('FIFA World Cup')} football`);
+  try {
+    const { BB_LEAGUES } = require('./basketball') as typeof import('./basketball');
+    for (const l of BB_LEAGUES) if (!fed.has(`basketball|${l.code}`)) add(l.code, 'basketball', `${quote(l.name)}${place(l.name, l.country)} basketball`);
+  } catch { /* basketball not loaded */ }
+  // never a search for the Israeli league (house rule: no new Israel references on the site)
+  return [...out.values()].filter(t => t.code !== 'AF383' && !/israel/i.test(t.query));
+}
+/** The searches due this refresh (never searched or older than 3 h), oldest first. */
+function dueTopics(): LeagueTopic[] {
+  const now = Date.now();
+  return leagueTopics().filter(t => now - (searchedAt.get(`${t.sport}|${t.code}`) || 0) > SEARCH_EVERY)
+    .sort((a, b) => (searchedAt.get(`${a.sport}|${a.code}`) || 0) - (searchedAt.get(`${b.sport}|${b.code}`) || 0)).slice(0, SEARCH_PER_TICK);
+}
+export const searchFeedsOf = (): Feed[] => dueTopics().map(t => ({ source: 'Google News', url: searchFeed(t.query), league: t.code, sport: t.sport, search: true }));
+const markSearched = (feeds: Feed[]) => { for (const f of feeds) if (f.search && f.league) searchedAt.set(`${f.sport || 'football'}|${f.league}`, Date.now()); };
 
 function refreshNow(): Promise<void> {
   if (!refreshing) {
@@ -593,11 +652,13 @@ export async function newsFor(opts: { sport?: Sport; limit?: number; league?: st
   if (opts.league) {
     // the last 14 days; a quiet league (fewer than 8 stories) also gets its older stories, up to 60 days back
     const code = opts.league.toUpperCase();
+    // fix176: Brazil Série A's stories were filed as BSA before it moved to AF71
+    const old = ({ AF71: 'BSA' } as Record<string, string>)[code] || code;
     const q = db.prepare(`
-      SELECT * FROM news_items WHERE sport = ? AND leagues LIKE ? AND COALESCE(published, seen_at) >= ?
+      SELECT * FROM news_items WHERE sport = ? AND (leagues LIKE ? OR leagues LIKE ?) AND COALESCE(published, seen_at) >= ?
       ORDER BY COALESCE(published, seen_at) DESC LIMIT ?`);
-    let rows = dedupe(q.all(sport, `%,${code},%`, new Date(Date.now() - 14 * 86400000).toISOString(), limit * 2)).slice(0, limit);
-    if (rows.length < Math.min(8, limit)) rows = dedupe(q.all(sport, `%,${code},%`, new Date(Date.now() - 60 * 86400000).toISOString(), Math.min(limit, 8) * 2)).slice(0, Math.min(limit, 8));
+    let rows = dedupe(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 14 * 86400000).toISOString(), limit * 2)).slice(0, limit);
+    if (rows.length < Math.min(8, limit)) rows = dedupe(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 60 * 86400000).toISOString(), Math.min(limit, 8) * 2)).slice(0, Math.min(limit, 8));
     return rows.map(toItem);
   }
   const rows = db.prepare(`SELECT * FROM news_items WHERE sport = ? AND COALESCE(published, seen_at) >= ? ORDER BY COALESCE(published, seen_at) DESC LIMIT 300`)

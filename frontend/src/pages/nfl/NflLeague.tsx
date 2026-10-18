@@ -90,9 +90,11 @@ export default function NflLeague() {
         <Card title={t('Next games')} action={<Link to={`${base}/games`} className="text-xs font-bold text-accent">{t('All →')}</Link>}>
           {!games ? <Skeleton rows={5} /> : next.length ? <div className="max-h-[430px] overflow-y-auto overscroll-contain">{rows(next)}</div> : <p className="text-sm text-faint">{t('No games in the next two weeks.')}</p>}
         </Card>
+        {(news === null || news === undefined || news.length > 0) && (
         <Card title={t('{0} news', { 0: name })}>
           {news === null ? <Skeleton rows={3} h="h-14" /> : news.length ? <div className="-mx-2 max-h-[520px] overflow-y-auto overscroll-contain"><NewsRows items={news} /></div> : <p className="text-sm text-faint">{t('No news about this league in the last two weeks.')}</p>}
         </Card>
+        )}
         <Card title={t('Latest results')}>
           {!games ? <Skeleton rows={5} /> : results.length ? <div className="max-h-[430px] overflow-y-auto overscroll-contain">{rows(results)}</div> : <p className="text-sm text-faint">{t('No results in the last three weeks.')}</p>}
         </Card>

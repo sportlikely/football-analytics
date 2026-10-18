@@ -138,9 +138,11 @@ export default function BbLeague() {
         <Card title={t('Next games')} action={<Link to="/basketball/games" className="text-xs font-bold text-accent">{t('All →')}</Link>}>
           {!next ? <Skeleton rows={5} /> : <div className="max-h-[430px] overflow-y-auto overscroll-contain pr-1"><GameList games={next.filter(g => g.state !== 'live')} empty={t('No games in the next 10 days.')} /></div>}
         </Card>
+        {(news === null || news === undefined || news.length > 0) && (
         <Card title={t('{0} news', { 0: league?.name || code.toUpperCase() })}>
           {news === null ? <Skeleton rows={3} h="h-14" /> : news.length ? <div className="-mx-2 max-h-[520px] overflow-y-auto overscroll-contain"><NewsRows items={news} /></div> : <p className="text-sm text-faint">{t('No news about this league in the last two weeks.')}</p>}
         </Card>
+        )}
         <Card title={t('Latest results')}>
           {!results ? <Skeleton rows={5} /> : <div className="max-h-[430px] overflow-y-auto overscroll-contain pr-1"><GameList games={results} empty={t('No results in the last three weeks.')} /></div>}
         </Card>

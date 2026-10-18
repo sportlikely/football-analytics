@@ -1964,5 +1964,11 @@
  "How far our expected margin and total points were from the final score, on average, over {0} games.": "Quanto se afastaram, em média, a nossa diferença esperada e o total de pontos do resultado final, em {0} jogos.",
  "Margin off by": "Diferença errada por",
  "Total off by": "Total errado por",
- "come in with one more day of rest": "chegam com mais um dia de descanso"
+ "come in with one more day of rest": "chegam com mais um dia de descanso",
+ "Next edition": "Próxima edição",
+ "European Championship qualifiers →": "Qualificação para o Europeu →",
+ "World Cup qualifiers →": "Qualificação para o Mundial →",
+ "Club this season": "Clube nesta época",
+ "{0} games · {1} goals": "{0} jogos · {1} golos",
+ "#{0} in {1}": "{0}.º em {1}"
 }

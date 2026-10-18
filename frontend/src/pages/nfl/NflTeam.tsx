@@ -70,6 +70,8 @@ export default function NflTeam() {
       fav={nflTeamFav({ id: tm.id, name: tm.name, logo: tm.logo })}
       facts={[
         d.standing ? record(d.standing) : null,
+        // fix176: the team's place in its division / conference table (college tables are built from the games)
+        (() => { const i = d.division ? d.division.rows.findIndex(r => r.team.id === tm.id) : -1; return i >= 0 ? t('#{0} in {1}', { 0: i + 1, 1: d.division!.name }) : null })(),
         d.standing ? t('PF {0} · PA {1}', { 0: d.standing.pf, 1: d.standing.pa }) : null,
         tm.coach ? t('Coach: {0}', { 0: tm.coach }) : null,
         tm.stadium || null
@@ -127,9 +129,11 @@ export default function NflTeam() {
             <div className="-mx-5 sm:-mx-6 divide-y divide-line/50">{d.results.map(g => <NflGameRow key={g.id} g={g} showDay />)}</div>
           )}
         </Card>
+        {(news === null || news === undefined || news.length > 0) && (
         <Card title={t('{0} news', { 0: tm.name })}>
           {news === null ? <Skeleton rows={3} h="h-14" /> : news.length ? <div className="-mx-2"><NewsRows items={news} /></div> : <p className="text-sm text-faint">{t('No news about this team in the last month.')}</p>}
         </Card>
+        )}
       </>}
     />
   )

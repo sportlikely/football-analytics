@@ -99,7 +99,8 @@ const FORM_BG: Record<string, string> = { W: 'bg-win', D: 'bg-draw', L: 'bg-loss
 
 // Leagues we get from Football-Data.org (fixtures, predictions and results are filed under these codes): the
 // API-Football code of the same league (from player pages) opens the main page instead
-const FD_OF: Record<string, string> = { AF39: 'PL', AF40: 'ELC', AF140: 'PD', AF135: 'SA', AF78: 'BL1', AF61: 'FL1', AF88: 'DED', AF94: 'PPL', AF2: 'CL', AF71: 'BSA' }
+// fix176: Brazil Série A lives under AF71 (it carries the predictions): BSA opens AF71, never the other way round
+const FD_OF: Record<string, string> = { AF39: 'PL', AF40: 'ELC', AF140: 'PD', AF135: 'SA', AF78: 'BL1', AF61: 'FL1', AF88: 'DED', AF94: 'PPL', AF2: 'CL', BSA: 'AF71' }
 
 export default function LeagueRoute() {
   const { code = '' } = useParams()
@@ -135,7 +136,8 @@ function League() {
       .then(r => !cancelled && setNews(r.data.data || []))
       .catch(() => !cancelled && setNews([]))
     // competitions from our second data source: the latest played edition (a cup between editions is never empty)
-    if (/^AF\d+$/.test(code)) {
+    // fix176: EC / WC between editions — the latest edition from the second source
+    if (/^AF\d+$/.test(code) || code === 'EC' || code === 'WC') {
       axios
         .get(`${API_URL}/leagues/${code}/results`)
         .then(r => {
@@ -286,6 +288,8 @@ function League() {
             )}
           </Card>
 
+          {/* fix176: no player stats for this league (provider): no empty scorers card */}
+          {!(scorers && scorers.length === 0) && (
           <Card
             title={leaders === 'goals' ? tt("Top scorers") : tt("Top assists")}
             action={
@@ -326,6 +330,7 @@ function League() {
               </ol>
             )}
           </Card>
+          )}
       </>}
       right={<>
           {live.length > 0 && (
@@ -359,6 +364,7 @@ function League() {
             )}
           </Card>
 
+          {(news === null || news === undefined || news.length > 0) && (
           <Card title={tt("{0} news", { 0: comp?.name || tt("League") })}>
             {!news ? (
               <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-16 rounded-xl bg-surface2/60 animate-pulse" />)}</div>
@@ -386,7 +392,14 @@ function League() {
               </ul>
             )}
           </Card>
+          )}
 
+          {/* fix176: between editions — where the next one is being decided */}
+          {(code === 'EC' || code === 'WC') && (
+            <Card title={tt("Next edition")}>
+              <Link to={code === 'EC' ? '/league/AF960' : '/league/AF32'} className="text-sm font-bold text-accent">{code === 'EC' ? tt("European Championship qualifiers →") : tt("World Cup qualifiers →")}</Link>
+            </Card>
+          )}
           {edition && edition.matches.length > 0 && (
             <Card
               title={tt("Latest edition{0}", { 0: editionYears(edition) ? ` · ${editionYears(edition)}` : '' })}

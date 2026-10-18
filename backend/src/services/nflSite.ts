@@ -128,8 +128,16 @@ export interface StandRow { team: NflSide; conference: string | null; division: 
 export function nflStandings(season: number, league: LeagueId = 1): { season: number; league: LeagueId; conferences: { name: string; level?: string | null; divisions: { name: string; rows: StandRow[] }[] }[]; rows: StandRow[] } {
   return cached(`stand|${league}|${season}`, () => standingsOf(season, league), 60 * 1000);
 }
+/**
+ * fix176: a regular-season game. The NFL's stage says "Regular Season"; college stages don't (the audit found
+ * /api/nfl/standings?league=2 empty), so a college game counts when its week is a numbered week (weekKey, like the
+ * lists) — bowls, playoffs and pre-season left out.
+ */
+const regularOf = (league: LeagueId) => (r: { stage: string | null; week: string | null }) =>
+  league === 1 ? /^regular/i.test(String(r.stage || '')) : /^\d+$/.test(weekKey(r.stage, r.week));
 function standingsOf(season: number, league: LeagueId) {
-  const games = db.prepare(`SELECT home_id, away_id, home_pts, away_pts, kickoff FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND season = ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL AND stage LIKE 'Regular%' ORDER BY kickoff`).all(league, season) as any[];
+  const isReg = regularOf(league);
+  const games = (db.prepare(`SELECT home_id, away_id, home_pts, away_pts, kickoff, stage, week FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND season = ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL ORDER BY kickoff`).all(league, season) as any[]).filter(isReg);
   const teams = new Map<number, StandRow & { seq: string[] }>();
   const ensure = (id: number) => {
     let r = teams.get(id);
@@ -141,7 +149,11 @@ function standingsOf(season: number, league: LeagueId) {
     return r;
   };
   // teams with no game yet still get a row (from the regular-season schedule)
-  for (const r of db.prepare(`SELECT DISTINCT home_id AS id FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND season = ? AND stage LIKE 'Regular%' UNION SELECT DISTINCT away_id FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND season = ? AND stage LIKE 'Regular%'`).all(league, season, league, season) as any[]) if (r.id) ensure(r.id);
+  for (const r of db.prepare(`SELECT home_id, away_id, stage, week FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND season = ?`).all(league, season) as any[]) {
+    if (!isReg(r)) continue;
+    if (r.home_id) ensure(r.home_id);
+    if (r.away_id) ensure(r.away_id);
+  }
   for (const g of games) {
     const h = ensure(g.home_id), a = ensure(g.away_id);
     h.pf += g.home_pts; h.pa += g.away_pts; a.pf += g.away_pts; a.pa += g.home_pts; h.games++; a.games++;
@@ -366,7 +378,7 @@ export function nflTeamAnalysis(teamId: number, season: number) {
 
 function rankByWeek(teamId: number, season: number, league: LeagueId = 1) {
   const all = cached(`rbw|${league}|${season}`, () => {
-    const weeks = (db.prepare(`SELECT DISTINCT week, stage FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND season = ? AND status IN ('FT','AOT') AND stage LIKE 'Regular%'`).all(league, season) as any[])
+    const weeks = (db.prepare(`SELECT DISTINCT week, stage FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND season = ? AND status IN ('FT','AOT')`).all(league, season) as any[]).filter(regularOf(league))
       .map(r => Number(weekKey(r.stage, r.week))).filter(n => Number.isFinite(n)).sort((a, b) => a - b);
     const out = new Map<number, { week: number; rank: number; of: number }[]>();
     for (const w of weeks) {
@@ -389,8 +401,11 @@ export function nflTeam(id: number, season: number) {
   const players = db.prepare(`SELECT player_id AS id, name, position, grp, number, age, image FROM nfl_players WHERE team_id = ? ORDER BY grp, position, number`).all(id) as any[];
   const roster = GROUP_ORDER.concat([...new Set(players.map(p => p.grp || 'Other'))].filter(g => !GROUP_ORDER.includes(g)))
     .map(g => ({ group: g, players: players.filter(p => (p.grp || 'Other') === g) })).filter(x => x.players.length);
+  // fix176: college teams come without a stadium (and coach): the stadium = the venue of most of its home games; an
+  // unknown coach stays null (the page hides it)
+  const team = t.stadium ? t : { ...t, stadium: (db.prepare(`SELECT venue, COUNT(*) AS n FROM nfl_games WHERE home_id = ? AND venue IS NOT NULL AND venue != '' GROUP BY venue ORDER BY n DESC LIMIT 1`).get(id) as any)?.venue || null };
   return {
-    team: t, season, standing: stand,
+    team: { ...team, coach: team.coach || null }, season, standing: stand,
     schedule: games.filter(g => g.state !== 'done'),
     results: games.filter(g => g.state === 'done').reverse(),
     roster,

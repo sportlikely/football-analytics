@@ -49,6 +49,17 @@ const SITE = 'https://sportlikely.com';
 export const SOCIAL_URLS = ['https://instagram.com/sportlikely', 'https://x.com/sportlikely'];
 
 /** fix134: old hub URLs (/predictions/PL, /es/predictions/PL …) → the new slug, for a 301. null = not an old hub URL. */
+/**
+ * fix176: one league, one page — a Football-Data.org code whose league lives under its API-Football code (that one
+ * carries the predictions): Brazil Série A BSA → AF71. The old URLs move permanently (301), any language prefix.
+ */
+export const MERGED_LEAGUES: Record<string, string> = { BSA: 'AF71' };
+export function leagueRedirect(rawPath: string): string | null {
+  const m = rawPath.match(/^(\/(?:es|pt|de|fr|it|tr))?\/league\/([A-Za-z0-9]+)\/?$/);
+  const to = m ? MERGED_LEAGUES[m[2].toUpperCase()] : undefined;
+  return to ? `${m![1] || ''}/league/${to}` : null;
+}
+
 export function hubRedirect(rawPath: string): string | null {
   const m = rawPath.match(/^(\/(?:es|pt|de|fr|it|tr))?\/predictions\/([A-Za-z0-9-]+)\/?$/);
   if (!m) return null;

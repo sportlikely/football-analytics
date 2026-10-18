@@ -15,6 +15,8 @@ interface Fixture { matchId: number | null; date: string; status: string; comp: 
 interface Player {
   id: number; name: string; number: number | null; pos: string; age: number | null; photo: string | null
   apps?: number | null; minutes?: number | null; goals?: number | null; assists?: number | null; yellow?: number | null; red?: number | null; rating?: number | null
+  /** fix176: national teams — the player's club this season (our stored club stats) */
+  club?: { id: number; name: string | null; season: number; apps: number | null; goals: number | null; assists: number | null }
 }
 interface Row { rank: number; id: number; name: string; logo: string; played: number; gd: number; points: number; me: boolean }
 interface TeamData {
@@ -136,6 +138,10 @@ export default function Team() {
 
   const { team, standing } = data
   const full = data.premium
+  // fix176: leagues where the provider has no player stats (Scottish Championship): no goals / assists / rating
+  // columns and no scorer cards instead of zeros and empty lists; appearances stay when there are any
+  const hasStats = data.squad.some(p => (p.goals ?? 0) > 0 || (p.assists ?? 0) > 0 || p.rating != null) || data.scorers.length > 0
+  const hasApps = data.squad.some(p => (p.apps ?? 0) > 0)
   const nextMatch = data.next[0]
   const rows = standing ? (() => {
     const i = standing.rows.findIndex(r => r.me)
@@ -190,16 +196,17 @@ export default function Team() {
                 <div key={pos}>
                   <div className="label mb-2">{POS_LABEL[pos] || pos}</div>
                   <div className="overflow-x-auto -mx-2">
-                    <table className="w-full text-sm min-w-[520px]">
+                    <table className={`w-full text-sm ${team.national ? 'min-w-[680px]' : 'min-w-[520px]'}`}>
                       <thead>
                         <tr className="text-[11px] text-faint text-left">
                           <th className="font-medium px-2 py-1 w-10">#</th>
                           <th className="font-medium px-2 py-1">{t("Player")}</th>
+                          {team.national && <th className="font-medium px-2 py-1">{t("Club this season")}</th>}
                           <th className="font-medium px-2 py-1 text-right w-12">{t("Age")}</th>
-                          <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Apps") : <Pro />}</th>
-                          <th className="font-medium px-2 py-1 text-right w-14">{t("Goals")}</th>
-                          <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Assists") : <Pro />}</th>
-                          <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Rating") : <Pro />}</th>
+                          {(hasStats || hasApps) && <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Apps") : <Pro />}</th>}
+                          {hasStats && <th className="font-medium px-2 py-1 text-right w-14">{t("Goals")}</th>}
+                          {hasStats && <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Assists") : <Pro />}</th>}
+                          {hasStats && <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Rating") : <Pro />}</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -212,11 +219,16 @@ export default function Team() {
                                 <Link to={`/player/${p.id}`} className="font-semibold text-ink truncate hover:text-accent">{p.name}</Link>
                               </span>
                             </td>
+                            {team.national && (
+                              <td className="px-2 py-2 text-xs">
+                                {p.club?.name ? <><NameLink to={href.team(p.club.id)} className="text-ink">{p.club.name}</NameLink><span className="block text-faint num">{t("{0} games · {1} goals", { 0: p.club.apps ?? 0, 1: p.club.goals ?? 0 })}</span></> : <span className="text-faint">–</span>}
+                              </td>
+                            )}
                             <td className="px-2 py-2 text-right text-muted num">{p.age ?? ''}</td>
-                            <td className="px-2 py-2 text-right num">{full ? p.apps ?? '–' : <span className="text-faint">·</span>}</td>
-                            <td className="px-2 py-2 text-right num font-semibold">{p.goals ?? '–'}</td>
-                            <td className="px-2 py-2 text-right num">{full ? p.assists ?? '–' : <span className="text-faint">·</span>}</td>
-                            <td className={`px-2 py-2 text-right num font-bold ${full && p.rating ? (p.rating >= 7.3 ? 'text-win' : p.rating >= 6.9 ? 'text-accent' : 'text-draw') : 'text-faint'}`}>{full ? p.rating ?? '–' : '·'}</td>
+                            {(hasStats || hasApps) && <td className="px-2 py-2 text-right num">{full ? p.apps ?? '–' : <span className="text-faint">·</span>}</td>}
+                            {hasStats && <td className="px-2 py-2 text-right num font-semibold">{p.goals ?? '–'}</td>}
+                            {hasStats && <td className="px-2 py-2 text-right num">{full ? p.assists ?? '–' : <span className="text-faint">·</span>}</td>}
+                            {hasStats && <td className={`px-2 py-2 text-right num font-bold ${full && p.rating ? (p.rating >= 7.3 ? 'text-win' : p.rating >= 6.9 ? 'text-accent' : 'text-draw') : 'text-faint'}`}>{full ? p.rating ?? '–' : '·'}</td>}
                           </tr>
                         ))}
                       </tbody>
@@ -255,13 +267,17 @@ export default function Team() {
 
           <TeamRecordCard rec={data.analysis?.record} teamName={team.name} />
 
-          <Card title={t("Top scorers")} action={!full ? <span className="text-[11px] text-faint">Top 3 · <Link to="/premium" className="text-accent font-bold">all</Link></span> : undefined}>
-            <Leaders items={data.scorers} label={t("goals")} squad={data.squad} />
-          </Card>
+          {hasStats && (
+            <Card title={t("Top scorers")} action={!full ? <span className="text-[11px] text-faint">Top 3 · <Link to="/premium" className="text-accent font-bold">all</Link></span> : undefined}>
+              <Leaders items={data.scorers} label={t("goals")} squad={data.squad} />
+            </Card>
+          )}
 
-          <Card title={t("Top assists")} action={!full ? <Pro /> : undefined}>
-            {full ? <Leaders items={data.assists} label={t("assists")} squad={data.squad} /> : <p className="text-sm text-muted"><Link to="/premium" className="font-bold text-accent">{t("Assists for every player are part of Premium.")}</Link></p>}
-          </Card>
+          {hasStats && (
+            <Card title={t("Top assists")} action={!full ? <Pro /> : undefined}>
+              {full ? <Leaders items={data.assists} label={t("assists")} squad={data.squad} /> : <p className="text-sm text-muted"><Link to="/premium" className="font-bold text-accent">{t("Assists for every player are part of Premium.")}</Link></p>}
+            </Card>
+          )}
 
           {rows.length > 0 && data.league && (
             <Card title={<NameLink to={href.league(data.league.id)}>{data.league.name}</NameLink>} action={<img src={data.league.logo} alt="" className="w-6 h-6 object-contain" />}>
@@ -287,9 +303,11 @@ export default function Team() {
             {data.last.slice(0, 8).map(f => <FixtureRow key={`l${f.date}`} f={f} teamId={team.id} />)}
           </Card>
 
+          {(news === null || news === undefined || news.length > 0) && (
           <Card title={t("{0} news", { 0: team.name })}>
             {news === null ? <div className="h-24 rounded-xl bg-surface2/60 animate-pulse" /> : news.length ? <div className="-mx-2"><NewsRows items={news} showLeague /></div> : <p className="text-sm text-faint">{t("No news about this team in the last month.")}</p>}
           </Card>
+          )}
       </>}
     />
   )

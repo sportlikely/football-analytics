@@ -1964,5 +1964,11 @@
  "How far our expected margin and total points were from the final score, on average, over {0} games.": "Beklenen farkımız ve toplam sayımız, {0} maçta ortalama olarak son skordan ne kadar uzaktı.",
  "Margin off by": "Fark sapması",
  "Total off by": "Toplam sapması",
- "come in with one more day of rest": "bir gün daha fazla dinlenmiş olarak geliyor"
+ "come in with one more day of rest": "bir gün daha fazla dinlenmiş olarak geliyor",
+ "Next edition": "Sonraki turnuva",
+ "European Championship qualifiers →": "Avrupa Şampiyonası elemeleri →",
+ "World Cup qualifiers →": "Dünya Kupası elemeleri →",
+ "Club this season": "Bu sezonki kulübü",
+ "{0} games · {1} goals": "{0} maç · {1} gol",
+ "#{0} in {1}": "{1} içinde {0}."
 }
