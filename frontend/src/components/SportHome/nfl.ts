@@ -4,7 +4,7 @@ import { API_URL } from '../../lib/socket'
 import { t as tt } from '../../lib/i18n'
 import { useAuth } from '../../lib/auth'
 import { useNflConfig, useNflFavorites, useNflLeague, NFL_STATUS, weekLabel, nick, nflRid, nflRstatus, nflBase, nflLeagueName, nflModelOf, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
-import { winnerPred, winnerRecordRows, upsetItems } from './winner'
+import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
 
 /** NFL's adapter for components/SportHome (fix141): the data and labels of the NFL home. fix142: NFL | College toggle. */
@@ -93,7 +93,9 @@ function useNflData(): SportHomeData {
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
       link: full ? { to: `${base}/games`, label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
     },
-    results: { rows: resultRows, days: 30, link: { to: '/american-football/accuracy', label: tt("How accurate is the model? →") } }
+    results: { rows: resultRows, days: 30, link: { to: '/american-football/accuracy', label: tt("How accurate is the model? →") } },
+    // fix174: first-visit tiles like football
+    introStats: winnerIntroStats(record?.bands, nflStrongAt(league), d?.standings ? { value: d.standings.rows.length, label: league === 2 ? tt('college teams covered') : tt('NFL teams covered') } : null)
   }
 }
 

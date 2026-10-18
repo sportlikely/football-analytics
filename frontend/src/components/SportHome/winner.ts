@@ -47,3 +47,18 @@ export function upsetItems<G>(games: G[], get: (g: G) => { id: number; href: str
       extra: { label: tt("Our pick"), value: `${u.fav} · ${Math.round(u.favPct)}%` }
     }))
 }
+
+/**
+ * fix174: the first-visit stats tiles (football's introStats) for the winner sports, from the record bands of the last
+ * 30 days: picks right, strong picks right, and what we cover (teams or leagues).
+ */
+export function winnerIntroStats(bands: { min: number; n: number; pct: number | null }[] | null | undefined, strongAt: number, cover: { value: number; label: string } | null) {
+  const all = (bands || []).find(b => b.min === 0)
+  if (!all || !all.n || all.pct === null) return undefined
+  const strong = (bands || []).filter(b => b.min >= strongAt && b.n >= 5 && b.pct !== null).sort((a, b) => a.min - b.min)[0]
+  return [
+    { value: `${all.pct}%`, label: tt("right · winner picks"), sub: tt("{0} games, last {1} days", { 0: all.n, 1: 30 }) },
+    ...(strong ? [{ value: `${strong.pct}%`, label: tt("when we're {0}%+ sure", { 0: strong.min }), sub: tt("{0} games", { 0: strong.n }) }] : []),
+    ...(cover && cover.value > 0 ? [{ value: String(cover.value), label: cover.label, sub: tt("every game predicted") }] : [])
+  ]
+}

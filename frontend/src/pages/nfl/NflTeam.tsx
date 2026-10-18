@@ -7,11 +7,12 @@ import { t } from '../../lib/i18n'
 import { record, nflTeamFav, setNflLeague, nflLeagueName, type NflGame, type StandRow, type NflLeague } from '../../lib/nfl'
 import { Skeleton, LockIcon } from '../bb/parts'
 import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
-import { NflGameRow, LeagueSwitch } from './parts'
+import { NflGameRow, LeagueSwitch, StandTable } from './parts'
+import RecordLink from '../../components/RecordLink'
 import { useNews, NewsRows } from '../../components/NewsList'
 
 interface Measure { id: string; label: string; better: 'high' | 'low'; value: number | null; text: string | null; rank: number | null; of: number | null; score: number | null }
-interface Analysis { season: number; measures: Measure[]; strengths: Measure[]; weaknesses: Measure[]; rankByWeek: { week: number; rank: number; of: number }[] }
+interface Analysis { season: number; measures: Measure[]; strengths: Measure[]; weaknesses: Measure[]; rankByWeek: { week: number; rank: number; of: number }[]; locked?: boolean; notesCount?: number }
 interface Player { id: number; name: string; position: string | null; grp: string | null; number: number | null; age: number | null; image: string | null }
 interface Data {
   team: { id: number; name: string; code: string | null; city: string | null; logo: string | null; conference: string | null; division: string | null; coach: string | null; stadium: string | null; league?: NflLeague; level?: string | null }
@@ -19,6 +20,8 @@ interface Data {
   roster: { group: string; players: Player[] }[]; injuries: { id: number; name: string; status: string | null; description: string | null }[]; analysis: Analysis | null
   /** fix139: nfl-v1 ratings (paid plans; null + modelLocked for the rest); record = our picks on this team (admins) */
   model?: Model | null; modelLocked?: boolean; record?: { games: number; right: number; strong: number; strongRight: number } | null
+  /** fix174: the team's division (NFL) or conference (college) table */
+  division?: { conference: string; name: string; rows: StandRow[] } | null
 }
 interface Model {
   elo: number; rank: number; teams: number; qb: { id: number; name: string; value: number; league: number } | null
@@ -98,6 +101,12 @@ export default function NflTeam() {
         )}
       </>}
       right={<>
+        <RecordCard d={d} />
+        {d.division && d.division.rows.length > 0 && (
+          <Card title={<NameLink to={href.nflStandings(tm.league || 1)}>{d.division.name !== d.division.conference ? `${d.division.conference} · ${d.division.name}` : d.division.name}</NameLink>} action={<Link to={href.nflStandings(tm.league || 1)} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
+            <StandTable rows={d.division.rows} compact highlight={tm.id} league={tm.league || 1} />
+          </Card>
+        )}
         {d.injuries.length > 0 && (
           <Card title={t('Injuries')}>
             <ul className="divide-y divide-line/50">
@@ -129,6 +138,7 @@ export default function NflTeam() {
 /** Team analysis (rule-based, fix137): 1–10 league scores, strengths and weaknesses, rank over the season; then the
  *  nfl-v1 model tiles (fix139, paid plans): Elo and rank, starting QB, points for / against ratings, next game. */
 function TeamAnalysis({ a, d }: { a: Analysis; d: Data }) {
+  if (a.locked) return <LockedAnalysis a={a} d={d} />
   const line = (m: Measure, good: boolean) => t((good ? SENTENCE[m.id]?.good : SENTENCE[m.id]?.bad) || '{0}', { 0: m.text ?? '–', 1: m.rank ?? '–', 2: m.of ?? '–' })
   const ranks = a.rankByWeek
   const of = ranks[0]?.of || 32
@@ -195,7 +205,6 @@ function ModelTiles({ d }: { d: Data }) {
     { label: t('Defence rating'), value: t('{0} pts', { 0: m.defense.toFixed(1) }), sub: t('#{0} of {1} · allowed per game', { 0: m.defRank, 1: m.teams }) }
   ]
   if (next && nextPct !== null) tiles.push({ label: t('Win chance next game'), value: `${Math.round(nextPct)}%`, sub: <>{home ? t('vs') : '@'} <NameLink to={href.nflTeam((home ? next.away : next.home).id)}>{(home ? next.away : next.home).name}</NameLink></> })
-  if (d.record && d.record.games > 0) tiles.push({ label: t('Our record on this team'), value: `${d.record.right}/${d.record.games}`, sub: t('{0}% right · strong picks {1}/{2}', { 0: Math.round((d.record.right / d.record.games) * 100), 1: d.record.strongRight, 2: d.record.strong }) })
   return (
     <div className="mt-5 grid gap-3 grid-cols-2 lg:grid-cols-3">
       {tiles.map(x => (
@@ -206,5 +215,52 @@ function ModelTiles({ d }: { d: Data }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/** fix174: free / signed-out view of the team analysis (like football and basketball): the rank over the season and
+ *  how many strengths and weaknesses we found; the scores and sentences are part of Premium. */
+function LockedAnalysis({ a, d }: { a: Analysis; d: Data }) {
+  const ranks = a.rankByWeek
+  return (
+    <Card title={t('Team analysis')} action={<span className="text-xs text-faint">{t('{0} season', { 0: a.season })}</span>}>
+      <div className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-4 text-sm text-ink space-y-3">
+        <p className="flex items-start gap-2"><LockIcon /> <span>{t('1–10 league scores for scoring, defence, yards per play, turnovers, third downs, red zone and pass rush')}{a.notesCount ? t(', and {0} strengths and weaknesses we found in the numbers', { 0: a.notesCount }) : ''}.</span></p>
+        <Link to="/premium" className="inline-block px-3 py-1.5 rounded-lg bg-accent text-bg text-xs font-extrabold">{t('Go Premium')}</Link>
+      </div>
+      {ranks.length > 1 && (
+        <div className="mt-5">
+          <div className="label pb-1">{t('League rank by week (point difference per game)')}</div>
+          <div className="flex justify-between text-sm"><span className="text-muted">{t('Week {0}', { 0: ranks[0].week })}: <b className="text-ink num">#{ranks[0].rank}</b></span><span className="text-muted">{t('now')}: <b className="text-ink num">#{ranks[ranks.length - 1].rank}</b> <span className="text-faint">/ {ranks[ranks.length - 1].of}</span></span></div>
+        </div>
+      )}
+      <ModelTiles d={d} />
+    </Card>
+  )
+}
+
+/** fix174: our record on the team (public, like football and basketball): picks saved before kick-off, finished games. */
+function RecordCard({ d }: { d: Data }) {
+  const r = d.record
+  if (!r) return null
+  return (
+    <Card title={t('Our record on {0}', { 0: d.team.name })} action={<RecordLink to="/american-football/accuracy" className="text-xs font-bold text-accent">{t('Full record →')}</RecordLink>}>
+      {!r.games ? <p className="text-sm text-faint">{t('No finished games with a saved prediction yet.')}</p> : (
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className="rounded-2xl bg-surface2/60 p-3.5">
+            <div className="text-[11px] text-faint">{t('Winner, {0} games', { 0: r.games })}</div>
+            <div className="font-display font-extrabold text-xl mt-1">{Math.round((r.right / r.games) * 100)}%</div>
+            <div className="text-[11px] text-muted">{t('{0} right', { 0: r.right })}</div>
+          </div>
+          {r.strong > 0 && (
+            <div className="rounded-2xl bg-surface2/60 p-3.5">
+              <div className="text-[11px] text-faint">{t('Strong picks')}</div>
+              <div className="font-display font-extrabold text-xl mt-1">{Math.round((r.strongRight / r.strong) * 100)}%</div>
+              <div className="text-[11px] text-muted">{t('{0} games', { 0: r.strong })}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }

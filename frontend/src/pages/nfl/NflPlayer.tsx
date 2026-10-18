@@ -8,6 +8,7 @@ import { FavStar } from '../../lib/favorites'
 import { LeagueSwitch } from './parts'
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
+import NameLink, { href } from '../../components/sport/NameLink'
 
 interface Data {
   player: { id: number; name: string; position: string | null; group: string | null; number: number | null; age: number | null; height: string | null; weight: string | null; college: string | null; experience: number | null; image: string | null }
@@ -15,7 +16,14 @@ interface Data {
   season: number; games: number
   totals: Record<string, Record<string, string>>
   log: { game: NflGame; teamId: number; groups: Record<string, Record<string, string>> }[]
+  // fix174
+  career?: { season: number; league: number; team: { id: number; name: string; logo: string | null } | null; games: number; stats: Record<string, number> }[]
+  injury?: { status: string | null; description: string | null; date: string | null } | null
 }
+const CAREER_COLS: { key: string; label: string }[] = [
+  { key: 'passYds', label: 'Pass yds' }, { key: 'passTd', label: 'Pass TD' }, { key: 'rushYds', label: 'Rush yds' }, { key: 'rushTd', label: 'Rush TD' },
+  { key: 'rec', label: 'Rec' }, { key: 'recYds', label: 'Rec yds' }, { key: 'recTd', label: 'Rec TD' }, { key: 'tackles', label: 'Tackles' }, { key: 'sacks', label: 'Sacks' }, { key: 'ints', label: 'INT' }
+]
 
 /** NFL player page (fix137): bio, season totals by group, game log. Pictures from API-Sports only. */
 export default function NflPlayer() {
@@ -55,6 +63,15 @@ export default function NflPlayer() {
         facts={bio.filter(([k]) => k !== t('Position') && k !== t('Number'))}
       />
       {p.image && !imgBroken && <img src={p.image} alt="" onError={() => setImgBroken(true)} className="hidden" />}
+      {d.injury && d.injury.status && (
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${/out|ir|reserve/i.test(d.injury.status) ? 'border-loss/40 bg-loss/10' : 'border-draw/40 bg-draw/10'}`}>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className={`font-bold ${/out|ir|reserve/i.test(d.injury.status) ? 'text-loss' : 'text-draw'}`}>{t('Injury report')}: {d.injury.status}</span>
+            {d.injury.date && <span className="text-xs text-faint">{new Date(d.injury.date).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>}
+          </div>
+          {d.injury.description && <p className="text-muted mt-0.5">{d.injury.description}</p>}
+        </div>
+      )}
       <Card title={t('{0} season · {1} games', { 0: d.season, 1: d.games })}>
         {Object.keys(d.totals).length === 0 ? <p className="text-sm text-faint">{t('No game statistics yet this season.')}</p> : (
           <div className="space-y-4">
@@ -69,6 +86,28 @@ export default function NflPlayer() {
           </div>
         )}
       </Card>
+      {d.career && d.career.length > 0 && (() => {
+        const cols = CAREER_COLS.filter(c => d.career!.some(s => s.stats[c.key]))
+        return (
+          <Card title={t('Career by season')}>
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full text-sm min-w-[480px]">
+                <thead><tr className="text-[10px] uppercase tracking-wide text-faint"><th className="text-left font-semibold py-1 px-1">{t('Season')}</th><th className="text-left font-semibold py-1 px-1">{t('Team')}</th><th className="text-right font-semibold py-1 px-1">{t('GP')}</th>{cols.map(c => <th key={c.key} className="text-right font-semibold py-1 px-1">{t(c.label)}</th>)}</tr></thead>
+                <tbody>
+                  {d.career!.map(s => (
+                    <tr key={`${s.season}${s.team?.id}`} className="border-t border-line/50">
+                      <td className="py-1.5 px-1 num text-muted">{s.season}</td>
+                      <td className="py-1.5 px-1">{s.team ? <span className="flex items-center gap-1.5 min-w-0"><TeamLogo team={s.team} size={14} /><NameLink to={href.nflTeam(s.team.id)} className="truncate text-ink">{s.team.name}</NameLink></span> : '–'}</td>
+                      <td className="py-1.5 px-1 text-right num text-muted">{s.games}</td>
+                      {cols.map(c => <td key={c.key} className="py-1.5 px-1 text-right num text-ink">{s.stats[c.key] ?? '–'}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )
+      })()}
       {d.log.length > 0 && (
         <Card title={t('Game log')}>
           <ul className="divide-y divide-line/50">

@@ -429,6 +429,59 @@ function playerLines(playerId: number, season: number) {
   return out;
 }
 
+/* ---------- fix174: career by season + injury status (player page) ---------- */
+
+const CAREER: { key: string; group: RegExp; stat: RegExp }[] = [
+  { key: 'passYds', group: /^passing$/i, stat: /^(yards|yds)$/i },
+  { key: 'passTd', group: /^passing$/i, stat: /touch ?downs?|^td$|^tds$/i },
+  { key: 'rushYds', group: /^rushing$/i, stat: /^(yards|yds)$/i },
+  { key: 'rushTd', group: /^rushing$/i, stat: /touch ?downs?|^td$|^tds$/i },
+  { key: 'rec', group: /^receiving$/i, stat: /^(receptions|rec|total receptions)$/i },
+  { key: 'recYds', group: /^receiving$/i, stat: /^(yards|yds)$/i },
+  { key: 'recTd', group: /^receiving$/i, stat: /touch ?downs?|^td$|^tds$/i },
+  { key: 'tackles', group: /defens/i, stat: /^(total tackles|tackles|tot)$/i },
+  { key: 'sacks', group: /defens/i, stat: /^sacks?$/i },
+  { key: 'ints', group: /defens|intercept/i, stat: /^(interceptions|int)$/i }
+];
+const careerCache = new Map<number, { at: number; v: any[] }>();
+/** Every season we hold for the player (regular season + playoffs): team, games and the main numbers. Cached 6 h. */
+export function nflPlayerCareer(playerId: number) {
+  const c = careerCache.get(playerId);
+  if (c && Date.now() - c.at < 6 * 3600 * 1000) return c.v;
+  // only this player's games (nfl_player_games, filled with every box score): never a scan of every box score
+  const rows = db.prepare(`SELECT g.season, g.league, p.team_id, p.json FROM nfl_player_games x JOIN nfl_player_stats p ON p.game_id = x.game_id AND p.team_id = x.team_id
+    JOIN nfl_games g ON g.game_id = x.game_id WHERE x.player_id = ? AND (g.stage IS NULL OR g.stage NOT LIKE 'Pre%')`).all(playerId) as any[];
+  const by = new Map<string, { season: number; league: number; teamId: number; games: number; s: Record<string, number> }>();
+  for (const r of rows) {
+    const groups = playerGroups(r.json);
+    let played = false;
+    const k = `${r.season}|${r.team_id}`;
+    const x = by.get(k) || { season: r.season, league: r.league, teamId: r.team_id, games: 0, s: {} as Record<string, number> };
+    for (const [gname, list] of Object.entries(groups)) {
+      const me = list.find(p => p.id === playerId);
+      if (!me) continue;
+      played = true;
+      for (const C of CAREER) {
+        if (!C.group.test(gname)) continue;
+        const key = Object.keys(me.stats).find(s => C.stat.test(s));
+        const v = key ? num(me.stats[key]) : null;
+        if (v !== null) x.s[C.key] = (x.s[C.key] || 0) + v;
+      }
+    }
+    if (played) { x.games++; by.set(k, x); }
+  }
+  const v = [...by.values()].sort((a, b) => b.season - a.season).map(x => {
+    const t = nflTeamRow(x.teamId);
+    return { season: x.season, league: x.league, team: t ? { id: x.teamId, name: t.name, logo: t.logo } : null, games: x.games, stats: Object.fromEntries(Object.entries(x.s).map(([k, n]) => [k, Math.round(n * 10) / 10])) };
+  });
+  careerCache.set(playerId, { at: Date.now(), v });
+  if (careerCache.size > 3000) careerCache.clear();
+  return v;
+}
+/** The player's line on the latest injury report (null = not listed). */
+export const nflPlayerInjury = (playerId: number) =>
+  (db.prepare(`SELECT status, description, date FROM nfl_injuries WHERE player_id = ? ORDER BY updated_at DESC LIMIT 1`).get(playerId) as any) || null;
+
 export function nflPlayer(id: number, season: number) {
   const p = db.prepare(`SELECT player_id AS id, team_id, name, position, grp, number, age, height, weight, college, experience, image FROM nfl_players WHERE player_id = ?`).get(id) as any;
   const lines = playerLines(id, season);

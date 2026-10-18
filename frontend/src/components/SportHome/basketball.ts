@@ -5,7 +5,7 @@ import { t as tt } from '../../lib/i18n'
 import { useAuth } from '../../lib/auth'
 import { useBbConfig, useBbFavorites, liveLabel, bbRank, type BbGame } from '../../lib/bb'
 import { rid, rstatus, bbShort } from '../../pages/bb/parts'
-import { winnerPred, winnerRecordRows, upsetItems } from './winner'
+import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
 
 /** Basketball's adapter for components/SportHome (fix141): the data and labels of the basketball home. */
@@ -52,7 +52,7 @@ function useBasketballData(): SportHomeData {
   useEffect(() => {
     const load = () => {
       axios.get(`${API_URL}/basketball/games`, { params: { days: 7 } }).then(r => setGames(r.data.data || [])).catch(() => undefined).finally(() => setLoaded(true))
-      axios.get(`${API_URL}/basketball/games`, { params: { days: 7, results: 1 } }).then(r => setResults((r.data.data || []).filter((g: BbGame) => g.state === 'done').reverse())).catch(() => setResults([]))
+      axios.get(`${API_URL}/basketball/games`, { params: { days: 30, results: 1 } }).then(r => setResults((r.data.data || []).filter((g: BbGame) => g.state === 'done').reverse())).catch(() => setResults([]))
     }
     load()
     axios.get(`${API_URL}/basketball/record`, { params: { days: 30 } }).then(r => setRecord(r.data.data)).catch(() => setRecord({}))
@@ -100,7 +100,9 @@ function useBasketballData(): SportHomeData {
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
       link: full ? { to: '/basketball/games', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
     },
-    results: { rows: resultRows, days: 7, link: { to: '/basketball/accuracy', label: tt("How accurate is the model? →") } }
+    results: { rows: resultRows, days: 30, link: { to: '/basketball/accuracy', label: tt("How accurate is the model? →") } },
+    // fix174: first-visit tiles like football; Latest results over 30 days like football
+    introStats: winnerIntroStats(record?.bands, STRONG, { value: new Set([...games, ...(results || [])].map(g => g.league.code)).size, label: tt('leagues covered') })
   }
 }
 

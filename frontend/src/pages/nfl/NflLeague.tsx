@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t } from '../../lib/i18n'
-import { useAuth } from '../../lib/auth'
 import { useNflLeague, nflBase, type Standings, type LeaderCat, type NflGame } from '../../lib/nfl'
+import type { Favorite } from '../../lib/favorites'
 import { Skeleton, TeamLogo } from '../bb/parts'
 import NameLink, { href } from '../../components/sport/NameLink'
 import { useNews, NewsRows } from '../../components/NewsList'
@@ -17,7 +17,6 @@ import { StandingsBlock, LeagueSwitch, NflGameRow } from './parts'
  */
 export default function NflLeague() {
   const { league } = useNflLeague()
-  const { access } = useAuth()
   const name = league === 2 ? t('College football') : 'NFL'
   const base = nflBase(league)
   const [d, setD] = useState<(Standings & { leaders: LeaderCat[] }) | null | undefined>(undefined)
@@ -31,11 +30,15 @@ export default function NflLeague() {
     const now = Date.now()
     axios.get(`${API_URL}/nfl/games`, { params: { from: new Date(now - 21 * 86400e3).toISOString(), to: new Date(now + 14 * 86400e3).toISOString(), league } })
       .then(r => setGames(r.data.data?.games || [])).catch(() => setGames([]))
-    // our record in this league, last 12 months (admins only while the NFL record is not public)
-    if (access === 'admin') axios.get(`${API_URL}/nfl/accuracy`, { params: { days: 365 } })
-      .then(r => { const x = (r.data.data?.leagues || []).find((l: any) => l.code === (league === 2 ? 'NCAA' : 'NFL')); setRecord(x && x.n > 0 && x.hitRate !== null ? { hitRate: x.hitRate, n: x.n } : null) })
+    // fix174: our record in this league, last 12 months — public like football and basketball (picks saved before kick-off)
+    axios.get(`${API_URL}/nfl/record`, { params: { days: 365, league } })
+      .then(r => { const all = (r.data.data?.bands || []).find((b: any) => b.min === 0); setRecord(all && all.n > 0 && all.pct !== null ? { hitRate: all.pct, n: all.n } : null) })
       .catch(() => undefined)
-  }, [league, access])
+  }, [league])
+  // fix174: the league's mark from the provider, the favorite star and the weekly hub, like every league page
+  const code = league === 2 ? 'NCAA' : 'NFL'
+  const logo = `https://media.api-sports.io/american-football/leagues/${league}.png`
+  const fav: Favorite = { kind: 'nfl-league', ref: code, code, name, img: logo }
 
   const live = (games || []).filter(g => g.state === 'live')
   const next = (games || []).filter(g => g.state === 'upcoming').sort((a, b) => a.kickoff.localeCompare(b.kickoff)).slice(0, 12)
@@ -45,13 +48,13 @@ export default function NflLeague() {
   return (
     <LeaguePage
       top={<LeagueSwitch />}
-      logo={null}
+      logo={logo}
       country={{ name: league === 2 ? t('USA · college') : t('USA') }}
       name={name}
       sub={d ? (league === 2 ? t('{0} season · by conference, FBS first', { 0: d.season }) : t('{0} season · regular season', { 0: d.season })) : null}
       record={record}
-      // fix175 (parity): favorite star and the weekly hub, like football and basketball
-      fav={{ kind: 'nfl-league', ref: league === 2 ? 'NCAA' : 'NFL', code: league === 2 ? 'NCAA' : 'NFL', name, img: null }}
+      // fix175 (parity) + fix174: favorite star and the weekly hub, like football and basketball
+      fav={fav}
       hub={{ to: `/predictions/${league === 2 ? 'college-football' : 'nfl'}`, label: t("This week's predictions →") }}
       left={<>
         <Card title={t('Table')}>

@@ -88,10 +88,10 @@ import { listFavorites, addFavorites, removeFavorite, MAX_FAVORITES } from './se
 import { tuneV3Full, tuneStatus, isTuning } from './services/v3Tuner';
 import { hiddenModels, v3MixBacktest, featureModelStatus, setConfig as setModelConfig, setMixLive, startFeatureModelScheduler } from './services/featureModel';
 import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, startModelDailyScheduler, dailyRunning } from './services/modelDaily';
-import { nflProbe, startNflScheduler, nflCurrentSeason, asLeague, LEAGUES } from './services/nfl';
+import { nflProbe, startNflScheduler, nflCurrentSeason, asLeague, LEAGUES, backfillPlayerGames } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
 import { withNflPrediction, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
-import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame, nflStandings, nflTeam, nflPlayer, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch } from './services/nflSite';
+import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame, nflStandings, nflTeam, nflPlayer, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury } from './services/nflSite';
 import { nflLiveNow, nflLiveCurve } from './services/nflLive';
 import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents } from './services/nflGameExtras';
 import { askAssistant, assistantConfigured, messagesToday, assistantStats } from './services/assistant';
@@ -2414,11 +2414,18 @@ app.get('/api/nfl/team/:id(\\d+)', (req, res) => {
     const season = allowedSeason(req.query.season, nflAdmin(req), league);
     const d = season ? nflTeam(id, season) : null;
     if (!d) return res.status(404).json({ error: 'Team not found' });
-    // fix139: model tiles for paid plans (null + locked for the rest); our record on the team: admins only for now
+    // fix139: model tiles for paid plans (null + locked for the rest)
+    // fix174: like football and basketball — our record on the team is public; strengths & weaknesses and the 1–10
+    // scores are paid (free: a locked preview that says how many we found); the team's division / conference table
     const full = nflFull(req), cur = season === nflCurrentSeason(league);
-    res.json({ data: { ...d, schedule: nflWith(req, d.schedule), results: nflWith(req, d.results),
+    const a: any = d.analysis;
+    const analysis = !a || full ? a : { season: a.season, locked: true, notesCount: (a.strengths?.length || 0) + (a.weaknesses?.length || 0), measures: [], strengths: [], weaknesses: [], rankByWeek: a.rankByWeek || [] };
+    const st = nflStandings(season!, league);
+    let division: any = null;
+    for (const c of st.conferences) for (const dv of c.divisions) if (!division && dv.rows.some(r => r.team.id === d.team.id)) division = { conference: c.name, name: dv.name, rows: dv.rows };
+    res.json({ data: { ...d, analysis, schedule: nflWith(req, d.schedule), results: nflWith(req, d.results),
       model: full && cur ? nflTeamModel(d.team.id) : null, modelLocked: !full,
-      record: nflAdmin(req) ? nflTeamRecord(d.team.id, season!) : null } });
+      record: nflTeamRecord(d.team.id, season!), division } });
   } catch (e) { sendError(res, e, 'Failed to load team'); }
 });
 app.get('/api/nfl/player/:id(\\d+)', (req, res) => {
@@ -2428,7 +2435,8 @@ app.get('/api/nfl/player/:id(\\d+)', (req, res) => {
     const season = allowedSeason(req.query.season, nflAdmin(req), pt ? leagueOfTeamId(pt) : nflLg(req));
     const d = season ? nflPlayer(pid, season) : null;
     if (!d) return res.status(404).json({ error: 'Player not found' });
-    res.json({ data: d });
+    // fix174: career by season and the injury report line, like the football and basketball player pages
+    res.json({ data: { ...d, career: nflPlayerCareer(pid), injury: nflPlayerInjury(pid) } });
   } catch (e) { sendError(res, e, 'Failed to load player'); }
 });
 // fix144: Upset watch for every sport (Pro; model only) and the NFL accuracy page (admins, like basketball's for now)
@@ -2701,6 +2709,8 @@ every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
 // fix175: indexes for the crawler pages, built off the main thread
 after('db indexes', () => ensureIndexes(), 20 * 1000).unref();
 after('hub warm', () => warmHubs(), 60 * 1000).unref();
+// fix174: the player → games index for NFL player careers (once, in slices)
+after('nfl player games', () => backfillPlayerGames().catch(e => logger.warn(`nfl player games: ${e.message}`)), 5 * 60 * 1000).unref();
 after('link check', () => linkCheckTick(), 10 * 60 * 1000).unref();
 
 // Admin: event-loop stalls and how long the heavy jobs take (why the site feels slow)

@@ -13,7 +13,7 @@
  */
 import { db } from '../db';
 import logger from '../utils/logger';
-import { timed, yieldLoop, every, after } from './perf';
+import { timed, yieldLoop, every, after, slicer } from './perf';
 
 const BASE = 'https://v1.american-football.api-sports.io';
 const KEY = () => process.env.API_NFL_KEY || process.env.API_FOOTBALL_KEY || '';
@@ -444,6 +444,33 @@ export async function nflLiveTick(): Promise<number> {
 /* ---------- box scores ---------- */
 
 db.exec(`CREATE TABLE IF NOT EXISTS nfl_events (game_id INTEGER PRIMARY KEY, json TEXT, updated_at TEXT NOT NULL)`);
+// fix174: which games each player has a box-score line in (player page career), filled with every box score
+db.exec(`CREATE TABLE IF NOT EXISTS nfl_player_games (player_id INTEGER NOT NULL, game_id INTEGER NOT NULL, team_id INTEGER NOT NULL, PRIMARY KEY (player_id, game_id));
+  CREATE INDEX IF NOT EXISTS idx_nfl_player_games_game ON nfl_player_games(game_id, team_id)`);
+const putPlayerGame = db.prepare(`INSERT OR IGNORE INTO nfl_player_games (player_id, game_id, team_id) VALUES (?, ?, ?)`);
+function indexPlayers(gameId: number, teamId: number, groupsJson: string | null) {
+  let groups: any[] = [];
+  try { groups = groupsJson ? JSON.parse(groupsJson) : []; } catch { groups = []; }
+  const ids = new Set<number>();
+  for (const g of Array.isArray(groups) ? groups : []) for (const p of g?.players || []) { const id = num(p?.player?.id); if (id) ids.add(id); }
+  for (const id of ids) putPlayerGame.run(id, gameId, teamId);
+}
+/** Backfill of nfl_player_games from the box scores stored before fix174 (once; 30-ms slices, so visitors never wait). */
+export async function backfillPlayerGames(): Promise<number> {
+  const done = db.prepare(`SELECT at FROM nfl_sync WHERE key = 'player-games'`).get() as any;
+  if (done) return 0;
+  const todo = db.prepare(`SELECT p.game_id, p.team_id FROM nfl_player_stats p WHERE NOT EXISTS (SELECT 1 FROM nfl_player_games x WHERE x.game_id = p.game_id AND x.team_id = p.team_id)`).all() as any[];
+  const one = db.prepare(`SELECT json FROM nfl_player_stats WHERE game_id = ? AND team_id = ?`);
+  const slice = slicer();
+  let n = 0;
+  for (const r of todo) {
+    indexPlayers(r.game_id, r.team_id, (one.get(r.game_id, r.team_id) as any)?.json ?? null);
+    n++;
+    await slice();
+  }
+  db.prepare(`INSERT OR REPLACE INTO nfl_sync (key, at, detail) VALUES ('player-games', ?, ?)`).run(new Date().toISOString(), String(n));
+  return n;
+}
 /** fix174: the scoring plays of a game (games/events), stored as we show them; [] when the provider has none. */
 function storeEvents(gameId: number, list: any[]) {
   const rows = (Array.isArray(list) ? list : []).map((e: any) => ({
@@ -464,7 +491,7 @@ export async function syncBoxScore(gameId: number): Promise<boolean> {
   db.exec('BEGIN');
   try {
     for (const t of teams) { const tid = num(t?.team?.id); if (tid) db.prepare(`INSERT OR REPLACE INTO nfl_team_stats (game_id, team_id, json) VALUES (?, ?, ?)`).run(gameId, tid, JSON.stringify(t.statistics || {})); }
-    for (const t of players) { const tid = num(t?.team?.id); if (tid) db.prepare(`INSERT OR REPLACE INTO nfl_player_stats (game_id, team_id, json) VALUES (?, ?, ?)`).run(gameId, tid, JSON.stringify(t.groups || [])); }
+    for (const t of players) { const tid = num(t?.team?.id); if (tid) { const json = JSON.stringify(t.groups || []); db.prepare(`INSERT OR REPLACE INTO nfl_player_stats (game_id, team_id, json) VALUES (?, ?, ?)`).run(gameId, tid, json); indexPlayers(gameId, tid, json); } }
     // 1 = stored, 2 = the provider has none for this game (don't ask again)
     db.prepare(`UPDATE nfl_games SET stats = ? WHERE game_id = ?`).run(teams.length || players.length ? 1 : 2, gameId);
     db.exec('COMMIT');
