@@ -747,7 +747,7 @@
  "Unlimited predictions, no counting": "Unbegrenzte Prognosen, ohne Zählen",
  "Everything in Premium": "Alles aus Premium",
  "Draw picks: the 2 likeliest draws every week": "Remis-Tipps: die 2 wahrscheinlichsten Unentschieden jede Woche",
- "Basketball, tennis and UFC as they launch": "Basketball, Tennis und UFC, sobald sie starten",
+ "Basketball now; tennis and UFC as they launch": "Basketball schon jetzt; Tennis und UFC, sobald sie starten",
  "Early access to new models and features": "Früher Zugang zu neuen Modellen und Funktionen",
  "You are back on Free (test).": "Du bist wieder auf Gratis (Test).",
  "You are on {0} now (test checkout, no payment taken).": "Du bist jetzt auf {0} (Test-Kauf, keine Zahlung erfolgt).",
@@ -1879,5 +1879,7 @@
  "{0} a pick": "{0} pro Tipp",
  "Adding…": "Wird hinzugefügt…",
  "Buy": "Kaufen",
- "Pack picks never expire and work in every sport. They are used after your free picks (and Premium's monthly unlocks). A pick that was used is not refunded.": "Paket-Tipps verfallen nie und gelten in jeder Sportart. Sie werden nach deinen Gratis-Tipps (und den monatlichen Freischaltungen von Premium) genutzt. Ein genutzter Tipp wird nicht erstattet."
+ "Pack picks never expire and work in every sport. They are used after your free picks (and Premium's monthly unlocks). A pick that was used is not refunded.": "Paket-Tipps verfallen nie und gelten in jeder Sportart. Sie werden nach deinen Gratis-Tipps (und den monatlichen Freischaltungen von Premium) genutzt. Ein genutzter Tipp wird nicht erstattet.",
+ "One pick at {0}, or {1} with Premium.": "Ein Tipp für {0}, oder {1} mit Premium.",
+ "Packs of {0} picks.": "Pakete mit {0} Tipps."
 }

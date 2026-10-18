@@ -79,7 +79,9 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   `/api/nfl/*`, `/api/admin/nfl-probe`. **`NFL_PUBLIC=1`** opens /american-football to everyone (admins see it before);
   past seasons stay admin-only. Frontend `pages/nfl/*`, `lib/nfl.ts`.
 - Accounts & admin: `auth.ts`, `twoFactor.ts`, `roles.ts`, `staffConsole.ts`, `securityLog.ts`, `crm.ts`, `billing.ts`
-  (plans: Premium $15, Pro $30, Pro 6 months $144, Pro yearly $249; 3-day trial decided, not built), `userPicks.ts`
+  (plans since fix147: Premium $8.99 / 6 months $48.49 / year $86.29 (60 unlocks a month), Pro $14.99 / $80.99 / $143.99
+  (unlimited); pick packs $0.79 per pick ($0.59 with Premium); 3-day money-back guarantee built; the 3-day free trial is
+  still decided, not built), `userPicks.ts`
   (users' own picks + personal record), `favorites.ts`, `testers.ts`, `backup.ts`, `clientErrors.ts`, `dataHealth.ts`,
   `dataAudit.ts`, `seo.ts`.
 - `OPEN_API` in `index.ts` lists the public routes; everything else is admin/staff only.

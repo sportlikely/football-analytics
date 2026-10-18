@@ -8,9 +8,10 @@ import { useUnlocks, buyPack, money, type Pack } from '../lib/unlocks'
  * Pick packs (fix147): 5 / 10 / 20 picks at the price of the member's plan ($0.79 a pick on Free, $0.59 on Premium; Pro
  * needs none). Used on the Premium page, the Account page and in the "Unlock this pick" sheet. While payments are in test
  * mode a pack is added straight away (no charge); otherwise the buttons say payments open soon.
- * `fallback` = the packs to show signed-out visitors (from /billing/plans).
+ * `fallback` = the packs to show signed-out visitors (from /billing/plans). `note` = false hides the terms line (fix172:
+ * the Premium page shows them once, in its pick packs row).
  */
-export default function PickPacks({ compact = false, fallback, onBought }: { compact?: boolean; fallback?: Pack[]; onBought?: () => void }) {
+export default function PickPacks({ compact = false, note = true, fallback, onBought }: { compact?: boolean; note?: boolean; fallback?: Pack[]; onBought?: () => void }) {
   const { user, access } = useAuth()
   const u = useUnlocks(!!user && (access === 'free' || access === 'premium'))
   const [busy, setBusy] = useState<string | null>(null)
@@ -51,7 +52,7 @@ export default function PickPacks({ compact = false, fallback, onBought }: { com
         ))}
       </div>
       {msg && <p className={`mt-2 text-xs ${msg.ok ? 'text-win' : 'text-loss'}`}>{msg.text}</p>}
-      {!compact && <p className="mt-3 text-[11px] text-faint">{tt("Pack picks never expire and work in every sport. They are used after your free picks (and Premium's monthly unlocks). A pick that was used is not refunded.")}</p>}
+      {!compact && note && <p className="mt-3 text-[11px] text-faint">{tt("Pack picks never expire and work in every sport. They are used after your free picks (and Premium's monthly unlocks). A pick that was used is not refunded.")}</p>}
     </div>
   )
 }

@@ -306,6 +306,8 @@ function stripMarket(x: any, depth = 0): any {
 }
 app.use('/api', (req, res, next) => {
   if (req.access === 'admin') return next();
+  // fix172: our own plan / pick-pack prices are not bookmaker data ("price" was stripped: /premium crashed for visitors)
+  if (/^\/(billing|unlocks)(\/|$)/.test(req.path)) return next();
   const json = res.json.bind(res);
   res.json = (body: any) => json(stripMarket(body));
   next();

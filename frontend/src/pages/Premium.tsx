@@ -24,8 +24,8 @@ const PLAN_DEFAULTS: PlanRow[] = [
 ]
 
 const FREE = [t("2 full picks a week with a free account"), t("Live scores, lineups and events"), t("League tables, team and player pages"), t("Latest results and our public record")]
+// fix172: the allowance is the card's subtitle (it was also the first line here)
 const PREMIUM = [
-  t("60 match unlocks a month"),
   t("Win / draw / loss %, and why this pick"),
   t("Goals: over/under, both teams score, likely scores"),
   t("Every finished match in full"),
@@ -35,7 +35,7 @@ const PRO = [
   t("Unlimited predictions, no counting"),
   t("Everything in Premium"),
   t("Draw picks: the 2 likeliest draws every week"),
-  t("Basketball, tennis and UFC as they launch"),
+  t("Basketball now; tennis and UFC as they launch"),
   t("Early access to new models and features")
 ]
 
@@ -52,6 +52,9 @@ export default function Premium() {
   const [testMode, setTestMode] = useState(false)
   const [plans, setPlans] = useState<PlanRow[]>(PLAN_DEFAULTS)
   const [packs, setPacks] = useState<Pack[]>([])
+  // fix172: the pick prices and pack sizes from the server (the same config the pack checkout uses)
+  const [pickPrice, setPickPrice] = useState<{ free: number; premium: number } | null>(null)
+  const [packSizes, setPackSizes] = useState<number[]>([])
   const [period, setPeriod] = useState<Period>('month')
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -60,7 +63,10 @@ export default function Premium() {
   useEffect(() => {
     axios
       .get(`${API_URL}/billing/plans`)
-      .then(r => { setTestMode(!!r.data.data?.testMode); if (Array.isArray(r.data.data?.plans)) setPlans(r.data.data.plans); setPacks(r.data.data?.packs || []) })
+      .then(r => { setTestMode(!!r.data.data?.testMode); if (Array.isArray(r.data.data?.plans)) setPlans(r.data.data.plans); setPacks(r.data.data?.packs || [])
+        const pp = r.data.data?.pickPrice
+        if (pp && Number.isFinite(pp.free) && Number.isFinite(pp.premium)) setPickPrice({ free: pp.free, premium: pp.premium })
+        if (Array.isArray(r.data.data?.packSizes)) setPackSizes(r.data.data.packSizes) })
       .catch(() => undefined)
   }, [])
 
@@ -155,7 +161,9 @@ export default function Premium() {
                 </div>
                 <div className="text-xs mt-1 flex flex-wrap items-center gap-x-2">
                   {period !== 'month' && <span className="text-muted">{t("= {0}/month", { 0: money(p.perMonth) })}</span>}
-                  {p.save > 0 ? <span className="text-win font-semibold">{t("Save {0}%", { 0: p.save })}</span> : <span className={pro ? 'text-accent font-semibold' : 'text-faint'}>{pro ? t("Unlimited matches") : t("60 match unlocks a month")}</span>}
+                  {/* fix172: the allowance on every tab (it is no longer repeated in the list below) */}
+                  <span className={pro ? 'text-accent font-semibold' : 'text-faint'}>{pro ? t("Unlimited matches") : t("60 match unlocks a month")}</span>
+                  {p.save > 0 && <span className="text-win font-semibold">{t("Save {0}%", { 0: p.save })}</span>}
                 </div>
                 <ul className="mt-5 space-y-2.5 text-sm text-ink/90 flex-1">
                   {(pro ? PRO : PREMIUM).map(f => (
@@ -170,20 +178,6 @@ export default function Premium() {
           )
         })}
       </div>
-
-      {/* fix147: pick packs — single picks once the free / monthly ones are used up */}
-      {access !== 'pro' && access !== 'admin' && (
-        <section id="packs" className="mt-10 card p-6 scroll-mt-24">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
-            <div>
-              <div className="label">{t("Pick packs")}</div>
-              <div className="text-sm text-muted mt-0.5">{access === 'premium' ? t("Premium price: {0} a pick.", { 0: money(0.59) }) : t("{0} a pick on Free, {1} on Premium. Pro needs none.", { 0: money(0.79), 1: money(0.59) })}</div>
-            </div>
-            {user && u && typeof u.credits === 'number' && <div className="text-sm text-ink">{t("Your balance: {0} picks", { 0: u.credits })}</div>}
-          </div>
-          <PickPacks fallback={packs} />
-        </section>
-      )}
 
       {msg && <p className={`mt-6 text-center text-sm ${msg.ok ? 'text-win' : 'text-loss'}`}>{msg.text}</p>}
 
@@ -211,8 +205,33 @@ export default function Premium() {
         )}
       </div>
 
+      {/* fix172: pick packs listed with the plans (prices and sizes from /billing/plans) */}
+      {pickPrice && (
+        <div className="mt-4 card px-6 py-4 flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4">
+          <div className="label flex-shrink-0">{t("Pick packs")}</div>
+          <div className="text-sm text-ink/90 min-w-0">
+            {t("One pick at {0}, or {1} with Premium.", { 0: money(pickPrice.free), 1: money(pickPrice.premium) })}
+            {packSizes.length > 0 && <>{' '}{t("Packs of {0} picks.", { 0: packSizes.join(' / ') })}</>}
+            <span className="block text-xs text-faint mt-1">{t("Pick packs never expire; a pick that was used is not refunded.")}</span>
+          </div>
+        </div>
+      )}
+
+      {/* fix147: pick packs — single picks once the free / monthly ones are used up */}
+      {access !== 'pro' && access !== 'admin' && (
+        <section id="packs" className="mt-4 card p-6 scroll-mt-24">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <div>
+              <div className="label">{t("Buy picks")}</div>
+            </div>
+            {user && u && typeof u.credits === 'number' && <div className="text-sm text-ink">{t("Your balance: {0} picks", { 0: u.credits })}</div>}
+          </div>
+          <PickPacks fallback={packs} note={false} />
+        </section>
+      )}
+
       <p className="mt-8 text-center text-xs text-faint max-w-xl mx-auto">
-        {t("3-day money-back guarantee on every plan: not for you? Ask within 3 days of paying and you get the full amount back. Unlocked matches stay open. Finished matches are always open on paid plans. Unlocks renew on the 1st of every month. Predictions are probabilities, not promises. SportLikely is an analytics service and does not take bets.")}{' '}{t("Pick packs never expire; a pick that was used is not refunded.")}</p>
+        {t("3-day money-back guarantee on every plan: not for you? Ask within 3 days of paying and you get the full amount back. Unlocked matches stay open. Finished matches are always open on paid plans. Unlocks renew on the 1st of every month. Predictions are probabilities, not promises. SportLikely is an analytics service and does not take bets.")}</p>
     </div>
   )
 }
