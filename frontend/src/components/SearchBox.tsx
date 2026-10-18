@@ -32,6 +32,17 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
   const input = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLDivElement>(null)
   const nav = useNavigate()
+  // fix170: the header box picks a placeholder that fits its width (never a cut-off word); the "/" hint from 300 px
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = box.current
+    if (compact || !el) return
+    const ro = new ResizeObserver(() => setWidth(Math.round(el.getBoundingClientRect().width)))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [compact])
+  const full = compact || width === 0 || width >= 380
+  const placeholder = full ? tt("Search leagues, teams, players") : width >= 300 ? tt("Search teams, players…") : tt("Search")
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -112,7 +123,7 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
   const afBlock = sportBlock(af, tt("American football"), '/american-football')
 
   return (
-    <div ref={box} className={`relative ${compact ? 'w-full' : 'w-full max-w-md'}`}>
+    <div ref={box} className="relative w-full">
       <label className="flex items-center gap-2.5 h-11 px-4 rounded-2xl bg-surface2/70 border border-line/80 focus-within:border-accent/60 transition-colors">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-muted flex-shrink-0" aria-hidden>
           <circle cx="11" cy="11" r="7" />
@@ -141,10 +152,10 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
               else if (players[0]) { nav(`/player/${players[0].id}`); done() }
             }
           }}
-          placeholder={tt("Search leagues, teams, players")}
+          placeholder={placeholder}
           className="flex-1 min-w-0 bg-transparent outline-none text-sm text-ink placeholder:text-faint"
         />
-        {!compact && <kbd className="hidden md:inline text-[11px] text-faint border border-line rounded-md px-1.5 py-0.5">/</kbd>}
+        {!compact && width >= 300 && <kbd className="hidden md:inline text-[11px] text-faint border border-line rounded-md px-1.5 py-0.5">/</kbd>}
       </label>
 
       {show && (

@@ -1856,5 +1856,6 @@
  "Live statistics usually appear a few minutes into the game. This page checks again every minute.": "Las estadísticas en directo suelen aparecer unos minutos después del inicio. Esta página vuelve a comprobarlo cada minuto.",
  "Most sure": "La más segura",
  "the pick we are most sure about in this match": "el pronóstico del que estamos más seguros en este partido",
- "{0} of {1} right. For every match, the one pick we were most sure about.": "{0} de {1} acertados. En cada partido, el pronóstico del que estábamos más seguros."
+ "{0} of {1} right. For every match, the one pick we were most sure about.": "{0} de {1} acertados. En cada partido, el pronóstico del que estábamos más seguros.",
+ "Search teams, players…": "Buscar equipos, jugadores…"
 }

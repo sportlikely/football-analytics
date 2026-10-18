@@ -1856,5 +1856,6 @@
  "Live statistics usually appear a few minutes into the game. This page checks again every minute.": "Canlı istatistikler genellikle maçın ilk dakikalarından sonra gelir. Bu sayfa her dakika yeniden kontrol eder.",
  "Most sure": "En emin olduğumuz",
  "the pick we are most sure about in this match": "bu maçta en emin olduğumuz tahmin",
- "{0} of {1} right. For every match, the one pick we were most sure about.": "{1} tahminden {0} isabet. Her maç için en emin olduğumuz tek tahmin."
+ "{0} of {1} right. For every match, the one pick we were most sure about.": "{1} tahminden {0} isabet. Her maç için en emin olduğumuz tek tahmin.",
+ "Search teams, players…": "Takım, oyuncu ara…"
 }

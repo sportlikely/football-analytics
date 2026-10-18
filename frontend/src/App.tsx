@@ -423,24 +423,25 @@ function DataLine() {
 }
 
 /** The menu of the sport on screen (fix144: one config for every sport, lib/sportNav.ts), then Premium / Go Pro. */
-/** Desktop tabs (xl+). fix157: when the header row has no room for every tab (long languages, admin tabs, account
- *  label), the search box narrows to 120 px first, then the last tabs move into a "More" menu, so the header never
- *  makes the page wider than the window. Where everything fits it looks as before. */
+/** Desktop tabs (xl+). fix157: the header never makes the page wider than the window. fix170: the search box keeps
+ *  260 px (grows to 420 px): when the row lacks room the tabs move into a "More" menu first — admin-only tabs before
+ *  any public tab, then public tabs from the end. Only when even every tab in "More" doesn't fit does the search go
+ *  down to 200 px (never below). The search width is set on the row as --search-min. */
 function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
   const { access } = useAuth()
   const bb = useBbOpen()
   const nfl = useNflOpen()
   const { base } = useNflLeague()
   const loc = useLocation()
-  const items: { key: string; to: string; end: boolean; label: string }[] = sportNav(nfl ? 'american-football' : bb ? 'basketball' : 'football', base)
-    .filter(i => !i.admin || access === 'admin').map(i => ({ key: i.key, to: i.to, end: !!i.end, label: tt(i.label) }))
+  const items: { key: string; to: string; end: boolean; label: string; admin: boolean }[] = sportNav(nfl ? 'american-football' : bb ? 'basketball' : 'football', base)
+    .filter(i => !i.admin || access === 'admin').map(i => ({ key: i.key, to: i.to, end: !!i.end, label: tt(i.label), admin: !!i.admin }))
   // Oct 2026: Past seasons, Users and CRM live in the account menu (top right), staff only
-  if (access !== 'pro' && access !== 'admin') items.push({ key: 'premium', to: '/premium', end: false, label: access === 'premium' ? tt("Go Pro") : tt("Premium") })
+  if (access !== 'pro' && access !== 'admin') items.push({ key: 'premium', to: '/premium', end: false, label: access === 'premium' ? tt("Go Pro") : tt("Premium"), admin: false })
   const names = items.map(i => i.label).join('|')
   const nav = useRef<HTMLElement>(null)
   const probe = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
-  const [fit, setFit] = useState(items.length)
+  const [hidden, setHidden] = useState('') // keys in "More", "|"-joined
   const [open, setOpen] = useState(false)
   useEffect(() => setOpen(false), [loc.pathname, loc.search])
   useEffect(() => {
@@ -458,21 +459,25 @@ function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
       if (getComputedStyle(el).display === 'none') return
       const rs = getComputedStyle(row)
       const gap = parseFloat(rs.columnGap) || 0
-      // room for the tabs = row minus the other header parts (search at its 120 px minimum), the gaps and the pill's padding
+      // room for the tabs = row minus the other header parts (search at 260 px), the gaps and the pill's padding
       let room = row.clientWidth - parseFloat(rs.paddingLeft) - parseFloat(rs.paddingRight) - 10
       for (const c of Array.from(row.children) as HTMLElement[]) {
         if (c === el || getComputedStyle(c).display === 'none') continue
-        room -= (c.dataset.grow ? 120 : c.getBoundingClientRect().width) + gap
+        room -= (c.dataset.grow ? 260 : c.getBoundingClientRect().width) + gap
       }
       const w = (Array.from(pr.children) as HTMLElement[]).map(c => c.getBoundingClientRect().width + 2)
       const more = w.pop() ?? 0
-      let n = w.length
-      if (w.reduce((a, b) => a + b, 0) > room) {
-        let used = more
-        n = 0
-        while (n < w.length && used + w[n] <= room) used += w[n++]
+      // which tab leaves first: admin-only tabs (from the end), then public tabs from the end
+      const order = [...items.keys()].filter(i => items[i].admin).reverse().concat([...items.keys()].filter(i => !items[i].admin).reverse())
+      const out = new Set<number>()
+      let used = w.reduce((a, b) => a + b, 0)
+      if (used > room) {
+        used += more
+        for (const i of order) { if (used <= room) break; out.add(i); used -= w[i] }
       }
-      setFit(n)
+      // every tab in "More" and still no room for a 260 px search: the search may go down to 200 px
+      row.style.setProperty('--search-min', used > room ? '200px' : '260px')
+      setHidden(items.filter((_, i) => out.has(i)).map(i => i.key).join('|'))
     }
     calc()
     const ro = new ResizeObserver(calc)
@@ -481,7 +486,8 @@ function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
     for (const c of Array.from(row.children)) if (c !== el) ro.observe(c)
     return () => ro.disconnect()
   }, [names])
-  const shown = items.slice(0, fit), rest = items.slice(fit)
+  const out = hidden ? hidden.split('|') : []
+  const shown = items.filter(i => !out.includes(i.key)), rest = items.filter(i => out.includes(i.key))
   const restActive = rest.some(i => matchPath({ path: i.to, end: i.end }, loc.pathname))
   const moreLabel = (
     <>
@@ -490,7 +496,7 @@ function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
     </>
   )
   return (
-    <nav ref={nav} className="relative hidden xl:flex min-w-0 items-center gap-0.5 p-1 rounded-full bg-surface2/60 border border-line/60">
+    <nav ref={nav} className="relative hidden xl:flex shrink-0 items-center gap-0.5 p-1 rounded-full bg-surface2/60 border border-line/60">
       {shown.map(i => <NavLink key={i.key} to={i.to} end={i.end} className={cls}>{i.label}</NavLink>)}
       {rest.length > 0 && (
         <div ref={box} className="relative">
@@ -665,7 +671,7 @@ function Shell() {
             <SportSwitch />
             <Logo />
             <HeaderNav cls={navCls} />
-            <div data-grow className="hidden lg:block flex-1 min-w-[120px] max-w-lg ml-auto">
+            <div data-grow className="hidden lg:block flex-[1_1_320px] min-w-[var(--search-min,260px)] max-w-[420px] ml-auto">
               <SearchBox />
             </div>
             <div className="flex shrink-0 items-center gap-2 ml-auto lg:ml-0">
@@ -676,7 +682,8 @@ function Shell() {
                 title={connected ? tt("Live updates connected") : tt("Reconnecting…")}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-live animate-pulseDot' : 'bg-faint'}`} />
-                <span className="hidden 2xl:inline">{connected ? tt("Live") : tt("Offline")}</span>
+                {/* fix170: dot only (the label is the tooltip), so wide windows keep their tabs */}
+                <span className="sr-only">{connected ? tt("Live") : tt("Offline")}</span>
               </div>
               <div className="hidden md:block"><LangSwitch /></div>
               <ThemeToggle theme={theme} onToggle={toggle} />
