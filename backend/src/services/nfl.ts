@@ -618,7 +618,14 @@ export function startNflScheduler() {
     if (ended.length) { const { saveNflPredictions } = await import('./nflModel'); await yieldLoop(); await timed('nfl live predictions', () => saveNflPredictions()); }
   }).catch(e => logger.warn(`NFL live: ${e.message}`)), 30 * 1000).unref();
   // fix155: the live ratings are built in the background (with yields) instead of on the first request
-  setTimeout(() => void (async () => { const { rebuildLive } = await import('./nflModel'); for (const lg of LEAGUES) await timed('nfl ratings', () => rebuildLive(lg)); })().catch(e => logger.warn(`NFL ratings: ${e.message}`)), 60 * 1000).unref();
+  // fix171: a 10 s pause between the leagues, so the two builds never run back to back
+  setTimeout(() => void (async () => {
+    const { rebuildLive } = await import('./nflModel');
+    for (const [i, lg] of LEAGUES.entries()) {
+      if (i) await new Promise(r => setTimeout(r, 10 * 1000));
+      await timed('nfl ratings', () => rebuildLive(lg));
+    }
+  })().catch(e => logger.warn(`NFL ratings: ${e.message}`)), 60 * 1000).unref();
 }
 
 export const nflClientStatus = () => ({ callsThisBoot, remainingDay, limitDay, lastError });

@@ -421,7 +421,7 @@ export async function runNflExperiments(): Promise<any> {
   nanLogged = false;
   const t0 = Date.now();
   try {
-    const games = M.loadGames(1), ctx = await M.loadCtxAsync(1); // fix169
+    const games = await M.loadGamesAsync(1), ctx = await M.loadCtxAsync(1); // fix169 / fix171: paged, with yields
     const done = games.filter(g => g.done);
     const seasons = [...new Set(done.map(g => g.season))].sort((a, b) => a - b);
     let tests = seasons.filter(s => s >= 2021 && s > seasons[0] + 1 && done.filter(g => g.season === s).length >= 30);
@@ -512,7 +512,7 @@ export async function refreshV2(): Promise<void> {
   checkedAt = Date.now();
   const live = M.readSync('model|v2');
   if (!live) { v2Cache = null; return; }
-  const games = M.loadGames(1);
+  const games = await M.loadGamesAsync(1); // fix171
   const key = `${live.at}|${games.filter(g => g.done).length}|${games.length}`;
   if (v2Cache && v2Cache.key === key && Date.now() - v2Cache.at < 30 * 60 * 1000) return;
   refreshing = true;

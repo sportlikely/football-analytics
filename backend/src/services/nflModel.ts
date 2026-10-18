@@ -102,48 +102,75 @@ function keepGames(league: LeagueId, sig: string, list: G[], maxUpd: string, loa
   gamesCache.set(league, { sig, checked: Date.now(), loaded, games, maxUpd, index: new Map(games.map((g, i) => [g.id, i])) });
   return games;
 }
+const GAMES_MAX_AGE = 6 * 3600 * 1000;
 /**
- * fix156 / fix165: the games of a league, kept in memory. A cheap signature is checked at most every 2 s; when it
- * changed (a game finished, a score was corrected, a game was added), only the rows updated since the last read are
- * read and patched in. A full read happens at most every 6 h.
+ * fix171: ids of games patched in by the partial updates since current() last looked ('all' after a full re-read:
+ * current() then compares every game once). current() takes them with takeChanged().
  */
-function loadGames(league: LeagueId = 1): G[] {
+const changedIds = new Map<LeagueId, Set<number> | 'all'>();
+const noteChanged = (league: LeagueId, ids: number[] | 'all') => {
+  const cur = changedIds.get(league);
+  if (ids === 'all' || cur === 'all') { changedIds.set(league, 'all'); return; }
+  const s = cur || new Set<number>();
+  for (const id of ids) s.add(id);
+  changedIds.set(league, s);
+};
+const takeChanged = (league: LeagueId) => { const c = changedIds.get(league) || null; changedIds.delete(league); return c; };
+/**
+ * fix156 / fix165 / fix171: the games of a league as kept in memory, or null when they were never read — never a full
+ * read. A cheap signature is checked at most every 2 s; when it changed (a game finished, a score was corrected, a game
+ * was added), only the rows updated since the last read are read and patched in. A list older than 6 h is still served
+ * (patched) while a full re-read runs in the background, in pages with yields.
+ */
+function peekGames(league: LeagueId): G[] | null {
   const c = gamesCache.get(league), now = Date.now();
-  if (c && now - c.checked < 2000) return c.games;
+  if (!c) return null;
+  if (now - c.loaded >= GAMES_MAX_AGE) void loadGamesAsync(league, true).catch(e => logger.warn(`${MODEL_OF[league]} games: ${e.message}`));
+  if (now - c.checked < 2000) return c.games;
   const sig = gamesSig(league);
-  if (c && c.sig === sig) { c.checked = now; return c.games; }
-  if (c && now - c.loaded < 6 * 3600 * 1000) {
-    const st = stadiums(league);
-    const rows = db.prepare(`${GAME_SQL} AND updated_at > ?`).all(league, c.maxUpd) as any[];
-    const games = c.games.slice();
-    let maxUpd = c.maxUpd;
-    for (const row of rows) {
-      const g = toG(row, st);
-      const i = c.index.get(g.id);
-      if (i === undefined) games.push(g); else games[i] = g;
-      if (row.updated_at > maxUpd) maxUpd = row.updated_at;
-    }
-    return keepGames(league, sig, games, maxUpd, c.loaded);
-  }
-  const rows = db.prepare(GAME_SQL).all(league) as any[];
+  if (c.sig === sig) { c.checked = now; return c.games; }
   const st = stadiums(league);
-  return keepGames(league, sig, rows.map(x => toG(x, st)), rows.reduce((m, x) => (x.updated_at > m ? x.updated_at : m), ''));
-}
-/** The same full read in pages of 3,000 games with a yield between them (the background build at boot). */
-async function loadGamesAsync(league: LeagueId): Promise<G[]> {
-  const c = gamesCache.get(league);
-  if (c) return loadGames(league);
-  const sig = gamesSig(league), st = stadiums(league);
-  const out: G[] = [];
-  let after = 0, maxUpd = '';
-  for (;;) {
-    const rows = db.prepare(`${GAME_SQL} AND game_id > ? ORDER BY game_id LIMIT 3000`).all(league, after) as any[];
-    if (!rows.length) break;
-    for (const x of rows) { out.push(toG(x, st)); if (x.updated_at > maxUpd) maxUpd = x.updated_at; }
-    after = rows[rows.length - 1].game_id;
-    await yieldLoop();
+  const rows = db.prepare(`${GAME_SQL} AND updated_at > ?`).all(league, c.maxUpd) as any[];
+  const games = c.games.slice();
+  let maxUpd = c.maxUpd;
+  for (const row of rows) {
+    const g = toG(row, st);
+    const i = c.index.get(g.id);
+    if (i === undefined) games.push(g); else games[i] = g;
+    if (row.updated_at > maxUpd) maxUpd = row.updated_at;
   }
-  return keepGames(league, sig, out, maxUpd);
+  noteChanged(league, rows.map(r => r.game_id as number));
+  return keepGames(league, sig, games, maxUpd, c.loaded);
+}
+/**
+ * The full read in pages of 3,000 games with a yield between them (the background build at boot, the 6-hourly
+ * re-read). A list read less than 6 h ago is served as it is (patched). One read per league at a time.
+ */
+const gamesReading = new Map<LeagueId, Promise<G[]>>();
+async function loadGamesAsync(league: LeagueId, force = false): Promise<G[]> {
+  const c = gamesCache.get(league);
+  if (c && !force && Date.now() - c.loaded < GAMES_MAX_AGE) return peekGames(league)!;
+  const running = gamesReading.get(league);
+  if (running) return running;
+  const p = (async () => {
+    const sig = gamesSig(league), st = stadiums(league);
+    const prevUpd = gamesCache.get(league)?.maxUpd ?? null;
+    const out: G[] = [];
+    let after = 0, maxUpd = '';
+    for (;;) {
+      const rows = db.prepare(`${GAME_SQL} AND game_id > ? ORDER BY game_id LIMIT 3000`).all(league, after) as any[];
+      if (!rows.length) break;
+      for (const x of rows) { out.push(toG(x, st)); if (x.updated_at > maxUpd) maxUpd = x.updated_at; }
+      after = rows[rows.length - 1].game_id;
+      await yieldLoop();
+    }
+    noteChanged(league, 'all');
+    // a re-read keeps the previous high-water mark: a row updated while the pages were read is patched in again
+    // on the next check (re-patching a row is harmless)
+    return keepGames(league, sig, out, prevUpd !== null && prevUpd < maxUpd ? prevUpd : maxUpd);
+  })();
+  gamesReading.set(league, p);
+  try { return await p; } finally { gamesReading.delete(league); }
 }
 
 const numOf = (v: any): number | null => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(/,/g, '')); return Number.isFinite(n) ? n : null; };
@@ -186,7 +213,6 @@ export function passersOf(json: string | null): Passer[] {
  * re-read when they change.
  */
 const ctxCache = new Map<LeagueId, { ctx: Ctx; pRow: number; tRow: number; teamsSig: string }>();
-function loadCtx(league: LeagueId = 1): Ctx { ctxPass(league, -1); return ctxCache.get(league)!.ctx; }
 /** fix165: the first parse of every stored box score, 400 rows at a time with a yield between (the boot build). */
 async function loadCtxAsync(league: LeagueId): Promise<Ctx> {
   while (ctxPass(league, 100) > 0) await yieldLoop(); // fix169: 100 rows a step (production box scores are large)
@@ -537,8 +563,8 @@ export interface Report {
 
 export async function buildReport(league: LeagueId = 1): Promise<Report> {
   const MODEL = MODEL_OF[league];
-  const games = loadGames(league);
-  const ctx = loadCtx(league);
+  const games = await loadGamesAsync(league); // fix171: paged, with yields
+  const ctx = await loadCtxAsync(league);
   // college: FBS vs FBS games reported apart as well
   const isFbs = (g: G) => league === 2 && !!ctx.teams.get(g.h)?.fbs && !!ctx.teams.get(g.a)?.fbs;
   // fix143: FBS against FCS (either way round)
@@ -617,6 +643,8 @@ interface Live {
   params: Params; blend: Blend | null; trained: number[]; builtAt: string; finishedCount: number; engine: Engine; games: G[]
   /** fix155: games already in the ratings, the latest kick-off among them, games by id */
   applied: Set<number>; lastT: number; byId: Map<number, G>; outOfOrder: boolean
+  /** fix171: games patched in since that may have finished, waiting to be added (box scores still being parsed) */
+  pending: Set<number>
 }
 const lives = new Map<LeagueId, Live>();
 const sync = (key: string, v: unknown) => db.prepare(`INSERT OR REPLACE INTO nfl_sync (key, at, detail) VALUES (?, ?, ?)`).run(key, new Date().toISOString(), JSON.stringify(v));
@@ -625,7 +653,7 @@ const readSync = (key: string): any => { const r = db.prepare(`SELECT detail FRO
 /** Re-tune on every finished season (+ the walk-forward report), then replay. Weekly (Tuesday) or when nothing is stored. */
 export async function retrain(league: LeagueId = 1): Promise<Report> {
   const report = await buildReport(league);
-  const games = loadGames(league), ctx = loadCtx(league);
+  const games = await loadGamesAsync(league), ctx = await loadCtxAsync(league); // fix171
   const finished = games.filter(g => g.done);
   const params = finished.length >= 200 ? await tune(games, ctx, Date.now() + DAY, false, league) : DEFAULTS[league];
   let blend: Blend | null = null;
@@ -653,7 +681,7 @@ export async function retrain(league: LeagueId = 1): Promise<Report> {
 function liveOf(games: G[], params: Params, stored: any, engine: Engine): Live {
   const done = games.filter(g => g.done);
   return { params, blend: stored?.blend || null, trained: stored?.trained || [], builtAt: new Date().toISOString(), finishedCount: done.length, engine, games,
-    applied: new Set(done.map(g => g.id)), lastT: done.reduce((m, g) => Math.max(m, g.t), 0), byId: new Map(games.map(g => [g.id, g])), outOfOrder: false };
+    applied: new Set(done.map(g => g.id)), lastT: done.reduce((m, g) => Math.max(m, g.t), 0), byId: new Map(games.map(g => [g.id, g])), outOfOrder: false, pending: new Set() };
 }
 /** fix155: the same replay without blocking the server (yields every 150 games); the live ratings are swapped at the end. */
 const replaying = new Set<LeagueId>();
@@ -663,6 +691,7 @@ export async function rebuildLive(league: LeagueId): Promise<void> {
   replaying.add(league);
   try {
     const games = await loadGamesAsync(league);
+    takeChanged(league); // this replay starts from this list (no await since it was read)
     if (games.filter(g => g.done).length < 50) return;
     const stored = readSync(`${KEY_OF[league]}|params`);
     const params: Params = { ...DEFAULTS[league], ...(stored?.params || {}) };
@@ -673,6 +702,8 @@ export async function rebuildLive(league: LeagueId): Promise<void> {
       E.update(E.pre(g));
       if (++i % 20 === 0) await slice40(); // fix169: ~40 ms slices
     }
+    // fix171: games patched in during the replay were taken by the old ratings: the new ones compare once
+    if (gamesCache.get(league)?.games !== games) noteChanged(league, 'all');
     lives.set(league, liveOf(games, params, stored, E));
   } finally { replaying.delete(league); }
 }
@@ -682,32 +713,42 @@ export async function rebuildLive(league: LeagueId): Promise<void> {
  * games already counted) or 6 hours since the last full replay starts a background replay that yields to visitors.
  */
 function current(league: LeagueId = 1): Live | null {
-  const games = loadGames(league);
-  const live = lives.get(league);
-  if (live && live.games === games) {
-    if (Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
-    return live;
+  // fix171: never a full read here (the first one froze the server 6.7 s at start-up): no list yet = the background
+  // build runs (with yields) and this request goes without
+  const games = peekGames(league);
+  const live = games ? lives.get(league) : undefined;
+  if (!games || !live) {
+    void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
+    return null;
   }
-  if (live) {
-    const fresh = games.filter(g => g.done && !live.applied.has(g.id)).sort((x, y) => x.t - y.t || x.id - y.id);
-    {
-      if (fresh.length) loadCtx(league); // the new box scores (same maps the engine reads)
-      for (const g of fresh) {
-        live.engine.update(live.engine.pre(g));
-        live.applied.add(g.id);
-        if (g.t < live.lastT - 12 * 3600 * 1000) live.outOfOrder = true;
-        live.lastT = Math.max(live.lastT, g.t);
-      }
-      live.games = games;
-      live.byId = new Map(games.map(g => [g.id, g]));
-      live.finishedCount = live.applied.size;
-      if (live.outOfOrder || Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
-      return live;
+  const ch = takeChanged(league);
+  if (ch === 'all') { for (const g of games) if (g.done && !live.applied.has(g.id)) live.pending.add(g.id); }
+  else if (ch) for (const id of ch) if (!live.applied.has(id)) live.pending.add(id);
+  if (live.games !== games) { live.games = games; live.byId = new Map(games.map(g => [g.id, g])); }
+  if (live.pending.size) {
+    // the new box scores (same maps the engine reads), 50 rows a step; while more are waiting, only the games whose
+    // box score is already parsed are added, the rest on a later tick
+    const more = ctxPass(league, 50) >= 50;
+    const ctx = ctxCache.get(league)!.ctx;
+    const fresh: G[] = [];
+    for (const id of live.pending) {
+      const g = live.byId.get(id);
+      if (!g || !g.done || live.applied.has(id)) { live.pending.delete(id); continue; }
+      if (more && !ctx.box.has(`${id}|${g.h}`) && !ctx.qb.has(`${id}|${g.h}`)) continue;
+      fresh.push(g);
+      live.pending.delete(id);
     }
+    fresh.sort(byTime);
+    for (const g of fresh) {
+      live.engine.update(live.engine.pre(g));
+      live.applied.add(g.id);
+      if (g.t < live.lastT - 12 * 3600 * 1000) live.outOfOrder = true;
+      live.lastT = Math.max(live.lastT, g.t);
+    }
+    live.finishedCount = live.applied.size;
   }
-  // fix165: not built yet (boot): the background build runs (with yields); this request goes without
-  void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
-  return null;
+  if (live.outOfOrder || Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
+  return live;
 }
 const leagueOfGame = (gameId: number): LeagueId => ((db.prepare(`SELECT league FROM nfl_games WHERE game_id = ?`).get(gameId) as any)?.league === 2 ? 2 : 1);
 const leagueOfTeam = (teamId: number): LeagueId => ((db.prepare(`SELECT league FROM nfl_teams WHERE team_id = ?`).get(teamId) as any)?.league === 2 ? 2 : 1);
@@ -934,4 +975,4 @@ export async function nflModelTick(): Promise<void> {
 
 /* ---------- fix146: internals the nfl-v2 experiments reuse (services/nflExperiments.ts) ---------- */
 export type { G as NflG, Pre as NflPre, Ctx as NflCtx, Row as NflRow, Box as NflBox, Passer as NflPasser };
-export const modelInternals = { loadGames, loadCtx, loadCtxAsync, run, tune, metrics, marginFromP, readSync, sync, logLossOf, clip, DEFAULTS, featOf, fitBlend, blendP, fullParams, noteNaN };
+export const modelInternals = { loadGamesAsync, loadCtxAsync, run, tune, metrics, marginFromP, readSync, sync, logLossOf, clip, DEFAULTS, featOf, fitBlend, blendP, fullParams, noteNaN };
