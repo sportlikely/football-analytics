@@ -19,7 +19,7 @@
  */
 import { db } from '../db';
 import logger from '../utils/logger';
-import { yieldLoop } from './perf';
+import { yieldLoop, timed, slicer } from './perf';
 import { teamBox } from './nflSite';
 import { modelInternals as M, type NflG as G, type NflPre as Pre, type NflCtx as Ctx, type NflRow as Row, type Params } from './nflModel';
 
@@ -183,10 +183,12 @@ const STATS = ['ypp', 'fdpp', 'to', 'sackRate', 'third', 'rz'] as const;
 const STAT_PEN = [6, 6, 30, 10, 8, 10]; // turnovers heavily shrunk
 /** fix155: parsed once, then only the rows added since (">=": a replaced last row can keep its rowid). */
 const effCache = { row: 0, map: new Map<string, (number | null)[]>() };
-function loadEffBox(): Map<string, (number | null)[]> {
+async function loadEffBox(): Promise<Map<string, (number | null)[]>> {
   const out = effCache.map;
+  const slice = slicer(); // fix169: the first parse of every NFL team box score gives way every ~30 ms
   for (const r of db.prepare(`SELECT s.rowid AS rid, s.game_id, s.team_id, s.json FROM nfl_team_stats s JOIN nfl_games g ON g.game_id = s.game_id WHERE g.league = 1 AND s.rowid >= ? ORDER BY s.rowid`).all(effCache.row) as any[]) {
     effCache.row = Math.max(effCache.row, r.rid);
+    await slice();
     let j: any = null; try { j = JSON.parse(r.json); } catch { j = null; }
     const b = teamBox(j);
     if (!b) continue;
@@ -374,7 +376,7 @@ async function buildFeats(games: G[], ctx: Ctx, from = 0): Promise<Feats> {
   for (const [hl, carry] of E2_GRID) m2.push(await marginRatings(games, hl, carry, from));
   const m6: Map<number, number>[] = [];
   for (const k of E6_GRID) m6.push(await earlyRatings(games, k, from));
-  const eff = await efficiency(games, loadEffBox(), from);
+  const eff = await efficiency(games, await loadEffBox(), from);
   return { m2, m6, eff, qb: qbV2(games, ctx), ctx: context(games) };
 }
 
@@ -419,7 +421,7 @@ export async function runNflExperiments(): Promise<any> {
   nanLogged = false;
   const t0 = Date.now();
   try {
-    const games = M.loadGames(1), ctx = M.loadCtx(1);
+    const games = M.loadGames(1), ctx = await M.loadCtxAsync(1); // fix169
     const done = games.filter(g => g.done);
     const seasons = [...new Set(done.map(g => g.season))].sort((a, b) => a - b);
     let tests = seasons.filter(s => s >= 2021 && s > seasons[0] + 1 && done.filter(g => g.season === s).length >= 30);
@@ -498,7 +500,7 @@ let v2Cache: { key: string; at: number; live: any; F: Feats } | null = null;
 /** nfl-v2's win chance for a game that has not started (null = nfl-v2 not adopted / not ready). `pr` = nfl-v1's numbers. */
 export function v2Prob(g: G, pr: Pre): number | null {
   const c = v2Cache;
-  if (!c || !c.live || !c.F.qb.has(g.id)) { void refreshV2(); return null; }
+  if (!c || !c.live || !c.F.qb.has(g.id)) { void timed('nfl-v2 features', () => refreshV2()); return null; } // fix169: named (it runs after the caller)
   return predV(c.live.model, xOf(c.live.variant, g, { p: pr.p, gap: pr.eloH - pr.eloA, home: g.neutral ? 0 : 1, total: pr.total }, c.F, c.live.c2, c.live.c6));
 }
 let refreshing = false;
@@ -515,7 +517,7 @@ export async function refreshV2(): Promise<void> {
   if (v2Cache && v2Cache.key === key && Date.now() - v2Cache.at < 30 * 60 * 1000) return;
   refreshing = true;
   try {
-    const F = await buildFeats(games, M.loadCtx(1), Date.now() - 10 * DAY);
+    const F = await buildFeats(games, await M.loadCtxAsync(1), Date.now() - 10 * DAY); // fix169: box scores in steps, not all at once
     v2Cache = { key, at: Date.now(), live, F };
   } catch (e: any) { logger.warn(`nfl-v2 features: ${e.message}`); } finally { refreshing = false; }
 }

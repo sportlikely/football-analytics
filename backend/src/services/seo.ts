@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { isMissingPlayer } from './missingPlayers';
 import { BB_LEAGUES } from './basketball';
 import { bbPublic } from './bbSite';
 import { FONT_HEAD } from './fonts';
@@ -230,6 +231,8 @@ export function seoPage(rawPath: string): SeoInfo {
       return page(`Football predictions for today and the coming days | ${BRAND}`, S('matches'),
         `<h1>Football matches and predictions</h1>${fbList(lang, fbUpcoming(120))}<h2>Competitions</h2><ul>${fbCompetitions().map(c => `<li><a href="${link(lang, `/league/${c.code}`)}">${esc(c.name)}</a></li>`).join('')}</ul>`);
     }
+    // fix169: a football player the provider doesn't have (old links): not found, never indexed
+    if ((m = path.match(/^\/player\/(\d+)$/)) && isMissingPlayer(Number(m[1]))) return page(`Player not found | ${BRAND}`, 'This player does not exist.', '', { noindex: true });
     if (path === '/predictions/today') {
       const t = todayGroups('football', lang);
       return page(`${pk.today} · ${titleDate(new Date().toISOString(), lang)} | ${BRAND}`, S('today'),

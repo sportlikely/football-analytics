@@ -395,7 +395,25 @@ let featuresBuiltAt: string | null = null;
 let lastValueMatch: { players: number; withValue: number } | null = null;
 
 /** Rebuild the availability features of one group (walk-forward over its fixtures). */
-function buildFeatures(group: string) {
+/**
+ * fix169: one group's features, async — a yield every 30 ms; built into a separate map and swapped in at the end (a
+ * prediction in between keeps the previous numbers). Skipped when the group's fixtures, lineups and injuries have not
+ * changed since its last build (signature), unless `force`.
+ */
+const featureSig = new Map<string, string>();
+function groupSig(group: string): string {
+  const one = (sql: string) => { try { const r = db.prepare(sql).get(group) as any; return `${r?.n ?? 0}:${r?.m ?? 0}`; } catch { return '0:0'; } };
+  return [
+    one(`SELECT COUNT(*) AS n, MAX(kickoff) AS m FROM af_fixtures WHERE grp = ?`),
+    one(`SELECT COUNT(*) AS n, MAX(l.rowid) AS m FROM af_lineups l JOIN af_fixtures f ON f.fixture_id = l.fixture_id WHERE f.grp = ?`),
+    one(`SELECT COUNT(*) AS n, MAX(i.rowid) AS m FROM af_injuries i JOIN af_fixtures f ON f.fixture_id = i.fixture_id WHERE f.grp = ?`)
+  ].join('|');
+}
+async function buildFeatures(group: string, force = false): Promise<number> {
+  const sig = groupSig(group);
+  if (!force && featureSig.get(group) === sig) return 0;
+  let sliceAt = Date.now();
+  const pause = async () => { if (Date.now() - sliceAt > 30) { await yieldLoop(); sliceAt = Date.now(); } };
   const fixtures = db.prepare(`
     SELECT f.fixture_id, f.kickoff, f.date, f.home_id, f.away_id, th.fd_name AS fd_home, ta.fd_name AS fd_away, f.lineups
     FROM af_fixtures f
@@ -403,7 +421,8 @@ function buildFeatures(group: string) {
     LEFT JOIN af_teams ta ON ta.grp = f.grp AND ta.team_id = f.away_id
     WHERE f.grp = ? ORDER BY f.kickoff
   `).all(group) as any[];
-  if (!fixtures.length) return 0;
+  if (!fixtures.length) { featureSig.set(group, sig); return 0; }
+  await pause();
   const ids = fixtures.map(f => f.fixture_id);
   const starters = new Map<number, Map<number, { ids: Set<number>; names: Map<number, string> }>>(); // fixture → team → XI
   const inj = new Map<number, Map<number, { id: number; name: string; type: string }[]>>(); // fixture → team → list
@@ -420,12 +439,13 @@ function buildFeatures(group: string) {
       const byTeam = inj.get(r.fixture_id) || inj.set(r.fixture_id, new Map()).get(r.fixture_id)!;
       (byTeam.get(r.team_id) || byTeam.set(r.team_id, []).get(r.team_id)!).push({ id: r.player_id, name: r.player_name, type: r.type || '' });
     }
+    await pause();
   }
 
   // walk forward: each team's recent XIs (before the fixture)
   const history = new Map<number, { ids: Set<number>; names: Map<number, string> }[]>();
   const prefix = `${group}|`;
-  for (const key of [...features.keys()]) if (key.startsWith(prefix)) features.delete(key);
+  const fresh = new Map<string, MatchAvail>(); // swapped in at the end
 
   // player importance = how often he starts × how valuable he is relative to the team's usual XI
   const valueCache = new Map<number, number | null>();
@@ -485,8 +505,9 @@ function buildFeatures(group: string) {
     return { players: valueCache.size, withValue };
   };
   for (const f of fixtures) {
+    await pause();
     if (f.fd_home && f.fd_away) {
-      features.set(`${group}|${f.fd_home}|${f.fd_away}|${f.date}`, {
+      fresh.set(`${group}|${f.fd_home}|${f.fd_away}|${f.date}`, {
         fixtureId: f.fixture_id,
         home: teamAvail(f.home_id, f.fixture_id, f.fd_home),
         away: teamAvail(f.away_id, f.fixture_id, f.fd_away)
@@ -501,6 +522,9 @@ function buildFeatures(group: string) {
       if (h.length > REGULAR_WINDOW * 2) h.shift();
     });
   }
+  for (const key of [...features.keys()]) if (key.startsWith(prefix)) features.delete(key);
+  for (const [k, v] of fresh) features.set(k, v);
+  featureSig.set(group, sig);
   const vm = countValues();
   lastValueMatch = lastValueMatch && group !== 'E' ? { players: lastValueMatch.players + vm.players, withValue: lastValueMatch.withValue + vm.withValue } : vm;
   return n;
@@ -553,18 +577,13 @@ export function xgCoverage() {
   return db.prepare(`SELECT grp, COUNT(*) AS finished, SUM(stats = 1) AS fetched, SUM(xg_h IS NOT NULL) AS withXg FROM af_fixtures WHERE status IN ('FT','AET','PEN') GROUP BY grp`).all();
 }
 
-export function rebuildAfFeatures() {
-  let n = 0;
-  for (const g of Object.keys(GROUPS)) n += buildFeatures(g);
-  featuresBuiltAt = new Date().toISOString();
-  return n;
-}
 /** The same, one group at a time with a pause between (used by the 10-minute tick). */
-export async function rebuildAfFeaturesAsync() {
+/** Every group whose data changed (`force`: all of them), one at a time, in 30 ms slices (fix169). */
+export async function rebuildAfFeaturesAsync(force = false) {
   let n = 0;
   for (const g of Object.keys(GROUPS)) {
     await yieldLoop();
-    n += buildFeatures(g);
+    n += await buildFeatures(g, force);
   }
   featuresBuiltAt = new Date().toISOString();
   return n;

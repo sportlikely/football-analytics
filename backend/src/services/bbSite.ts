@@ -4,6 +4,7 @@
  * Visible to everyone when BASKETBALL_PUBLIC=1; before that, admins only (everyone else sees the "coming soon" page).
  */
 import { db } from '../db';
+import logger from '../utils/logger';
 import { bbPreview } from './bbPreview';
 import { bbTeamAnalysis, bbTeamAnalysisTeaser } from './bbTeamAnalysis';
 import { BB_LEAGUES, bbGet } from './basketball';
@@ -308,10 +309,16 @@ export async function bbStandings(code: string) {
 }
 
 export async function bbGame(id: number, full: boolean) {
+  // fix169: each part is timed; a page over 300 ms logs its slow parts by name ("bb game page 123: preview 640 ms …")
+  const parts: [string, number][] = [];
+  let tp = performance.now(), t0 = tp;
+  const mark = (name: string) => { const t = performance.now(); parts.push([name, t - tp]); tp = t; };
   const g: Row = db.prepare(`${SELECT} WHERE game_id = ?`).get(id);
   if (!g) return null;
   const game = shape(g, full);
+  mark('game');
   const pr = game.state === 'upcoming' ? predictGameCached(g) : null;
+  mark('prediction');
   const h2h = db.prepare(`${SELECT} WHERE ((home_id = ? AND away_id = ?) OR (home_id = ? AND away_id = ?)) AND status IN ('FT','AOT') AND kickoff < ? ORDER BY kickoff DESC LIMIT 10`)
     .all(g.home_id, g.away_id, g.away_id, g.home_id, g.kickoff) as Row[];
   // box score (finished or live games)
@@ -333,8 +340,10 @@ export async function bbGame(id: number, full: boolean) {
       box = { home: side(g.home_id), away: side(g.away_id) };
     }
   }
+  mark('h2h + box');
   let standings: any = null;
   try { standings = await bbStandings(g.code); } catch { /* table not available */ }
+  tp = performance.now(); // (awaits are not counted)
   const ratings = full ? { home: teamRating(g.code, g.home_id), away: teamRating(g.code, g.away_id) } : null;
   // markets and model numbers: whoever sees the full prediction (and everyone once the game is over)
   const gp: any = game.prediction;
@@ -345,16 +354,32 @@ export async function bbGame(id: number, full: boolean) {
   const top = async (teamId: number, name: string) => {
     try { return (await bbSquad(teamId, name, g.code, g.season)).filter(p => p.gp > 0).sort((a, b) => (b.pts || 0) - (a.pts || 0)).slice(0, 8); } catch { return []; }
   };
+  mark('ratings + markets');
   const players = { home: await top(g.home_id, g.home_name), away: await top(g.away_id, g.away_name) };
+  tp = performance.now();
+  const why = reasons(g, pr || (game.prediction && (game.prediction as any).spread != null ? { margin: (game.prediction as any).spread, b2bHome: (game.prediction as any).b2bHome, b2bAway: (game.prediction as any).b2bAway } : null), full || game.state === 'done');
+  mark('why');
+  const stats = { home: averages(g.home_id, g.kickoff), away: averages(g.away_id, g.kickoff) };
+  mark('averages');
+  const sched = { home: schedule(g.home_id, g.kickoff), away: schedule(g.away_id, g.kickoff) };
+  mark('schedule');
+  const pv = preview(g);
+  mark('preview');
+  const writeup = bbPreview(id);
+  mark('writeup');
+  const injuries = g.code === 'NBA' ? { home: nbaInjuries(g.home_id, g.home_name, g.kickoff), away: nbaInjuries(g.away_id, g.away_name, g.kickoff) } : null;
+  mark('injuries');
+  const syncMs = parts.reduce((x, [, ms]) => x + ms, 0);
+  if (syncMs > 300) logger.warn(`bb game page ${id}: ${Math.round(syncMs)} ms (${parts.filter(([, ms]) => ms >= 30).sort((a, b) => b[1] - a[1]).map(([n, ms]) => `${n} ${Math.round(ms)} ms`).join(', ')}; total with waits ${Math.round(performance.now() - t0)} ms)`);
   return {
     game,
-    why: reasons(g, pr || (game.prediction && (game.prediction as any).spread != null ? { margin: (game.prediction as any).spread, b2bHome: (game.prediction as any).b2bHome, b2bAway: (game.prediction as any).b2bAway } : null), full || game.state === 'done'),
+    why,
     ratings,
-    stats: { home: averages(g.home_id, g.kickoff), away: averages(g.away_id, g.kickoff) },
-    schedule: { home: schedule(g.home_id, g.kickoff), away: schedule(g.away_id, g.kickoff) },
-    preview: preview(g),
-    writeup: bbPreview(id), // fix124: the English text preview (same as crawlers get, no pick, no %)
-    injuries: g.code === 'NBA' ? { home: nbaInjuries(g.home_id, g.home_name, g.kickoff), away: nbaInjuries(g.away_id, g.away_name, g.kickoff) } : null,
+    stats,
+    schedule: sched,
+    preview: pv,
+    writeup, // fix124: the English text preview (same as crawlers get, no pick, no %)
+    injuries,
     h2h: h2h.map(x => ({ id: x.game_id, kickoff: x.kickoff, home: x.home_name, away: x.away_name, homeId: x.home_id, score: [x.hs, x.as_], league: x.code })),
     box,
     standings,

@@ -30,7 +30,7 @@ import { v3WindowRun, liveVector, applyVector, isTuning } from './v3Tuner';
 import { clearPredictionCache } from './predCache';
 import { sendEmail, emailEnabled, SITE, esc } from './email';
 import { lastDataHealth } from './dataHealth';
-import { every, after } from './perf';
+import { every, after, timed, slicer, yieldLoop } from './perf';
 import {
   buildFeatures, buildFeaturesAsync, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
   fixtureByNames, getConfig, setConfig, mixWeight, mixMode, mixLive, setMixLive, scoreProbs, FEAT_MODEL, MIX_MODEL,
@@ -147,12 +147,15 @@ export async function runModelDaily(force = false): Promise<any> {
     const rowsByFid = new Map(st.rows.map(r => [r.fid, r]));
     const prevModel = prev?.featModelId ? loadFeatureModel(prev.featModelId) : null;
     const games: { W: Game[]; Wp: Game[] } = { W: [], Wp: [] };
-    run.items.forEach((it, i) => {
+    const slice = slicer(); // fix169: the job yields every 30 ms (it froze the server 0.5 s unlabelled)
+    for (let i = 0; i < run.items.length; i++) {
+      await slice();
+      const it = run.items[i];
       const grp = divGroup.get(it.div);
-      if (!grp) return;
+      if (!grp) continue;
       const fx = fixtureByNames(st, grp, it.home, it.away, it.date);
       const row = fx ? rowsByFid.get(fx.fid) : null;
-      if (!fx || !row || !row.ok) return;
+      if (!fx || !row || !row.ok) continue;
       const inW = it.date >= W.from;
       const fm = (m: FittedModel | null) => (m ? predictWith(m, row.x) : null);
       const v3 = (run.vectors.champion?.[i] || run.live[i]) as P3;
@@ -163,7 +166,7 @@ export async function runModelDaily(force = false): Promise<any> {
         fPrev: fm(prevModel), v3Prev: (run.vectors.previous?.[i] as P3) || null
       };
       (inW ? games.W : games.Wp).push(g);
-    });
+    }
 
     // 3. candidates
     const w0 = champ.mixWeight;
@@ -187,7 +190,9 @@ export async function runModelDaily(force = false): Promise<any> {
       apply: async () => { setConfig('mix_weight', String(w)); champ = { ...champ, mixWeight: w }; return `mix weight ${w0} → ${w}`; }
     });
 
-    const scored = cands.map(c => ({ c, W: scoreSet(games.W, c.probs), Wp: scoreSet(games.Wp, c.probs) }));
+    const scored: { c: Cand; W: ReturnType<typeof scoreSet>; Wp: ReturnType<typeof scoreSet> }[] = [];
+    for (const c of cands) { await yieldLoop(); scored.push({ c, W: scoreSet(games.W, c.probs), Wp: scoreSet(games.Wp, c.probs) }); }
+    await yieldLoop();
     const base = scored[0];
     const reference = {
       v3: { W: scoreSet(games.W, g => g.v3), Wp: scoreSet(games.Wp, g => g.v3) },
@@ -369,16 +374,17 @@ export function modelDailyLog(days = 30) {
 
 /** Every 5 minutes: the daily job from 04:00 UTC, the report from 07:00 Asia/Jerusalem (DST-aware). */
 export function startModelDailyScheduler() {
-  const tick = () => {
+  // fix169: the tick awaits its work and labels it, so a slow part is named in the stall report (it ran outside its label)
+  const tick = async () => {
     const now = new Date();
     const lp = localParts(now);
     const row: any = db.prepare(`SELECT ran_at, report_sent_at FROM model_daily WHERE date = ?`).get(lp.date);
     // 04:00–20:59 UTC only: late in the UTC evening the Jerusalem date is already tomorrow's
     if (now.getUTCHours() >= 4 && now.getUTCHours() < 21 && !row?.ran_at && !running && process.env.MODEL_DAILY !== 'off')
-      runModelDaily().catch(e => logger.warn(`model daily: ${e.message}`));
+      await timed('model daily job', () => runModelDaily()).catch(e => logger.warn(`model daily: ${e.message}`));
     // the report waits for the job when it is still running at 07:00 (until 09:00 local at the latest)
     if (lp.hour >= 7 && lp.hour < 12 && !row?.report_sent_at && (!running || lp.hour >= 9))
-      sendMorningReport().catch(e => logger.warn(`model report: ${e.message}`));
+      await timed('model report', () => sendMorningReport()).catch(e => logger.warn(`model report: ${e.message}`));
   };
   after('model daily', tick, 3 * 60 * 1000);
   every('model daily', tick, 5 * 60 * 1000);

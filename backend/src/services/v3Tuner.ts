@@ -15,6 +15,7 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { GROUPS, loadGroupMatches } from './history';
+import { inBatches } from './perf';
 import {
   CONV, buildState, scoreMatch, withLiveConfig, weekDivs, LAST_DETAIL, TEAM_ROW_IDS, DRAW_ROW_IDS, rowRel, MatchType,
   leagueConvStatus, LeagueConv, storeTuning
@@ -461,7 +462,7 @@ export async function v3WindowRun(opt: { seasons: string[]; scoreFrom: string; f
     const scored = items.filter(i => i.date >= opt.scoreFrom);
     const out: WindowRun = {
       items: scored.map(i => ({ div: i.div, date: i.date, home: i.home, away: i.away, o: i.o, mkt: i.mkt ? [i.mkt.H, i.mkt.D, i.mkt.A] : null })),
-      live: scored.map(i => probs(cLive, i, lcOf(i))),
+      live: await inBatches(scored, 200, b => b.map(i => probs(cLive, i, lcOf(i)))), // fix169: in slices
       fits: {}, vectors: {}
     };
     for (const f of opt.fits) {
@@ -469,12 +470,12 @@ export async function v3WindowRun(opt: { seasons: string[]; scoreFrom: string; f
       if (train.length < 500) continue;
       const fit = await fitVector(train, defs, x0, defs.map(() => true), { lambda: 0, useBrier: false, lcOf, rounds: opt.rounds ?? 60, shared: false });
       const c = compile(defs, fit.x, false);
-      out.fits[f.label] = { probs: scored.map(i => probs(c, i, lcOf(i))), x: Array.from(fit.x), setting: unpack(defs, fit.x, false), train: train.length };
+      out.fits[f.label] = { probs: await inBatches(scored, 200, b => b.map(i => probs(c, i, lcOf(i)))), x: Array.from(fit.x), setting: unpack(defs, fit.x, false), train: train.length };
     }
     for (const [label, v] of Object.entries(opt.vectors || {})) {
       if (v.length !== defs.length) continue;
       const c = compile(defs, Float64Array.from(v), false);
-      out.vectors[label] = scored.map(i => probs(c, i, lcOf(i)));
+      out.vectors[label] = await inBatches(scored, 200, b => b.map(i => probs(c, i, lcOf(i))));
     }
     return out;
   } finally {

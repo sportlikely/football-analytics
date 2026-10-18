@@ -9,6 +9,7 @@ import { getPreview } from './matchPreview';
 import { bbPreview } from './bbPreview';
 import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
+import { slicer, yieldLoop } from './perf';
 
 /** slug = the URL (/predictions/<slug>); old = the fix125 URL, answered with a 301 to the slug (fix134) */
 export type HubSport = 'football' | 'basketball' | 'american-football';
@@ -48,10 +49,38 @@ export const hubRange = (from: string, to: string) => {
 };
 
 const cache = new Map<string, { at: number; hub: Hub }>();
-/** This week's games of a hub with their previews (kept 15 minutes). */
+const refreshing = new Set<string>();
+/**
+ * This week's games of a hub with their previews. fix169: kept 15 minutes and then served as it is while a fresh copy is
+ * built in the background (a yield between games — "GET /predictions/*" blocked 1.7 s); only a hub never built is
+ * built inside the request. The hubs are also warmed in the background (warmHubs).
+ */
 export function buildHub(h: HubDef): Hub {
   const c = cache.get(h.slug);
-  if (c && Date.now() - c.at < 15 * 60 * 1000) return c.hub;
+  if (c) {
+    if (Date.now() - c.at >= 15 * 60 * 1000) void refreshHub(h);
+    return c.hub;
+  }
+  const g = hubSteps(h);
+  let x = g.next();
+  while (!x.done) x = g.next();
+  return x.value;
+}
+export async function refreshHub(h: HubDef): Promise<void> {
+  if (refreshing.has(h.slug)) return;
+  refreshing.add(h.slug);
+  try {
+    const slice = slicer();
+    const g = hubSteps(h);
+    let x = g.next();
+    while (!x.done) { await slice(); x = g.next(); }
+  } finally { refreshing.delete(h.slug); }
+}
+/** Every hub a visitor can open, built again in the background (start-up and every 15 minutes). */
+export async function warmHubs(): Promise<void> {
+  for (const h of HUBS) if (h.sport === 'football' || (h.sport === 'basketball' ? bbPublic() : nflPublic())) { await refreshHub(h); await yieldLoop(); }
+}
+function* hubSteps(h: HubDef): Generator<void, Hub> {
   const start = dayStart(), end = new Date(start.getTime() + 7 * 86400000 - 1);
   const from = start.toISOString(), to = end.toISOString();
   let games: HubGame[] = [], next: string | null = null;
@@ -59,10 +88,10 @@ export function buildHub(h: HubDef): Hub {
     const rows = db.prepare(`SELECT p.match_id AS id, MAX(p.utc_date) AS date, MAX(p.home_team) AS home, MAX(p.away_team) AS away, MAX(r.home_goals) AS hg, MAX(r.away_goals) AS ag
       FROM predictions p LEFT JOIN results r ON r.match_id = p.match_id AND r.outcome IN ('H','D','A')
       WHERE p.competition_code = ? AND p.utc_date >= ? AND p.utc_date <= ? GROUP BY p.match_id ORDER BY date`).all(h.code, from, to) as any[];
-    games = rows.filter(r => r.home && r.away).map(r => ({
-      id: r.id, kickoff: r.date, home: r.home, away: r.away, score: r.hg != null ? [r.hg, r.ag] : null,
-      preview: getPreview(r.id)?.text || null, url: `/match/${r.id}`
-    }));
+    for (const r of rows.filter(x => x.home && x.away)) {
+      games.push({ id: r.id, kickoff: r.date, home: r.home, away: r.away, score: r.hg != null ? [r.hg, r.ag] : null, preview: getPreview(r.id)?.text || null, url: `/match/${r.id}` });
+      yield;
+    }
     if (!games.length) next = (db.prepare(`SELECT MIN(utc_date) AS d FROM predictions WHERE competition_code = ? AND utc_date > ?`).get(h.code, to) as any)?.d || null;
   } else if (h.sport === 'american-football') {
     // fix142: NFL hub = league 1; college hub = league 2, games with at least one FBS team
@@ -75,10 +104,10 @@ export function buildHub(h: HubDef): Hub {
   } else {
     const rows = db.prepare(`SELECT game_id AS id, kickoff, home_name AS home, away_name AS away, hs, as_, status FROM bb_games
       WHERE code = ? AND kickoff >= ? AND kickoff <= ? AND (status IS NULL OR status NOT IN ('CANC','POST')) ORDER BY kickoff`).all(h.code, from, to) as any[];
-    games = rows.map(r => ({
-      id: r.id, kickoff: r.kickoff, home: r.home, away: r.away, score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null,
-      preview: bbPreview(r.id), url: `/basketball/game/${r.id}`
-    }));
+    for (const r of rows) {
+      games.push({ id: r.id, kickoff: r.kickoff, home: r.home, away: r.away, score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null, preview: bbPreview(r.id), url: `/basketball/game/${r.id}` });
+      yield;
+    }
     if (!games.length) next = (db.prepare(`SELECT MIN(kickoff) AS d FROM bb_games WHERE code = ? AND kickoff > ?`).get(h.code, to) as any)?.d || null;
   }
   const hub: Hub = { slug: h.slug, code: h.code, sport: h.sport, name: h.name, intro: h.intro, from, to, games, next };

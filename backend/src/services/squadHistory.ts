@@ -9,7 +9,10 @@
  * Per club and month: sum of the 15 most valuable players whose latest valuation (before the month,
  * at most ~13 months old) was made while at that club.
  */
-import { gunzipSync } from 'zlib';
+import { gunzip } from 'zlib';
+import { promisify } from 'util';
+import { slicer } from './perf';
+const gunzipAsync = promisify(gunzip);
 import { db } from '../db';
 import logger from '../utils/logger';
 
@@ -84,13 +87,14 @@ async function fetchText(name: string): Promise<string> {
   const res = await fetch(BASE + name, { signal: AbortSignal.timeout(120_000) });
   if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  return (name.endsWith('.gz') ? gunzipSync(buf) : buf).toString('utf8');
+  return (name.endsWith('.gz') ? await gunzipAsync(buf) : buf).toString('utf8'); // fix169: off the event loop
 }
 
 export async function syncClubValueHistory(competitions: string[], force = false) {
   const s: any = db.prepare(`SELECT synced_at FROM club_value_sync WHERE id = 1`).get();
   if (!force && s && Date.now() - new Date(s.synced_at).getTime() < 7 * 86400000) return null;
   const comps = new Set(competitions);
+  const slice = slicer(); // fix169: yields every ~30 ms (the sync froze the server 2.4 s)
 
   // clubs: id → name, only the competitions we model
   const clubsText = await fetchText('clubs.csv.gz');
@@ -100,7 +104,9 @@ export async function syncClubValueHistory(competitions: string[], force = false
   if (ciId < 0 || ciName < 0) throw new Error(`clubs.csv: unexpected columns ${ch.join(',')}`);
   const clubName = new Map<string, string>();
   const clubComp = new Map<string, string>();
-  for (const line of cl.slice(1)) {
+  for (let li = 1; li < cl.length; li++) {
+    if ((li & 1023) === 0) await slice();
+    const line = cl[li];
     if (!line.trim()) continue;
     const r = parseQuoted(line);
     if (ciComp >= 0 && r[ciComp] && !comps.has(r[ciComp])) continue;
@@ -117,6 +123,7 @@ export async function syncClubValueHistory(competitions: string[], force = false
   const earliest = new Date(new Date(FIRST_MONTH).getTime() - MAX_AGE_DAYS * 86400000).toISOString().slice(0, 10);
   const perPlayer = new Map<string, { d: string; v: number; c: string }[]>();
   for (let i = 1; i < vl.length; i++) {
+    if ((i & 1023) === 0) await slice();
     const line = vl[i];
     if (!line) continue;
     const r = line.includes('"') ? parseQuoted(line) : line.split(',');
@@ -127,22 +134,19 @@ export async function syncClubValueHistory(competitions: string[], force = false
     const arr = perPlayer.get(r[iP]) || perPlayer.set(r[iP], []).get(r[iP])!;
     arr.push({ d, v, c: r[iC] });
   }
-  perPlayer.forEach(a => a.sort((x, y) => (x.d < y.d ? -1 : x.d > y.d ? 1 : 0)));
+  let si = 0;
+  for (const a of perPlayer.values()) { if ((++si & 1023) === 0) await slice(); a.sort((x, y) => (x.d < y.d ? -1 : x.d > y.d ? 1 : 0)); }
 
   // month starts
   const months: string[] = [];
   const now = new Date();
   for (let d = new Date(FIRST_MONTH + 'T00:00:00Z'); d <= now; d.setUTCMonth(d.getUTCMonth() + 1)) months.push(d.toISOString().slice(0, 10));
 
-  const ins = db.prepare(`INSERT OR REPLACE INTO club_value_month (club, month, top_eur, players) VALUES (?, ?, ?, ?)`);
-  let rows = 0;
-  db.exec('BEGIN');
-  try {
-    db.exec(`DELETE FROM club_value_month`);
-    db.exec(`DELETE FROM club_value_comp`);
-    const insC = db.prepare(`INSERT OR REPLACE INTO club_value_comp (club, comp) VALUES (?, ?)`);
-    clubComp.forEach((c, n) => insC.run(n, c));
-    for (const month of months) {
+  // fix169: the club-months are computed first (a yield per month); the transaction below only writes
+  const monthRows: [string, string, number, number][] = [];
+  for (const month of months) {
+    await slice();
+    {
       const minDate = new Date(new Date(month).getTime() - MAX_AGE_DAYS * 86400000).toISOString().slice(0, 10);
       const clubVals = new Map<string, number[]>();
       perPlayer.forEach(a => {
@@ -159,10 +163,19 @@ export async function syncClubValueHistory(competitions: string[], force = false
       clubVals.forEach((vals, club) => {
         if (vals.length < 11) return;
         vals.sort((x, y) => y - x);
-        ins.run(club, month, vals.slice(0, TOP_N).reduce((s, v) => s + v, 0), vals.length);
-        rows++;
+        monthRows.push([club, month, vals.slice(0, TOP_N).reduce((s, v) => s + v, 0), vals.length]);
       });
     }
+  }
+  const rows = monthRows.length;
+  const ins = db.prepare(`INSERT OR REPLACE INTO club_value_month (club, month, top_eur, players) VALUES (?, ?, ?, ?)`);
+  db.exec('BEGIN');
+  try {
+    db.exec(`DELETE FROM club_value_month`);
+    db.exec(`DELETE FROM club_value_comp`);
+    const insC = db.prepare(`INSERT OR REPLACE INTO club_value_comp (club, comp) VALUES (?, ?)`);
+    clubComp.forEach((c, n) => insC.run(n, c));
+    for (const r of monthRows) ins.run(...r);
     db.prepare(`INSERT OR REPLACE INTO club_value_sync (id, synced_at, clubs, months, rows) VALUES (1, ?, ?, ?, ?)`).run(new Date().toISOString(), clubName.size, months.length, rows);
     db.exec('COMMIT');
   } catch (e) {

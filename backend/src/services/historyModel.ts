@@ -6,7 +6,7 @@ import { yieldLoop, timed } from './perf';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { Prediction } from './predictionModel';
-import { fitDixonColes, predictDC, DCParams } from './dixonColes';
+import { fitDixonColes, fitDixonColesAsync, predictDC, DCParams } from './dixonColes';
 import { GROUPS, groupForCompetition, loadGroupMatches, buildTeamMap, fdNameFor, ApiTeam, seasonCodes, syncAll } from './history';
 
 export const MODEL_V2 = 'dc-history-v2';
@@ -79,7 +79,7 @@ export async function fitAllGroups(asOf: string = new Date().toISOString().slice
       continue;
     }
     const t0 = Date.now();
-    const p = fitDixonColes(matches, asOf, { ...FIT_OPTS, warm: params.get(group) || null });
+    const p = await fitDixonColesAsync(matches, asOf, { ...FIT_OPTS, warm: params.get(group) || null }); // fix169: yields between sweeps
     params.set(group, p);
     fitted++;
     console.log(

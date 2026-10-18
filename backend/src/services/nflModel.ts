@@ -29,7 +29,7 @@
 import { db } from '../db';
 import { winnerBands, winnerCalibration, winnerByConfidence } from '../utils/winnerBands';
 import logger from '../utils/logger';
-import { yieldLoop } from './perf';
+import { yieldLoop, timed, slicer } from './perf';
 import { teamBox, NflGame } from './nflSite';
 import { HIDE_OTHER, type LeagueId } from './nfl';
 
@@ -189,7 +189,7 @@ const ctxCache = new Map<LeagueId, { ctx: Ctx; pRow: number; tRow: number; teams
 function loadCtx(league: LeagueId = 1): Ctx { ctxPass(league, -1); return ctxCache.get(league)!.ctx; }
 /** fix165: the first parse of every stored box score, 400 rows at a time with a yield between (the boot build). */
 async function loadCtxAsync(league: LeagueId): Promise<Ctx> {
-  while (ctxPass(league, 400) > 0) await yieldLoop();
+  while (ctxPass(league, 100) > 0) await yieldLoop(); // fix169: 100 rows a step (production box scores are large)
   return ctxCache.get(league)!.ctx;
 }
 /** One pass: parses up to `limit` new rows of each table (-1 = all); returns how many new rows it read. */
@@ -657,6 +657,7 @@ function liveOf(games: G[], params: Params, stored: any, engine: Engine): Live {
 }
 /** fix155: the same replay without blocking the server (yields every 150 games); the live ratings are swapped at the end. */
 const replaying = new Set<LeagueId>();
+const slice40 = slicer(40); // fix169: the replay gives way every ~40 ms
 export async function rebuildLive(league: LeagueId): Promise<void> {
   if (replaying.has(league)) return;
   replaying.add(league);
@@ -670,7 +671,7 @@ export async function rebuildLive(league: LeagueId): Promise<void> {
     for (const g of games) {
       if (!g.done) continue;
       E.update(E.pre(g));
-      if (++i % 150 === 0) await yieldLoop();
+      if (++i % 20 === 0) await slice40(); // fix169: ~40 ms slices
     }
     lives.set(league, liveOf(games, params, stored, E));
   } finally { replaying.delete(league); }
@@ -684,7 +685,7 @@ function current(league: LeagueId = 1): Live | null {
   const games = loadGames(league);
   const live = lives.get(league);
   if (live && live.games === games) {
-    if (Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void rebuildLive(league).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
+    if (Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
     return live;
   }
   if (live) {
@@ -700,12 +701,12 @@ function current(league: LeagueId = 1): Live | null {
       live.games = games;
       live.byId = new Map(games.map(g => [g.id, g]));
       live.finishedCount = live.applied.size;
-      if (live.outOfOrder || Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void rebuildLive(league).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
+      if (live.outOfOrder || Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
       return live;
     }
   }
   // fix165: not built yet (boot): the background build runs (with yields); this request goes without
-  void rebuildLive(league).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
+  void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
   return null;
 }
 const leagueOfGame = (gameId: number): LeagueId => ((db.prepare(`SELECT league FROM nfl_games WHERE game_id = ?`).get(gameId) as any)?.league === 2 ? 2 : 1);
@@ -875,7 +876,7 @@ export function nflTeamRecord(teamId: number, season: number) {
 export function nflTeamModel(teamId: number) {
   const league = leagueOfTeam(teamId);
   // fix159: a team page never runs the first full replay itself (seconds); it starts the yielding one and shows no tiles
-  if (!lives.has(league)) { void rebuildLive(league).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`)); return null; }
+  if (!lives.has(league)) { void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`)); return null; }
   const L = current(league);
   if (!L) return null;
   const E = L.engine;
@@ -933,4 +934,4 @@ export async function nflModelTick(): Promise<void> {
 
 /* ---------- fix146: internals the nfl-v2 experiments reuse (services/nflExperiments.ts) ---------- */
 export type { G as NflG, Pre as NflPre, Ctx as NflCtx, Row as NflRow, Box as NflBox, Passer as NflPasser };
-export const modelInternals = { loadGames, loadCtx, run, tune, metrics, marginFromP, readSync, sync, logLossOf, clip, DEFAULTS, featOf, fitBlend, blendP, fullParams, noteNaN };
+export const modelInternals = { loadGames, loadCtx, loadCtxAsync, run, tune, metrics, marginFromP, readSync, sync, logLossOf, clip, DEFAULTS, featOf, fitBlend, blendP, fullParams, noteNaN };

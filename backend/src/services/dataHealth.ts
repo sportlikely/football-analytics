@@ -22,7 +22,7 @@ import { afConfigured } from './apiFootball';
 import { feedState, bootedAt } from './freshness';
 import { emailEnabled, sendEmail, layout, section, esc, C, SITE } from './email';
 import { lastDataAudit } from './dataAudit';
-import { every, after } from './perf';
+import { every, after, slicer, inBatches } from './perf';
 
 type Level = 'ok' | 'warn' | 'fail';
 export interface Check { id: string; label: string; level: Level; detail: string; items?: string[] }
@@ -44,18 +44,21 @@ const ago = (ms: number) => (ms < 90 * 1000 ? `${Math.round(ms / 1000)} s` : ms 
 const gameName = (m: any) => `${m.homeTeam?.name ?? m.home_team ?? '?'} – ${m.awayTeam?.name ?? m.away_team ?? '?'} (${m.competition?.name ?? m.competition_name ?? ''}, ${String(m.utcDate ?? m.utc_date ?? '').slice(0, 16).replace('T', ' ')} UTC)`;
 
 async function allMatches(): Promise<any[]> {
-  const fd = footballDataAPI.withPredictions(await footballDataAPI.getUpcomingMatches(30));
-  return [...fd, ...afWithPredictions(afUpcoming(30))];
+  // fix169: predictions in batches of 25 with yields (the hourly check blocked 0.5–0.9 s)
+  const fd = await inBatches(await footballDataAPI.getUpcomingMatches(30), 25, b => footballDataAPI.withPredictions(b));
+  return [...fd, ...(await inBatches(afUpcoming(30), 25, b => afWithPredictions(b)))];
 }
 
 export async function dataHealth(): Promise<{ level: Level; at: string; checks: Check[] }> {
   const now = Date.now();
   const checks: Check[] = [];
+  const slice = slicer(); // fix169: a yield between checks once ~30 ms have passed
   const starting = now - bootedAt() < 10 * MIN;
   let matches: any[] = [];
   try { matches = await allMatches(); } catch (e: any) { checks.push({ id: 'matches', label: 'Match list', level: 'fail', detail: `Could not load: ${e.message}` }); }
   const liveNow = matches.some(m => LIVE.includes(m.status));
 
+  await slice();
   // ---------- 1. freshness ----------
   for (const f of FEEDS) {
     if (f.when && !f.when()) continue;
@@ -73,6 +76,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     });
   }
 
+  await slice();
   // ---------- 2. validity ----------
   // games stuck as live, or never started, long after kick-off
   const stuck = matches.filter(m => {
@@ -81,6 +85,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     if (LIVE.includes(m.status)) return t < now - 3 * 3600 * 1000;
     return t < now - 150 * MIN && t > now - 3 * 86400000;
   });
+  await slice();
   checks.push({
     id: 'stuck', label: 'Games with an up-to-date status', level: stuck.length ? 'warn' : 'ok',
     detail: stuck.length ? `${stuck.length} game(s) still shown as live or not started long after kick-off (re-checked automatically)` : 'Every game past kick-off has a live or final status',
@@ -94,6 +99,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
 
   // finished without a score
   const noScore = matches.filter(m => m.status === 'FINISHED' && (m.score?.fullTime?.home === null || m.score?.fullTime?.home === undefined));
+  await slice();
   checks.push({ id: 'no-score', label: 'Finished games have a score', level: noScore.length ? 'fail' : 'ok', detail: noScore.length ? `${noScore.length} finished game(s) without a score` : 'All finished games have a score', items: noScore.slice(0, 15).map(gameName) });
 
   // the same game twice (main feed + other-competitions feed)
@@ -103,11 +109,13 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     const k = `${String(m.utcDate).slice(0, 10)}|${String(m.homeTeam?.name).toLowerCase()}|${String(m.awayTeam?.name).toLowerCase()}`;
     if (seen.has(k)) dup.push(gameName(m)); else seen.set(k, m);
   }
+  await slice();
   checks.push({ id: 'duplicates', label: 'No game listed twice', level: dup.length ? 'warn' : 'ok', detail: dup.length ? `${dup.length} game(s) listed twice` : 'No duplicates', items: dup.slice(0, 15) });
 
   // predictions: upcoming 48 h covered, probabilities valid
   const soon = matches.filter(m => !FINAL.includes(m.status) && !LIVE.includes(m.status) && new Date(m.utcDate).getTime() > now && new Date(m.utcDate).getTime() < now + 48 * 3600 * 1000);
   const noPred = soon.filter(m => !m.prediction);
+  await slice();
   checks.push({
     id: 'missing-predictions', label: 'Upcoming games have a prediction', level: noPred.length > Math.max(3, soon.length * 0.1) ? 'warn' : 'ok',
     detail: `${soon.length - noPred.length} of ${soon.length} games in the next 48 h have a prediction`,
@@ -121,6 +129,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     const sum = vals.reduce((a: number, b: number) => a + b, 0);
     return Math.abs(sum - 100) > 1.5;
   });
+  await slice();
   checks.push({ id: 'probabilities', label: 'Probabilities add up to 100%', level: badProb.length ? 'fail' : 'ok', detail: badProb.length ? `${badProb.length} prediction(s) with invalid percentages` : 'All predictions add up', items: badProb.slice(0, 15).map(m => `${gameName(m)} · ${m.prediction.home}/${m.prediction.draw}/${m.prediction.away}`) });
 
   // predictions never settled
@@ -154,6 +163,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
       if (r.points > 3 * r.won + r.draw) tableIssues.push(`${name}: ${r.points} points is more than 3×${r.won}+${r.draw}`);
     }
   }
+  await slice();
   checks.push({ id: 'tables', label: 'League tables add up', level: tableIssues.length ? 'fail' : 'ok', detail: tableIssues.length ? `${tableIssues.length} table row(s) don't add up` : `${footballDataAPI.standings.size} tables checked`, items: tableIssues.slice(0, 15) });
 
   // model history (results used for ratings) not falling behind: a division is behind only when games were

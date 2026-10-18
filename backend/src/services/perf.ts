@@ -84,6 +84,19 @@ setInterval(() => {
 }, 3600 * 1000).unref();
 
 export const yieldLoop = () => new Promise<void>(r => setImmediate(r));
+
+/** fix169: cut a long loop into ~30 ms slices: `const slice = slicer(); for (…) { …; await slice(); }` */
+export function slicer(ms = 30) {
+  let t = Date.now();
+  return async () => { if (Date.now() - t >= ms) { await yieldLoop(); t = Date.now(); } };
+}
+/** fix169: `fn` over the items in batches of `size`, yielding whenever ~30 ms have passed (fix159 style). */
+export async function inBatches<T, R>(items: T[], size: number, fn: (batch: T[]) => R[]): Promise<R[]> {
+  const out: R[] = [];
+  const slice = slicer();
+  for (let i = 0; i < items.length; i += size) { out.push(...fn(items.slice(i, i + size))); await slice(); }
+  return out;
+}
 /**
  * fix167: a loop over cached work never gives the thread back (each await on a ready value only runs microtasks), so
  * hundreds of items run as one block. `const step = yielder(50)` … `await step()` in the loop yields once 50 ms have

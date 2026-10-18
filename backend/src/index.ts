@@ -3,9 +3,10 @@ import { joinWaitlist, waitlistStats } from './services/waitlist';
 import { slimForList, clearPredictionCache } from './services/predCache';
 import { withLiveScore, liveBookStatus } from './services/liveScores';
 import { runLinkCheck, lastLinkCheck, linkCheckTick } from './services/linkCheck';
+import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
 import { sendMail as sendMailFix168 } from './services/email';
-import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after } from './services/perf';
+import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
 import { Server } from 'socket.io';
@@ -79,7 +80,7 @@ import { trackVisit, visitorStats } from './services/visitors';
 import { startGeo, geoCredit } from './services/geo';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
-import { hubBySlug, hubByOld, hubOpen, buildHub, HUBS } from './services/hubs';
+import { hubBySlug, hubByOld, hubOpen, buildHub, warmHubs, HUBS } from './services/hubs';
 import { refreshFromDetails } from './services/matchPreview';
 import { fontRoute, warmFonts } from './services/fonts';
 import { listFavorites, addFavorites, removeFavorite, MAX_FAVORITES } from './services/favorites';
@@ -94,7 +95,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { dataHealth, startDataHealthScheduler } from './services/dataHealth';
-import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeatures, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
+import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerUa, isCrawlerRequest, noProviderCalls } from './services/afUsage';
 import { createHash, randomBytes } from 'node:crypto';
 import { leagueCoverage, pickForAdding } from './services/leagueCoverage';
@@ -896,7 +897,7 @@ function warmExtraLeagues() {
       await afTick(true);
       await refreshAfWindow().catch(() => undefined);
       await prepareModelV3Async();
-      rebuildAfFeatures();
+      await rebuildAfFeaturesAsync(true);
     } catch (e: any) { logger.warn(`extra leagues warm-up: ${e.message}`); }
     finally { extraLeagueJob = null; }
   })();
@@ -1529,7 +1530,8 @@ function startRefresh(id: number, hit: { at: number; data: any; refreshing: bool
   hit.refreshing = true;
   hit.startedAt = t0;
   const live = LIVE_ST.has(String(hit.data?.match?.status));
-  const job = live && !isAfMatchId(id) && footballDataAPI.quotaBusy ? lightRefresh(hit.data) : buildMatchDetails(id);
+  // fix169: under its own label (it runs after the response, outside the request's label)
+  const job = timed('details refresh', () => (live && !isAfMatchId(id) && footballDataAPI.quotaBusy ? lightRefresh(hit.data) : buildMatchDetails(id)));
   withTimeoutMs(job, 25 * 1000)
     .then(data => storeDetails(id, data, t0))
     .catch(e => {
@@ -1718,6 +1720,12 @@ app.get('/api/player-page/:id(\\d+)', async (req, res) => {
     res.json({ data: await crawlerSafe(() => playerPage(parseInt(req.params.id, 10), isPaid(req.access || 'anon'))), timestamp: new Date().toISOString() });
   } catch (error: any) {
     if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.json({ data: null, pending: true, message: 'More details soon' });
+    // fix169: an old link to a player the provider doesn't have (crawlers): a quiet 404, one warning per id, never indexed
+    if ((error?.response?.status || error?.status) === 404) {
+      const id = parseInt(req.params.id, 10);
+      if (markMissingPlayer(id)) logger.warn(`player page: no player ${id} (old link): 404, noindex`);
+      return res.status(404).json({ error: 'Player not found' });
+    }
     sendError(res, error, 'Player page failed');
   }
 });
@@ -2210,7 +2218,8 @@ app.get('/api/model/v3/squad', (_req, res) => {
 const squadSyncHandler = async (_req: express.Request, res: express.Response) => {
   try {
     const r = await syncSquadValues(true);
-    if (r) { prepareModelV3(); rebuildAfFeatures(); }
+    // fix169: the model is rebuilt in slices in the background (the sync build froze the server 1.6 s)
+    if (r) void timed('squad values: model v3', async () => { await prepareModelV3Async(); await rebuildAfFeaturesAsync(true); }).catch(e => logger.warn(`squad values rebuild: ${e.message}`));
     res.json({ data: { synced: r, status: squadValuesStatus() }, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Squad values sync failed');
@@ -2382,11 +2391,20 @@ app.get('/api/basketball/games', (req, res) => {
     sendError(res, error, 'Failed to load games');
   }
 });
+// fix169: the game page is kept 20 s while the game is live and 2 min otherwise (it was rebuilt on every open, up to
+// 1.25 s); one copy per access level (full numbers or not)
+const bbGameCache = new Map<string, { at: number; until: number; data: any }>();
 app.get('/api/basketball/game/:id(\\d+)', async (req, res) => {
   try {
     const gid = parseInt(req.params.id, 10);
-    const data = await bbGame(gid, fullOne(req, -gid));
+    const full = fullOne(req, -gid);
+    const key = `${gid}|${full ? 1 : 0}`;
+    const hit = bbGameCache.get(key);
+    if (hit && Date.now() < hit.until) return res.json({ data: hit.data, timestamp: new Date(hit.at).toISOString(), cached: true });
+    const data = await bbGame(gid, full);
     if (!data) return res.status(404).json({ error: 'Game not found' });
+    bbGameCache.set(key, { at: Date.now(), until: Date.now() + ((data as any).game?.state === 'live' ? 20 : 120) * 1000, data });
+    if (bbGameCache.size > 1000) bbGameCache.delete(bbGameCache.keys().next().value!);
     res.json({ data, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to load game');
@@ -2576,6 +2594,9 @@ app.get('/api/admin/link-check', async (req, res) => {
   try { res.json({ data: req.query.run === '1' || !lastLinkCheck() ? await runLinkCheck() : lastLinkCheck(), timestamp: new Date().toISOString() }); } catch (e) { sendError(res, e, 'Link check failed'); }
 });
 every('link check', linkCheckTick, 3600 * 1000).unref();
+// fix169: the weekly prediction hubs are rebuilt in the background (visitors and crawlers get the cached copy)
+every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
+after('hub warm', () => warmHubs(), 60 * 1000).unref();
 after('link check', () => linkCheckTick(), 10 * 60 * 1000).unref();
 
 // Admin: event-loop stalls and how long the heavy jobs take (why the site feels slow)
@@ -3049,23 +3070,18 @@ server.listen(PORT, () => {
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
   // Save/refresh predictions every time the fixture window is refreshed
-  footballDataAPI.onWindowRefreshed = matches => { setJob('record predictions (main leagues)'); try { recordPredictions(matches); } finally { setJob(null); } };
+  // fix169: recorded in batches of 25 with yields (fix159 style)
+  footballDataAPI.onWindowRefreshed = matches => { void timed('record predictions (main leagues)', () => inBatches(matches, 25, b => { recordPredictions(b); return []; })).catch(e => logger.warn(`record predictions: ${e.message}`)); };
   // Same for API-Football competitions (national teams, UEFA cups, extra leagues)
   onAfWindow(matches => { void (async () => {
     // ~700 matches: predict 40 at a time with a pause between, so visitors are not kept waiting
-    const withP: any[] = [];
-    for (let i = 0; i < matches.length; i += 40) {
-      setJob('predict more-leagues window');
-      withP.push(...afWithPredictions(matches.slice(i, i + 40)));
-      setJob(null);
-      await yieldLoop();
-    }
-    setJob('record predictions (more leagues)');
-    try { recordPredictions(withP); } finally { setJob(null); }
+    // fix169: 25 at a time, a yield whenever ~30 ms have passed (the window blocked 0.3 s and the recording 1.4 s)
+    const withP: any[] = await timed('predict more-leagues window', () => inBatches(matches, 25, b => afWithPredictions(b)));
+    await timed('record predictions (more leagues)', () => inBatches(withP, 25, b => { recordPredictions(b); return []; }));
     // then the bookmaker odds for matches starting soon, so every tracked game can be compared with the market
-    withAfOdds(matches)
-      .then(ms => { if (ms.length) recordPredictions(afWithPredictions(ms)); })
-      .catch(err => logger.warn('AF odds for tracking failed', { message: err.message }));
+    // fix169: awaited and batched under a label (the continuation used to run after the label had ended)
+    const ms = await withAfOdds(matches).catch(err => { logger.warn('AF odds for tracking failed', { message: err.message }); return [] as any[]; });
+    if (ms.length) await timed('record predictions (odds)', () => inBatches(ms, 25, b => { recordPredictions(afWithPredictions(b)); return []; }));
   })().catch(err => logger.warn('AF window predictions failed', { message: err.message })); });
   // fix167: the schedulers start one after another over the first 2 minutes (each under its own name in /api/perf),
   // not all at once inside the listen callback ("boot (scheduler start)" blocked 11 s on every deploy). The site is
@@ -3081,7 +3097,8 @@ server.listen(PORT, () => {
     // Injuries / suspensions / confirmed lineups (API-Football) for model v3 rows #12 and #13
     ['API-Football', () => startApiFootballScheduler()],
     // Squad market values for model v3 (weekly; first attempt after the history sync has team names)
-    ['squad values', () => startSquadValuesScheduler(() => { prepareModelV3(); void rebuildAfFeaturesAsync(); })],
+    // fix169: the async v3 build (the sync one froze the server 1.6 s), awaited inside the 'squad values' label
+    ['squad values', () => startSquadValuesScheduler(async () => { await prepareModelV3Async(); await rebuildAfFeaturesAsync(true); })],
     ['balldontlie', () => startBdlScheduler()],
     // Live closing-line value tracking (open price + v3 at 48 h, closing price in the last 35 min)
     ['clv', () => startClvScheduler()],

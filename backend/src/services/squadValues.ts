@@ -11,12 +11,13 @@
  * moving quantity: refreshed weekly if the URL responds, kept otherwise. Missing values leave
  * the row neutral (5) — they neither help nor hurt.
  */
-import { gunzipSync } from 'zlib';
+import { gunzip } from 'zlib';
+import { promisify } from 'util';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { GROUPS, ALIASES, similarity } from './history';
 import { clubValueAt, syncClubValueHistory, historyClubs, historyVersion } from './squadHistory';
-import { every, after } from './perf';
+import { every, after, slicer } from './perf';
 
 const SOURCE_URL =
   process.env.SQUAD_VALUES_URL || 'https://pub-e682421888d945d684bcae8890b0ec20.r2.dev/data/players.csv.gz';
@@ -122,13 +123,15 @@ db.exec(`
   );
 `);
 
-/** Minimal RFC-4180 CSV parser (quotes, escaped quotes, newlines inside quotes). */
-function parseCsv(text: string): string[][] {
+/** Minimal RFC-4180 CSV parser (quotes, escaped quotes, newlines inside quotes). fix169: yields every ~30 ms. */
+async function parseCsv(text: string): Promise<string[][]> {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
   let inQ = false;
+  const slice = slicer();
   for (let i = 0; i < text.length; i++) {
+    if ((i & 0xffff) === 0) await slice();
     const c = text[i];
     if (inQ) {
       if (c === '"') {
@@ -315,10 +318,14 @@ export function historyMatchReport(group: string, names: string[]) {
 
 export const squadCompetitions = () => Object.keys(COMPETITION_GROUP);
 
-/** Map aggregated clubs of one group onto the fd names seen in that group's history. */
-function mapGroup(group: string, clubs: ClubAgg[], fetchedAt: string) {
+type SquadRow = [string, string, string, string, number, number, number, number, string];
+/**
+ * Map aggregated clubs of one group onto the fd names seen in that group's history. fix169: only matches (with
+ * yields); the rows are written afterwards in one short transaction.
+ */
+async function mapGroup(group: string, clubs: ClubAgg[], fetchedAt: string, slice: () => Promise<void>): Promise<SquadRow[]> {
   const divs = GROUPS[group]?.divisions || [];
-  if (!divs.length) return 0;
+  if (!divs.length) return [];
   const placeholders = divs.map(() => '?').join(',');
   const fdNames: string[] = db
     .prepare(`SELECT DISTINCT home AS n FROM history_matches WHERE division IN (${placeholders})`)
@@ -327,6 +334,7 @@ function mapGroup(group: string, clubs: ClubAgg[], fetchedAt: string) {
 
   const pairs: { club: ClubAgg; fd: string; score: number }[] = [];
   for (const club of clubs) {
+    await slice();
     for (const fd of fdNames) {
       const key = fd.toLowerCase();
       const hints = [fd, ALIASES[key] || '', TM_ALIASES[key] || ''].filter(Boolean);
@@ -338,23 +346,19 @@ function mapGroup(group: string, clubs: ClubAgg[], fetchedAt: string) {
   pairs.sort((a, b) => b.score - a.score);
   const usedClub = new Set<string>();
   const usedFd = new Set<string>();
-  const upsert = db.prepare(
-    `INSERT OR REPLACE INTO squad_values (grp, fd_name, club_name, competition, total_eur, top_eur, players, score, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  let mapped = 0;
+  const out: SquadRow[] = [];
   for (const p of pairs) {
     if (usedClub.has(p.club.name) || usedFd.has(p.fd)) continue;
     const vals = [...p.club.values].sort((a, b) => b - a);
     const total = vals.reduce((s, v) => s + v, 0);
     const top = vals.slice(0, TOP_N).reduce((s, v) => s + v, 0);
-    upsert.run(group, p.fd, p.club.name, p.club.competition, total, top, vals.length, p.score, fetchedAt);
+    out.push([group, p.fd, p.club.name, p.club.competition, total, top, vals.length, p.score, fetchedAt]);
     usedClub.add(p.club.name);
     usedFd.add(p.fd);
-    mapped++;
   }
   const unmatched = clubs.filter(c => !usedClub.has(c.name)).map(c => c.name);
-  if (unmatched.length) logger.info(`Squad values ${group}: ${mapped} mapped, unmatched clubs: ${unmatched.join(', ')}`);
-  return mapped;
+  if (unmatched.length) logger.info(`Squad values ${group}: ${out.length} mapped, unmatched clubs: ${unmatched.join(', ')}`);
+  return out;
 }
 
 /** Download the players dump and rebuild the per-club values. Safe to call repeatedly. */
@@ -364,8 +368,9 @@ export async function syncSquadValues(force = false): Promise<{ clubs: number; m
     const res = await fetch(SOURCE_URL, { signal: AbortSignal.timeout(60_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    const text = (SOURCE_URL.endsWith('.gz') ? gunzipSync(buf) : buf).toString('utf8');
-    const rows = parseCsv(text);
+    const text = (SOURCE_URL.endsWith('.gz') ? await promisify(gunzip)(buf) : buf).toString('utf8'); // fix169: off the event loop
+    const rows = await parseCsv(text);
+    const slice = slicer();
     const header = rows[0].map(h => h.trim());
     const col = (n: string) => header.indexOf(n);
     const iName = col('current_club_name'), iComp = col('current_club_domestic_competition_id'),
@@ -376,7 +381,9 @@ export async function syncSquadValues(force = false): Promise<{ clubs: number; m
     const seasonMin = new Date().getUTCFullYear() - 1; // only players active this or last season
     const clubs = new Map<string, ClubAgg>();
     const playerRows: [string, string, string | null, number][] = [];
-    for (const r of rows.slice(1)) {
+    for (let ri = 1; ri < rows.length; ri++) {
+      if ((ri & 255) === 0) await slice();
+      const r = rows[ri];
       // every recently active player with a value, any league (players change clubs; lineups need their value)
       if (iPlayer >= 0 && r[iPlayer]) {
         const pv = parseFloat(r[iVal]);
@@ -403,24 +410,30 @@ export async function syncSquadValues(force = false): Promise<{ clubs: number; m
       clubs.set(key, agg);
     }
     const fetchedAt = new Date().toISOString();
-    let mapped = 0;
+    // fix169: everything is computed first (with yields); the transaction below only writes
+    const squadRows: SquadRow[] = [];
+    for (const group of Object.keys(GROUPS)) {
+      const list: ClubAgg[] = [];
+      clubs.forEach((agg, key) => { if (key.startsWith(`${group}|`)) list.push(agg); });
+      squadRows.push(...await mapGroup(group, list, fetchedAt, slice));
+    }
+    const natRows: [string, string, number, number][] = [];
+    byCountry.forEach((c, key) => natRows.push([key, c.name, c.values.sort((a, b) => b - a).slice(0, 23).reduce((a, b) => a + b, 0), c.values.length]));
+    await slice();
+    const mapped = squadRows.length;
     db.exec('BEGIN');
     try {
       db.prepare(`DELETE FROM squad_values`).run();
       db.prepare(`DELETE FROM squad_players`).run();
       db.prepare(`DELETE FROM nat_values`).run();
       const insN = db.prepare(`INSERT INTO nat_values (country, name, top_eur, players) VALUES (?, ?, ?, ?)`);
-      byCountry.forEach((c, key) => {
-        const top = c.values.sort((a, b) => b - a).slice(0, 23).reduce((a, b) => a + b, 0);
-        insN.run(key, c.name, top, c.values.length);
-      });
+      for (const n of natRows) insN.run(...n);
       const insP = db.prepare(`INSERT INTO squad_players (pkey, name, club, value_eur) VALUES (?, ?, ?, ?)`);
       for (const pr of playerRows) if (pr[0]) insP.run(...pr);
-      for (const group of Object.keys(GROUPS)) {
-        const list: ClubAgg[] = [];
-        clubs.forEach((agg, key) => { if (key.startsWith(`${group}|`)) list.push(agg); });
-        mapped += mapGroup(group, list, fetchedAt);
-      }
+      const upsert = db.prepare(
+        `INSERT OR REPLACE INTO squad_values (grp, fd_name, club_name, competition, total_eur, top_eur, players, score, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const sr of squadRows) upsert.run(...sr);
       db.prepare(`INSERT OR REPLACE INTO squad_values_sync (id, fetched_at, clubs, mapped, source) VALUES (1, ?, ?, ?, ?)`)
         .run(fetchedAt, clubs.size, mapped, SOURCE_URL);
       db.exec('COMMIT');
@@ -464,12 +477,12 @@ export function squadValuesStatus() {
 }
 
 /** Weekly refresh; first attempt shortly after start so history names exist. */
-export function startSquadValuesScheduler(onSynced?: () => void) {
+export function startSquadValuesScheduler(onSynced?: () => unknown) {
   const tick = () =>
     syncSquadValues()
       .then(async r => {
         const h = await syncClubValueHistory(Object.keys(COMPETITION_GROUP)).catch(e => { logger.warn(`Club value history: ${e.message}`); return null; });
-        if ((r || h) && onSynced) onSynced();
+        if ((r || h) && onSynced) await onSynced();
       })
       .catch(() => undefined);
   after('squad values', tick, 90_000);

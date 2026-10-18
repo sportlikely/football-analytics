@@ -1,3 +1,4 @@
+import { slicer } from './perf';
 /**
  * Dixon-Coles model fitted by maximum likelihood with time decay.
  *
@@ -48,6 +49,22 @@ function daysBetween(a: string, b: string) {
 }
 
 export function fitDixonColes(matches: FitMatch[], asOf: string, opts: DCOptions = {}): DCParams {
+  const g = fitSteps(matches, asOf, opts);
+  let r = g.next();
+  while (!r.done) r = g.next();
+  return r.value;
+}
+/** fix169: the same fit giving way to visitors every ~30 ms (between sweeps). */
+export async function fitDixonColesAsync(matches: FitMatch[], asOf: string, opts: DCOptions = {}): Promise<DCParams> {
+  const g = fitSteps(matches, asOf, opts);
+  const slice = slicer();
+  let r = g.next();
+  while (!r.done) { await slice(); r = g.next(); }
+  return r.value;
+}
+
+/** fix169: the fit as a generator that pauses after every sweep (sync and async wrappers below). */
+function* fitSteps(matches: FitMatch[], asOf: string, opts: DCOptions = {}): Generator<void, DCParams> {
   const halfLife = opts.halfLifeDays ?? 180;
   const xi = Math.log(2) / halfLife;
   const ridge = opts.ridge ?? 1.0;
@@ -165,6 +182,7 @@ export function fitDixonColes(matches: FitMatch[], asOf: string, opts: DCOptions
       hG += ms[k].w * lam;
     }
     gamma += gG / hG;
+    yield;
   }
 
   // ρ by 1-D search on the DC likelihood (λ, μ fixed)
