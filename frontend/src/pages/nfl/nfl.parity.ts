@@ -4,6 +4,8 @@ import type { ParityProvides } from '../../lib/sportParity'
 export const PARITY_PROVIDES: ParityProvides = {
   sport: 'nfl',
   keys: [
+    'game.beforeAfter',
+    'game.lineups',
     'game.howCalculated',
     'game.preview',
     'game.restTab',

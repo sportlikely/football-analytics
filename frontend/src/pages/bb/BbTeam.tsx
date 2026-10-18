@@ -29,6 +29,9 @@ interface TeamData {
   squad?: SquadPlayer[]
   recent: BbGame[]
   next: BbGame[]
+  /** fix177: a team of a newly added league, no game stored yet (page from the league table) */
+  noGamesYet?: boolean
+  standing?: { position: number; played: number; won: number; lost: number; group: string | null }
 }
 
 interface SquadPlayer { id: number; name: string; number: string | null; position: string | null; country: string | null; age: number | null; injury: string | null; statsFrom: 'current' | { season: string; league: string | null } | null; gp: number; starts: number; min: number | null; pts: number | null; reb: number | null; ast: number | null; fgPct: number | null; tpPct: number | null; pie: number | null; usg: number | null; net: number | null }
@@ -67,7 +70,7 @@ export default function BbTeam() {
         `${t('Home')} ${s.homeWon}–${s.homeLost}`,
         `${t('Away')} ${s.awayWon}–${s.awayLost}`
       ] : []}
-      note={league ? <Link to={`/basketball/league/${league.code}`} className="hover:text-white">{t('{0} table →', { 0: league.name })}</Link> : undefined}
+      note={<>{league ? <Link to={`/basketball/league/${league.code}`} className="hover:text-white">{t('{0} table →', { 0: league.name })}</Link> : null}{d.noGamesYet && <span className="block">{d.standing ? t('#{0} in the table · {1}–{2}', { 0: d.standing.position, 1: d.standing.won, 2: d.standing.lost }) + ' · ' : ''}{t("Games appear here once the league's schedule is loaded.")}</span>}</>}
       form={form}
       left={<>
         {/* fix126: Team analysis, like football (strengths & weaknesses, model rating, 1–10 scores, rank over time) */}

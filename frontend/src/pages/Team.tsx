@@ -17,6 +17,8 @@ interface Player {
   apps?: number | null; minutes?: number | null; goals?: number | null; assists?: number | null; yellow?: number | null; red?: number | null; rating?: number | null
   /** fix176: national teams — the player's club this season (our stored club stats) */
   club?: { id: number; name: string | null; season: number; apps: number | null; goals: number | null; assists: number | null }
+  /** fix177: the provider has no page for this player (no link) */
+  noPage?: boolean
 }
 interface Row { rank: number; id: number; name: string; logo: string; played: number; gd: number; points: number; me: boolean }
 interface TeamData {
@@ -142,6 +144,8 @@ export default function Team() {
   // columns and no scorer cards instead of zeros and empty lists; appearances stay when there are any
   const hasStats = data.squad.some(p => (p.goals ?? 0) > 0 || (p.assists ?? 0) > 0 || p.rating != null) || data.scorers.length > 0
   const hasApps = data.squad.some(p => (p.apps ?? 0) > 0)
+  // fix177: national teams — the club column only when we know some clubs (small nations: name only, no grid of dashes)
+  const hasClubs = team.national && data.squad.some(p => p.club?.name)
   const nextMatch = data.next[0]
   const rows = standing ? (() => {
     const i = standing.rows.findIndex(r => r.me)
@@ -201,7 +205,7 @@ export default function Team() {
                         <tr className="text-[11px] text-faint text-left">
                           <th className="font-medium px-2 py-1 w-10">#</th>
                           <th className="font-medium px-2 py-1">{t("Player")}</th>
-                          {team.national && <th className="font-medium px-2 py-1">{t("Club this season")}</th>}
+                          {hasClubs && <th className="font-medium px-2 py-1">{t("Club this season")}</th>}
                           <th className="font-medium px-2 py-1 text-right w-12">{t("Age")}</th>
                           {(hasStats || hasApps) && <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Apps") : <Pro />}</th>}
                           {hasStats && <th className="font-medium px-2 py-1 text-right w-14">{t("Goals")}</th>}
@@ -216,12 +220,12 @@ export default function Team() {
                             <td className="px-2 py-2">
                               <span className="flex items-center gap-2.5">
                                 {p.photo ? <span className="photo-duo w-7 h-7 rounded-full overflow-hidden flex-shrink-0"><img src={p.photo} alt="" className="w-full h-full object-cover" loading="lazy" /></span> : <span className="w-7 h-7 rounded-full bg-surface2" />}
-                                <Link to={`/player/${p.id}`} className="font-semibold text-ink truncate hover:text-accent">{p.name}</Link>
+                                {p.noPage ? <span className="font-semibold text-ink truncate">{p.name}</span> : <Link to={`/player/${p.id}`} className="font-semibold text-ink truncate hover:text-accent">{p.name}</Link>}
                               </span>
                             </td>
-                            {team.national && (
+                            {hasClubs && (
                               <td className="px-2 py-2 text-xs">
-                                {p.club?.name ? <><NameLink to={href.team(p.club.id)} className="text-ink">{p.club.name}</NameLink><span className="block text-faint num">{t("{0} games · {1} goals", { 0: p.club.apps ?? 0, 1: p.club.goals ?? 0 })}</span></> : <span className="text-faint">–</span>}
+                                {p.club?.name ? <><NameLink to={href.team(p.club.id)} className="text-ink">{p.club.name}</NameLink>{(p.club.apps ?? 0) > 0 && <span className="block text-faint num">{t("{0} games · {1} goals", { 0: p.club.apps ?? 0, 1: p.club.goals ?? 0 })}</span>}</> : <span className="text-faint">–</span>}
                               </td>
                             )}
                             <td className="px-2 py-2 text-right text-muted num">{p.age ?? ''}</td>

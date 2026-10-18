@@ -294,7 +294,7 @@ let afLiveRaw = new Map<number, any>();
 let afLiveAt = 0;
 const standingsByCode = new Map<string, any>();
 
-async function currentSeason(leagueId: number): Promise<number | null> {
+export async function currentSeason(leagueId: number): Promise<number | null> {
   return cached(`season:${leagueId}`, 24 * 3600 * 1000, async () => {
     const j = await afGet('/leagues', { id: leagueId, current: 'true' });
     const l = j.response?.[0];

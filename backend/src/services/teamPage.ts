@@ -14,7 +14,8 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { afGet, afRemaining, afConfigured } from './apiFootball';
 import { groupForCompetition, fdNameFor, normalizeName } from './history';
-import { isKnownAfFixture, fdTwinOf, afCompetitions, afStandingsCached, afWindowMatches } from './afMatches';
+import { isKnownAfFixture, fdTwinOf, afCompetitions, afStandingsCached, afWindowMatches, currentSeason } from './afMatches';
+import { isMissingPlayer } from './missingPlayers';
 import { isCrawlerRequest, noProviderCalls } from './afUsage';
 import { teamAnalysis, teamAnalysisTeaser } from './teamAnalysis';
 import { twinDupIds, warmPlayers } from './playerPage';
@@ -837,6 +838,49 @@ async function pageData(afId: number): Promise<any> {
   }
 }
 
+/**
+ * fix177: a national team in one competition (the link's c=AF32 / WC / EC…, else the competition of its next or last
+ * official game): the group table holding the team and the team's scorers / assist makers in it. Two provider calls,
+ * cached; crawlers never call (the page keeps what it has).
+ */
+const NATIONAL_CODE: Record<string, number> = { WC: 1, EC: 4 };
+async function nationalCompView(afId: number, code: string) {
+  const id = NATIONAL_CODE[code.toUpperCase()] ?? (/^AF\d+$/i.test(code) ? parseInt(code.slice(2), 10) : NaN);
+  if (!Number.isFinite(id)) return null;
+  const season = await currentSeason(id);
+  if (!season) return null;
+  let standing: any = null, league: any = null;
+  try {
+    const st = await g('/standings', { league: id, season });
+    const lg = st.response?.[0]?.league;
+    if (lg) league = { id, name: lg.name, logo: lg.logo || null, country: null, season, type: 'National' };
+    const table = ((lg?.standings || []) as any[][]).find(x => x.some((r: any) => r.team?.id === afId)) || null;
+    const me = table?.find((r: any) => r.team?.id === afId);
+    if (table && me) standing = {
+      rank: me.rank, points: me.points, played: me.all?.played, won: me.all?.win, drawn: me.all?.draw, lost: me.all?.lose,
+      gf: me.all?.goals?.for, ga: me.all?.goals?.against, group: me.group || null,
+      rows: table.map((r: any) => ({ rank: r.rank, id: AF_OFFSET + r.team.id, name: r.team.name, logo: r.team.logo, played: r.all?.played, gd: r.goalsDiff, points: r.points, me: r.team.id === afId }))
+    };
+  } catch (e: any) { if (e?.code === 'PAGE_BUDGET' || e?.code === 'NO_PROVIDER_CALL') throw e; }
+  const tot = new Map<number, { id: number; name: string; goals: number; assists: number }>();
+  for (let page = 1; page <= 2; page++) {
+    try {
+      const pr = await g('/players', { team: afId, league: id, season, page });
+      for (const it of pr.response || []) for (const s of it.statistics || []) {
+        if (s.team?.id !== afId || s.league?.id !== id) continue;
+        const x = tot.get(it.player.id) || { id: it.player.id, name: it.player.name, goals: 0, assists: 0 };
+        x.goals += s.goals?.total || 0; x.assists += s.goals?.assists || 0;
+        tot.set(it.player.id, x);
+      }
+      if ((pr.paging?.current || page) >= (pr.paging?.total || 1)) break;
+    } catch (e: any) { if (e?.code === 'PAGE_BUDGET' || e?.code === 'NO_PROVIDER_CALL') throw e; break; }
+  }
+  const lead = (k: 'goals' | 'assists') => [...tot.values()].filter(x => x[k] > 0).sort((a, b) => b[k] - a[k]).slice(0, 8)
+    .map(x => ({ id: x.id, name: x.name, value: x[k], detail: league?.name || undefined }));
+  if (!league && !tot.size) return null;
+  return { league: league || { id, name: null, logo: null, country: null, season, type: 'National' }, standing, scorers: lead('goals'), assists: lead('assists') };
+}
+
 /** fix176: a national team's players — each one's club this season (the club with most games) from our stored stats. */
 function clubSeasons(afId: number, squad: any[]) {
   const q = db.prepare(`SELECT team_id, season, SUM(apps) AS apps, SUM(goals) AS goals, SUM(assists) AS assists FROM af_player_season
@@ -849,9 +893,23 @@ function clubSeasons(afId: number, squad: any[]) {
   });
 }
 
-export async function teamPage(afId: number, full: boolean) {
+export async function teamPage(afId: number, full: boolean, comp?: string) {
   const { _playedUnknown, ...raw }: any = await pageData(afId);
-  const data = raw.team?.national && Array.isArray(raw.squad) ? { ...raw, squad: clubSeasons(afId, raw.squad) } : raw;
+  let data = raw.team?.national && Array.isArray(raw.squad) ? { ...raw, squad: clubSeasons(afId, raw.squad) } : raw;
+  if (data.team?.national) {
+    // fix177: the competition of the link (c=…), else the one of the next / last official game when the stored page
+    // has no table yet; its group table and the team's scorers replace the empty ones
+    const official = [...(data.next || []), ...(data.last || [])].find((f: any) => f.compCode && !/friendl/i.test(f.comp || ''))?.compCode || null;
+    const target = comp && comp.toUpperCase() !== `AF${data.league?.id}` ? comp : !data.standing ? official : null;
+    if (target && !isCrawlerRequest()) {
+      try {
+        const v = await nationalCompView(afId, target);
+        if (v) data = { ...data, league: v.league.name ? v.league : data.league, standing: v.standing ?? data.standing, scorers: v.scorers.length ? v.scorers : data.scorers, assists: v.assists.length ? v.assists : data.assists };
+      } catch (e: any) { logger.warn(`national team ${afId} ${target}: ${e.message}`); }
+    }
+    // a squad player the provider has no page for: no link (fix169's list of missing players)
+    data = { ...data, squad: (data.squad || []).map((p: any) => (isMissingPlayer(p.id) ? { ...p, noPage: true } : p)) };
+  }
   // player pages of the squad are built in the background — not for crawlers (no provider calls for them)
   if (!isCrawlerRequest()) try { warmPlayers((data.squad || []).map((p: any) => p.id).filter(Boolean)); } catch { /* optional */ }
   let analysis: any = null;
@@ -861,7 +919,7 @@ export async function teamPage(afId: number, full: boolean) {
     ...data,
     analysis: analysis ? teamAnalysisTeaser(analysis) : null,
     premium: false,
-    squad: data.squad.map((p: any) => ({ id: p.id, name: p.name, number: p.number, pos: p.pos, age: p.age, photo: p.photo, goals: p.goals, club: p.club })),
+    squad: data.squad.map((p: any) => ({ id: p.id, name: p.name, number: p.number, pos: p.pos, age: p.age, photo: p.photo, goals: p.goals, club: p.club, noPage: p.noPage })),
     scorers: data.scorers.slice(0, 3),
     assists: [],
     locked: ['Assists, appearances, minutes, cards and ratings for every player', 'Full top-scorer and assist lists', 'AI analysis of the team']

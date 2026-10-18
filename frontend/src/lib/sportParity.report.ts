@@ -29,26 +29,6 @@ export const PARITY_REPORT: ParityReport = {
  ],
  "na": [
   {
-   "key": "game.beforeAfter",
-   "sport": "basketball",
-   "reason": "no line-up announcement to compare around (live 'was X%' is in the live chance)"
-  },
-  {
-   "key": "game.beforeAfter",
-   "sport": "nfl",
-   "reason": "no line-up announcement to compare around"
-  },
-  {
-   "key": "game.lineups",
-   "sport": "basketball",
-   "reason": "the providers have no line-ups (basketball box scores only flag starters; American football only the starting QB, shown in the reasons)"
-  },
-  {
-   "key": "game.lineups",
-   "sport": "nfl",
-   "reason": "the providers have no line-ups (basketball box scores only flag starters; American football only the starting QB, shown in the reasons)"
-  },
-  {
    "key": "league.logo",
    "sport": "nfl",
    "reason": "the provider's NFL / college league images are its 'image not available' placeholder"

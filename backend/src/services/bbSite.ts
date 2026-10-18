@@ -512,12 +512,38 @@ function teamAnalysis(teamId: number, code: string) {
 }
 
 /** A team's page data: recent and next games. */
+/**
+ * fix177: a team we have no game of yet (a league added from admin lists its teams in the table before its games are
+ * stored — e.g. Arlans, BB396): the page from the league table — name, logo, league, place — instead of a 404. Tables
+ * already loaded are searched first; then the tables of the leagues added from admin (one cached call each).
+ */
+async function bbTeamFromTable(teamId: number) {
+  const find = (code: string, data: any) => {
+    for (const gr of data?.groups || []) for (const r of gr.rows || []) if (r.team?.id === teamId) return { code, row: r, group: gr.name };
+    return null;
+  };
+  let hit: { code: string; row: any; group: string | null } | null = null;
+  for (const [code, c] of standCache) { hit = find(code, c.data); if (hit) break; }
+  if (!hit) for (const l of BB_LEAGUES) {
+    if (standCache.has(l.code)) continue;
+    try { hit = find(l.code, await bbStandings(l.code)); } catch { /* table not available */ }
+    if (hit) break;
+  }
+  if (!hit) return null;
+  logger.info(`basketball team ${teamId}: no games stored yet, page from the ${hit.code} table`);
+  const r = hit.row;
+  return {
+    team: { id: teamId, name: r.team.name, logo: r.team.logo || null, league: hit.code }, rating: null, averages: null, analysis: null, teamAnalysis: null, squad: [],
+    recent: [], next: [], standing: { position: r.position, played: r.played, won: r.won, lost: r.lost, group: hit.group }, noGamesYet: true
+  };
+}
+
 export async function bbTeam(teamId: number, full: boolean) {
   const now = new Date().toISOString();
   const recent = db.prepare(`${SELECT} WHERE (home_id = ? OR away_id = ?) AND kickoff < ? ORDER BY kickoff DESC LIMIT 15`).all(teamId, teamId, now) as Row[];
   const next = db.prepare(`${SELECT} WHERE (home_id = ? OR away_id = ?) AND kickoff >= ? ORDER BY kickoff ASC LIMIT 8`).all(teamId, teamId, now) as Row[];
   const any = recent[0] || next[0];
-  if (!any) return null;
+  if (!any) return bbTeamFromTable(teamId);
   const name = any.home_id === teamId ? any.home_name : any.away_name, logo = any.home_id === teamId ? any.home_logo : any.away_logo;
   // fix126: "Team analysis" card like football's (paid plans; our record on the team is public)
   let ta: any = null;

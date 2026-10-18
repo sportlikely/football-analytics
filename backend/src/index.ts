@@ -1574,10 +1574,73 @@ async function lightRefresh(prev: any) {
 }
 
 const withTimeoutMs = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(Object.assign(new Error('timed out'), { timeout: true })), ms))]);
+
+/*
+ * fix177: a details request never answers 500 because a provider is slow (30 parallel opens of past matches queued in
+ * Football-Data.org's rate limit and timed out):
+ *  - a finished match's details are kept for good (match_details_store, from 6 h after kick-off): never rebuilt;
+ *  - a first open waits 8 s at most; then it gets what we hold (match, result, saved prediction) + "More details soon"
+ *    while the build goes on in ONE background queue (one build at a time, under the provider's rate limit);
+ *  - one build per match at a time (requests share it).
+ */
+db.exec(`CREATE TABLE IF NOT EXISTS match_details_store (match_id INTEGER PRIMARY KEY, json TEXT NOT NULL, built_at TEXT NOT NULL)`);
+const FINAL_ST = new Set(['FINISHED', 'AWARDED']);
+const isSettled = (d: any) => FINAL_ST.has(String(d?.match?.status)) && Date.parse(d?.match?.utcDate || '') < Date.now() - 6 * 3600 * 1000;
+function storedDetails(id: number): any | null {
+  try { const r = db.prepare(`SELECT json FROM match_details_store WHERE match_id = ?`).get(id) as any; return r ? JSON.parse(r.json) : null; } catch { return null; }
+}
+/** What we hold without a provider call: the match from our saved predictions + its result, and the saved prediction. */
+function offlineDetails(id: number): any | null {
+  const p = db.prepare(`SELECT match_id, utc_date, competition_code, competition_name, home_team_id, home_team, away_team_id, away_team FROM predictions WHERE match_id = ? LIMIT 1`).get(id) as any;
+  if (!p) return null;
+  const r = db.prepare(`SELECT home_goals, away_goals, outcome FROM results WHERE match_id = ? LIMIT 1`).get(id) as any;
+  const done = !!r && ['H', 'D', 'A'].includes(r.outcome);
+  const match: any = {
+    id, utcDate: p.utc_date, status: done ? 'FINISHED' : Date.parse(p.utc_date) > Date.now() ? 'TIMED' : 'IN_PLAY',
+    competition: { code: p.competition_code, name: p.competition_name },
+    homeTeam: { id: p.home_team_id, name: p.home_team, shortName: p.home_team }, awayTeam: { id: p.away_team_id, name: p.away_team, shortName: p.away_team },
+    score: { winner: done ? ({ H: 'HOME_TEAM', D: 'DRAW', A: 'AWAY_TEAM' } as any)[r.outcome] : null, fullTime: { home: done ? r.home_goals : null, away: done ? r.away_goals : null } },
+    goals: [], bookings: [], substitutions: []
+  };
+  let prediction: any = null, predictions: any[] = [];
+  try { predictions = footballDataAPI.allPredictionsFor(match); prediction = footballDataAPI.predictionFor(match); } catch { /* none saved */ }
+  return { match, prediction, predictions, head2head: null, standings: { home: null, away: null }, form: { home: [], away: [] }, probableLineups: null, partial: true, message: 'More details soon' };
+}
+const detailsInflight = new Map<number, Promise<any>>();
+function buildOnce(id: number): Promise<any> {
+  let run = detailsInflight.get(id);
+  if (!run) {
+    run = refreshMatchDetails(id).finally(() => detailsInflight.delete(id));
+    detailsInflight.set(id, run);
+  }
+  return run;
+}
+const detailsQueue = new Set<number>();
+let detailsWorker = false;
+/** One background build at a time (60 s each at most). */
+function queueDetails(id: number) {
+  detailsQueue.add(id);
+  if (detailsWorker) return;
+  detailsWorker = true;
+  void (async () => {
+    while (detailsQueue.size) {
+      const next = detailsQueue.values().next().value as number;
+      detailsQueue.delete(next);
+      if (detailsCache.has(next)) continue;
+      try { await withTimeoutMs(buildOnce(next), 60 * 1000); } catch (e: any) { logger.warn(`details queue ${next}: ${e?.timeout ? 'timed out' : e?.message}`); }
+    }
+    detailsWorker = false;
+  })();
+}
+
 function storeDetails(id: number, data: any, startedAt: number) {
   const cur = detailsCache.get(id);
   if (cur && cur.at > startedAt) return; // a newer copy is already there (a late refresh never overwrites it)
-  detailsCache.set(id, { at: Date.now(), ttl: detailsTtl(data), data, refreshing: false, startedAt: 0 });
+  const settled = isSettled(data);
+  if (settled && !data?.partial) {
+    try { db.prepare(`INSERT OR REPLACE INTO match_details_store (match_id, json, built_at) VALUES (?, ?, ?)`).run(id, JSON.stringify(data), new Date().toISOString()); } catch (e: any) { logger.warn(`details store ${id}: ${e.message}`); }
+  }
+  detailsCache.set(id, { at: Date.now(), ttl: settled ? Infinity : detailsTtl(data), data, refreshing: false, startedAt: 0 });
   if (detailsCache.size > 2000) { const oldest = [...detailsCache.entries()].sort((x, y) => x[1].at - y[1].at)[0]; if (oldest) detailsCache.delete(oldest[0]); }
 }
 async function refreshMatchDetails(id: number) {
@@ -1613,9 +1676,26 @@ app.get('/api/matches/:id(\\d+)/details', async (req, res) => {
       if (Date.now() - hit.at > hit.ttl) startRefresh(id, hit);
       return res.json({ data: liveNow(id, hit.data), timestamp: new Date(hit.at).toISOString(), cached: true });
     }
-    const details = await refreshMatchDetails(id);
-    res.json({ data: liveNow(id, details), timestamp: new Date().toISOString() });
+    // fix177: a finished match we kept — never rebuilt
+    const kept = storedDetails(id);
+    if (kept) {
+      detailsCache.set(id, { at: Date.now(), ttl: Infinity, data: kept, refreshing: false, startedAt: 0 });
+      return res.json({ data: kept, timestamp: new Date().toISOString(), cached: true });
+    }
+    try {
+      const details = await withTimeoutMs(buildOnce(id), 8 * 1000);
+      return res.json({ data: liveNow(id, details), timestamp: new Date().toISOString() });
+    } catch (e: any) {
+      if (e?.response?.status === 404) throw e;
+      // slow or failing provider: what we hold now, the full page from the background queue
+      const off = offlineDetails(id);
+      if (!off) throw e;
+      if (!e?.timeout) logger.warn(`details ${id}: ${e?.message} — served what we hold`);
+      queueDetails(id);
+      return res.json({ data: liveNow(id, off), timestamp: new Date().toISOString(), pending: true, message: 'More details soon' });
+    }
   } catch (error: any) {
+    if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.json({ data: null, pending: true, message: 'More details soon' });
     sendError(res, error, 'Failed to fetch match details');
   }
 });
@@ -1776,7 +1856,7 @@ app.get('/api/team-page/:id(\\d+)', async (req, res) => {
   try {
     const afId = resolveAfTeamId(parseInt(req.params.id, 10), req.query.c ? String(req.query.c) : undefined, req.query.n ? String(req.query.n) : undefined);
     if (!afId) return res.status(404).json({ error: 'Team not found' });
-    res.json({ data: await crawlerSafe(() => teamPage(afId, isPaid(req.access || 'anon'))), timestamp: new Date().toISOString() });
+    res.json({ data: await crawlerSafe(() => teamPage(afId, isPaid(req.access || 'anon'), req.query.c ? String(req.query.c) : undefined)), timestamp: new Date().toISOString() });
   } catch (error: any) {
     if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.json({ data: null, pending: true, message: 'More details soon' });
     sendError(res, error, 'Team page failed');
@@ -2443,7 +2523,9 @@ app.get('/api/nfl/team/:id(\\d+)', (req, res) => {
     for (const c of st.conferences) for (const dv of c.divisions) if (!division && dv.rows.some(r => r.team.id === d.team.id)) division = { conference: c.name, name: dv.name, rows: dv.rows };
     res.json({ data: { ...d, analysis, schedule: nflWith(req, d.schedule), results: nflWith(req, d.results),
       model: full && cur ? nflTeamModel(d.team.id) : null, modelLocked: !full,
-      record: nflTeamRecord(d.team.id, season!), division } });
+      record: nflTeamRecord(d.team.id, season!), division,
+      // fix177: no roster from the provider (FCS teams): the team's season leaders from our box scores instead
+      leaders: d.roster.length ? null : nflStarters(d.team.id, season!) } });
   } catch (e) { sendError(res, e, 'Failed to load team'); }
 });
 app.get('/api/nfl/player/:id(\\d+)', (req, res) => {

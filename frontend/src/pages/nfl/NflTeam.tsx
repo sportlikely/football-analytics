@@ -22,6 +22,8 @@ interface Data {
   model?: Model | null; modelLocked?: boolean; record?: { games: number; right: number; strong: number; strongRight: number } | null
   /** fix174: the team's division (NFL) or conference (college) table */
   division?: { conference: string; name: string; rows: StandRow[] } | null
+  /** fix177: no roster from the provider (FCS): the team's season leaders from our box scores */
+  leaders?: { id: number; name: string; position: string; line: string | null; status: string | null; out: boolean }[] | null
 }
 interface Model {
   elo: number; rank: number; teams: number; qb: { id: number; name: string; value: number; league: number } | null
@@ -79,6 +81,19 @@ export default function NflTeam() {
       form={form}
       left={<>
         {d.analysis && <TeamAnalysis a={d.analysis} d={d} />}
+        {d.roster.length === 0 && d.leaders && d.leaders.length > 0 && (
+          <Card title={t('Season leaders')} action={<span className="text-xs text-faint">{t('From the box scores')}</span>}>
+            <ul className="divide-y divide-line/50">
+              {d.leaders.map(p => (
+                <li key={`${p.position}${p.id}`} className="flex items-center gap-3 py-1.5 text-sm min-w-0">
+                  <span className="w-14 shrink-0 text-[10px] font-bold uppercase tracking-wide text-faint">{t(p.position)}</span>
+                  <Link to={`/american-football/player/${p.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink hover:text-accent">{p.name}</Link>
+                  {p.line && <span className="shrink-0 text-[11px] text-faint">{p.line}</span>}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
         {d.roster.length > 0 && (
           <Card title={t('Roster')}>
             <div className="space-y-5">

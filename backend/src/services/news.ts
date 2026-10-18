@@ -476,6 +476,20 @@ async function refresh() {
   });
   buildMatcher(); // team lists can change (new season, promotions)
   buildBbMatcher();
+  const fresh = storeRaws(raws);
+  // pictures for new stories whose feed has none (a few at a time)
+  const setImg = db.prepare(`UPDATE news_items SET image = ? WHERE link = ?`);
+  const todo = fresh.slice(0, 30);
+  for (let i = 0; i < todo.length; i += 5) {
+    await Promise.all(todo.slice(i, i + 5).map(async link => { const img = await previewImage(link); if (img) setImg.run(img, link); }));
+  }
+  lastRefresh = now;
+  logger.info(`News refreshed: ${raws.length} stories from ${results.filter(r => r.status === 'fulfilled').length}/${feeds.length} feeds, ${fresh.length} new pictures looked up, ${Math.round((Date.now() - t0) / 1000)} s`);
+}
+
+/** Files and stores stories (new ones inserted, a known link gets the extra leagues); the new links without a picture. */
+function storeRaws(raws: Raw[]): string[] {
+  const now = new Date().toISOString();
   const get = db.prepare(`SELECT leagues, image FROM news_items WHERE link = ?`);
   const ins = db.prepare(`INSERT INTO news_items (link, title, source, published, summary, image, leagues, seen_at, sport) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const upd = db.prepare(`UPDATE news_items SET leagues = ?, image = COALESCE(image, ?), published = COALESCE(published, ?) WHERE link = ?`);
@@ -505,14 +519,7 @@ async function refresh() {
     db.exec('ROLLBACK');
     throw e;
   }
-  // pictures for new stories whose feed has none (a few at a time)
-  const setImg = db.prepare(`UPDATE news_items SET image = ? WHERE link = ?`);
-  const todo = fresh.slice(0, 30);
-  for (let i = 0; i < todo.length; i += 5) {
-    await Promise.all(todo.slice(i, i + 5).map(async link => { const img = await previewImage(link); if (img) setImg.run(img, link); }));
-  }
-  lastRefresh = now;
-  logger.info(`News refreshed: ${raws.length} stories from ${results.filter(r => r.status === 'fulfilled').length}/${feeds.length} feeds, ${fresh.length} new pictures looked up, ${Math.round((Date.now() - t0) / 1000)}s`);
+  return fresh;
 }
 
 /* ------------------------------------------------------------------ */
@@ -526,7 +533,25 @@ async function refresh() {
  * league has one; national-team competitions by their name. Every league added from admin gets one automatically.
  * Each league is searched at most every 3 hours, 12 searches per 15-minute refresh; its stories are filed under it.
  */
-const SEARCH_EVERY = 3 * 3600 * 1000, SEARCH_PER_TICK = 12;
+// fix177: 40 searches a refresh until every league has had its first one (after a deploy every league is new), then 12
+const SEARCH_EVERY = 3 * 3600 * 1000, SEARCH_PER_TICK = 12, SEARCH_FIRST_PASS = 40;
+/**
+ * fix177: national-team competitions by the words headlines use ("World Cup qualifiers", "Nations League"), not the
+ * provider's names ("World Cup - Qualification Europe"). The rule below covers new ones ("X - Qualification Y").
+ */
+const NATIONAL_QUERIES: Record<string, string> = {
+  WC: '"FIFA World Cup" OR "World Cup qualifiers" football', AF1: '"FIFA World Cup" OR "World Cup qualifiers" football',
+  EC: '"Euro 2028" OR "European Championship" OR "Euro qualifiers" football', AF4: '"Euro 2028" OR "European Championship" OR "Euro qualifiers" football',
+  AF960: '"Euro qualifiers" OR "Euro 2028 qualifying" football', AF5: '"Nations League" UEFA football', AF10: '"international friendly" football',
+  AF29: '"World Cup qualifiers" Africa football', AF30: '"World Cup qualifiers" Asia football', AF31: '"World Cup qualifiers" CONCACAF football',
+  AF32: '"World Cup qualifiers" Europe football', AF33: '"World Cup qualifiers" Oceania football', AF34: '"World Cup qualifiers" South America football',
+  AF36: '"Africa Cup of Nations" qualifiers football', AF536: '"CONCACAF Nations League" football'
+};
+/** A national-team competition's search from its name: "World Cup - Qualification Europe" → "World Cup qualifiers" Europe. */
+function nationalQuery(name: string): string {
+  const m = /^(.*?)\s*-\s*Qualification\s*(.*)$/i.exec(name);
+  return m ? `${quote(`${m[1]} qualifiers`)}${m[2] ? ` ${m[2]}` : ''} football` : `${quote(name)} football`;
+}
 const searchedAt = new Map<string, number>();
 const quote = (s: string) => `"${String(s).replace(/"/g, '').trim()}"`;
 const searchFeed = (q: string): string => `https://news.google.com/rss/search?${new URLSearchParams({ q: `${q} when:14d`, hl: 'en-US', gl: 'US', ceid: 'US:en' })}`;
@@ -537,6 +562,7 @@ export function leagueTopics(): LeagueTopic[] {
   const add = (code: string, sport: Sport, query: string) => { const k = `${sport}|${code}`; if (!out.has(k)) out.set(k, { code, sport, query }); };
   const place = (name: string, country?: string | null) => (country && !/world|europe|international/i.test(country) && !name.toLowerCase().includes(country.toLowerCase()) ? ` ${country}` : '');
   const fed = new Set(FEEDS.filter(f => f.league).map(f => `${f.sport || 'football'}|${f.league}`)); // leagues with their own section feed
+  for (const [code, q] of Object.entries(NATIONAL_QUERIES)) add(code, 'football', q);
   for (const l of NEWS_LEAGUES) if (!fed.has(`football|${l.code}`)) add(l.code, 'football', `${quote(l.phrases[0])} football`);
   for (const l of BB_NEWS_LEAGUES) if (!fed.has(`basketball|${l.code}`) && l.phrases[0].length >= 5) add(l.code, 'basketball', `${quote(l.phrases[0])} basketball`);
   try {
@@ -544,15 +570,13 @@ export function leagueTopics(): LeagueTopic[] {
     for (const c of afCompetitions()) {
       if (fed.has(`football|${c.code}`)) continue;
       // national-team competitions and cups: by their name; leagues: name + country
-      add(c.code, 'football', c.type === 'LEAGUE' ? `${quote(c.name)}${place(c.name, c.area?.name)} football` : `${quote(c.name)} football`);
+      add(c.code, 'football', c.type === 'LEAGUE' ? `${quote(c.name)}${place(c.name, c.area?.name)} football` : c.type === 'NATIONAL' ? nationalQuery(c.name) : `${quote(c.name)} football`);
     }
   } catch { /* fixtures not loaded */ }
   try {
     for (const r of db.prepare(`SELECT competition_code AS code, MAX(competition_name) AS name FROM predictions WHERE utc_date >= ? AND competition_code IS NOT NULL GROUP BY competition_code`).all(new Date(Date.now() - 120 * 86400000).toISOString()) as any[])
       if (r.name && !fed.has(`football|${r.code}`)) add(r.code, 'football', `${quote(r.name)} football`);
   } catch { /* table missing */ }
-  add('EC', 'football', `${quote('UEFA European Championship')} OR ${quote('Euro 2028')} football`);
-  add('WC', 'football', `${quote('FIFA World Cup')} football`);
   try {
     const { BB_LEAGUES } = require('./basketball') as typeof import('./basketball');
     for (const l of BB_LEAGUES) if (!fed.has(`basketball|${l.code}`)) add(l.code, 'basketball', `${quote(l.name)}${place(l.name, l.country)} basketball`);
@@ -564,7 +588,27 @@ export function leagueTopics(): LeagueTopic[] {
 function dueTopics(): LeagueTopic[] {
   const now = Date.now();
   return leagueTopics().filter(t => now - (searchedAt.get(`${t.sport}|${t.code}`) || 0) > SEARCH_EVERY)
-    .sort((a, b) => (searchedAt.get(`${a.sport}|${a.code}`) || 0) - (searchedAt.get(`${b.sport}|${b.code}`) || 0)).slice(0, SEARCH_PER_TICK);
+    .sort((a, b) => (searchedAt.get(`${a.sport}|${a.code}`) || 0) - (searchedAt.get(`${b.sport}|${b.code}`) || 0))
+    .slice(0, leagueTopics().some(t => !searchedAt.has(`${t.sport}|${t.code}`)) ? SEARCH_FIRST_PASS : SEARCH_PER_TICK);
+}
+/**
+ * fix177: a league asked for that has no stories and wasn't searched in the last 3 h is searched right away (one
+ * search, shared by everyone asking, 8 s at most) — the first visitor of a league added today sees its news.
+ */
+const searching = new Map<string, Promise<void>>();
+async function searchNow(code: string, sport: Sport): Promise<void> {
+  const key = `${sport}|${code}`;
+  if (Date.now() - (searchedAt.get(key) || 0) < SEARCH_EVERY) return;
+  const topic = leagueTopics().find(t => t.code === code && t.sport === sport);
+  if (!topic) return;
+  let run = searching.get(key);
+  if (!run) {
+    const f: Feed = { source: 'Google News', url: searchFeed(topic.query), league: code, sport, search: true };
+    run = fetchFeed(f).then(raws => { markSearched([f]); storeRaws(raws); }).catch(e => { logger.warn(`news search ${code}: ${e.message}`); markSearched([f]); })
+      .finally(() => searching.delete(key));
+    searching.set(key, run);
+  }
+  await Promise.race([run, new Promise(r => setTimeout(r, 8000))]);
 }
 export const searchFeedsOf = (): Feed[] => dueTopics().map(t => ({ source: 'Google News', url: searchFeed(t.query), league: t.code, sport: t.sport, search: true }));
 const markSearched = (feeds: Feed[]) => { for (const f of feeds) if (f.search && f.league) searchedAt.set(`${f.sport || 'football'}|${f.league}`, Date.now()); };
@@ -657,6 +701,8 @@ export async function newsFor(opts: { sport?: Sport; limit?: number; league?: st
     const q = db.prepare(`
       SELECT * FROM news_items WHERE sport = ? AND (leagues LIKE ? OR leagues LIKE ?) AND COALESCE(published, seen_at) >= ?
       ORDER BY COALESCE(published, seen_at) DESC LIMIT ?`);
+    // fix177: nothing stored yet for this league — its news search runs now (the first visitor waits up to 8 s)
+    if (!(db.prepare(`SELECT 1 FROM news_items WHERE sport = ? AND (leagues LIKE ? OR leagues LIKE ?) LIMIT 1`).get(sport, `%,${code},%`, `%,${old},%`))) await searchNow(code, sport);
     let rows = dedupe(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 14 * 86400000).toISOString(), limit * 2)).slice(0, limit);
     if (rows.length < Math.min(8, limit)) rows = dedupe(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 60 * 86400000).toISOString(), Math.min(limit, 8) * 2)).slice(0, Math.min(limit, 8));
     return rows.map(toItem);

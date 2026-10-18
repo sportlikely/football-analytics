@@ -1970,5 +1970,9 @@
  "World Cup qualifiers →": "Qualifications pour la Coupe du monde →",
  "Club this season": "Club cette saison",
  "{0} games · {1} goals": "{0} matchs · {1} buts",
- "#{0} in {1}": "{0}e en {1}"
+ "#{0} in {1}": "{0}e en {1}",
+ "#{0} in the table · {1}–{2}": "{0}e du classement · {1}–{2}",
+ "Games appear here once the league's schedule is loaded.": "Les matchs apparaîtront ici dès que le calendrier de la ligue sera chargé.",
+ "Season leaders": "Meilleurs de la saison",
+ "From the box scores": "D'après les feuilles de match"
 }
