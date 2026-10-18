@@ -197,10 +197,14 @@ export function FeaturedHero({ g, a, label }: { g: HGame | null; a: SportAdapter
       <div className="relative h-full p-5 sm:p-9 flex flex-col gap-6 sm:gap-8">
         <div className="flex flex-wrap items-center justify-center sm:justify-between gap-2">
           <span className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-[#07090D] bg-[#C8FF3D] px-3 py-1.5 rounded-full">{label || a.labels.featured}</span>
-          <span className="glass !rounded-full inline-flex items-center gap-2 px-3 py-1.5 text-xs sm:text-sm text-[#C9D0DB]">
-            {g.competition.emblem && <img src={g.competition.emblem} alt="" width={16} height={16} className="w-4 h-4 object-contain" />}
-            {g.competition.name}
-          </span>
+          {(() => {
+            const pill = <>
+              {g.competition.emblem && <img src={g.competition.emblem} alt="" width={16} height={16} className="w-4 h-4 object-contain" />}
+              {g.competition.name}
+            </>
+            const cls = 'glass !rounded-full inline-flex items-center gap-2 px-3 py-1.5 text-xs sm:text-sm text-[#C9D0DB]'
+            return g.competition.href ? <Link to={g.competition.href} className={`${cls} hover:text-white hover:underline underline-offset-2`}>{pill}</Link> : <span className={cls}>{pill}</span>
+          })()}
         </div>
 
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-6 flex-1">

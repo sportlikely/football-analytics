@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
@@ -34,7 +35,7 @@ interface PlayerData {
     season: NbaLine | null
     lastSeason: NbaLine | null
     injury: { status: string; comment: string | null; reported: string | null } | null
-    contract: { season: number | null; team: string | null; amount: number | null; type: string | null; status: string | null }[] | null
+    contract: { season: number | null; team: string | null; teamId?: number | null; amount: number | null; type: string | null; status: string | null }[] | null
   } | null
 }
 
@@ -169,7 +170,7 @@ export default function BbPlayer() {
                 {nba.contract.map((c, i) => (
                   <li key={i} className="flex items-center gap-2 py-2">
                     <span className="num text-muted w-16">{c.season ?? '–'}</span>
-                    <span className="truncate text-muted">{c.team ?? ''}</span>
+                    <NameLink to={href.bbTeam(c.teamId)} className="truncate text-muted">{c.team ?? ''}</NameLink>
                     <span className="ml-auto num font-bold text-ink">{money(c.amount)}</span>
                   </li>
                 ))}
@@ -197,7 +198,7 @@ export default function BbPlayer() {
                       <tr key={`${s.code}${s.season}`} className="border-t border-line/40">
                         <td className="py-1.5 px-2 font-sans whitespace-nowrap">
                           <span className="text-ink">{s.season}</span>
-                          <span className="ml-1.5 text-[10px] text-faint">{s.code} · {s.team.name}</span>
+                          <span className="ml-1.5 text-[10px] text-faint"><NameLink to={href.bbLeague(s.code)}>{s.code}</NameLink> · <NameLink to={href.bbTeam(s.team.id)}>{s.team.name}</NameLink></span>
                         </td>
                         <td className="text-right px-1 text-muted">{s.gp}</td>
                         <td className="text-right px-1 text-muted">{v(s.min)}</td>

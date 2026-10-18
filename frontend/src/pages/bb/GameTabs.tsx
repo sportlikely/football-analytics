@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import NameLink, { href } from '../../components/sport/NameLink'
 import { t, LOCALE } from '../../lib/i18n'
 import type { BbGame as Game } from '../../lib/bb'
 import { Card, TeamLogo } from './parts'
@@ -214,7 +215,7 @@ export function RestTab({ g, home, away }: { g: Game; home: Sched; away: Sched }
         <div className="flex items-center gap-2 mb-3">
           <span className={`w-1 h-6 rounded-full ${BG[s]}`} />
           <TeamLogo team={team} size={22} />
-          <span className="font-display font-bold text-ink truncate">{team.name}</span>
+          <NameLink to={href.bbTeam(team.id)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
           {x.backToBack && <span className="ml-auto rounded-full bg-loss/15 text-loss px-2 py-0.5 text-[10px] font-extrabold">{t('B2B')}</span>}
         </div>
         <div className="grid grid-cols-3 gap-2 mb-4">
@@ -278,7 +279,7 @@ export function H2HTab({ g, list }: { g: Game; list: H2H[] }) {
                 <div key={s} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
                   <span className="w-12 h-12 rounded-2xl bg-surface border border-line/60 grid place-items-center shrink-0"><TeamLogo team={teamOf(s)} size={30} /></span>
                   <span className="min-w-0 max-w-full">
-                    <span className="block font-display font-bold text-ink truncate">{teamOf(s).name}</span>
+                    <NameLink to={href.bbTeam(teamOf(s).id)} className="block font-display font-bold text-ink truncate">{teamOf(s).name}</NameLink>
                     <span className="block text-[11px] text-faint num">{t('{0} pts a game', { 0: avg(s === 'H' ? hp : ap) })}</span>
                   </span>
                 </div>
@@ -353,7 +354,7 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
         <span className={`absolute top-0 ${s === 'H' ? 'left-0' : 'right-0'} w-1 h-full ${BG[s]}`} />
         <div className={`flex items-center gap-2 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
           <TeamLogo team={team} size={22} />
-          <span className="font-display font-bold text-ink truncate">{team.name}</span>
+          <NameLink to={href.bbTeam(team.id)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
         </div>
         {x ? (
           <div className={`mt-3 flex items-end gap-4 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
@@ -378,14 +379,14 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
   }
   const gap = h && a ? Math.abs(h.r.position - a.r.position) : 0
   return (
-    <Card title={t('Standings')} action={<span className="text-xs text-faint">{g.league.name}</span>}>
+    <Card title={t('Standings')} action={<NameLink to={href.bbLeague(g.league.code)} className="text-xs text-faint">{g.league.name}</NameLink>}>
       <div className="grid grid-cols-2 gap-3">
         {card('H', h)}
         {card('A', a)}
       </div>
       {h && a && gap > 0 && (
         <p className="mt-3 text-center text-xs text-muted">
-          <b className={TEXT[h.r.position < a.r.position ? 'H' : 'A']}>{h.r.position < a.r.position ? g.home.name : g.away.name}</b> {gap === 1 ? t('are one place higher') : t('are {0} places higher', { 0: gap })}
+          <b className={TEXT[h.r.position < a.r.position ? 'H' : 'A']}><NameLink to={href.bbTeam(h.r.position < a.r.position ? g.home.id : g.away.id)}>{h.r.position < a.r.position ? g.home.name : g.away.name}</NameLink></b> {gap === 1 ? t('are one place higher') : t('are {0} places higher', { 0: gap })}
         </p>
       )}
       <div className="mt-5">

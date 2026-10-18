@@ -534,5 +534,11 @@ export function nflSearch(q: string) {
     WHERE (home_name LIKE ? OR away_name LIKE ?) ${HIDE_OTHER} AND kickoff >= ? AND kickoff < ? AND (stage IS NULL OR stage NOT LIKE 'Pre%') ORDER BY kickoff LIMIT 6`)
     .all(like, like, new Date(Date.now() - 5 * 3600000).toISOString(), new Date(Date.now() + 14 * 86400000).toISOString()) as any[])
     .map(g => ({ id: g.id, kickoff: g.kickoff, status: g.status, league: lname(g.league), home: g.home || 'TBD', away: g.away || 'TBD' }));
-  return { teams, players, leagues: [], games };
+  // fix174: the two leagues (their standings pages) when the term matches
+  const t = term.toLowerCase();
+  const leagues = [
+    { code: 'NFL', name: 'NFL', country: 'USA', logo: null as string | null, keys: ['nfl', 'national football league', 'american football'] },
+    { code: 'NCAA', name: 'College football', country: 'USA', logo: null as string | null, keys: ['college', 'ncaa', 'fbs', 'american football'] }
+  ].filter(l => l.keys.some(k => k.startsWith(t) || t.startsWith(k) || k.includes(t))).map(({ keys, ...l }) => l);
+  return { teams, players, leagues, games };
 }

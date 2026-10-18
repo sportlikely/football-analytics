@@ -10,6 +10,7 @@ import RecentResults from '../components/RecentResults'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { hubFor } from '../lib/hubs'
 import { footballTeamHref } from '../lib/teamLink'
+import NameLink from '../components/sport/NameLink'
 
 /**
  * League page: /league/<code> (football-data codes like PL, API-Football codes like AF140).
@@ -316,7 +317,7 @@ function League() {
                           <span className="block h-full rounded-full bg-accent" style={{ width: `${(v / max) * 100}%` }} />
                         </span>
                       </span>
-                      <span className="text-[11px] text-faint w-28 truncate text-right hidden sm:block">{tn(s.team)}</span>
+                      <NameLink to={teamLink(s.team, code)} className="text-[11px] text-faint w-28 truncate text-right hidden sm:block">{tn(s.team)}</NameLink>
                       <span className="font-display font-bold text-ink num w-6 text-right">{v}</span>
                     </li>
                   )

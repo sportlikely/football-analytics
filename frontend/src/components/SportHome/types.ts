@@ -26,7 +26,8 @@ export interface HGame {
   /** "guess first" cover (lib/reveal): the id and status the reveal helper uses; null = never covered */
   reveal: { id: number; status: string } | null
   kickoff: string
-  competition: { name: string; emblem?: string | null }
+  /** fix174: href = the competition's page (league / standings) */
+  competition: { name: string; emblem?: string | null; href?: string | null }
   home: HTeam
   away: HTeam
   /** live games: the clock label ("67'", "Q3") and the score */

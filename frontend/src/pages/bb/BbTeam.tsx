@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
@@ -58,7 +59,7 @@ export default function BbTeam() {
   return (
     <TeamPage
       logo={d.team.logo}
-      kicker={[league?.name, an?.season].filter(Boolean).join(' · ')}
+      kicker={<><NameLink to={href.bbLeague(league?.code ?? d.team.league)}>{league?.name}</NameLink>{an?.season ? `${league?.name ? ' · ' : ''}${an.season}` : ''}</>}
       name={d.team.name}
       fav={bbTeamFav(d.team, d.team.league)}
       facts={s && s.games > 0 ? [

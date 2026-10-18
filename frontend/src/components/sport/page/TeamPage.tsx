@@ -11,7 +11,8 @@ export interface TeamPageProps {
   /** above the banner (NFL: the NFL | College switch) */
   top?: ReactNode
   logo: string | null
-  kicker: string
+  /** league · country (fix174: the league part can be a link) */
+  kicker: ReactNode
   name: string
   fav: Favorite
   facts: ReactNode[]
@@ -24,7 +25,7 @@ export interface TeamPageProps {
 
 const FORM_BG: Record<string, string> = { W: 'bg-win', D: 'bg-draw', T: 'bg-draw', L: 'bg-loss' }
 
-export function TCard({ title, action, children, className = '', id }: { title?: string; action?: ReactNode; children: ReactNode; className?: string; id?: string }) {
+export function TCard({ title, action, children, className = '', id }: { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; id?: string }) {
   return (
     <section id={id} className={`card p-5 sm:p-6 min-w-0 scroll-mt-24 ${className}`}>
       {(title || action) && (

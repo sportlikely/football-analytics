@@ -83,7 +83,7 @@ export function toGame(m: Match): HGame {
   } else if (p) pred = { kind: 'locked', heads: ['1', 'X', '2'] } // fix160: drawn blurred, like the open block
   return {
     id: m.id, href: `/match/${m.id}`, linkState: { match: m }, reveal: { id: m.id, status: m.status }, kickoff: m.utcDate,
-    competition: { name: m.competition.name, emblem: m.competition.emblem || null },
+    competition: { name: m.competition.name, emblem: m.competition.emblem || null, href: m.competition.code ? `/league/${m.competition.code}` : null },
     home: team(m.homeTeam), away: team(m.awayTeam),
     live: live ? { label: m.minute ? `${m.minute}'` : tt('Live'), score: [m.score?.fullTime?.home ?? 0, m.score?.fullTime?.away ?? 0] } : null,
     pred

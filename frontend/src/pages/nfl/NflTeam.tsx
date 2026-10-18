@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t } from '../../lib/i18n'
@@ -61,7 +62,7 @@ export default function NflTeam() {
     <TeamPage
       top={<LeagueSwitch />}
       logo={tm.logo}
-      kicker={[tm.level, tm.conference, tm.division !== tm.conference ? tm.division : null].filter(Boolean).join(' · ') || nflLeagueName(tm.league || 1)}
+      kicker={<NameLink to={href.nflStandings(tm.league || 1)}>{[tm.level, tm.conference, tm.division !== tm.conference ? tm.division : null].filter(Boolean).join(' · ') || nflLeagueName(tm.league || 1)}</NameLink>}
       name={tm.name}
       fav={nflTeamFav({ id: tm.id, name: tm.name, logo: tm.logo })}
       facts={[
@@ -187,18 +188,18 @@ function ModelTiles({ d }: { d: Data }) {
     )
   }
   if (!m) return null
-  const tiles: { label: string; value: string; sub: string }[] = [
+  const tiles: { label: string; value: ReactNode; sub: ReactNode }[] = [
     { label: t('Elo rating'), value: String(m.elo), sub: t('#{0} of {1}', { 0: m.rank, 1: m.teams }) },
-    { label: t('Quarterback'), value: m.qb ? m.qb.name : '–', sub: m.qb ? t('{0} net yards per pass attempt (league {1})', { 0: m.qb.value.toFixed(1), 1: m.qb.league.toFixed(1) }) : '' },
+    { label: t('Quarterback'), value: m.qb ? <NameLink to={href.nflPlayer(m.qb.id)}>{m.qb.name}</NameLink> : '–', sub: m.qb ? t('{0} net yards per pass attempt (league {1})', { 0: m.qb.value.toFixed(1), 1: m.qb.league.toFixed(1) }) : '' },
     { label: t('Attack rating'), value: t('{0} pts', { 0: m.offense.toFixed(1) }), sub: t('#{0} of {1} · league {2}', { 0: m.offRank, 1: m.teams, 2: m.leaguePoints.toFixed(1) }) },
     { label: t('Defence rating'), value: t('{0} pts', { 0: m.defense.toFixed(1) }), sub: t('#{0} of {1} · allowed per game', { 0: m.defRank, 1: m.teams }) }
   ]
-  if (next && nextPct !== null) tiles.push({ label: t('Win chance next game'), value: `${Math.round(nextPct)}%`, sub: `${home ? t('vs') : '@'} ${(home ? next.away : next.home).name}` })
+  if (next && nextPct !== null) tiles.push({ label: t('Win chance next game'), value: `${Math.round(nextPct)}%`, sub: <>{home ? t('vs') : '@'} <NameLink to={href.nflTeam((home ? next.away : next.home).id)}>{(home ? next.away : next.home).name}</NameLink></> })
   if (d.record && d.record.games > 0) tiles.push({ label: t('Our record on this team'), value: `${d.record.right}/${d.record.games}`, sub: t('{0}% right · strong picks {1}/{2}', { 0: Math.round((d.record.right / d.record.games) * 100), 1: d.record.strongRight, 2: d.record.strong }) })
   return (
     <div className="mt-5 grid gap-3 grid-cols-2 lg:grid-cols-3">
       {tiles.map(x => (
-        <div key={x.label} className="rounded-xl border border-line/70 bg-surface2/40 px-4 py-3 min-w-0">
+        <div key={String(x.label)} className="rounded-xl border border-line/70 bg-surface2/40 px-4 py-3 min-w-0">
           <div className="text-xs text-muted">{x.label}</div>
           <div className="font-display text-lg font-extrabold text-ink leading-tight break-words">{x.value}</div>
           {x.sub && <div className="text-[11px] text-faint mt-0.5">{x.sub}</div>}

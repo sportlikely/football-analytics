@@ -6,6 +6,8 @@ import { errorText } from '../lib/auth'
 import { FavStar } from '../lib/favorites'
 import { t as tt, LOCALE } from '../lib/i18n'
 import PlayerHeader, { Chip } from '../components/sport/page/PlayerHeader'
+import NameLink, { href } from '../components/sport/NameLink'
+import { tNodes } from '../lib/tNodes'
 
 /**
  * Player page: /player/<API-Football id>. /player/find?name=&team=&c=&n= looks a scorer up first (Football-Data ids).
@@ -58,7 +60,7 @@ interface PlayerData {
 
 const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 
-function Card({ title, action, children, className = '' }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
+function Card({ title, action, children, className = '' }: { title: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={`card p-4 sm:p-5 ${className}`}>
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -263,7 +265,7 @@ export default function Player() {
           </Card>
 
           {full && main && (
-            <Card title={tt("Detail · {0}", { 0: main.league.name })}>
+            <Card title={tNodes("Detail · {0}", { 0: <NameLink to={main.league.code ? `/league/${main.league.code}` : href.league(main.league.id)}>{main.league.name}</NameLink> })}>
               <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
                 {gk ? (
                   <>
@@ -318,7 +320,7 @@ export default function Player() {
                       <td className="py-2">
                         <span className="flex items-center gap-2 min-w-0">
                           {clubs.map(c => <img key={c.id} src={c.logo} alt="" className="w-4 h-4 object-contain" />)}
-                          <span className="truncate text-ink">{clubs.map(c => c.name).join(' · ')}</span>
+                          <span className="truncate text-ink">{clubs.map((c, k) => <span key={c.id}>{k > 0 && ' · '}<NameLink to={teamHref(c)}>{c.name}</NameLink></span>)}</span>
                         </span>
                       </td>
                       <td className="py-2 text-right num text-muted">{s.totals.apps}</td>
@@ -353,7 +355,7 @@ export default function Player() {
               {data.internationalTotals.map((t, i) => (
                 <span key={i} className="inline-flex items-center gap-2 rounded-xl bg-surface2/60 border border-line/60 px-3 py-2 text-sm">
                   {t.team && <img src={t.team.logo} alt="" className="w-5 h-5 object-contain" />}
-                  <span className="font-semibold text-ink">{t.team?.name || tt("National team")}</span>
+                  {t.team ? <NameLink to={teamHref(t.team)} className="font-semibold text-ink">{t.team.name}</NameLink> : <span className="font-semibold text-ink">{tt("National team")}</span>}
                   <span className="text-muted num">{tt("{0} caps · {1} goals", { 0: t.apps, 1: t.goals })}{full && t.assists !== undefined ? tt(" · {0} assists", { 0: t.assists }) : ''}</span>
                 </span>
               ))}
@@ -376,8 +378,8 @@ export default function Player() {
                     <td className="py-2 pl-2">
                       <span className="flex items-center gap-2 min-w-0">
                         {r.team && <img src={r.team.logo} alt="" className="w-4 h-4 object-contain" />}
-                        <span className="truncate text-ink">{r.league.name}</span>
-                        {r.team && <span className="text-[11px] text-faint truncate">· {r.team.name}</span>}
+                        <NameLink to={r.league.code ? `/league/${r.league.code}` : href.league(r.league.id)} className="truncate text-ink">{r.league.name}</NameLink>
+                        {r.team && <span className="text-[11px] text-faint truncate">· <NameLink to={teamHref(r.team)}>{r.team.name}</NameLink></span>}
                       </span>
                     </td>
                     <td className="py-2 text-[11px] text-faint whitespace-nowrap">{span(r.from, r.to)}</td>

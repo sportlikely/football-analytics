@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
+import NameLink from '../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { t as tt, LOCALE } from '../lib/i18n'
@@ -10,7 +11,7 @@ import { hubByOld } from '../lib/hubs'
  * link to each game page. Never the pick or a %: the game page shows the prediction. English text for now.
  */
 
-interface HubGame { id: number; kickoff: string; home: string; away: string; score: [number, number] | null; preview: string | null; url: string }
+interface HubGame { id: number; kickoff: string; home: string; away: string; score: [number, number] | null; preview: string | null; url: string; homeUrl?: string | null; awayUrl?: string | null }
 interface Hub { slug: string; code: string; sport: 'football' | 'basketball' | 'american-football'; name: string; intro: string; from: string; to: string; games: HubGame[]; next: string | null }
 
 const range = (from: string, to: string) => {
@@ -43,7 +44,7 @@ export default function LeagueHub() {
   if (missing) return <div className="max-w-2xl mx-auto px-4 py-16 text-center text-muted">{tt("Page not found.")}</div>
   if (!hub) return <div className="min-h-[50vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={tt('Loading…')} /></div>
   const bb = hub.sport !== 'football' // basketball and NFL say "game"
-  const leagueUrl = hub.sport === 'basketball' ? `/basketball/league/${hub.code}` : hub.sport === 'american-football' ? '/american-football/league' : `/league/${hub.code}`
+  const leagueUrl = hub.sport === 'basketball' ? `/basketball/league/${hub.code}` : hub.sport === 'american-football' ? (hub.code === 'NCAA' ? '/american-football/college/league' : '/american-football/league') : `/league/${hub.code}`
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 sm:py-10 space-y-5">
       <header className="space-y-2">
@@ -64,7 +65,7 @@ export default function LeagueHub() {
         <section key={g.id} className="card p-4 sm:p-5 space-y-2">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="font-display text-lg font-bold text-ink min-w-0 break-words">
-              <Link to={g.url} className="hover:text-accent">{g.home} vs {g.away}</Link>
+              <NameLink to={g.homeUrl}>{g.home}</NameLink> <Link to={g.url} className="text-faint hover:text-accent">vs</Link> <NameLink to={g.awayUrl}>{g.away}</NameLink>
             </h2>
             <span className="text-xs font-semibold text-faint whitespace-nowrap num">
               {g.score ? `${g.score[0]}–${g.score[1]}` : new Date(g.kickoff).toLocaleString(LOCALE, { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}

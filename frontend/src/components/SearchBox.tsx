@@ -85,7 +85,7 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
         <span className="h-px flex-1 bg-line/60" />
       </div>
       {hits.leagues.map(l => (
-        <Link key={`bl${l.code}`} to={`${base}/league/${l.code}`} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
+        <Link key={`bl${l.code}`} to={base === '/american-football' ? (l.code === 'NCAA' ? '/american-football/college/league' : '/american-football/league') : `${base}/league/${l.code}`} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
           {l.logo ? <img src={l.logo} alt="" width={24} height={24} className="w-6 h-6 object-contain" /> : <span className="w-6 h-6 rounded-full bg-surface2" />}
           <span className="text-sm font-semibold text-ink">{l.name}</span>
           <span className="ml-auto text-[11px] text-faint">{l.country}</span>

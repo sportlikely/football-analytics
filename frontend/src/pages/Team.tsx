@@ -8,9 +8,10 @@ import { errorText, useAuth } from '../lib/auth'
 import { TeamAnalysisCard, TeamRecordCard, type Analysis } from '../components/TeamAnalysis'
 import { nameKey } from '../lib/favorites'
 import { t, LOCALE } from '../lib/i18n'
+import NameLink, { href } from '../components/sport/NameLink'
 
 interface Side { id: number; name: string; logo: string }
-interface Fixture { matchId: number | null; date: string; status: string; comp: string; home: Side; away: Side; hg: number | null; ag: number | null }
+interface Fixture { matchId: number | null; date: string; status: string; comp: string; compCode?: string | null; home: Side; away: Side; hg: number | null; ag: number | null }
 interface Player {
   id: number; name: string; number: number | null; pos: string; age: number | null; photo: string | null
   apps?: number | null; minutes?: number | null; goals?: number | null; assists?: number | null; yellow?: number | null; red?: number | null; rating?: number | null
@@ -19,20 +20,22 @@ interface Row { rank: number; id: number; name: string; logo: string; played: nu
 interface TeamData {
   team: { id: number; name: string; logo: string; country: string; founded: number | null; national: boolean }
   venue: { name: string; city: string; capacity: number } | null
-  league: { name: string; logo: string; season: number } | null
+  league: { id?: number; name: string; logo: string; season: number } | null
   standing: { rank: number; points: number; played: number; won: number; drawn: number; lost: number; gf: number; ga: number; rows: Row[] } | null
   form: ('W' | 'D' | 'L')[]
   last: Fixture[]
   next: Fixture[]
   squad: Player[]
-  scorers: { name: string; value: number; detail?: string }[]
-  assists: { name: string; value: number; detail?: string }[]
+  scorers: Leader[]
+  assists: Leader[]
   premium: boolean
   locked?: string[]
   builtAt?: string
   stale?: boolean
   analysis?: Analysis | null
 }
+
+interface Leader { id?: number; name: string; value: number; detail?: string }
 
 const FORM_BG = { W: 'bg-win', D: 'bg-draw', L: 'bg-loss' }
 const POS_LABEL: Record<string, string> = { Goalkeeper: t('Goalkeepers'), Defender: t('Defenders'), Midfielder: t('Midfielders'), Attacker: t('Forwards') }
@@ -55,7 +58,7 @@ function FixtureRow({ f, teamId }: { f: Fixture; teamId: number }) {
         <span className="flex items-center gap-2 text-sm"><img src={f.home.logo} alt="" className="w-4 h-4 object-contain" /><span className={`truncate ${f.home.id === teamId ? 'font-bold text-ink' : 'text-muted'}`}>{f.home.name}</span></span>
         <span className="flex items-center gap-2 text-sm"><img src={f.away.logo} alt="" className="w-4 h-4 object-contain" /><span className={`truncate ${f.away.id === teamId ? 'font-bold text-ink' : 'text-muted'}`}>{f.away.name}</span></span>
       </span>
-      <span className="text-[11px] text-faint hidden sm:block w-40 truncate text-right">{f.comp}</span>
+      <span className="text-[11px] text-faint hidden sm:block w-40 truncate text-right">{f.compCode && !f.matchId ? <NameLink to={href.league(f.compCode)}>{f.comp}</NameLink> : f.comp}</span>
       {done ? (
         <span className="flex items-center gap-2">
           <span className="font-display font-bold text-sm num">{f.hg}–{f.ag}</span>
@@ -69,7 +72,7 @@ function FixtureRow({ f, teamId }: { f: Fixture; teamId: number }) {
   return f.matchId ? <Link to={`/match/${f.matchId}`} className="block hover:bg-surface2/40 rounded-lg">{body}</Link> : body
 }
 
-function Leaders({ items, label }: { items: { name: string; value: number; detail?: string }[]; label: string }) {
+function Leaders({ items, label, squad }: { items: Leader[]; label: string; squad: Player[] }) {
   const max = Math.max(1, ...items.map(i => i.value))
   if (!items.length) return <p className="text-sm text-faint">{t("No")}{' '}{label} {t("yet this season.")}</p>
   return (
@@ -78,7 +81,7 @@ function Leaders({ items, label }: { items: { name: string; value: number; detai
         <div key={s.name} className="flex items-center gap-3">
           <span className="w-5 font-display text-sm font-bold text-faint">{i + 1}</span>
           <span className="flex-1 min-w-0">
-            <span className="block truncate text-sm font-semibold">{s.name}</span>
+            <NameLink to={href.player(s.id ?? squad.find(p => p.name === s.name)?.id)} className="block truncate text-sm font-semibold">{s.name}</NameLink>
             {s.detail && <span className="block truncate text-[11px] text-faint">{s.detail}</span>}
           </span>
           <span className="w-24 sm:w-32 h-2 rounded-full bg-surface2"><span className="block h-full rounded-full bg-accent" style={{ width: `${(s.value / max) * 100}%` }} /></span>
@@ -143,7 +146,7 @@ export default function Team() {
   return (
     <TeamPage
       logo={team.logo || null}
-      kicker={team.national ? t("National team") : data.league ? `${data.league.name} · ${team.country}` : team.country}
+      kicker={team.national ? t("National team") : data.league ? <><NameLink to={href.league(data.league.id)}>{data.league.name}</NameLink>{team.country ? ` · ${team.country}` : ''}</> : team.country}
       name={team.name}
       fav={{ kind: 'team', ref: nameKey(team.name), name: team.name, img: team.logo, ids: [...new Set([team.id, Number(id)].filter(n => Number.isFinite(n) && n > 0))] }}
       facts={[
@@ -166,14 +169,14 @@ export default function Team() {
           <TeamAnalysisCard a={data.analysis} full={full} />
 
           {nextMatch && (
-            <Card title={t("Next match")} action={<span className="text-xs text-faint">{nextMatch.comp}</span>}>
+            <Card title={t("Next match")} action={<NameLink to={href.league(nextMatch.compCode)} className="text-xs text-faint">{nextMatch.comp}</NameLink>}>
               <div className="flex items-center gap-4">
-                <div className="flex-1 flex items-center gap-3 min-w-0"><img src={nextMatch.home.logo} alt="" className="w-9 h-9 object-contain" /><span className="font-bold truncate">{nextMatch.home.name}</span></div>
+                <div className="flex-1 flex items-center gap-3 min-w-0"><img src={nextMatch.home.logo} alt="" className="w-9 h-9 object-contain" /><NameLink to={nextMatch.home.id === team.id ? null : href.team(nextMatch.home.id)} className="font-bold truncate">{nextMatch.home.name}</NameLink></div>
                 <div className="text-center">
                   <div className="font-display font-bold text-sm">{new Date(nextMatch.date).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
                   <div className="text-xs text-faint">{new Date(nextMatch.date).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
-                <div className="flex-1 flex items-center justify-end gap-3 min-w-0"><span className="font-bold truncate text-right">{nextMatch.away.name}</span><img src={nextMatch.away.logo} alt="" className="w-9 h-9 object-contain" /></div>
+                <div className="flex-1 flex items-center justify-end gap-3 min-w-0"><NameLink to={nextMatch.away.id === team.id ? null : href.team(nextMatch.away.id)} className="font-bold truncate text-right">{nextMatch.away.name}</NameLink><img src={nextMatch.away.logo} alt="" className="w-9 h-9 object-contain" /></div>
               </div>
               {nextMatch.matchId && <Link to={`/match/${nextMatch.matchId}`} className="mt-4 inline-block text-sm font-bold text-accent">{t("v3 prediction and analysis →")}</Link>}
             </Card>
@@ -253,15 +256,15 @@ export default function Team() {
           <TeamRecordCard rec={data.analysis?.record} teamName={team.name} />
 
           <Card title={t("Top scorers")} action={!full ? <span className="text-[11px] text-faint">Top 3 · <Link to="/premium" className="text-accent font-bold">all</Link></span> : undefined}>
-            <Leaders items={data.scorers} label={t("goals")} />
+            <Leaders items={data.scorers} label={t("goals")} squad={data.squad} />
           </Card>
 
           <Card title={t("Top assists")} action={!full ? <Pro /> : undefined}>
-            {full ? <Leaders items={data.assists} label={t("assists")} /> : <p className="text-sm text-muted"><Link to="/premium" className="font-bold text-accent">{t("Assists for every player are part of Premium.")}</Link></p>}
+            {full ? <Leaders items={data.assists} label={t("assists")} squad={data.squad} /> : <p className="text-sm text-muted"><Link to="/premium" className="font-bold text-accent">{t("Assists for every player are part of Premium.")}</Link></p>}
           </Card>
 
           {rows.length > 0 && data.league && (
-            <Card title={data.league.name} action={<img src={data.league.logo} alt="" className="w-6 h-6 object-contain" />}>
+            <Card title={<NameLink to={href.league(data.league.id)}>{data.league.name}</NameLink>} action={<img src={data.league.logo} alt="" className="w-6 h-6 object-contain" />}>
               <table className="w-full text-sm">
                 <thead><tr className="text-[11px] text-faint"><th className="text-left font-medium py-1 w-8">#</th><th className="text-left font-medium py-1">{t("Team")}</th><th className="text-right font-medium py-1 w-10">P</th><th className="text-right font-medium py-1 w-12">{t("GD")}</th><th className="text-right font-medium py-1 w-12">{t("Pts")}</th></tr></thead>
                 <tbody>

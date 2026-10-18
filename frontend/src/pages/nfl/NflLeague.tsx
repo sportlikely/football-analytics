@@ -6,6 +6,7 @@ import { t } from '../../lib/i18n'
 import { useAuth } from '../../lib/auth'
 import { useNflLeague, nflBase, type Standings, type LeaderCat, type NflGame } from '../../lib/nfl'
 import { Skeleton, TeamLogo } from '../bb/parts'
+import NameLink, { href } from '../../components/sport/NameLink'
 import { useNews, NewsRows } from '../../components/NewsList'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import { StandingsBlock, LeagueSwitch, NflGameRow } from './parts'
@@ -69,6 +70,7 @@ export default function NflLeague() {
                           <span className="w-4 text-faint num">{i + 1}</span>
                           {r.team && <TeamLogo team={r.team} size={16} />}
                           <Link to={`/american-football/player/${r.id}`} className="flex-1 truncate text-ink hover:text-accent">{r.name}</Link>
+                          {r.team && <NameLink to={href.nflTeam(r.team.id)} className="hidden sm:block max-w-[7rem] truncate text-[11px] text-faint">{r.team.name}</NameLink>}
                           <span className="num font-bold text-ink">{r.value}</span>
                         </li>
                       ))}

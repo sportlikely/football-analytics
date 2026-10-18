@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import NameLink from './NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { errorText, useAuth } from '../../lib/auth'
@@ -14,7 +15,7 @@ import { t, LOCALE } from '../../lib/i18n'
 export interface AccBin { lo: number; hi: number; n: number; said: number; happened: number | null }
 export interface AccConf { id: string; label: string; n: number; hitRate: number | null; said: number | null }
 export interface AccLeague { key: string; name: ReactNode; href?: string | null; n: number; main: number | null; cols: (number | null)[]; note?: ReactNode }
-export interface AccRecent { id: number | string; href: string; date: string; comp: string | null; home: string; away: string; score: string; cells: ReactNode[] }
+export interface AccRecent { id: number | string; href: string; date: string; comp: string | null; compHref?: string | null; home: string; away: string; score: string; cells: ReactNode[] }
 export interface AccData {
   headline: {
     label: string
@@ -286,7 +287,7 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
                         <td className="py-2 pr-2">
                           <Link to={x.href} className="text-ink hover:text-accent">{x.home} – {x.away}</Link>
                           <div className="text-[11px] text-faint">
-                            {new Date(x.date).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}{x.comp ? ` · ${x.comp}` : ''}
+                            {new Date(x.date).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}{x.comp ? <> · <NameLink to={x.compHref}>{x.comp}</NameLink></> : ''}
                           </div>
                         </td>
                         <td className="py-2 text-center num font-bold text-ink">{x.score}</td>

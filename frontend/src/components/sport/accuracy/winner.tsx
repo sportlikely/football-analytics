@@ -79,7 +79,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
         note: l.trial ? <span className="shrink-0 text-[10px] font-bold uppercase text-accent" title={t("We added this league recently. Its predictions are being tested and don’t count in our public record yet.")}>{t('in testing')}</span> : null
       })),
       recent: d.recent.map(r => ({
-        id: r.gameId, href: o.gameHref(r.gameId), date: r.kickoff, comp: o.leagueName(r.code), home: r.home, away: r.away, score: `${r.score[0]}–${r.score[1]}`,
+        id: r.gameId, href: o.gameHref(r.gameId), date: r.kickoff, comp: o.leagueName(r.code), compHref: o.leagueHref?.(r.code) || null, home: r.home, away: r.away, score: `${r.score[0]}–${r.score[1]}`,
         cells: [<span className="inline-flex items-center gap-1.5"><Tick hit={r.hit} /> <span className="text-ink truncate">{r.pick === 'H' ? r.home : r.away}</span> <span className="num text-faint">{pct(Math.round(100 * (r.pick === 'H' ? r.pHome : 1 - r.pHome)))}</span></span>]
       })),
       after: (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, lang } from '../../lib/i18n'
@@ -179,7 +180,7 @@ export default function BbGame() {
             <tbody>
               {(['home', 'away'] as const).map(s => (
                 <tr key={s}>
-                  <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left">{(s === 'home' ? g.home : g.away).name}</td>
+                  <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left"><NameLink to={href.bbTeam((s === 'home' ? g.home : g.away).id)}>{(s === 'home' ? g.home : g.away).name}</NameLink></td>
                   {q![s].map((v, i) => (i < 4 || q!.home[4] !== null) && <td key={i} className="px-3 text-center text-ink">{v ?? '–'}</td>)}
                   <td className="px-3 text-center text-ink font-bold">{s === 'home' ? g.score!.home : g.score!.away}</td>
                 </tr>
@@ -351,7 +352,7 @@ function InjuriesCard({ d }: { d: Detail }) {
     <div>
       <div className="flex items-center gap-2 mb-3">
         <TeamLogo team={team} size={22} />
-        <span className="font-display font-bold text-ink">{team.name}</span>
+        <NameLink to={href.bbTeam(team.id)} className="font-display font-bold text-ink">{team.name}</NameLink>
         {pts ? <span className="ml-auto text-xs font-bold text-loss num">−{pts.toFixed(1)} {t('pts')}</span> : null}
       </div>
       {list.length === 0 ? <p className="text-sm text-faint">{t('No injuries listed.')}</p> : (
@@ -387,7 +388,7 @@ function BoxTab({ d }: { d: Detail }) {
   const side = (team: Game['home'], s: BoxSide) => {
     const more = s.players.some(p => p.plusMinus !== undefined && p.plusMinus !== null)
     return (
-    <Card title={team.name}>
+    <Card title={<NameLink to={href.bbTeam(team.id)}>{team.name}</NameLink>}>
       <div className="overflow-x-auto">
         <table className="w-full text-xs num">
           <thead>

@@ -9,7 +9,7 @@ const a = winnerAccuracy({
   url: '/nfl/accuracy',
   gameHref: id => `/american-football/game/${id}`,
   leagueName: c => (c === 'NCAA' ? t('College football') : 'NFL'),
-  leagueHref: c => (c === 'NCAA' ? '/american-football/college' : '/american-football'),
+  leagueHref: c => (c === 'NCAA' ? '/american-football/college/league' : '/american-football/league'),
   strongLabel: t('Strong picks right'),
   savedNote: t('picks saved before kick-off'),
   waitingNote: t('Bold = our pick. Each game is checked automatically after the final whistle.'),

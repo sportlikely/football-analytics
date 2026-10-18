@@ -1,6 +1,6 @@
 import YourPicks from '../components/YourPicks'
 import UnlockPrompt from '../components/UnlockPrompt'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL, socket } from '../lib/socket'
@@ -16,6 +16,16 @@ import { t as tt, LOCALE, lang } from '../lib/i18n'
 import GamePage, { HeroLogo, GameNews } from '../components/sport/game/GamePage'
 import { newerFootballLive, tickedMinute } from '../lib/liveState'
 import { footballTeamHref } from '../lib/teamLink'
+import NameLink, { href as hrefOf } from '../components/sport/NameLink'
+import { tNodes } from '../lib/tNodes'
+
+/** fix174: the match's competition code, so every team name on the page links to its team page */
+const CompCode = createContext<string | undefined>(undefined)
+function TeamName({ team, className, short = false }: { team: { id?: number; name: string; shortName?: string }; className?: string; short?: boolean }) {
+  const code = useContext(CompCode)
+  const label = short ? team.shortName || team.name : tname(team as Team)
+  return <NameLink to={team.id ? footballTeamHref(team.id, team.name, code) : null} className={className}>{label}</NameLink>
+}
 
 /* ---------- types (Football-Data.org v4 shapes, loosely) ---------- */
 
@@ -211,8 +221,8 @@ function StatsPanel({ home, away, hs, as, keys }: { home: Team; away: Team; hs: 
   return (
     <div>
       <div className="flex items-center justify-between text-xs font-semibold mb-3">
-        <span className="text-home truncate">{home.shortName || home.name}</span>
-        <span className="text-away truncate text-right">{away.shortName || away.name}</span>
+        <TeamName team={home} short className="text-home truncate" />
+        <TeamName team={away} short className="text-away truncate text-right" />
       </div>
       {poss && (
         <div className="mb-5">
@@ -480,7 +490,12 @@ function MatchDetail() {
   const events = useMemo(() => {
     if (!details) return []
     const m = details.match
-    const list: { minute: number; extra: number; kind: string; teamId: number; text: string; sub?: string }[] = []
+    const list: { minute: number; extra: number; kind: string; teamId: number; text: string; sub?: string; href?: string | null }[] = []
+    // fix174: the player's name opens the player page
+    const pHref = (pl: { id: number; name: string } | null | undefined, teamId: number) => {
+      const team = teamId === m.homeTeam?.id ? m.homeTeam : teamId === m.awayTeam?.id ? m.awayTeam : null
+      return pl && team ? playerHref(pl, team as Team, m.competition?.code) : null
+    }
     ;(m.goals || []).forEach(g =>
       list.push({
         minute: g.minute,
@@ -488,11 +503,12 @@ function MatchDetail() {
         kind: g.type === 'OWN' ? 'own' : g.type === 'PENALTY' ? 'pen' : 'goal',
         teamId: g.team.id,
         text: g.scorer.name + (g.type === 'PENALTY' ? tt(" (pen)") : g.type === 'OWN' ? ' (og)' : ''),
-        sub: g.assist ? `assist: ${g.assist.name}` : undefined
+        sub: g.assist ? `assist: ${g.assist.name}` : undefined,
+        href: g.type === 'OWN' ? null : pHref(g.scorer, g.team.id)
       })
     )
     ;(m.bookings || []).forEach(b =>
-      list.push({ minute: b.minute, extra: 0, kind: b.card.toLowerCase(), teamId: b.team.id, text: b.player.name })
+      list.push({ minute: b.minute, extra: 0, kind: b.card.toLowerCase(), teamId: b.team.id, text: b.player.name, href: pHref(b.player, b.team.id) })
     )
     ;(m.substitutions || []).forEach(s =>
       list.push({
@@ -501,6 +517,7 @@ function MatchDetail() {
         kind: 'sub',
         teamId: s.team.id,
         text: s.playerIn.name,
+        href: pHref(s.playerIn, s.team.id),
         sub: `for ${s.playerOut.name}`
       })
     )
@@ -984,6 +1001,7 @@ function MatchDetail() {
   })
 
   return (
+    <CompCode.Provider value={m.competition?.code}>
     <GamePage
       back={{ to: '/matches', label: tt("All matches") }}
       srTitle={tabTitle ? `${tabTitle}${m.competition?.name ? ` · ${m.competition.name}` : ''} ${tt("prediction")}` : undefined}
@@ -1034,6 +1052,7 @@ function MatchDetail() {
       tab={tab}
       onTab={id => pickTab(id as TabId)}
     />
+    </CompCode.Provider>
   )
 }
 
@@ -1184,7 +1203,12 @@ function LineupTip({ kickoff, lineupsOut, usesLineups }: { kickoff: number; line
   )
 }
 
-function Section({ title, note, id, children }: { title: string; note?: string; id?: string; children: ReactNode }) {
+function CompLink({ name }: { name: string }) {
+  const code = useContext(CompCode)
+  return <NameLink to={hrefOf.league(code)}>{name}</NameLink>
+}
+
+function Section({ title, note, id, children }: { title: string; note?: ReactNode; id?: string; children: ReactNode }) {
   return (
     <section id={id} className="card p-5 sm:p-6 scroll-mt-32">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
@@ -1420,12 +1444,12 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
   )
 }
 
-function EventText({ e, align }: { e: { kind: string; text: string; sub?: string }; align: 'left' | 'right' }) {
+function EventText({ e, align }: { e: { kind: string; text: string; sub?: string; href?: string | null }; align: 'left' | 'right' }) {
   return (
     <div className={`flex items-center gap-2 ${align === 'right' ? 'justify-end' : ''}`}>
       {align === 'left' && <EventIcon kind={e.kind} />}
       <span className="min-w-0">
-        <span className="text-ink font-medium">{e.text}</span>
+        <NameLink to={e.href} className="text-ink font-medium">{e.text}</NameLink>
         {e.sub && <span className="block text-[11px] text-faint">{e.sub}</span>}
       </span>
       {align === 'right' && <EventIcon kind={e.kind} />}
@@ -1462,7 +1486,7 @@ function SideTitle({ team, side, right }: { team: Team; side: SideK; right?: Rea
     <div className="flex items-center gap-2 mb-3">
       <span className={`w-1 h-6 rounded-full ${SIDE_BG[side]}`} />
       {team.crest && <img src={team.crest} alt="" className="w-6 h-6 object-contain" />}
-      <span className="font-display font-bold text-ink truncate">{tname(team)}</span>
+      <TeamName team={team} className="font-display font-bold text-ink truncate" />
       {right && <span className="ml-auto shrink-0">{right}</span>}
     </div>
   )
@@ -1487,7 +1511,7 @@ function TeamsHead({ home, away, sub }: { home: Team; away: Team; sub?: (s: Side
       <div className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${s === 'A' ? 'sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
         <CrestBox team={team} />
         <span className="min-w-0 max-w-full">
-          <span className="block font-display font-bold text-ink truncate">{tname(team)}</span>
+          <TeamName team={team} className="block font-display font-bold text-ink truncate" />
           {sub && <span className="block">{sub(s)}</span>}
         </span>
       </div>
@@ -1557,13 +1581,13 @@ function TeamPanel({ team, side, row, recent }: { team: Team; side: SideK; row: 
             const r = resultFor(team.id, m)
             return (
               <li key={m.id}>
-                <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
+                <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs hover:bg-surface2/50">
                   <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${r ? RES_CLS[r] : 'bg-surface2 text-faint'}`}>{r || '–'}</span>
-                  <span className="num text-faint w-14 shrink-0 whitespace-nowrap">{new Date(m.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
+                  <NameLink to={hrefOf.match(m.id)} className="num text-faint w-14 shrink-0 whitespace-nowrap">{new Date(m.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</NameLink>
                   <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${isHome ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{isHome ? tt("H") : tt("A")}</span>
                   {opp.crest ? <img src={opp.crest} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
-                  <span className="text-ink font-medium truncate">{tname(opp)}</span>
-                  <span className="ml-auto num font-bold text-ink shrink-0">{gf}–{ga}</span>
+                  <TeamName team={opp} className="text-ink font-medium truncate" />
+                  <NameLink to={hrefOf.match(m.id)} className="ml-auto num font-bold text-ink shrink-0">{gf}–{ga}</NameLink>
                 </div>
               </li>
             )
@@ -1596,7 +1620,7 @@ function H2H({ h2h, home, away }: { h2h: H2HData; home: Team; away: Team }) {
               <div key={s} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
                 <CrestBox team={team} />
                 <span className="min-w-0 max-w-full">
-                  <span className="block font-display font-bold text-ink truncate">{tname(team)}</span>
+                  <TeamName team={team} className="block font-display font-bold text-ink truncate" />
                   <span className="block text-[11px] text-faint">{tt("{0} wins", { 0: s === 'H' ? hw : aw })}</span>
                 </span>
               </div>
@@ -1631,19 +1655,19 @@ function H2H({ h2h, home, away }: { h2h: H2HData; home: Team; away: Team }) {
             <li key={h.id}>
               <div className="grid grid-cols-[3.5rem_1fr_auto_1fr_0.75rem] sm:grid-cols-[6rem_1fr_auto_1fr_1rem] items-center gap-2 sm:gap-3 py-2 px-1 text-sm">
                 <span className="text-[11px] text-faint leading-tight min-w-0">
-                  <span className="num block whitespace-nowrap">{new Date(h.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</span>
-                  <span className="hidden sm:block text-[10px] truncate" title={h.competition?.name}>{h.competition?.name}</span>
+                  <NameLink to={hrefOf.match(h.id)} className="num block whitespace-nowrap">{new Date(h.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</NameLink>
+                  <NameLink to={hrefOf.league(h.competition?.code)} className="hidden sm:block text-[10px] truncate">{h.competition?.name}</NameLink>
                 </span>
                 <span className="flex items-center justify-end gap-2 min-w-0">
-                  <span className={`truncate ${hg > ag ? 'font-bold text-ink' : 'text-muted'}`}>{tname(h.homeTeam)}</span>
+                  <TeamName team={h.homeTeam} className={`truncate ${hg > ag ? 'font-bold text-ink' : 'text-muted'}`} />
                   {h.homeTeam.crest && <img src={h.homeTeam.crest} alt="" className="w-[18px] h-[18px] object-contain shrink-0" loading="lazy" />}
                 </span>
-                <span className="num font-extrabold text-ink rounded-lg bg-surface2/80 px-2.5 py-1 text-center min-w-[56px]">
+                <NameLink to={hrefOf.match(h.id)} className="num font-extrabold text-ink rounded-lg bg-surface2/80 px-2.5 py-1 text-center min-w-[56px]">
                   <span className={hg >= ag ? '' : 'text-muted'}>{hg}</span><span className="text-faint">–</span><span className={ag >= hg ? '' : 'text-muted'}>{ag}</span>
-                </span>
+                </NameLink>
                 <span className="flex items-center gap-2 min-w-0">
                   {h.awayTeam.crest && <img src={h.awayTeam.crest} alt="" className="w-[18px] h-[18px] object-contain shrink-0" loading="lazy" />}
-                  <span className={`truncate ${ag > hg ? 'font-bold text-ink' : 'text-muted'}`}>{tname(h.awayTeam)}</span>
+                  <TeamName team={h.awayTeam} className={`truncate ${ag > hg ? 'font-bold text-ink' : 'text-muted'}`} />
                 </span>
                 <span className={`justify-self-end w-2 h-2 rounded-full ${dot}`} />
               </div>
@@ -1671,7 +1695,7 @@ interface TeamAvg {
 }
 
 interface Injury { id: number | null; name: string; out: boolean; reason: string | null; importance?: number | null; importanceLabel?: string | null; starts?: number | null; of?: number | null }
-interface Fixture1 { date: string; days: number; home: boolean; opponent: string; opponentCrest: string | null; competition: string | null; score: string | null }
+interface Fixture1 { date: string; days: number; home: boolean; opponent: string; opponentCrest: string | null; opponentId?: number | null; competition: string | null; competitionCode?: string | null; score: string | null }
 interface TeamSchedule { previous: Fixture1 | null; next: Fixture1 | null; games14: number; games30: number | null; away30: number | null; recent: Fixture1[]; upcoming: Fixture1[] }
 const IMP_TONE: Record<number, string> = { 5: 'text-loss', 4: 'text-draw', 3: 'text-ink', 2: 'text-muted', 1: 'text-faint' }
 const IMP_BAR: Record<number, string> = { 5: 'bg-loss', 4: 'bg-draw', 3: 'bg-ink/70', 2: 'bg-muted/70', 1: 'bg-faint/70' }
@@ -1696,7 +1720,7 @@ function InjuryList({ team, list }: { team: Team; list: Injury[] }) {
     <div>
       <div className="flex items-center gap-2 mb-1">
         {team.crest && <img src={team.crest} alt="" className="w-6 h-6 object-contain" />}
-        <span className="font-display font-bold text-ink">{team.shortName || team.name}</span>
+        <TeamName team={team} short className="font-display font-bold text-ink" />
         <span className="ml-auto num text-xs text-faint">{list.filter(x => x.out).length} {tt("out")} · {list.filter(x => !x.out).length} {tt("doubtful")}</span>
       </div>
       {list.length > 0 && (
@@ -1734,12 +1758,12 @@ function RestSummary({ home, away, h, a }: { home: Team; away: Team; h: TeamSche
     const diff = Math.floor(hr) - Math.floor(ar)
     if (Math.abs(diff) >= 2) {
       const s: SideK = diff > 0 ? 'H' : 'A'
-      lines.push(<><b className={SIDE_TEXT[s]}>{tname(s === 'H' ? home : away)}</b> {tt("has {0} more days of rest.", { 0: Math.abs(diff) })}</>)
+      lines.push(<><b className={SIDE_TEXT[s]}><TeamName team={s === 'H' ? home : away} /></b> {tt("has {0} more days of rest.", { 0: Math.abs(diff) })}</>)
     } else lines.push(tt("Similar rest for both teams."))
   }
   for (const [t, s] of [[home, h], [away, a]] as const) {
-    if (s.games14 >= 4) lines.push(tt("{0} played {1} games in the last 14 days.", { 0: tname(t), 1: s.games14 }))
-    if (s.next && s.next.days <= 4) lines.push(tt("{0} plays again {1} later ({2}).", { 0: tname(t), 1: daysText(s.next.days), 2: s.next.competition || '' }))
+    if (s.games14 >= 4) lines.push(tNodes("{0} played {1} games in the last 14 days.", { 0: <TeamName team={t} />, 1: s.games14 }))
+    if (s.next && s.next.days <= 4) lines.push(tNodes("{0} plays again {1} later ({2}).", { 0: <TeamName team={t} />, 1: daysText(s.next.days), 2: <NameLink to={hrefOf.league(s.next.competitionCode)}>{s.next.competition || ''}</NameLink> }))
   }
   if (!lines.length) return null
   return (
@@ -1766,8 +1790,8 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
       <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${f.home ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{f.home ? tt("H") : tt("A")}</span>
       {f.opponentCrest ? <img src={f.opponentCrest} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
       <span className="min-w-0 truncate">
-        <span className="text-ink font-medium">{f.opponent}</span>
-        {f.competition && <span className="hidden sm:inline text-[10px] text-faint ml-1.5">{f.competition}</span>}
+        <NameLink to={f.opponentId ? footballTeamHref(f.opponentId, f.opponent) : null} className="text-ink font-medium">{f.opponent}</NameLink>
+        {f.competition && <NameLink to={hrefOf.league(f.competitionCode)} className="hidden sm:inline text-[10px] text-faint ml-1.5">{f.competition}</NameLink>}
       </span>
     </>
   )
@@ -1975,7 +1999,7 @@ function LeagueTable({ tables: show, name, home, away }: { tables: StandingsTabl
         <span className={`absolute top-0 ${s === 'H' ? 'left-0' : 'right-0'} w-1 h-full ${SIDE_BG[s]}`} />
         <div className={`flex items-center gap-2 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
           {team.crest && <img src={team.crest} alt="" className="w-[22px] h-[22px] object-contain" />}
-          <span className="font-display font-bold text-ink truncate">{tname(team)}</span>
+          <TeamName team={team} className="font-display font-bold text-ink truncate" />
         </div>
         {x ? (
           <div className={`mt-3 flex flex-wrap items-end gap-x-4 gap-y-2 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
@@ -2006,14 +2030,14 @@ function LeagueTable({ tables: show, name, home, away }: { tables: StandingsTabl
   const upper: SideK | null = h && a && gap ? (h.r.position < a.r.position ? 'H' : 'A') : null
   const hasForm = show.some(t => t.table.some(r => r.form))
   return (
-    <Section title={tt("Standings")} note={name}>
+    <Section title={tt("Standings")} note={<CompLink name={name} />}>
       <div className="grid grid-cols-2 gap-3">
         {card('H', h)}
         {card('A', a)}
       </div>
       {upper && (
         <p className="mt-3 text-center text-xs text-muted">
-          <b className={SIDE_TEXT[upper]}>{tname(upper === 'H' ? home : away)}</b> {gap === 1 ? tt("are one place higher") : tt("are {0} places higher", { 0: gap })}{pts ? ` · ${tt("{0} points apart", { 0: pts })}` : ''}
+          <b className={SIDE_TEXT[upper]}><TeamName team={upper === 'H' ? home : away} /></b> {gap === 1 ? tt("are one place higher") : tt("are {0} places higher", { 0: gap })}{pts ? ` · ${tt("{0} points apart", { 0: pts })}` : ''}
         </p>
       )}
       <div className="mt-5 space-y-5">
@@ -2048,7 +2072,7 @@ function LeagueTable({ tables: show, name, home, away }: { tables: StandingsTabl
                       <td className="py-1.5 pr-2">
                         <span className="flex items-center gap-2 min-w-0">
                           {r.team.crest ? <img src={r.team.crest} alt="" className="w-[18px] h-[18px] object-contain flex-shrink-0" /> : <span className="w-[18px] h-[18px] rounded-full bg-surface2 flex-shrink-0" />}
-                          <span className={`truncate ${side ? 'font-bold text-ink' : 'text-ink'}`}>{r.team.shortName || r.team.name}</span>
+                          <TeamName team={r.team} short className={`truncate ${side ? 'font-bold text-ink' : 'text-ink'}`} />
                         </span>
                       </td>
                       <td className="py-1.5 text-right num text-muted">{r.playedGames}</td>
@@ -2183,7 +2207,7 @@ function XiList({ team, side, of, code }: { team: Team; side: 'home' | 'away'; o
     <div>
       <div className="flex items-center gap-2 mb-2">
         {team.crest && <img src={team.crest} alt="" className="w-5 h-5 object-contain" />}
-        <span className="font-display font-bold text-ink">{team.shortName || team.name}</span>
+        <TeamName team={team} short className="font-display font-bold text-ink" />
         {team.formation && <span className="num text-xs text-faint">{team.formation}</span>}
       </div>
       <div className="space-y-2">
@@ -2235,7 +2259,7 @@ function Pitch({ home, away, probable = false, code }: { home: Team; away: Team;
       <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${side === 'home' ? 'bg-home' : 'bg-away'}`} />
       {t.crest && <img src={t.crest} alt="" className="w-6 h-6 object-contain shrink-0" />}
       <span className="min-w-0">
-        <span className="block font-display font-bold text-ink truncate">{t.shortName || t.name}</span>
+        <TeamName team={t} short className="block font-display font-bold text-ink truncate" />
         <span className="block num text-[11px] text-faint truncate">{[t.formation, t.coach?.name].filter(Boolean).join(' · ')}</span>
       </span>
     </div>
@@ -2410,7 +2434,7 @@ function Bench({ team, code }: { team: Team; code?: string }) {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-ink">
           {team.crest && <img src={team.crest} alt="" className="w-4 h-4 object-contain" />}
-          {team.shortName || team.name} {tt("· bench")}</div>
+          <TeamName team={team} short /> {tt("· bench")}</div>
         {team.coach?.name && <span className="text-[11px] text-faint">{tt("Coach")}{' '}{team.coach.name}</span>}
       </div>
       {bench.length ? (

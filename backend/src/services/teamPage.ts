@@ -324,12 +324,13 @@ const simpleFixture = (f: any) => ({
   date: f.fixture.date,
   status: f.fixture.status?.short,
   comp: f.league?.name,
+  compCode: f.league?.id ? `AF${f.league.id}` : null, // fix174: the competition's page (/league/AF<id>)
   home: { id: AF_OFFSET + f.teams.home.id, name: f.teams.home.name, logo: f.teams.home.logo },
   away: { id: AF_OFFSET + f.teams.away.id, name: f.teams.away.name, logo: f.teams.away.logo },
   hg: f.goals?.home ?? null,
   ag: f.goals?.away ?? null
 });
-type Fx = { fid?: number; matchId: number | null; date: string; status: string; comp: string | null; home: any; away: any; hg: number | null; ag: number | null; timed?: boolean };
+type Fx = { fid?: number; matchId: number | null; date: string; status: string; comp: string | null; compCode?: string | null; home: any; away: any; hg: number | null; ag: number | null; timed?: boolean };
 
 const gameKey = (f: Fx) => `${String(f.date).slice(0, 10)}|${f.home.id}|${f.away.id}`;
 const side = (id: number, name: string) => ({ id: AF_OFFSET + id, name, logo: logo(id) });
@@ -477,7 +478,7 @@ async function buildSlow(afId: number) {
           }
           // rating: league games when there are enough of them, else all official games
           const rating = s.lRatingN >= 3 ? s.lRatingSum / s.lRatingN : s.ratingN ? s.ratingSum / s.ratingN : null;
-          stats.set(it.player.id, { name: it.player.name, ...s, byComp, rating: rating === null ? null : Math.round(rating * 10) / 10 });
+          stats.set(it.player.id, { id: it.player.id, name: it.player.name, ...s, byComp, rating: rating === null ? null : Math.round(rating * 10) / 10 });
         }
         if ((pr.paging?.current || page) >= (pr.paging?.total || 1)) break;
       } catch (e: any) {
@@ -505,6 +506,7 @@ async function buildSlow(afId: number) {
       .sort((a, b) => b[key] - a[key])
       .slice(0, 8)
       .map(s => ({
+        id: s.id, // fix174: scorer → player page
         name: s.name,
         value: s[key],
         detail: s.byComp.filter((c: any) => c[key] > 0).map((c: any) => `${c[key]} ${c.comp}`).join(' · ')
@@ -553,7 +555,7 @@ function storedGames(afId: number, names: Map<number, string>): Fx[] {
     if (!cur || rank > cur.rank) byFid.set(f.fid!, { ...f, rank });
   };
   const fromRow = (r: any, date: string, timed: boolean, status: string): Fx => ({
-    fid: r.fixture_id, matchId: AF_OFFSET + r.fixture_id, date, timed, status, comp: names.get(r.league_id) || null,
+    fid: r.fixture_id, matchId: AF_OFFSET + r.fixture_id, date, timed, status, comp: names.get(r.league_id) || null, compCode: r.league_id ? `AF${r.league_id}` : null,
     home: side(r.home_id, r.home_name), away: side(r.away_id, r.away_name), hg: r.hg ?? null, ag: r.ag ?? null
   });
   const q = (sql: string, fn: (r: any) => void) => { try { for (const r of db.prepare(sql).all(afId, afId, since) as any[]) fn(r); } catch { /* table missing */ } };
@@ -567,7 +569,7 @@ function storedGames(afId: number, names: Map<number, string>): Fx[] {
   for (const m of afWindowMatches()) {
     if (m.homeTeam?.id !== me && m.awayTeam?.id !== me) continue;
     put({
-      fid: m.id - AF_OFFSET, matchId: m.id, date: m.utcDate, timed: true, status: WINDOW_STATUS[m.status] || m.status, comp: m.competition?.name || null,
+      fid: m.id - AF_OFFSET, matchId: m.id, date: m.utcDate, timed: true, status: WINDOW_STATUS[m.status] || m.status, comp: m.competition?.name || null, compCode: m.competition?.code || null,
       home: { id: m.homeTeam.id, name: m.homeTeam.name, logo: m.homeTeam.crest || logo(m.homeTeam.id - AF_OFFSET) },
       away: { id: m.awayTeam.id, name: m.awayTeam.name, logo: m.awayTeam.crest || logo(m.awayTeam.id - AF_OFFSET) },
       hg: m.score?.fullTime?.home ?? null, ag: m.score?.fullTime?.away ?? null
@@ -589,7 +591,7 @@ function fastFixtures(afId: number, slow: any, names: Map<number, string>) {
     const k = (f.fid && keyOf.get(f.fid)) || gameKey(f);
     const s = merged.get(k);
     merged.set(k, s
-      ? { ...s, fid: f.fid ?? s.fid, status: f.status, hg: f.hg, ag: f.ag, date: f.timed ? f.date : s.date, comp: s.comp || f.comp, matchId: s.matchId ?? f.matchId }
+      ? { ...s, fid: f.fid ?? s.fid, status: f.status, hg: f.hg, ag: f.ag, date: f.timed ? f.date : s.date, comp: s.comp || f.comp, compCode: s.compCode || f.compCode, matchId: s.matchId ?? f.matchId }
       : f);
   }
   const all = [...merged.values()];
@@ -741,14 +743,14 @@ function offlinePage(afId: number) {
   // scorers / assists: the season data we store (af_player_season), newest season
   const leaders = (key: 'goals' | 'assists') => {
     try {
-      const rows = db.prepare(`SELECT name, league_id, ${key} AS v FROM af_player_season WHERE team_id = ? AND season = (SELECT MAX(season) FROM af_player_season WHERE team_id = ?) AND ${key} > 0`).all(afId, afId) as any[];
-      const by = new Map<string, { name: string; value: number; parts: string[] }>();
+      const rows = db.prepare(`SELECT player_id, name, league_id, ${key} AS v FROM af_player_season WHERE team_id = ? AND season = (SELECT MAX(season) FROM af_player_season WHERE team_id = ?) AND ${key} > 0`).all(afId, afId) as any[];
+      const by = new Map<string, { id: number; name: string; value: number; parts: string[] }>();
       for (const r of rows) {
-        const x = by.get(r.name) || { name: r.name, value: 0, parts: [] as string[] };
+        const x = by.get(r.name) || { id: r.player_id, name: r.name, value: 0, parts: [] as string[] };
         x.value += r.v; x.parts.push(`${r.v} ${names.get(r.league_id) || 'other'}`);
         by.set(r.name, x);
       }
-      return [...by.values()].sort((a, b) => b.value - a.value).slice(0, 8).map(x => ({ name: x.name, value: x.value, detail: x.parts.join(' · ') }));
+      return [...by.values()].sort((a, b) => b.value - a.value).slice(0, 8).map(x => ({ id: x.id, name: x.name, value: x.value, detail: x.parts.join(' · ') }));
     } catch { return []; }
   };
   const slow = {

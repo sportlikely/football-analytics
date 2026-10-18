@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
@@ -133,7 +134,7 @@ export default function NflGame() {
                 <tbody>
                   {(['home', 'away'] as const).map(s => (
                     <tr key={s}>
-                      <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left">{nick(g[s].name, g.league)}</td>
+                      <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left"><NameLink to={href.nflTeam(g[s].id)}>{nick(g[s].name, g.league)}</NameLink></td>
                       {q![s].slice(0, ot ? 5 : 4).map((v, i) => <td key={i} className="px-3 text-center text-ink">{v ?? '–'}</td>)}
                       <td className="px-3 text-center text-ink font-bold">{g.score ? g.score[s] : '–'}</td>
                     </tr>
@@ -176,7 +177,7 @@ function H2HForm({ d }: { d: Data }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
           {(['home', 'away'] as const).map(s => (
             <div key={s} className="min-w-0">
-              <div className="flex items-center gap-2 mb-3"><TeamLogo team={g[s]} size={22} /><span className="font-display font-bold text-ink truncate">{g[s].name}</span></div>
+              <div className="flex items-center gap-2 mb-3"><TeamLogo team={g[s]} size={22} /><NameLink to={href.nflTeam(g[s].id)} className="font-display font-bold text-ink truncate">{g[s].name}</NameLink></div>
               {d.form[s].length === 0 ? <p className="text-sm text-faint">{t('No games yet.')}</p> : (
                 <ul className="space-y-1.5">
                   {d.form[s].map(f => (
@@ -243,8 +244,8 @@ function TeamStats({ g, home, away }: { g: Game; home: Box | null; away: Box | n
   return (
     <Card title={t('Statistics')}>
       <div className="flex items-center justify-between text-xs font-bold mb-1">
-        <span className="flex items-center gap-1.5 text-home"><TeamLogo team={g.home} size={16} />{g.home.name}</span>
-        <span className="flex items-center gap-1.5 text-away">{g.away.name}<TeamLogo team={g.away} size={16} /></span>
+        <span className="flex items-center gap-1.5 text-home"><TeamLogo team={g.home} size={16} /><NameLink to={href.nflTeam(g.home.id)}>{g.home.name}</NameLink></span>
+        <span className="flex items-center gap-1.5 text-away"><NameLink to={href.nflTeam(g.away.id)}>{g.away.name}</NameLink><TeamLogo team={g.away} size={16} /></span>
       </div>
       <div className="divide-y divide-line/40">
         <StatBars label={t('Total yards')} home={v(home, 'yards')} away={v(away, 'yards')} />
@@ -302,7 +303,7 @@ function Injuries({ g, data }: { g: Game; data: { home: Injury[]; away: Injury[]
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
         {(['home', 'away'] as const).map(s => (
           <div key={s} className="min-w-0">
-            <div className="flex items-center gap-2 mb-3"><TeamLogo team={g[s]} size={22} /><span className="font-display font-bold text-ink truncate">{g[s].name}</span></div>
+            <div className="flex items-center gap-2 mb-3"><TeamLogo team={g[s]} size={22} /><NameLink to={href.nflTeam(g[s].id)} className="font-display font-bold text-ink truncate">{g[s].name}</NameLink></div>
             {data[s].length === 0 ? <p className="text-sm text-faint">{t('No injuries reported.')}</p> : (
               <ul className="divide-y divide-line/50">
                 {data[s].map(i => (

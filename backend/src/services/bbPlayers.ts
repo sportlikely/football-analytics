@@ -102,6 +102,15 @@ function nbaSeason(bdlId: number, season: number) {
   return seasonLine(base, adv);
 }
 
+/** fix174: an NBA team's id from its full name (the contract list names the team) — its team page */
+function nbaTeamIdOf(name: string | null): number | null {
+  if (!name) return null;
+  try {
+    const r = db.prepare(`SELECT home_id AS id FROM bb_games WHERE code = 'NBA' AND home_name = ? ORDER BY kickoff DESC LIMIT 1`).get(name) as any;
+    return r?.id ?? null;
+  } catch { return null; }
+}
+
 async function nbaPart(bdl: any, teamName: string, rawName: string) {
   const now = bdlSeasonNow();
   const cur = nbaSeason(bdl.id, now), prev = nbaSeason(bdl.id, now - 1);
@@ -112,7 +121,7 @@ async function nbaPart(bdl: any, teamName: string, rawName: string) {
     season: cur ? { label: `${now}-${String(now + 1).slice(2)}`, ...cur } : null,
     lastSeason: prev ? { label: `${now - 1}-${String(now).slice(2)}`, ...prev } : null,
     injury: injuryOf(teamName, displayName(rawName, bdl)),
-    contract: Array.isArray(contract) ? contract.map((c: any) => ({ season: c.season, team: c.team, amount: c.amount, type: c.type, status: c.status })).slice(0, 8) : null
+    contract: Array.isArray(contract) ? contract.map((c: any) => ({ season: c.season, team: c.team, teamId: nbaTeamIdOf(c.team), amount: c.amount, type: c.type, status: c.status })).slice(0, 8) : null
   };
 }
 

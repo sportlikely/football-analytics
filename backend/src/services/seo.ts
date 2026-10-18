@@ -339,7 +339,7 @@ export function seoPage(rawPath: string): SeoInfo {
       const games = h.games.length
         ? h.games.map(g => `<section><h2><a href="${g.url}">${esc(g.home)} vs ${esc(g.away)}</a></h2><p>${g.score ? `Final score ${g.score[0]}–${g.score[1]} · ` : ''}${esc(when(g.kickoff))}</p>${g.preview ? `<p>${esc(g.preview)}</p>` : ''}</section>`).join('')
         : `<p>No matches this week.${h.next ? ` Next match: ${esc(new Date(h.next).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }))}.` : ''}</p>`;
-      const leagueUrl = def.sport === 'football' ? `/league/${def.code}` : def.sport === 'basketball' ? `/basketball/league/${def.code}` : '/american-football/league';
+      const leagueUrl = def.sport === 'football' ? `/league/${def.code}` : def.sport === 'basketball' ? `/basketball/league/${def.code}` : def.code === 'NCAA' ? '/american-football/college/league' : '/american-football/league';
       const what = def.sport === 'american-football' ? 'games' : 'predictions'; // fix137: no NFL predictions yet
       return page(`${def.name} ${what} this week · ${hubRange(h.from, h.to)} | ${BRAND}`, hubDescription(def),
         `<h1>${esc(def.name)} ${what} this week</h1><p>${esc(def.intro)}</p>${games}<p><a href="${leagueUrl}">${esc(def.name)} table and fixtures</a></p>`,

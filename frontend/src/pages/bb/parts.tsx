@@ -16,7 +16,7 @@ export const rstatus = (g: BbGame) => (g.state === 'done' ? 'FT' : g.status)
 
 const PICK_COLOR = { H: 'text-home', A: 'text-away' } as const
 
-export function Card({ title, action, children, className = '' }: { title?: string; action?: ReactNode; children: ReactNode; className?: string }) {
+export function Card({ title, action, children, className = '' }: { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={`card p-5 sm:p-6 ${className}`}>
       {(title || action) && (

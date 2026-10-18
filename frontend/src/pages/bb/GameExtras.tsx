@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import NameLink, { href } from '../../components/sport/NameLink'
 import { t } from '../../lib/i18n'
 import type { BbGame as Game } from '../../lib/bb'
 import { Card, TeamLogo } from './parts'
@@ -170,7 +171,7 @@ export function CompareCard({ g, home, away, table, form }: {
             <div key={sd} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
               <span className="w-11 h-11 rounded-2xl bg-surface2/80 border border-line/60 grid place-items-center shrink-0"><TeamLogo team={team} size={28} /></span>
               <span className="min-w-0 max-w-full">
-                <span className="block text-sm font-bold text-ink leading-tight line-clamp-2">{team.name}</span>
+                <NameLink to={href.bbTeam(team.id)} className="block text-sm font-bold text-ink leading-tight line-clamp-2">{team.name}</NameLink>
                 {f.length > 0 && <span className={`mt-1 flex justify-center ${i === 1 ? 'sm:justify-end' : 'sm:justify-start'}`}><FormDots f={f} /></span>}
               </span>
             </div>
@@ -305,7 +306,7 @@ export function ModelTable({ g, model, ratings }: {
     <div className="mt-3">
       <table className="w-full text-xs num">
         <thead>
-          <tr className="text-faint"><th className="text-left font-semibold py-1">{t('Part')}</th><th className="text-right font-semibold w-20 truncate">{g.home.name}</th><th className="text-right font-semibold w-20 truncate">{g.away.name}</th></tr>
+          <tr className="text-faint"><th className="text-left font-semibold py-1">{t('Part')}</th><th className="text-right font-semibold w-20 truncate"><NameLink to={href.bbTeam(g.home.id)}>{g.home.name}</NameLink></th><th className="text-right font-semibold w-20 truncate"><NameLink to={href.bbTeam(g.away.id)}>{g.away.name}</NameLink></th></tr>
         </thead>
         <tbody>
           {rows.map(x => <tr key={x.label} className="border-t border-line/40"><td className="py-1 text-muted font-sans">{x.label}</td><td className="text-right text-ink">{x.h}</td><td className="text-right text-ink">{x.a}</td></tr>)}

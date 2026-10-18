@@ -1395,7 +1395,9 @@ export async function teamSchedule(afTeamId: number, kickoffIso: string) {
       home,
       opponent: opp?.name || '?',
       opponentCrest: opp?.logo || null,
+      opponentId: opp?.id ? AF_OFFSET + opp.id : null, // fix174: names link to the team / competition pages
       competition: f.league?.name || null,
+      competitionCode: f.league?.id ? `AF${f.league.id}` : null,
       score: FINISHED_SHORT.has(f.fixture?.status?.short) && gf != null && ga != null ? `${gf}-${ga}` : null
     };
   };

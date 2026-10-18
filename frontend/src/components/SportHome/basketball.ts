@@ -21,7 +21,7 @@ export function toGame(g: BbGame): HGame {
   const team = (s: BbGame['home']) => ({ id: s.id, name: s.name, short: bbShort(s.name, g.league.code), logo: s.logo, href: `/basketball/team/${s.id}` })
   return {
     id: g.id, href: `/basketball/game/${g.id}`, reveal: { id: rid(g), status: rstatus(g) }, kickoff: g.kickoff,
-    competition: { name: g.league.name }, home: team(g.home), away: team(g.away),
+    competition: { name: g.league.name, href: `/basketball/league/${g.league.code}` }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: liveLabel(g, true), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
     pred: winnerPred(g.prediction, bbShort(g.home.name, g.league.code), bbShort(g.away.name, g.league.code), STRONG)
   }

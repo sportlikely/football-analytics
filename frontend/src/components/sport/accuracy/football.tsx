@@ -95,7 +95,7 @@ export const footballAccuracy: AccuracyAdapter = {
         n: c.n, main: c.v3, cols: [c.dc ?? null, c.btts ?? null, c.over25 ?? null]
       })),
       recent: rec.recent.map(x => ({
-        id: x.matchId, href: `/match/${x.matchId}`, date: x.date, comp: x.competition, home: x.home, away: x.away, score: x.score,
+        id: x.matchId, href: `/match/${x.matchId}`, date: x.date, comp: x.competition, compHref: (() => { const c = rec.byCompetition.find(b => b.name === x.competition)?.code; return c ? `/league/${c}` : null })(), home: x.home, away: x.away, score: x.score,
         cells: [
           x.dc ? <span className="inline-flex items-center gap-1.5"><Tick hit={x.dc.hit} /> <DcTag code={x.dc.pick} /> <span className="text-ink truncate">{dcLabel(x.dc.pick, x.home, x.away)}</span></span> : <span className="text-faint">–</span>,
           <span className="inline-flex items-center gap-1.5"><Tick hit={x.result.hit} /> <span className="text-muted truncate">{name(x, x.result.pick)}</span></span>,

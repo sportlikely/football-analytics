@@ -20,7 +20,7 @@ export function toGame(g: NflGame): HGame {
   const team = (s: NflGame['home']) => ({ id: s.id, name: s.name, short: nick(s.name, lg), logo: s.logo, href: `/american-football/team/${s.id}` })
   return {
     id: g.id, href: `/american-football/game/${g.id}`, reveal: { id: nflRid(g), status: nflRstatus(g) }, kickoff: g.kickoff,
-    competition: { name: compOf(g) }, home: team(g.home), away: team(g.away),
+    competition: { name: compOf(g), href: lg === 2 ? '/american-football/college/league' : '/american-football/league' }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: NFL_STATUS[g.status] || tt('LIVE'), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
     pred: winnerPred(g.prediction, nick(g.home.name, lg), nick(g.away.name, lg), nflStrongAt(lg))
   }
@@ -83,7 +83,7 @@ function useNflData(): SportHomeData {
     record: {
       rows: record ? winnerRecordRows(record.bands) : null, aside: tt("last {0} days", { 0: 30 }),
       note: tt("Picks right, every game counted. Each prediction is saved before kick-off and never edited."),
-      link: null,
+      link: { to: '/american-football/accuracy', label: tt("See the full record →") },
       empty: { title: tt("Predictions start soon"), text: league === 2 ? tt("Once our college football model is live, every prediction is saved before kick-off and checked after the game, here and in public.") : tt("Once our NFL model is live, every prediction is saved before kick-off and checked after the game, here and in public.") }
     },
     special: {
@@ -93,7 +93,7 @@ function useNflData(): SportHomeData {
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
       link: full ? { to: `${base}/games`, label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
     },
-    results: { rows: resultRows, days: 30, link: null }
+    results: { rows: resultRows, days: 30, link: { to: '/american-football/accuracy', label: tt("How accurate is the model? →") } }
   }
 }
 

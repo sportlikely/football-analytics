@@ -36,7 +36,11 @@ export const hubByOld = (slug: string) => HUBS.find(h => h.old === slug.toUpperC
 export const hubOpen = (h: HubDef, admin = false) => h.sport === 'football' || admin || (h.sport === 'basketball' ? bbPublic() : nflPublic());
 export const hubForCode = (sport: HubSport, code: string) => HUBS.find(h => h.sport === sport && h.code === code) || null;
 
-export interface HubGame { id: number; kickoff: string; home: string; away: string; score: [number, number] | null; preview: string | null; url: string }
+export interface HubGame { id: number; kickoff: string; home: string; away: string; score: [number, number] | null; preview: string | null; url: string; homeUrl?: string | null; awayUrl?: string | null }
+/** fix174: a football team page link from a hub (API-Football ids open directly; others carry the name and the league) */
+const FB_CUPS = new Set(['CL', 'EL', 'ECL', 'EC', 'WC']);
+const fbTeamUrl = (id: number | null, name: string, code: string) => !id ? null
+  : id >= 1_000_000_000 ? `/team/${id}` : `/team/${id}?${FB_CUPS.has(code) ? '' : `c=${encodeURIComponent(code)}&`}n=${encodeURIComponent(name)}`;
 export interface Hub { slug: string; code: string; sport: HubSport; name: string; intro: string; from: string; to: string; games: HubGame[]; next: string | null }
 
 const dayStart = () => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d; };
@@ -85,11 +89,11 @@ function* hubSteps(h: HubDef): Generator<void, Hub> {
   const from = start.toISOString(), to = end.toISOString();
   let games: HubGame[] = [], next: string | null = null;
   if (h.sport === 'football') {
-    const rows = db.prepare(`SELECT p.match_id AS id, MAX(p.utc_date) AS date, MAX(p.home_team) AS home, MAX(p.away_team) AS away, MAX(r.home_goals) AS hg, MAX(r.away_goals) AS ag
+    const rows = db.prepare(`SELECT p.match_id AS id, MAX(p.utc_date) AS date, MAX(p.home_team) AS home, MAX(p.away_team) AS away, MAX(p.home_team_id) AS hid, MAX(p.away_team_id) AS aid, MAX(r.home_goals) AS hg, MAX(r.away_goals) AS ag
       FROM predictions p LEFT JOIN results r ON r.match_id = p.match_id AND r.outcome IN ('H','D','A')
       WHERE p.competition_code = ? AND p.utc_date >= ? AND p.utc_date <= ? GROUP BY p.match_id ORDER BY date`).all(h.code, from, to) as any[];
     for (const r of rows.filter(x => x.home && x.away)) {
-      games.push({ id: r.id, kickoff: r.date, home: r.home, away: r.away, score: r.hg != null ? [r.hg, r.ag] : null, preview: getPreview(r.id)?.text || null, url: `/match/${r.id}` });
+      games.push({ id: r.id, kickoff: r.date, home: r.home, away: r.away, score: r.hg != null ? [r.hg, r.ag] : null, preview: getPreview(r.id)?.text || null, url: `/match/${r.id}`, homeUrl: fbTeamUrl(r.hid, r.home, h.code), awayUrl: fbTeamUrl(r.aid, r.away, h.code) });
       yield;
     }
     if (!games.length) next = (db.prepare(`SELECT MIN(utc_date) AS d FROM predictions WHERE competition_code = ? AND utc_date > ?`).get(h.code, to) as any)?.d || null;
@@ -97,15 +101,15 @@ function* hubSteps(h: HubDef): Generator<void, Hub> {
     // fix142: NFL hub = league 1; college hub = league 2, games with at least one FBS team
     const league = h.code === 'NCAA' ? 2 : 1;
     const fbs = league === 2 ? `AND (home_id IN (SELECT team_id FROM nfl_teams WHERE league = 2 AND level = 'FBS') OR away_id IN (SELECT team_id FROM nfl_teams WHERE league = 2 AND level = 'FBS'))` : '';
-    const rows = db.prepare(`SELECT game_id AS id, kickoff, home_name AS home, away_name AS away, home_pts AS hs, away_pts AS as_, status FROM nfl_games
+    const rows = db.prepare(`SELECT game_id AS id, kickoff, home_id AS hid, away_id AS aid, home_name AS home, away_name AS away, home_pts AS hs, away_pts AS as_, status FROM nfl_games
       WHERE league = ? AND kickoff >= ? AND kickoff <= ? AND (stage IS NULL OR stage NOT LIKE 'Pre%') AND (status IS NULL OR status NOT IN ('CANC','PST')) ${fbs} ORDER BY kickoff`).all(league, from, to) as any[];
-    games = rows.map(r => ({ id: r.id, kickoff: r.kickoff, home: r.home || 'TBD', away: r.away || 'TBD', score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null, preview: null, url: `/american-football/game/${r.id}` }));
+    games = rows.map(r => ({ id: r.id, kickoff: r.kickoff, home: r.home || 'TBD', away: r.away || 'TBD', score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null, preview: null, url: `/american-football/game/${r.id}`, homeUrl: r.hid ? `/american-football/team/${r.hid}` : null, awayUrl: r.aid ? `/american-football/team/${r.aid}` : null }));
     if (!games.length) next = (db.prepare(`SELECT MIN(kickoff) AS d FROM nfl_games WHERE league = ? AND kickoff > ? AND (stage IS NULL OR stage NOT LIKE 'Pre%')`).get(league, to) as any)?.d || null;
   } else {
-    const rows = db.prepare(`SELECT game_id AS id, kickoff, home_name AS home, away_name AS away, hs, as_, status FROM bb_games
+    const rows = db.prepare(`SELECT game_id AS id, kickoff, home_id AS hid, away_id AS aid, home_name AS home, away_name AS away, hs, as_, status FROM bb_games
       WHERE code = ? AND kickoff >= ? AND kickoff <= ? AND (status IS NULL OR status NOT IN ('CANC','POST')) ORDER BY kickoff`).all(h.code, from, to) as any[];
     for (const r of rows) {
-      games.push({ id: r.id, kickoff: r.kickoff, home: r.home, away: r.away, score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null, preview: bbPreview(r.id), url: `/basketball/game/${r.id}` });
+      games.push({ id: r.id, kickoff: r.kickoff, home: r.home, away: r.away, score: (r.status === 'FT' || r.status === 'AOT') && r.hs != null ? [r.hs, r.as_] : null, preview: bbPreview(r.id), url: `/basketball/game/${r.id}`, homeUrl: r.hid ? `/basketball/team/${r.hid}` : null, awayUrl: r.aid ? `/basketball/team/${r.aid}` : null });
       yield;
     }
     if (!games.length) next = (db.prepare(`SELECT MIN(kickoff) AS d FROM bb_games WHERE code = ? AND kickoff > ?`).get(h.code, to) as any)?.d || null;
