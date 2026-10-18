@@ -14,7 +14,7 @@ function fmtDay(iso: string | null) {
 
 export default function Account() {
   const { user, access, loading, logout, needsVerification, setOptIn } = useAuth()
-  const unlocks = useUnlocks(access === 'premium')
+  const unlocks = useUnlocks(access === 'premium' || access === 'free')
   const nav = useNavigate()
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -64,6 +64,9 @@ export default function Account() {
               <div className="text-xs text-ink mt-1">
                 {t("{0} of {1} unlocks left this month · renews {2}", { 0: unlocks.left, 1: unlocks.allowance, 2: resetDay(unlocks.resetsAt) })}
               </div>
+            )}
+            {(access === 'free' || access === 'premium') && unlocks && (
+              <div className="text-xs text-ink mt-1">{t("Pick packs: {0} picks left", { 0: unlocks.credits ?? 0 })} · <Link to="/premium#packs" className="font-semibold text-accent">{t("Buy picks")}</Link></div>
             )}
             <div className="text-xs text-faint mt-0.5">{t("Member since")}{' '}{fmtDay(user.createdAt)}</div>
             {needsVerification && (
@@ -268,7 +271,7 @@ function DataCard() {
       )}
       {open && (
         <form onSubmit={del} className="rounded-xl border border-loss/40 bg-loss/5 p-4 space-y-3">
-          <p className="text-sm text-ink">{t("This deletes your account, favorites and unlocked matches for good. It cannot be undone. Paid plans are not refunded automatically: write to us first if you want a refund.")}</p>
+          <p className="text-sm text-ink">{t("This deletes your account, favorites, unlocked matches and unused pack picks for good. It cannot be undone. Paid plans are not refunded automatically: write to us first if you want a refund.")}</p>
           <ReasonPicker value={reason} onChange={setReason} details={details} onDetails={setDetails} />
           <label className="block">
             <span className="label">{t("Password")}</span>

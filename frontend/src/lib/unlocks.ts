@@ -4,7 +4,8 @@ import { API_URL } from './socket'
 import { LOCALE, t } from './i18n'
 
 /**
- * $15 Premium: monthly allowance of match unlocks (see backend services/billing.ts).
+ * Free (2 a week) / Premium (60 a month) unlock allowance and, since fix147, the pick balance (pick packs) — see backend
+ * services/billing.ts.
  * One shared copy for the whole app; pages call refreshUnlocks() after an unlock or a plan change.
  */
 export interface UnlockStatus {
@@ -17,7 +18,11 @@ export interface UnlockStatus {
   left: number | null
   resetsAt: string
   testMode: boolean
+  /** fix147: picks left from pick packs (shared by every sport) and the packs this plan can buy */
+  credits?: number
+  packs?: Pack[]
 }
+export interface Pack { id: string; picks: number; each: number; price: number }
 
 const EVT = 'b2b-unlocks'
 let current: UnlockStatus | null = null
@@ -66,3 +71,16 @@ export async function unlockMatch(matchId: number, status: string): Promise<Unlo
 }
 
 export const resetDay = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })
+
+/** fix147: buy a pick pack (test mode only for now: no payment is taken). Resolves with the new status. */
+export async function buyPack(packId: string): Promise<UnlockStatus> {
+  try {
+    const r = await axios.post(`${API_URL}/billing/test-pack`, { pack: packId })
+    current = r.data.data.status
+    window.dispatchEvent(new Event(EVT))
+    return r.data.data.status
+  } catch (e: any) {
+    throw { message: e?.response?.data?.error || t("Could not add the pack. Try again.") }
+  }
+}
+export const money = (n: number) => `$${n.toFixed(2)}`

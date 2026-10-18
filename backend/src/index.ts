@@ -61,7 +61,7 @@ import { nationalValueSearch, historyMatchReport } from './services/squadValues'
 import { drawAlertsReport, drawFactorTest } from './services/drawAlerts';
 import { teamPage, searchTeams, searchPlayers, searchPlayersRemote, resolveAfTeamId, setTeamOverride, teamOverrides } from './services/teamPage';
 import { playerPage, findPlayer } from './services/playerPage';
-import { unlockStatus, unlockMatch, unlockedIds, isFinished, testCheckout, PLANS, billingTestMode, unlockStats, REFUND_DAYS, FREE_WEEKLY_UNLOCKS } from './services/billing';
+import { unlockStatus, unlockMatch, unlockedIds, isFinished, testCheckout, PLANS, billingTestMode, unlockStats, REFUND_DAYS, FREE_WEEKLY_UNLOCKS, packsFor, buyPack, addCredits, creditBalance, creditEvents, PICK_PRICE, PACK_SIZES } from './services/billing';
 import { goalsCalibration } from './services/goalsCalibration';
 import { runDataAudit, lastDataAudit, startDataAuditScheduler } from './services/dataAudit';
 import { newsFor, newsStatus, startNewsScheduler, bbTeamNames, footballTeamNames, nflTeamNamesById } from './services/news';
@@ -698,6 +698,23 @@ app.post('/api/crm/customers/:id(\\d+)/plan', need('customers.plan'), jsonOnly, 
     res.json({ data: u });
   } catch (e) { crmFail(res, e); }
 });
+// fix147: pick packs per customer — balance + history, and grant / take credits (plan permission, logged)
+app.get('/api/crm/customers/:id(\\d+)/credits', need('customers.view'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  res.set('Cache-Control', 'no-store').json({ data: { balance: creditBalance(id), events: creditEvents(id) } });
+});
+app.post('/api/crm/customers/:id(\\d+)/credits', need('customers.plan'), jsonOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!userById(id)) return res.status(404).json({ error: 'Account not found.' });
+    const delta = Math.max(-500, Math.min(500, parseInt(String(req.body?.delta || '0'), 10) || 0));
+    if (!delta) return res.status(400).json({ error: 'Give a number of picks (e.g. 5 or -5).' });
+    const note = String(req.body?.note || '').slice(0, 60);
+    const balance = addCredits(id, delta, `staff ${delta > 0 ? 'grant' : 'removal'} by #${req.user!.id}${note ? `: ${note}` : ''}`);
+    securityLog(req, 'staff_credits', req.user, `account #${id} ${delta > 0 ? '+' : ''}${delta} picks → ${balance}${note ? ` (${note})` : ''}`);
+    res.json({ data: { balance, events: creditEvents(id) } });
+  } catch (e) { crmFail(res, e); }
+});
 app.post('/api/crm/customers/:id(\\d+)/reset-email', need('customers.security'), async (req, res) => {
   try {
     const target = userById(parseInt(req.params.id, 10));
@@ -1308,7 +1325,18 @@ app.post('/api/unlocks/:id(-?\\d+)', jsonOnly, (req, res) => {
     authFail(res, e);
   }
 });
-app.get('/api/billing/plans', (_req, res) => res.json({ data: { plans: PLANS, testMode: billingTestMode, refundDays: REFUND_DAYS, freeWeekly: FREE_WEEKLY_UNLOCKS } }));
+app.get('/api/billing/plans', (req, res) => res.json({ data: { plans: PLANS, testMode: billingTestMode, refundDays: REFUND_DAYS, freeWeekly: FREE_WEEKLY_UNLOCKS,
+  // fix147: pick packs — the packs of the visitor's plan (signed out: the Free prices) and both price lists
+  packs: packsFor(req.user ? req.access || 'free' : 'free'), pickPrice: PICK_PRICE, packSizes: PACK_SIZES } }));
+// fix147: buy a pick pack (test mode only until the payment provider is wired; no real charge)
+app.post('/api/billing/test-pack', jsonOnly, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+  try {
+    const r = buyPack(req.user, req.access || 'free', String(req.body?.pack || ''));
+    logger.info(`Test pick pack: user #${req.user.id} +${r.pack.picks} (balance ${r.balance})`);
+    res.json({ data: { ...r, status: unlockStatus(req.user, req.access || 'free') } });
+  } catch (e) { authFail(res, e); }
+});
 // Test checkout (only while BILLING_TEST_MODE=1): switch your own plan
 app.post('/api/billing/test-checkout', jsonOnly, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Sign in required' });

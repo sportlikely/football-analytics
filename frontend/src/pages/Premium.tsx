@@ -3,14 +3,25 @@ import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
-import { refreshUnlocks, useUnlocks, resetDay } from '../lib/unlocks'
+import { refreshUnlocks, useUnlocks, resetDay, money, type Pack } from '../lib/unlocks'
+import PickPacks from '../components/PickPacks'
 import { t } from '../lib/i18n'
 
 /**
- * Plans: Free · Premium $15 (60 match unlocks a month) · Pro $30 (unlimited + draw alerts) · Pro yearly.
+ * Plans (fix147): Free · Premium $8.99 (60 match unlocks a month) · Pro $14.99 (unlimited + draw alerts); each also for
+ * 6 months (10% off) and a year (20% off) — a Monthly / 6 months / Yearly toggle, monthly first. Pick packs for Free and Premium.
  * Pro sits in the middle and is marked "Most popular". While the backend runs with BILLING_TEST_MODE=1 the buttons
  * switch the plan straight away (test checkout); otherwise they say payments open soon.
  */
+
+type Period = 'month' | '6 months' | 'year'
+interface PlanRow { id: string; plan?: string; name: string; price: number; period: string; perMonth: number; save: number }
+/** Shown until /billing/plans answers (the same numbers as the server). */
+const PLAN_DEFAULTS: PlanRow[] = [
+  { id: 'premium', name: 'Premium', price: 8.99, period: 'month', perMonth: 8.99, save: 0 }, { id: 'premium-6m', plan: 'premium', name: 'Premium 6 months', price: 48.49, period: '6 months', perMonth: 8.08, save: 10 },
+  { id: 'premium-year', plan: 'premium', name: 'Premium yearly', price: 86.29, period: 'year', perMonth: 7.19, save: 20 }, { id: 'pro', name: 'Pro', price: 14.99, period: 'month', perMonth: 14.99, save: 0 },
+  { id: 'pro-6m', plan: 'pro', name: 'Pro 6 months', price: 80.99, period: '6 months', perMonth: 13.5, save: 10 }, { id: 'pro-year', plan: 'pro', name: 'Pro yearly', price: 143.99, period: 'year', perMonth: 12, save: 20 }
+]
 
 const FREE = [t("2 full picks a week with a free account"), t("Live scores, lineups and events"), t("League tables, team and player pages"), t("Latest results and our public record")]
 const PREMIUM = [
@@ -39,14 +50,17 @@ function Check() {
 export default function Premium() {
   const { user, access, refresh } = useAuth()
   const [testMode, setTestMode] = useState(false)
+  const [plans, setPlans] = useState<PlanRow[]>(PLAN_DEFAULTS)
+  const [packs, setPacks] = useState<Pack[]>([])
+  const [period, setPeriod] = useState<Period>('month')
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const u = useUnlocks(access === 'premium')
+  const u = useUnlocks(access === 'premium' || access === 'free')
 
   useEffect(() => {
     axios
       .get(`${API_URL}/billing/plans`)
-      .then(r => setTestMode(!!r.data.data?.testMode))
+      .then(r => { setTestMode(!!r.data.data?.testMode); if (Array.isArray(r.data.data?.plans)) setPlans(r.data.data.plans); setPacks(r.data.data?.packs || []) })
       .catch(() => undefined)
   }, [])
 
@@ -66,7 +80,7 @@ export default function Premium() {
   }
 
   const button = (plan: string, label: string, primary: boolean) => {
-    const target = plan === 'pro-year' ? 'pro' : plan
+    const target = plans.find(p => p.id === plan)?.plan || plan
     if (access === 'admin') return <div className="rounded-xl bg-surface2/70 text-center py-2.5 text-sm text-muted">{t("Admin: full access")}</div>
     if (access === target) return <div className="rounded-xl bg-accent/15 text-accent text-center py-2.5 text-sm font-semibold">{t("Your plan")}</div>
     if (!user)
@@ -112,82 +126,64 @@ export default function Premium() {
         </div>
       )}
 
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 items-stretch">
-        {/* Premium */}
-        <div className="card p-6 flex flex-col">
-          <div className="label">{t("Premium")}</div>
-          <div className="mt-1 flex items-baseline gap-1">
-            <span className="font-display text-4xl font-extrabold text-ink">$15</span>
-            <span className="text-sm text-muted">/ month</span>
-          </div>
-          <div className="text-xs text-faint mt-1">{t("60 matches · about $0.25 per match")}</div>
-          <ul className="mt-5 space-y-2.5 text-sm text-ink/90 flex-1">
-            {PREMIUM.map(f => (
-              <li key={f} className="flex gap-2">
-                <Check /> {f}
-              </li>
-            ))}
-          </ul>
-          <div className="mt-6">{button('premium', 'Premium', false)}</div>
-        </div>
-
-        {/* Pro: the plan we steer people to */}
-        <div className="card p-6 flex flex-col relative overflow-hidden border-accent/60 xl:-my-3 xl:py-9 shadow-lift order-first xl:order-none">
-          <div className="pointer-events-none absolute -top-24 -right-24 w-64 h-64 rounded-full bg-accent/20 blur-3xl" />
-          <span className="absolute top-4 right-4 text-[10px] font-extrabold uppercase tracking-wider text-bg bg-accent px-2.5 py-1 rounded-full">{t("Most popular")}</span>
-          <div className="relative flex flex-col flex-1">
-            <div className="label text-accent">{t("Pro")}</div>
-            <div className="mt-1 flex items-baseline gap-1">
-              <span className="font-display text-4xl font-extrabold text-ink">$30</span>
-              <span className="text-sm text-muted">/ month</span>
-            </div>
-            <div className="text-xs text-accent font-semibold mt-1">{t("Unlimited matches")}</div>
-            <ul className="mt-5 space-y-2.5 text-sm text-ink/90 flex-1">
-              {PRO.map(f => (
-                <li key={f} className="flex gap-2">
-                  <Check /> {f}
-                </li>
-              ))}
-            </ul>
-            <div className="mt-6">{button('pro', 'Pro', true)}</div>
-          </div>
-        </div>
-
-        {/* Pro 6 months: 20% off */}
-        <div className="card p-6 flex flex-col">
-          <div className="label">{t("Pro 6 months")}</div>
-          <div className="mt-1 flex items-baseline gap-1">
-            <span className="font-display text-4xl font-extrabold text-ink">$144</span>
-            <span className="text-sm text-muted">/ 6 months</span>
-          </div>
-          <div className="text-xs text-win font-semibold mt-1">{t("$24 a month · save 20%")}</div>
-          <ul className="mt-5 space-y-2.5 text-sm text-ink/90 flex-1">
-            <li className="flex gap-2">
-              <Check /> {t("Everything in Pro")}</li>
-            <li className="flex gap-2">
-              <Check /> {t("One payment every 6 months")}</li>
-          </ul>
-          <div className="mt-6">{button('pro-6m', t("Pro 6 months"), false)}</div>
-        </div>
-
-        {/* Pro yearly: the best price per month */}
-        <div className="card p-6 flex flex-col relative border-home/60">
-          <span className="absolute top-4 right-4 text-[10px] font-extrabold uppercase tracking-wider text-white bg-home px-2.5 py-1 rounded-full">{t("Best offer")}</span>
-          <div className="label text-home">{t("Pro yearly")}</div>
-          <div className="mt-1 flex items-baseline gap-1">
-            <span className="font-display text-4xl font-extrabold text-ink">$249</span>
-            <span className="text-sm text-muted">/ year</span>
-          </div>
-          <div className="text-xs text-win font-semibold mt-1">{t("About $21 a month · save 30%")}</div>
-          <ul className="mt-5 space-y-2.5 text-sm text-ink/90 flex-1">
-            <li className="flex gap-2">
-              <Check /> {t("Everything in Pro")}</li>
-            <li className="flex gap-2">
-              <Check /> {t("One payment a year")}</li>
-          </ul>
-          <div className="mt-6">{button('pro-year', t("Pro yearly"), false)}</div>
+      {/* fix147: one card per plan, the period from the toggle (monthly first) */}
+      <div className="mt-8 flex justify-center">
+        <div role="tablist" className="inline-flex p-1 rounded-full bg-surface2 border border-line/60">
+          {([['month', t("Monthly")], ['6 months', t("6 months")], ['year', t("Yearly")]] as [Period, string][]).map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={period === k} onClick={() => setPeriod(k)}
+              className={`px-3.5 sm:px-4 py-2 rounded-full text-sm font-semibold ${period === k ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}>
+              {label}{k !== 'month' && <span className={`ml-1.5 text-[10px] font-extrabold ${period === k ? 'text-bg' : 'text-win'}`}>{k === 'year' ? '−20%' : '−10%'}</span>}
+            </button>
+          ))}
         </div>
       </div>
+
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch max-w-4xl mx-auto">
+        {(['premium', 'pro'] as const).map(kind => {
+          const p = plans.find(x => (x.plan || x.id) === kind && x.period === period) || plans.find(x => x.id === kind)!
+          const pro = kind === 'pro'
+          const per = period === 'month' ? t("/ month") : period === 'year' ? t("/ year") : t("/ 6 months")
+          return (
+            <div key={kind} className={`card p-6 flex flex-col relative overflow-hidden ${pro ? 'border-accent/60 shadow-lift order-first md:order-none' : ''}`}>
+              {pro && <div className="pointer-events-none absolute -top-24 -right-24 w-64 h-64 rounded-full bg-accent/20 blur-3xl" />}
+              {pro && <span className="absolute top-4 right-4 text-[10px] font-extrabold uppercase tracking-wider text-bg bg-accent px-2.5 py-1 rounded-full">{t("Most popular")}</span>}
+              <div className="relative flex flex-col flex-1">
+                <div className={`label ${pro ? 'text-accent' : ''}`}>{pro ? t("Pro") : t("Premium")}</div>
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span className="font-display text-4xl font-extrabold text-ink">{money(p.price)}</span>
+                  <span className="text-sm text-muted">{per}</span>
+                </div>
+                <div className="text-xs mt-1 flex flex-wrap items-center gap-x-2">
+                  {period !== 'month' && <span className="text-muted">{t("= {0}/month", { 0: money(p.perMonth) })}</span>}
+                  {p.save > 0 ? <span className="text-win font-semibold">{t("Save {0}%", { 0: p.save })}</span> : <span className={pro ? 'text-accent font-semibold' : 'text-faint'}>{pro ? t("Unlimited matches") : t("60 match unlocks a month")}</span>}
+                </div>
+                <ul className="mt-5 space-y-2.5 text-sm text-ink/90 flex-1">
+                  {(pro ? PRO : PREMIUM).map(f => (
+                    <li key={f} className="flex gap-2">
+                      <Check /> {f}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-6">{button(p.id, pro ? 'Pro' : 'Premium', pro)}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* fix147: pick packs — single picks once the free / monthly ones are used up */}
+      {access !== 'pro' && access !== 'admin' && (
+        <section id="packs" className="mt-10 card p-6 scroll-mt-24">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <div>
+              <div className="label">{t("Pick packs")}</div>
+              <div className="text-sm text-muted mt-0.5">{access === 'premium' ? t("Premium price: {0} a pick.", { 0: money(0.59) }) : t("{0} a pick on Free, {1} on Premium. Pro needs none.", { 0: money(0.79), 1: money(0.59) })}</div>
+            </div>
+            {user && u && typeof u.credits === 'number' && <div className="text-sm text-ink">{t("Your balance: {0} picks", { 0: u.credits })}</div>}
+          </div>
+          <PickPacks fallback={packs} />
+        </section>
+      )}
 
       {msg && <p className={`mt-6 text-center text-sm ${msg.ok ? 'text-win' : 'text-loss'}`}>{msg.text}</p>}
 
@@ -216,7 +212,7 @@ export default function Premium() {
       </div>
 
       <p className="mt-8 text-center text-xs text-faint max-w-xl mx-auto">
-        {t("3-day money-back guarantee on every plan: not for you? Ask within 3 days of paying and you get the full amount back. Unlocked matches stay open. Finished matches are always open on paid plans. Unlocks renew on the 1st of every month. Predictions are probabilities, not promises. SportLikely is an analytics service and does not take bets.")}</p>
+        {t("3-day money-back guarantee on every plan: not for you? Ask within 3 days of paying and you get the full amount back. Unlocked matches stay open. Finished matches are always open on paid plans. Unlocks renew on the 1st of every month. Predictions are probabilities, not promises. SportLikely is an analytics service and does not take bets.")}{' '}{t("Pick packs never expire; a pick that was used is not refunded.")}</p>
     </div>
   )
 }

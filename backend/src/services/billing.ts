@@ -2,10 +2,14 @@
  * Plans and the monthly unlock allowance.
  *
  *   Free     — signed-in: FREE_WEEKLY_UNLOCKS (default 2) full match unlocks a week (Monday–Sunday, UTC); signed out: nothing.
- *   Premium  — $15 / month: PREMIUM_UNLOCKS (default 60) match unlocks per calendar month (UTC). An unlocked match
- *              stays open for good (reopening is free); finished matches are always open; team / player stats and
- *              the track record in full.
- *   Pro      — $30 / month (or yearly): unlimited, plus draw alerts.
+ *   Premium  — $8.99 / month ($48.49 / 6 months, $86.29 / year): PREMIUM_UNLOCKS (default 60) match unlocks per calendar
+ *              month (UTC). An unlocked match stays open for good (reopening is free); finished matches are always open;
+ *              team / player stats and the track record in full.
+ *   Pro      — $14.99 / month ($80.99 / 6 months, $143.99 / year): unlimited, plus draw alerts. (fix147: 6 months = 10% off,
+ *              a year = 20% off.)
+ *   Pick packs (fix147) — credits for single picks when the free / monthly allowance is used up: 5 / 10 / 20 picks at
+ *              $0.79 each on Free, $0.59 on Premium (the price of the plan at purchase time); Pro needs none. Credits never
+ *              expire, are shared by every sport and are spent one per pick, after the free picks and Premium's cap.
  *
  * Payments: no provider is connected yet. While BILLING_TEST_MODE=1 is set (Railway), a signed-in user can switch
  * their own plan from the Premium page to try the flow ("test checkout"). Remove the variable before launch; a real
@@ -20,12 +24,54 @@ export const FREE_WEEKLY_UNLOCKS = parseInt(process.env.FREE_WEEKLY_UNLOCKS || '
 export const REFUND_DAYS = 3;
 export const billingTestMode = process.env.BILLING_TEST_MODE === '1';
 
-export const PLANS: { id: string; plan?: string; name: string; price: number; period: string; unlocks: number | null }[] = [
-  { id: 'premium', name: 'Premium', price: 15, period: 'month', unlocks: PREMIUM_UNLOCKS },
-  { id: 'pro', name: 'Pro', price: 30, period: 'month', unlocks: null },
-  { id: 'pro-6m', plan: 'pro', name: 'Pro 6 months', price: 144, period: '6 months', unlocks: null }, // 20% off 6 × $30
-  { id: 'pro-year', plan: 'pro', name: 'Pro yearly', price: 249, period: 'year', unlocks: null }
+/** fix147: monthly price, 6 months = 10% off, a year = 20% off. `perMonth` = what it comes to a month, `save` = % off. */
+export const PLANS: { id: string; plan?: string; name: string; price: number; period: string; perMonth: number; save: number; unlocks: number | null }[] = [
+  { id: 'premium', name: 'Premium', price: 8.99, period: 'month', perMonth: 8.99, save: 0, unlocks: PREMIUM_UNLOCKS },
+  { id: 'premium-6m', plan: 'premium', name: 'Premium 6 months', price: 48.49, period: '6 months', perMonth: 8.08, save: 10, unlocks: PREMIUM_UNLOCKS },
+  { id: 'premium-year', plan: 'premium', name: 'Premium yearly', price: 86.29, period: 'year', perMonth: 7.19, save: 20, unlocks: PREMIUM_UNLOCKS },
+  { id: 'pro', name: 'Pro', price: 14.99, period: 'month', perMonth: 14.99, save: 0, unlocks: null },
+  { id: 'pro-6m', plan: 'pro', name: 'Pro 6 months', price: 80.99, period: '6 months', perMonth: 13.5, save: 10, unlocks: null },
+  { id: 'pro-year', plan: 'pro', name: 'Pro yearly', price: 143.99, period: 'year', perMonth: 12, save: 20, unlocks: null }
 ];
+
+/* ---------- pick packs (fix147) ---------- */
+
+export const PACK_SIZES = [5, 10, 20];
+/** Price of one pick in a pack, by the plan at purchase time (Pro / admin: no packs, they see everything). */
+export const PICK_PRICE: Record<string, number> = { free: 0.79, premium: 0.59 };
+export function packsFor(access: string) {
+  const each = PICK_PRICE[access];
+  if (!each) return [];
+  return PACK_SIZES.map(n => ({ id: `pack-${n}`, picks: n, each, price: Math.round(n * each * 100) / 100 }));
+}
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_credits (user_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS credit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, delta INTEGER NOT NULL, reason TEXT NOT NULL, at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS idx_credit_events_user ON credit_events(user_id, at);
+`);
+export const creditBalance = (userId: number): number => (db.prepare('SELECT balance FROM user_credits WHERE user_id = ?').get(userId) as any)?.balance ?? 0;
+/** Add (or take, delta < 0) credits with a reason ('pack 10 (test)', 'unlock 123', 'staff grant by #5'). Never below 0. */
+export function addCredits(userId: number, delta: number, reason: string): number {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    const bal = creditBalance(userId);
+    if (bal + delta < 0) throw new AuthError(402, 'Not enough picks left in your balance.');
+    db.prepare(`INSERT INTO user_credits (user_id, balance, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET balance = excluded.balance, updated_at = excluded.updated_at`).run(userId, bal + delta, now);
+    db.prepare('INSERT INTO credit_events (user_id, delta, reason, at) VALUES (?, ?, ?, ?)').run(userId, delta, reason.slice(0, 120), now);
+    db.exec('COMMIT');
+    return bal + delta;
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+export const creditEvents = (userId: number, limit = 50) => db.prepare('SELECT delta, reason, at FROM credit_events WHERE user_id = ? ORDER BY id DESC LIMIT ?').all(userId, limit);
+/** Buy a pack. Only in test mode for now (no real charge); the payment webhook will call addCredits() when wired. */
+export function buyPack(user: User, access: string, packId: string) {
+  const pack = packsFor(access).find(p => p.id === packId);
+  if (!pack) throw new AuthError(400, access === 'pro' || access === 'admin' ? 'Pro sees every pick: no packs needed.' : 'Unknown pack.');
+  if (!billingTestMode) throw new AuthError(403, 'Payments are not open yet.');
+  const balance = addCredits(user.id, pack.picks, `pack ${pack.picks} at $${pack.each} (test, $${pack.price})`);
+  return { balance, pack };
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS match_unlocks (
@@ -75,7 +121,7 @@ export function unlockedIds(userId: number): Set<number> {
 
 export function unlockStatus(user: User | null, access: string) {
   const unlimited = access === 'pro' || access === 'admin';
-  if (!user) return { plan: 'anon', unlimited: false, allowance: FREE_WEEKLY_UNLOCKS, period: 'week', used: 0, left: 0, resetsAt: nextWeekStart(), testMode: billingTestMode };
+  if (!user) return { plan: 'anon', unlimited: false, allowance: FREE_WEEKLY_UNLOCKS, period: 'week', used: 0, left: 0, resetsAt: nextWeekStart(), testMode: billingTestMode, credits: 0, packs: [] as ReturnType<typeof packsFor> };
   const weekly = access === 'free';
   const since = weekly ? weekStart() : monthStart();
   const kind = weekly ? 'free' : 'premium';
@@ -89,7 +135,10 @@ export function unlockStatus(user: User | null, access: string) {
     used,
     left: unlimited ? null : Math.max(0, allowance - used),
     resetsAt: weekly ? nextWeekStart() : nextMonthStart(),
-    testMode: billingTestMode
+    testMode: billingTestMode,
+    // fix147: the pick balance and the packs this plan can buy
+    credits: creditBalance(user.id),
+    packs: packsFor(access)
   };
 }
 
@@ -105,11 +154,19 @@ export function unlockMatch(user: User, access: string, matchId: number, status:
   const have = db.prepare('SELECT 1 FROM match_unlocks WHERE user_id = ? AND match_id = ?').get(user.id, matchId);
   if (have || isFinished(status)) return { unlocked: true, charged: false, ...unlockStatus(user, access) };
   const st = unlockStatus(user, access);
-  if ((st.left ?? 0) <= 0)
+  if ((st.left ?? 0) <= 0) {
+    // fix147: allowance used up → one pick from the balance (every sport shares it), else the packs / upgrade sheet
+    if (creditBalance(user.id) > 0) {
+      addCredits(user.id, -1, `unlock ${matchId}`);
+      db.prepare('INSERT OR IGNORE INTO match_unlocks (user_id, match_id, at, kind) VALUES (?, ?, ?, ?)').run(user.id, matchId, new Date().toISOString(), 'credit');
+      idCache.delete(user.id);
+      return { unlocked: true, charged: true, credit: true, ...unlockStatus(user, access) };
+    }
     throw Object.assign(
-      new AuthError(402, access === 'free' ? `You've used your ${FREE_WEEKLY_UNLOCKS} free picks this week. They come back on Monday. Premium opens 60 matches a month, Pro all of them.` : `You've used all ${PREMIUM_UNLOCKS} unlocks this month. Pro is unlimited.`),
-      { upgrade: true }
+      new AuthError(402, access === 'free' ? `You've used your ${FREE_WEEKLY_UNLOCKS} free picks this week. They come back on Monday. Buy a pick pack or go Premium.` : `You've used all ${PREMIUM_UNLOCKS} unlocks this month. Buy a pick pack or go Pro.`),
+      { upgrade: true, packs: true }
     );
+  }
   db.prepare('INSERT OR IGNORE INTO match_unlocks (user_id, match_id, at, kind) VALUES (?, ?, ?, ?)').run(user.id, matchId, new Date().toISOString(), access === 'free' ? 'free' : 'premium');
   idCache.delete(user.id);
   return { unlocked: true, charged: true, ...unlockStatus(user, access) };

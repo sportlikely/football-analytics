@@ -4,7 +4,7 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 
 const CONTACT = 'contact@sportlikely.com'
-const UPDATED = '13 October 2026'
+const UPDATED = '17 October 2026'
 // Operator details: fill in once the company is registered (legal name, registration number, address)
 const OPERATOR: string | null = null
 
@@ -83,6 +83,12 @@ export function Terms() {
           Premium includes a monthly number of match unlocks; Pro is unlimited. Every paid plan has a 3-day money-back guarantee: ask
           within 3 days of a payment and we refund it in full. Plans renew automatically until you cancel; cancelling stops the next
           renewal. Payments are handled by a payment provider; we never see or store your card details.
+        </p>
+        <p>
+          Pick packs are one-off purchases of single picks (5, 10 or 20) for Free and Premium accounts, at the price shown for
+          your plan when you buy. Pack picks do not expire, work in every sport and are used one per pick after your free picks
+          (and Premium's monthly unlocks). A pick that was used is not refunded; unused picks are covered by the 3-day money-back
+          guarantee. Deleting your account removes any unused picks.
         </p>
       </Section>
       <Section title="Fair use">

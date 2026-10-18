@@ -7,8 +7,9 @@
   Statistics · Lineups & injuries · Schedule & rest · H2H · Standings (· Highlights after the game).
 - Basketball menu: Home · Games · Favorites · Upset alerts (Pro) · Accuracy. Game tabs: Prediction · Stats · Injuries &
   lineups · Schedule & rest · H2H · Standings.
-- Plans: Free (2 full picks a week, live scores, tables, player pages), Premium $15 (60 unlocks a month), Pro $30 unlimited +
-  draw picks + upset watch, Pro 6 months $144, Pro yearly $249. 3-day money back; 3-day free trial decided (not built).
+- Plans: Free (2 full picks a week, live scores, tables, player pages), Premium $8.99 / $48.49 6 months / $86.29 a year (60 unlocks a
+  month), Pro $14.99 / $80.99 / $143.99 unlimited + draw picks + upset watch (6 months = 10% off, a year = 20% off; fix147,
+  branch fix147-pricing). Pick packs 5 / 10 / 20 at $0.79 a pick (Free) or $0.59 (Premium), never expire. 3-day money back; 3-day free trial decided (not built).
   Users can cancel (reason required), delete the account (quiet link, password + DELETE), download their data.
 - Home: featured-match carousel (big games of the next 7 days, `lib/fame.ts`), live box, favorites row, next matches, our
   record (last 30 days), draw picks, latest results, world football news (RSS headlines + link out, no copying).

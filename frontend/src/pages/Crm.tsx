@@ -603,6 +603,8 @@ function CustomerView({ id }: { id: number }) {
         </div>
       )}
 
+      <CustomerCredits id={id} canGrant={can('customers.plan')} />
+
       {can('customers.security') && !staffAcct && (
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={busy} onClick={() => act(async () => { const r = await axios.post(`${API_URL}/crm/customers/${id}/reset-email`); return `Password-reset code sent to ${r.data.data.sentTo}.` })} className="rounded-xl border border-line px-3 py-2 text-sm font-semibold text-ink">Send password reset email</button>
@@ -1061,6 +1063,41 @@ function Activity() {
         )}
         <p className="px-5 py-3 text-[11px] text-faint border-t border-line/60">Recorded automatically for every staff action, kept 1 year. Message texts and passwords are never stored here.</p>
       </section>
+    </div>
+  )
+}
+
+/** fix147: a customer's pick packs — balance, history, grant / take picks (plan permission; logged on the server). */
+function CustomerCredits({ id, canGrant }: { id: number; canGrant: boolean }) {
+  const [d, setD] = useState<{ balance: number; events: { delta: number; reason: string; at: string }[] } | null>(null)
+  const [n, setN] = useState('5')
+  const [note, setNote] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  const load = () => axios.get(`${API_URL}/crm/customers/${id}/credits`).then(r => setD(r.data.data)).catch(() => setD(null))
+  useEffect(() => { load() }, [id])
+  if (!d) return null
+  const grant = (sign: 1 | -1) => {
+    const delta = sign * (parseInt(n, 10) || 0)
+    if (!delta || !window.confirm(`${delta > 0 ? 'Give' : 'Take'} ${Math.abs(delta)} picks?`)) return
+    axios.post(`${API_URL}/crm/customers/${id}/credits`, { delta, note }).then(r => { setD(r.data.data); setMsg('Saved.'); setNote('') }).catch(e => setMsg(errorText(e)))
+  }
+  return (
+    <div className="rounded-2xl border border-line p-4 space-y-3">
+      <div className="flex items-baseline justify-between"><div className="font-semibold text-ink text-sm">Pick packs</div><div className="text-sm text-ink">Balance <b className="num">{d.balance}</b></div></div>
+      {canGrant && (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs text-muted">Picks<input value={n} onChange={e => setN(e.target.value.replace(/\D/g, '').slice(0, 3))} className="ml-1 w-16 rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink num" inputMode="numeric" /></label>
+          <label className="text-xs text-muted flex-1 min-w-[140px]">Note<input value={note} onChange={e => setNote(e.target.value.slice(0, 60))} className="ml-1 w-full rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink" placeholder="goodwill, support case…" /></label>
+          <button type="button" onClick={() => grant(1)} className="rounded-xl bg-accent text-bg font-semibold px-4 py-2 text-sm">Give</button>
+          <button type="button" onClick={() => grant(-1)} className="rounded-xl border border-line text-ink font-semibold px-4 py-2 text-sm">Take</button>
+        </div>
+      )}
+      {msg && <p className="text-xs text-muted">{msg}</p>}
+      {d.events.length > 0 && (
+        <ul className="text-xs divide-y divide-line/50 max-h-48 overflow-y-auto">
+          {d.events.map((e, i) => <li key={i} className="py-1.5 flex gap-3"><span className="num text-faint w-24 shrink-0">{e.at.slice(0, 16).replace('T', ' ')}</span><span className={`num w-10 shrink-0 font-bold ${e.delta > 0 ? 'text-win' : 'text-loss'}`}>{e.delta > 0 ? '+' : ''}{e.delta}</span><span className="text-muted truncate">{e.reason}</span></li>)}
+        </ul>
+      )}
     </div>
   )
 }

@@ -244,6 +244,7 @@ function LangSwitch({ compact = false }: { compact?: boolean }) {
 
 function UserMenu() {
   const { user, access, staff, can, loading, logout } = useAuth()
+  const unl = useUnlocks(!!user && (access === 'free' || access === 'premium')) // fix147: pick balance
   const loc = useLocation()
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
@@ -293,6 +294,9 @@ function UserMenu() {
             <div className="text-sm font-semibold text-ink truncate">{user.name || user.email.split('@')[0]}</div>
             <div className="text-[11px] text-faint truncate">{user.email}</div>
           </div>
+          {(access === 'free' || access === 'premium') && (
+            <Link to="/premium#packs" role="menuitem" className={item}>{icon('M4 7h16v12H4zM8 7V5h8v2M4 11h16')}<span className="flex-1">{tt("Pick packs")}</span><span className="num text-xs font-bold text-accent">{unl?.credits ?? 0}</span></Link>
+          )}
           <Link to="/my-picks" role="menuitem" className={item}>{icon('M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9')}{tt("My picks")}</Link>
           <Link to="/account" role="menuitem" className={item}>{icon('M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z')}{tt("Settings")}</Link>
           {(staff || can('model')) && (
@@ -319,7 +323,7 @@ function UserMenu() {
 }
 
 /** Reminder for signed-in users who haven't confirmed their email yet. */
-/** $15 Premium: a nudge when the monthly unlocks run low (10 or fewer left). */
+/** Premium: a nudge when the monthly unlocks run low (10 or fewer left). */
 function UnlocksBanner() {
   const { access } = useAuth()
   const u = useUnlocks(access === 'premium')
