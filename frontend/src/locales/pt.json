@@ -1974,5 +1974,7 @@
  "#{0} in the table · {1}–{2}": "{0}.º na tabela · {1}–{2}",
  "Games appear here once the league's schedule is loaded.": "Os jogos aparecem aqui assim que o calendário da liga for carregado.",
  "Season leaders": "Líderes da época",
- "From the box scores": "Das estatísticas dos jogos"
+ "From the box scores": "Das estatísticas dos jogos",
+ "Even game": "Jogo equilibrado",
+ "Both teams' win chances are within 3 points.": "As chances de vitória das duas equipas estão a menos de 3 pontos."
 }

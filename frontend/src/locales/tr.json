@@ -1974,5 +1974,7 @@
  "#{0} in the table · {1}–{2}": "Tabloda {0}. · {1}–{2}",
  "Games appear here once the league's schedule is loaded.": "Ligin fikstürü yüklenince maçlar burada görünecek.",
  "Season leaders": "Sezon liderleri",
- "From the box scores": "Maç istatistiklerinden"
+ "From the box scores": "Maç istatistiklerinden",
+ "Even game": "Dengeli maç",
+ "Both teams' win chances are within 3 points.": "İki takımın kazanma şansı arasında 3 puandan az fark var."
 }

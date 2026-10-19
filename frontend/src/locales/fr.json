@@ -1974,5 +1974,7 @@
  "#{0} in the table · {1}–{2}": "{0}e du classement · {1}–{2}",
  "Games appear here once the league's schedule is loaded.": "Les matchs apparaîtront ici dès que le calendrier de la ligue sera chargé.",
  "Season leaders": "Meilleurs de la saison",
- "From the box scores": "D'après les feuilles de match"
+ "From the box scores": "D'après les feuilles de match",
+ "Even game": "Match équilibré",
+ "Both teams' win chances are within 3 points.": "Les chances de victoire des deux équipes sont à moins de 3 points."
 }

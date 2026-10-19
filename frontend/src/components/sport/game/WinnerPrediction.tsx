@@ -113,7 +113,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
               <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${topV >= x.strongAt ? 'bg-accent/15 text-accent border-accent/40' : 'bg-surface2 text-ink border-line'}`}>
-                {topV >= x.strongAt + 10 ? t('Very strong pick') : topV >= x.strongAt ? t('Strong pick') : topV >= 55 ? t('Pick') : t('Close game')}
+                {topV >= x.strongAt + 10 ? t('Very strong pick') : topV >= x.strongAt ? t('Strong pick') : topV >= 55 ? t('Pick') : Math.abs((p.pHome || 0) - (p.pAway || 0)) < 3 ? t('Even game') : t('Close game')}
               </span>
               <span className="text-muted">{t('Our pick')} · <span className="text-ink font-semibold">{team.name}</span> · <span className="num text-accent font-extrabold">{Math.round(topV)}%</span></span>
               {typeof p.hit === 'boolean' && <span className={`ml-auto rounded-full px-3 py-1 text-xs font-bold ${p.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{p.hit ? t('Right') : t('Wrong')}</span>}

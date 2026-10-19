@@ -3,7 +3,7 @@ import { t as tt, LOCALE } from '../../lib/i18n'
 import { useReveal, justRevealed } from '../../lib/reveal'
 import { useAuth } from '../../lib/auth'
 import CountUp from '../CountUp'
-import { DcHelp } from '../DcPick'
+import { DcHelp, EvenChip, isEvenGame } from '../DcPick'
 import { Crest, Lock } from '../SportHome/parts'
 import type { HPred } from '../SportHome/types'
 import type { SGame } from './types'
@@ -39,6 +39,8 @@ export function PredBlock({ pred, roll = false }: { pred: Extract<HPred, { kind:
         </span>
       )}
       {pred.pick?.strong && <span className="rounded-full border border-accent/50 text-accent text-[9px] font-bold px-1.5 py-px leading-none whitespace-nowrap">{tt("Strong")}</span>}
+      {/* fix179: home vs away within 3 points (first and last cell: 1 · X · 2 or 1 · 2) */}
+      {pred.cells.length >= 2 && isEvenGame(pred.cells[0].pct, pred.cells[pred.cells.length - 1].pct) && <EvenChip />}
     </span>
   )
 }

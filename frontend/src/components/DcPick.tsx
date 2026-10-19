@@ -19,11 +19,25 @@ export function DcTag({ code, className = '' }: { code: DC; className?: string }
 export default function OurPick({ p, home, away, dark = false, compact = false, showCode = false, className = '' }: { p: Prediction | null | undefined; home: string; away: string; dark?: boolean; compact?: boolean; showCode?: boolean; className?: string }) {
   const dc = doubleChance(p)
   if (!dc) return null
-  return <OurPickBadge code={dc.code} pct={dc.pct} home={home} away={away} dark={dark} compact={compact} showCode={showCode} className={className} />
+  const even = typeof p?.home === 'number' && typeof p?.away === 'number' && isEvenGame(p.home, p.away)
+  return <OurPickBadge code={dc.code} pct={dc.pct} home={home} away={away} dark={dark} compact={compact} showCode={showCode} even={even} className={className} />
+}
+
+/** fix179: the top two win chances (home vs away) within 3 points = an even game (the model can't split them). */
+export const isEvenGame = (home: number, away: number) => Math.abs(home - away) < 3
+
+/** fix179: the small "Even game" chip, every sport (list rows, football pick badge, winner-sport prediction). */
+export function EvenChip({ compact = true, dark = false }: { compact?: boolean; dark?: boolean }) {
+  return (
+    <span title={t("Both teams' win chances are within 3 points.")}
+      className={`inline-block rounded-full border font-bold whitespace-nowrap leading-none ${compact ? 'text-[9px] px-1.5 py-px' : 'text-[11px] px-2 py-0.5'} ${dark ? 'border-white/40 text-white/80' : 'border-line text-muted'}`}>
+      {t("Even game")}
+    </span>
+  )
 }
 
 /** Same badge from the code and % alone (alerts and other server lists that send { k, p }). */
-export function OurPickBadge({ code, pct, home, away, dark = false, compact = false, showCode = false, className = '' }: { code: DC; pct: number | null; home: string; away: string; dark?: boolean; compact?: boolean; showCode?: boolean; className?: string }) {
+export function OurPickBadge({ code, pct, home, away, dark = false, compact = false, showCode = false, even = false, className = '' }: { code: DC; pct: number | null; home: string; away: string; dark?: boolean; compact?: boolean; showCode?: boolean; even?: boolean; className?: string }) {
   const dc = { code, pct: pct === null ? null : Math.round(pct), strong: pct !== null && Math.round(pct) >= DC_STRONG }
   return (
     <span className={`inline-flex flex-wrap items-center gap-1.5 min-w-0 ${className}`}>
@@ -44,6 +58,7 @@ export function OurPickBadge({ code, pct, home, away, dark = false, compact = fa
           {t("Strong pick")}
         </span>
       )}
+      {even && <EvenChip compact={compact} dark={dark} />}
     </span>
   )
 }
@@ -85,6 +100,7 @@ export function DcBlock({ p, home, away, roll = false, className = '' }: { p: Pr
       </span>
       <DcLine code={dc.code} pct={dc.pct} home={home} away={away} />
       {dc.strong && <span className="rounded-full border border-accent/50 text-accent text-[9px] font-bold px-1.5 py-px leading-none whitespace-nowrap">{t("Strong")}</span>}
+      {isEvenGame(p.home, p.away) && <EvenChip />}
     </span>
   )
 }
