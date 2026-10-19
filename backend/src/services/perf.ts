@@ -85,6 +85,8 @@ setInterval(() => {
 }, 3600 * 1000).unref();
 
 export const yieldLoop = () => new Promise<void>(r => setImmediate(r));
+/** fix187: was the event loop blocked longer than `minLag` ms within the last `windowMs`? (background jobs back off) */
+export const stalledWithin = (windowMs: number, minLag = 500) => stalls.some(s => s.ms > minLag && Date.parse(s.at) >= Date.now() - windowMs);
 
 /** fix169: cut a long loop into ~30 ms slices: `const slice = slicer(); for (…) { …; await slice(); }` */
 export function slicer(ms = 30) {

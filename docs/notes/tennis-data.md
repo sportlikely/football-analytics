@@ -19,7 +19,7 @@ https://docs.livetennisapi.com/llms.txt.
 
 | Endpoint | What we use it for |
 |---|---|
-| `/fixtures` | upcoming singles fixtures (every 15 min) |
+| `/matches?status=upcoming` | upcoming singles matches with tier, format, tournament_id (every 15 min; fix187). `/fixtures` (no tier) only when that listing fails; missing tiers are filled from tennis_tournaments (by tournament_id, else same name + tour) |
 | `/matches?status=live` | live singles matches (every 60 s while any is live, else 10 min) |
 | `/history/matches?from=` | finished matches since the last sync (every 30 min) |
 | `/history/matches/{id}` | the point tape of one match → `tennis_match_stats` (tour level first, 150 a run) |
@@ -28,7 +28,7 @@ https://docs.livetennisapi.com/llms.txt.
 | `/history/archive/matches` | results 1968–2022: winner / loser, ranks, seeds; serve statistics from 1991 (detail endpoint / packages only) |
 | `/players/{id}` | bio + ranking + cached stats (first sight, then weekly) |
 | `/players/{id}/stoppages` | medical timeouts, retirements… of players in the next 48 h of fixtures (every 6 h, ATP / WTA / Challenger) |
-| `/rankings?tour=atp|wta` | rank-ordered listing (daily, top 1,600) |
+| `/rankings?system=atp` / `?system=wta` | rank-ordered listing (daily, top 1,600). PRO listing = exactly one `system` and no `player`; `tour` is for elo only (the old `?tour=atp` call answered 400). If the listing is refused, tennis_rankings is filled from /players/{id} (ranking, points, movement); /api/admin/tennis/status → rankings.mode says which |
 | `/tournaments` | catalogue (daily) |
 | `/markets?match_id=` | match-winner market — **admin benchmark only**, last pre-match price (~1 h before the start) |
 

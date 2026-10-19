@@ -78,7 +78,7 @@ import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuali
 import { db } from './db';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { startAsn } from './services/asn';
-import { startTennisScheduler, tennisProbe, tennisStatus } from './services/tennis';
+import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample } from './services/tennis';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
@@ -1007,6 +1007,12 @@ app.get('/api/admin/tennis-probe', async (_req, res) => {
 app.get('/api/admin/tennis/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: tennisStatus() }); } catch (e) { sendError(res, e, 'Tennis status failed'); }
+});
+// fix187: ?tour=atp|wta|challenger&status=upcoming|live|completed&limit=30 — to compare with the real ATP / WTA schedule
+app.get('/api/admin/tennis/sample', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: tennisSample({ tour: String(req.query.tour || ''), status: String(req.query.status || ''), limit: Number(req.query.limit) || 30 }) }); }
+  catch (e) { sendError(res, e, 'Tennis sample failed'); }
 });
 // NFL model report (fix139, admin only): walk-forward test of nfl-v1 (each of the last 5 seasons tuned on the seasons
 // before it), baselines, calibration, the live settings. ?rebuild=1 re-tunes now (takes a minute; runs in the background).

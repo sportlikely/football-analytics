@@ -22,7 +22,7 @@ import zlib from 'zlib';
 import readline from 'readline';
 import { db } from '../db';
 import logger from '../utils/logger';
-import { every, after, slicer } from './perf';
+import { every, after, slicer, stalledWithin } from './perf';
 
 const BASE = 'https://api.livetennisapi.com/api/public/v1';
 const KEY = () => process.env.TENNIS_API_KEY || '';
@@ -70,7 +70,10 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS tennis_calls (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0, errors INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS tennis_meta (k TEXT PRIMARY KEY, v TEXT);
+  CREATE INDEX IF NOT EXISTS idx_tennis_matches_tour ON tennis_matches(tour, status);
 `);
+// fix187: the player's ranking movement (from /players/{id}; the rankings fallback)
+try { db.exec(`ALTER TABLE tennis_players ADD COLUMN ranking_movement INTEGER`); } catch { /* column exists */ }
 const meta = {
   get: (k: string): string | null => (db.prepare(`SELECT v FROM tennis_meta WHERE k = ?`).get(k) as any)?.v ?? null,
   set: (k: string, v: string) => db.prepare(`INSERT OR REPLACE INTO tennis_meta (k, v) VALUES (?, ?)`).run(k, v)
@@ -353,12 +356,46 @@ async function job(name: string, fn: () => Promise<string | void>) {
   catch (e: any) { j.lastError = e?.message || String(e); if (!(e instanceof TennisError && (e.status === 429 || e.plan || /^daily budget/.test(e.message)))) logger.warn(`tennis ${name}: ${j.lastError}`); }
   finally { j.running = false; }
 }
+/** fix187: a job that did not run this time says why (status route). */
+function note(name: string, info: string) {
+  const j = jobs.get(name) || { lastRun: null, lastOk: null, lastError: null, info: null, running: false };
+  j.info = `${info} (${nowIso()})`;
+  jobs.set(name, j);
+}
 const tx = <T>(fn: () => T): T => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
 
 async function syncFixtures() {
-  let n = 0;
-  await pages('/fixtures', { draw: 'singles' }, 25, 'core', rows => { tx(() => { for (const f of rows) if (storeFixture(f)) n++; }); });
-  return `${n} fixtures`;
+  // fix187: /matches?status=upcoming carries tier, format, tournament_id and the players; /fixtures (no tier) only when
+  // that listing fails
+  let n = 0, via = 'matches?status=upcoming';
+  try {
+    await pages('/matches', { status: 'upcoming', draw: 'singles' }, 25, 'core', rows => { tx(() => { for (const m of rows) if (storeMatch(m, 'fixture')) n++; }); });
+  } catch (e: any) {
+    if (n) throw e;
+    via = `fixtures (matches?status=upcoming failed: ${e.message})`;
+    await pages('/fixtures', { draw: 'singles' }, 25, 'core', rows => { tx(() => { for (const f of rows) if (storeFixture(f)) n++; }); });
+  }
+  const filled = fillTiers();
+  return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled from the tournament catalogue` : ''}`;
+}
+
+/**
+ * fix187: matches without a tier (fixture rows, older rows) take tier / surface / indoor from tennis_tournaments — by
+ * tournament_id, else by the same name on the same tour (exact, case-insensitive).
+ */
+function fillTiers(): number {
+  const a = db.prepare(`UPDATE tennis_matches SET
+      tier = COALESCE(tier, (SELECT t.tier FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id)),
+      surface = COALESCE(surface, (SELECT t.surface FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id)),
+      indoor = COALESCE(indoor, (SELECT t.indoor FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id))
+    WHERE tier IS NULL AND tournament_id IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id AND t.tier IS NOT NULL)`).run();
+  const b = db.prepare(`UPDATE tennis_matches SET
+      tournament_id = COALESCE(tournament_id, (SELECT t.id FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1)),
+      tier = (SELECT t.tier FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1),
+      surface = COALESCE(surface, (SELECT t.surface FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1)),
+      indoor = COALESCE(indoor, (SELECT t.indoor FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1))
+    WHERE tier IS NULL AND tournament IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL)`).run();
+  return Number(a.changes) + Number(b.changes);
 }
 
 let liveCount = 0, lastLiveRun = 0;
@@ -414,6 +451,7 @@ async function syncPlayers(max = 120) {
     if (p.is_doubles_team) { db.prepare(`DELETE FROM tennis_players WHERE id = ?`).run(r.id); continue; }
     upPlayer.run(str(p.name), str(p.country), str(p.tour), str(p.hand), str(p.birthday), num(p.height_cm ?? p.height), num(p.ranking), num(p.ranking_points),
       p.stats ? JSON.stringify(p.stats) : null, nowIso(), r.id);
+    if (num(p.ranking_movement) !== null) db.prepare(`UPDATE tennis_players SET ranking_movement = ? WHERE id = ?`).run(num(p.ranking_movement), r.id);
     n++;
     await slice();
   }
@@ -423,20 +461,34 @@ async function syncPlayers(max = 120) {
 async function syncRankings() {
   const date = today();
   let n = 0;
-  for (const tour of ['atp', 'wta']) {
-    const ins = db.prepare(`INSERT OR REPLACE INTO tennis_rankings (tour, date, rank, player_id, player_name, points) VALUES (?, ?, ?, ?, ?, ?)`);
-    await pages('/rankings', { tour }, 8, 'bulk', rows => {
-      tx(() => {
-        for (const r of rows) {
-          if (num(r.rank) === null || (r.system && !['atp', 'wta'].includes(r.system))) continue;
-          ins.run(tour, str(r.effective_date)?.slice(0, 10) || date, num(r.rank), num(r.player_id), str(r.player_name), num(r.points));
-          if (num(r.player_id) !== null) seePlayer.run(num(r.player_id), str(r.player_name), null, tour, num(r.rank), num(r.points), nowIso());
-          n++;
-        }
-      });
-    });
+  const ins = db.prepare(`INSERT OR REPLACE INTO tennis_rankings (tour, date, rank, player_id, player_name, points) VALUES (?, ?, ?, ?, ?, ?)`);
+  // fix187: the rank-ordered listing (PRO) takes exactly one `system` (atp | wta) and no `player`; `tour` is only for elo
+  try {
+    for (const tour of ['atp', 'wta']) await rankingListing(tour, ins, date, c => { n += c; });
+    meta.set('rankings_mode', JSON.stringify({ mode: 'listing', at: nowIso() }));
+    return `${n} ranking rows (listing)`;
+  } catch (e: any) {
+    if (!(e instanceof TennisError) || !(e.status === 400 || e.plan || e.status === 403)) throw e;
+    // the listing refused: today's table from the players' own ranking (GET /players/{id}, refreshed weekly)
+    const rows = db.prepare(`SELECT id, name, tour, ranking, ranking_points FROM tennis_players WHERE ranking IS NOT NULL AND tour IN ('atp', 'wta') ORDER BY tour, ranking`).all() as any[];
+    tx(() => { for (const r of rows) ins.run(r.tour, date, r.ranking, r.id, r.name, r.ranking_points); });
+    meta.set('rankings_mode', JSON.stringify({ mode: 'players', at: nowIso(), why: e.message, rows: rows.length }));
+    return `listing refused (${e.message}): ${rows.length} rows from /players/{id}`;
   }
-  return `${n} ranking rows`;
+}
+async function rankingListing(tour: string, ins: ReturnType<typeof db.prepare>, date: string, done: (n: number) => void) {
+  let n = 0;
+  await pages('/rankings', { system: tour }, 8, 'bulk', rows => {
+    tx(() => {
+      for (const r of rows) {
+        if (num(r.rank) === null || (r.system && !['atp', 'wta'].includes(r.system))) continue;
+        ins.run(tour, str(r.effective_date)?.slice(0, 10) || date, num(r.rank), num(r.player_id), str(r.player_name), num(r.points));
+        if (num(r.player_id) !== null) seePlayer.run(num(r.player_id), str(r.player_name), null, tour, num(r.rank), num(r.points), nowIso());
+        n++;
+      }
+    });
+  });
+  done(n);
 }
 
 async function syncTournaments() {
@@ -455,7 +507,8 @@ async function syncTournaments() {
       }
     });
   });
-  return `${n} tournaments`;
+  const filled = fillTiers();
+  return `${n} tournaments${filled ? `, ${filled} match tiers filled` : ''}`;
 }
 
 /** Stoppages (medical timeouts, retirements …) of the players in singles fixtures of the next 48 h — tour level and Challenger. */
@@ -601,9 +654,15 @@ export function startTennisScheduler() {
   every('tennis tournaments', () => job('tournaments', syncTournaments), 24 * 3600 * 1000).unref();
   every('tennis stoppages', () => job('stoppages', () => syncStoppages()), 6 * 3600 * 1000).unref();
   every('tennis prices', () => job('prices', syncPrices), 10 * 60 * 1000).unref();
-  // backfill: slowly, one month / one archive step every 20 min, always under the reserve
-  every('tennis backfill packages', () => job('backfill packages', backfillPackages), 20 * 60 * 1000).unref();
-  every('tennis backfill archive', () => job('backfill archive', backfillArchive), 20 * 60 * 1000).unref();
+  // backfill: one month / one archive step every 5 min (fix187; ~25 s each), always under the reserve; skipped while a
+  // live sync runs or when the event loop was blocked > 500 ms in the last minute
+  const calm = (name: string, fn: () => Promise<string | void>) => () => {
+    if (jobs.get('live')?.running) { note(name, 'skipped: live sync running'); return; }
+    if (stalledWithin(60 * 1000, 500)) { note(name, 'skipped: event loop blocked > 500 ms in the last minute'); return; }
+    return job(name, fn);
+  };
+  every('tennis backfill packages', calm('backfill packages', backfillPackages), 5 * 60 * 1000).unref();
+  every('tennis backfill archive', calm('backfill archive', backfillArchive), 5 * 60 * 1000).unref();
   after('tennis backfill first', async () => { await job('backfill packages', backfillPackages); await job('backfill archive', backfillArchive); }, 8 * 60 * 1000).unref();
 }
 
@@ -645,7 +704,8 @@ export async function tennisProbe() {
   if (mid) await call('/history/matches/{id}', `/history/matches/${mid}`);
   const pid = fx?.data?.[0]?.player1_id || hist?.data?.[0]?.players?.p1?.id;
   if (pid) { await call('/players/{id}', `/players/${pid}`); await call('/players/{id}/stoppages', `/players/${pid}/stoppages`, { limit: 2 }); }
-  await call('/rankings', '/rankings', { tour: 'atp', limit: 2 });
+  await call('/rankings?system=atp', '/rankings', { system: 'atp', limit: 2 });
+  await call('/matches?status=upcoming', '/matches', { status: 'upcoming', draw: 'singles', limit: 2 });
   await call('/tournaments', '/tournaments', { draw: 'singles', limit: 2 });
   const up = fx?.data?.[0]?.id;
   if (up) await call('/markets', '/markets', { match_id: up });
@@ -655,6 +715,36 @@ export async function tennisProbe() {
   await call('/history/packages?kind=archive', '/history/packages', { kind: 'archive' });
   await call('/history/archive/matches', '/history/archive/matches', { tour: 'atp', from: '2019-01-01', to: '2019-12-31', limit: 2 });
   return { configured: true, base: BASE, calls: out.length, results: out };
+}
+
+/**
+ * fix187: a sample to compare with the real ATP / WTA schedule: start (UTC), tournament, tier, surface, round, both players
+ * with their ranks, score and winner.
+ */
+export function tennisSample(o: { tour?: string; status?: string; limit?: number }) {
+  const tour = ['atp', 'wta', 'challenger', 'itf'].includes(String(o.tour)) ? String(o.tour) : 'atp';
+  const status = ['upcoming', 'live', 'completed'].includes(String(o.status)) ? String(o.status) : 'upcoming';
+  const limit = Math.min(200, Math.max(1, Number(o.limit) || 30));
+  const where = status === 'upcoming' ? `AND m.scheduled_at >= ?` : status === 'completed' ? `AND m.scheduled_at <= ?` : `AND ? IS NOT NULL`;
+  const rows = db.prepare(`SELECT m.*, p1.ranking AS p1_rank, p2.ranking AS p2_rank FROM tennis_matches m
+      LEFT JOIN tennis_players p1 ON p1.id = m.p1_id LEFT JOIN tennis_players p2 ON p2.id = m.p2_id
+    WHERE m.tour = ? AND m.status = ? ${where} ORDER BY m.scheduled_at ${status === 'completed' ? 'DESC' : 'ASC'} LIMIT ?`)
+    .all(tour, status, new Date(Date.now() - 3 * 3600 * 1000).toISOString(), limit) as any[];
+  const score = (r: any) => {
+    try {
+      const g = JSON.parse(r.games || 'null');
+      if (Array.isArray(g) && Array.isArray(g[0]) && Array.isArray(g[1])) return g[0].map((x: any, i: number) => `${x}-${g[1][i] ?? ''}`).join(' ');
+    } catch { /* none */ }
+    return null;
+  };
+  return {
+    tour, status, count: rows.length,
+    rows: rows.map(r => ({
+      startUtc: r.scheduled_at, tournament: r.tournament, tier: r.tier, surface: r.surface, indoor: r.indoor == null ? null : !!r.indoor, round: r.round || r.round_code,
+      bestOf: r.best_of, p1: { name: r.p1_name, rank: r.p1_rank ?? null }, p2: { name: r.p2_name, rank: r.p2_rank ?? null },
+      score: score(r), winner: r.winner === 1 ? r.p1_name : r.winner === 2 ? r.p2_name : null, outcome: r.outcome, source: r.source, id: r.id
+    }))
+  };
 }
 
 /** Admin status: rows, coverage, backfill progress, quota, jobs. */
@@ -668,12 +758,21 @@ export function tennisStatus() {
   const pkgs = (db.prepare(`SELECT k, v FROM tennis_meta WHERE k LIKE 'pkg:%' ORDER BY k DESC`).all() as any[]).map(r => ({ month: r.k.slice(4), ...(() => { try { return JSON.parse(r.v); } catch { return { note: r.v }; } })() }));
   const now = new Date(); const monthsTotal = (now.getUTCFullYear() - 2023) * 12 + now.getUTCMonth();
   const arch = (db.prepare(`SELECT k, v FROM tennis_meta WHERE k LIKE 'arch%' ORDER BY k DESC`).all() as any[]).map(r => ({ key: r.k, value: r.v }));
+  // fix187: per month (2023+), how many completed matches have a tape and how many of those tapes are complete
+  const tapeByMonth = (db.prepare(`SELECT substr(m.scheduled_at, 1, 7) AS month, COUNT(*) AS completed,
+      SUM(CASE WHEN s.match_id IS NOT NULL THEN 1 ELSE 0 END) AS withStats, SUM(CASE WHEN s.complete = 1 THEN 1 ELSE 0 END) AS completeStats
+    FROM tennis_matches m LEFT JOIN tennis_match_stats s ON s.match_id = m.id AND s.player = 1
+    WHERE m.id > 0 AND m.status = 'completed' AND m.scheduled_at >= '2023-01-01' GROUP BY 1 ORDER BY 1 DESC`).all() as any[])
+    .map(r => ({ ...r, pctWithStats: r.completed ? Math.round((1000 * r.withStats) / r.completed) / 10 : null, pctCompleteOfStats: r.withStats ? Math.round((1000 * r.completeStats) / r.withStats) / 10 : null, partial: r.withStats - r.completeStats }));
   return {
     configured: !!KEY(),
     rows: Object.fromEntries(['tennis_matches', 'tennis_players', 'tennis_tournaments', 'tennis_match_stats', 'tennis_rankings', 'tennis_stoppages', 'tennis_prices'].map(t => [t, cnt(t)])),
     matchesBySource: db.prepare(`SELECT source, COUNT(*) AS n FROM tennis_matches GROUP BY source`).all(),
     matchesByTourTierYear: byTour,
     since2023: { completed: recent.n || 0, withStats: recent.withStats || 0, completeStats: recent.complete || 0, pctWithStats: recent.n ? Math.round((1000 * (recent.withStats || 0)) / recent.n) / 10 : null },
+    tapeByMonth,
+    rankings: { mode: (() => { try { return JSON.parse(meta.get('rankings_mode') || 'null'); } catch { return null; } })(), byTour: db.prepare(`SELECT tour, MAX(date) AS date, COUNT(*) AS n FROM tennis_rankings GROUP BY tour`).all() },
+    upcomingWithoutTier: (db.prepare(`SELECT COUNT(*) AS n FROM tennis_matches WHERE status = 'upcoming' AND tier IS NULL`).get() as any).n,
     backfill: { packages: { done: pkgs.length, of: monthsTotal, months: pkgs.slice(0, 40) }, archive: arch },
     quota: { callsToday: usedToday(), ourCountToday: callsToday(), limit: dayLimit(), reserve: RESERVE(), usage: usage ? { tier: usage.tier, calls: usage.calls, remaining: usage.remaining, readAt: new Date(usage.at).toISOString() } : null, backoffUntil: backoffUntil > Date.now() ? new Date(backoffUntil).toISOString() : null, blockedEndpoints: Object.fromEntries(blocked) },
     callsByDay: db.prepare(`SELECT day, calls, errors FROM tennis_calls ORDER BY day DESC LIMIT 14`).all(),
