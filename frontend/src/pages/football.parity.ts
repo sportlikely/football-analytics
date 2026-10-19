@@ -14,6 +14,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.h2h',
     'game.form',
     'game.restTab',
+    'game.pastMatchLinks', // fix180: MatchDetail H2H / form / rest rows (RowLink), team page fixtures
     'game.standingsTab',
     'game.liveChance',
     'game.swingChart',

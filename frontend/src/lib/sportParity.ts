@@ -39,6 +39,7 @@ export const PARITY = [
   { key: 'game.h2h', label: 'Head-to-head', football: true, basketball: true, nfl: true },
   { key: 'game.form', label: 'Form', football: true, basketball: true, nfl: true },
   { key: 'game.restTab', label: 'Rest tab', football: true, basketball: true, nfl: true },
+  { key: 'game.pastMatchLinks', label: 'Past-match rows link to the match (H2H, form, rest / schedule)', football: true, basketball: true, nfl: true },
   { key: 'game.standingsTab', label: 'Standings tab', football: true, basketball: true, nfl: true },
   { key: 'game.liveChance', label: 'Live win chance', football: true, basketball: true, nfl: true },
   { key: 'game.swingChart', label: 'Win-chance swing chart', football: true, basketball: true, nfl: true },

@@ -14,7 +14,7 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { afGet, afRemaining, afConfigured } from './apiFootball';
 import { groupForCompetition, fdNameFor, normalizeName } from './history';
-import { isKnownAfFixture, fdTwinOf, afCompetitions, afStandingsCached, afWindowMatches, currentSeason } from './afMatches';
+import { noteAfFixture, fdTwinOf, afCompetitions, afStandingsCached, afWindowMatches, currentSeason } from './afMatches';
 import { isMissingPlayer } from './missingPlayers';
 import { isCrawlerRequest, noProviderCalls } from './afUsage';
 import { teamAnalysis, teamAnalysisTeaser } from './teamAnalysis';
@@ -320,8 +320,9 @@ const WINDOW_STATUS: Record<string, string> = { FINISHED: 'FT', SCHEDULED: 'NS',
 
 const simpleFixture = (f: any) => ({
   fid: f.fixture.id as number,
-  // prefer our Football-Data twin of the fixture (it carries the v3 prediction), else the API-Football page
-  matchId: fdTwinOf(f.fixture.date, f.teams.home.name, f.teams.away.name) ?? (isKnownAfFixture(AF_OFFSET + f.fixture.id) ? AF_OFFSET + f.fixture.id : null),
+  // prefer our Football-Data twin of the fixture (it carries the v3 prediction), else the API-Football page (fix180:
+  // always — a fixture without a page yet gets one built on the first visit)
+  matchId: fdTwinOf(f.fixture.date, f.teams.home.name, f.teams.away.name) ?? (noteAfFixture(f.fixture.id), AF_OFFSET + f.fixture.id),
   date: f.fixture.date,
   status: f.fixture.status?.short,
   comp: f.league?.name,

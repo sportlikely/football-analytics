@@ -4,7 +4,19 @@ import { API_URL } from '../lib/socket'
 import { t } from '../lib/i18n'
 
 /** News stories (headline, outlet, time, link to the original article) — shared by team, league and basketball pages. */
-export interface NewsItem { title: string; link: string; source: string; published: string | null; summary?: string; image?: string | null; leagues?: { code: string; name: string }[] }
+export interface NewsItem { title: string; link: string; source: string; published: string | null; summary?: string; image?: string | null; imageKind?: 'photo' | 'logo'; leagues?: { code: string; name: string }[] }
+
+/** fix180: the story has a real picture (not a league logo / team crest standing in for one). */
+export const isPhoto = (n: { image?: string | null; imageKind?: string }) => !!n.image && n.imageKind !== 'logo'
+
+/** fix180: a story's thumbnail — its picture, else the league logo / team crest the server picked (shown whole), else
+ *  our mark; never a grey tile with the outlet's name. */
+export function NewsPic({ n }: { n: { image?: string | null; imageKind?: string } }) {
+  const [broken, setBroken] = useState(false)
+  const src = !n.image || broken ? '/logo-mark.png' : n.image
+  const contain = !isPhoto(n) || broken
+  return <img src={src} alt="" loading="lazy" className={contain ? 'w-full h-full object-contain p-2' : 'w-full h-full object-cover'} onError={() => setBroken(true)} />
+}
 
 export const newsAgo = (iso: string | null) => {
   if (!iso) return ''
@@ -35,11 +47,7 @@ export function NewsRows({ items, showLeague = false, max = 12 }: { items: NewsI
         <li key={n.link}>
           <a href={n.link} target="_blank" rel="noreferrer" className="flex gap-3 p-2 rounded-xl hover:bg-surface2/60 transition-colors">
             <span className="w-20 h-14 rounded-lg overflow-hidden bg-surface2 flex-shrink-0 grid place-items-center">
-              {n.image ? (
-                <img src={n.image} alt="" loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} />
-              ) : (
-                <span className="text-[9px] font-extrabold uppercase tracking-wide text-faint px-1 text-center">{n.source}</span>
-              )}
+              <NewsPic n={n} />
             </span>
             <span className="min-w-0 flex flex-col gap-1">
               <span className="text-[13px] font-bold leading-snug text-ink break-words">{n.title}</span>
@@ -54,21 +62,21 @@ export function NewsRows({ items, showLeague = false, max = 12 }: { items: NewsI
 
 /** Lead story with a big picture, then a list — the football home's news block. */
 export function NewsLead({ items, max = 7 }: { items: NewsItem[]; max?: number }) {
-  const lead = items.find(n => n.image) || items[0]
+  const lead = items.find(isPhoto) || items[0]
   if (!lead) return null
   const rest = items.filter(n => n !== lead).slice(0, max - 1)
   return (
     <div className="grid gap-4 md:grid-cols-[1.25fr_1fr]">
       <a href={lead.link} target="_blank" rel="noreferrer" className="card card-hover overflow-hidden flex flex-col">
-        {lead.image && (
+        {isPhoto(lead) && (
           <span className="relative block aspect-[16/9] bg-surface2 overflow-hidden">
-            <img src={lead.image} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
+            <img src={lead.image || ''} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
             <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
             <span className="absolute left-4 bottom-3 text-[11px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
           </span>
         )}
         <span className="p-5 flex flex-col gap-2 flex-1">
-          {!lead.image && <span className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{lead.source}</span>}
+          {!isPhoto(lead) && <span className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{lead.source}</span>}
           <span className="font-display text-lg sm:text-xl font-bold leading-snug text-ink break-words">{lead.title}</span>
           {lead.summary && <span className="text-sm text-muted break-words">{lead.summary}</span>}
           <span className="mt-auto pt-2 text-[11px] text-faint">{lead.published ? `${newsAgo(lead.published)} · ` : ''}{t('opens {0}', { 0: lead.source })}</span>

@@ -18,6 +18,7 @@ import Highlights from '../components/sport/game/Highlights'
 import { newerFootballLive, tickedMinute } from '../lib/liveState'
 import { footballTeamHref } from '../lib/teamLink'
 import NameLink, { href as hrefOf } from '../components/sport/NameLink'
+import RowLink from '../components/sport/RowLink'
 import { tNodes } from '../lib/tNodes'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
@@ -1527,14 +1528,14 @@ function TeamPanel({ team, side, row, recent }: { team: Team; side: SideK; row: 
             const r = resultFor(team.id, m)
             return (
               <li key={m.id}>
-                <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs hover:bg-surface2/50">
+                <RowLink to={hrefOf.match(m.id)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
                   <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${r ? RES_CLS[r] : 'bg-surface2 text-faint'}`}>{r || '–'}</span>
                   <NameLink to={hrefOf.match(m.id)} className="num text-faint w-14 shrink-0 whitespace-nowrap">{new Date(m.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</NameLink>
                   <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${isHome ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{isHome ? tt("H") : tt("A")}</span>
                   {opp.crest ? <img src={opp.crest} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
                   <TeamName team={opp} className="text-ink font-medium truncate" />
                   <NameLink to={hrefOf.match(m.id)} className="ml-auto num font-bold text-ink shrink-0">{gf}–{ga}</NameLink>
-                </div>
+                </RowLink>
               </li>
             )
           })}
@@ -1599,7 +1600,7 @@ function H2H({ h2h, home, away }: { h2h: H2HData; home: Team; away: Team }) {
           const dot = ours > 0 ? 'bg-home' : ours < 0 ? 'bg-away' : 'bg-muted/50'
           return (
             <li key={h.id}>
-              <div className="grid grid-cols-[3.5rem_1fr_auto_1fr_0.75rem] sm:grid-cols-[6rem_1fr_auto_1fr_1rem] items-center gap-2 sm:gap-3 py-2 px-1 text-sm">
+              <RowLink to={hrefOf.match(h.id)} className="grid grid-cols-[3.5rem_1fr_auto_1fr_0.75rem] sm:grid-cols-[6rem_1fr_auto_1fr_1rem] items-center gap-2 sm:gap-3 py-2 px-1 text-sm rounded-lg">
                 <span className="text-[11px] text-faint leading-tight min-w-0">
                   <NameLink to={hrefOf.match(h.id)} className="num block whitespace-nowrap">{new Date(h.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</NameLink>
                   <NameLink to={hrefOf.league(h.competition?.code)} className="hidden sm:block text-[10px] truncate">{h.competition?.name}</NameLink>
@@ -1616,7 +1617,7 @@ function H2H({ h2h, home, away }: { h2h: H2HData; home: Team; away: Team }) {
                   <TeamName team={h.awayTeam} className={`truncate ${ag > hg ? 'font-bold text-ink' : 'text-muted'}`} />
                 </span>
                 <span className={`justify-self-end w-2 h-2 rounded-full ${dot}`} />
-              </div>
+              </RowLink>
             </li>
           )
         })}
@@ -1641,7 +1642,7 @@ interface TeamAvg {
 }
 
 interface Injury { id: number | null; name: string; out: boolean; reason: string | null; importance?: number | null; importanceLabel?: string | null; starts?: number | null; of?: number | null }
-interface Fixture1 { date: string; days: number; home: boolean; opponent: string; opponentCrest: string | null; opponentId?: number | null; competition: string | null; competitionCode?: string | null; score: string | null }
+interface Fixture1 { matchId?: number | null; date: string; days: number; home: boolean; opponent: string; opponentCrest: string | null; opponentId?: number | null; competition: string | null; competitionCode?: string | null; score: string | null }
 interface TeamSchedule { previous: Fixture1 | null; next: Fixture1 | null; games14: number; games30: number | null; away30: number | null; recent: Fixture1[]; upcoming: Fixture1[] }
 const IMP_TONE: Record<number, string> = { 5: 'text-loss', 4: 'text-draw', 3: 'text-ink', 2: 'text-muted', 1: 'text-faint' }
 const IMP_BAR: Record<number, string> = { 5: 'bg-loss', 4: 'bg-draw', 3: 'bg-ink/70', 2: 'bg-muted/70', 1: 'bg-faint/70' }
@@ -1756,11 +1757,13 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
             {s.recent.map((f, i) => {
               const r = res(f)
               return (
-                <li key={i} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
-                  <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${r ? RES_CLS[r] : 'bg-surface2 text-faint'}`}>{r || '–'}</span>
-                  <span className="num text-faint w-12 shrink-0">{date(f)}</span>
-                  {opp(f)}
-                  {f.score && <span className="ml-auto num font-bold text-ink shrink-0">{f.score.replace('-', '–')}</span>}
+                <li key={i}>
+                  <RowLink to={f.matchId ? hrefOf.match(f.matchId) : null} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
+                    <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${r ? RES_CLS[r] : 'bg-surface2 text-faint'}`}>{r || '–'}</span>
+                    <span className="num text-faint w-12 shrink-0">{date(f)}</span>
+                    {opp(f)}
+                    {f.score && <span className="ml-auto num font-bold text-ink shrink-0">{f.score.replace('-', '–')}</span>}
+                  </RowLink>
                 </li>
               )
             })}
@@ -1772,11 +1775,13 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
           <div className="label pb-1 px-2">{tt("After this match")}</div>
           <ul>
             {s.upcoming.map((f, i) => (
-              <li key={i} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
-                <span className="w-6 h-6 rounded-md grid place-items-center border border-dashed border-line text-faint shrink-0">{ICO.clock}</span>
-                <span className="num text-faint w-12 shrink-0">{date(f)}</span>
-                {opp(f)}
-                <span className="ml-auto rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-muted num shrink-0">+{tt("{0} d", { 0: Math.floor(f.days) })}</span>
+              <li key={i}>
+                <RowLink to={f.matchId ? hrefOf.match(f.matchId) : null} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
+                  <span className="w-6 h-6 rounded-md grid place-items-center border border-dashed border-line text-faint shrink-0">{ICO.clock}</span>
+                  <span className="num text-faint w-12 shrink-0">{date(f)}</span>
+                  {opp(f)}
+                  <span className="ml-auto rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-muted num shrink-0">+{tt("{0} d", { 0: Math.floor(f.days) })}</span>
+                </RowLink>
               </li>
             ))}
           </ul>

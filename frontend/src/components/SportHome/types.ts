@@ -35,7 +35,7 @@ export interface HGame {
   pred: HPred
 }
 
-export interface HNews { title: string; link: string; source: string; published: string | null; summary?: string; image?: string | null; leagues?: { code: string; name: string }[] }
+export interface HNews { title: string; link: string; source: string; published: string | null; summary?: string; image?: string | null; imageKind?: 'photo' | 'logo'; leagues?: { code: string; name: string }[] }
 
 /** "Our record" bars: label, hit rate and games (rows under 30 games are not shown; at most 6, high → low). */
 export interface HRecordRow { key: string; label: string; pct: number | null; n: number }

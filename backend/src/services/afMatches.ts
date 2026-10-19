@@ -140,8 +140,29 @@ function competitionOf(league: any) {
   };
 }
 
+/**
+ * fix180: every fixture we link to (H2H, form, schedule, team page rows) gets a match page, built from the provider on
+ * the first visit (finished ones are stored afterwards). Remembered in memory and in af_linked so random ids still 404.
+ */
+const linkedFixtures = new Set<number>();
+let linkedPending: number[] = [];
+export function noteAfFixture(fid: number) {
+  if (!fid || linkedFixtures.has(fid)) return;
+  linkedFixtures.add(fid);
+  linkedPending.push(fid);
+  if (linkedPending.length === 1) setTimeout(() => {
+    const ids = linkedPending; linkedPending = [];
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS af_linked (fixture_id INTEGER PRIMARY KEY, at TEXT NOT NULL)`);
+      const ins = db.prepare(`INSERT OR IGNORE INTO af_linked (fixture_id, at) VALUES (?, ?)`), now = new Date().toISOString();
+      db.exec('BEGIN'); for (const id of ids) ins.run(id, now); db.exec('COMMIT');
+    } catch { try { db.exec('ROLLBACK'); } catch { /* none open */ } }
+  }, 2000).unref?.();
+}
+
 export function toFdMatch(f: any) {
   const st = f.fixture?.status || {};
+  if (f.fixture?.id) noteAfFixture(f.fixture.id);
   const round: string = f.league?.round || '';
   const md = round.match(/(\d+)\s*$/);
   const hg = f.goals?.home ?? null, ag = f.goals?.away ?? null;
@@ -316,7 +337,8 @@ export function onAfWindow(fn: (matches: any[]) => void) {
 export function isKnownAfFixture(matchId: number): boolean {
   if (windowMatches.some(m => m.id === matchId) || liveById.has(matchId)) return true;
   const fid = matchId - AF_OFFSET;
-  for (const t of ['af_fixtures', 'eur_matches', 'nat_matches']) {
+  if (linkedFixtures.has(fid)) return true;
+  for (const t of ['af_fixtures', 'eur_matches', 'nat_matches', 'af_linked']) {
     try {
       if (db.prepare(`SELECT 1 FROM ${t} WHERE fixture_id = ?`).get(fid)) return true;
     } catch {
@@ -1389,7 +1411,10 @@ export async function teamSchedule(afTeamId: number, kickoffIso: string) {
     const opp = home ? f.teams.away : f.teams.home;
     const gf = home ? f.goals?.home : f.goals?.away, ga = home ? f.goals?.away : f.goals?.home;
     const t = new Date(f.fixture.date).getTime();
+    noteAfFixture(f.fixture.id);
     return {
+      // fix180: the row opens its match (our Football-Data twin when we have one, else the API-Football page)
+      matchId: fdTwinOf(f.fixture.date, f.teams.home.name, f.teams.away.name) ?? AF_OFFSET + f.fixture.id,
       date: new Date(t).toISOString(),
       days: Math.round((Math.abs(ko - t) / 86400000) * 10) / 10,
       home,

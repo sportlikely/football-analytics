@@ -6,6 +6,7 @@ import CountUp from '../CountUp'
 import { RevealChip } from '../Reveal'
 import { DcHelp } from '../DcPick'
 import RecordLink from '../RecordLink'
+import { NewsPic, isPhoto } from '../NewsList'
 import type { HGame, HTeam, HPick, HNews, HRecord, HSpecial, HResults, SportAdapter } from './types'
 
 /** Shared pieces of the sport home page (fix141) — the football home's look, for every sport. */
@@ -579,20 +580,20 @@ export function NewsBlock({ news, full, loading }: { news: HNews[]; full: boolea
       {news.length ? (
         <div className="grid gap-4 md:grid-cols-[1.25fr_1fr]">
           {(() => {
-            const lead = news.find(n => n.image) || news[0]
+            const lead = news.find(isPhoto) || news[0]
             const rest = news.filter(n => n !== lead).slice(0, full ? 6 : 5)
             return (
               <>
                 <a href={lead.link} target="_blank" rel="noreferrer" className="card card-hover overflow-hidden flex flex-col">
-                  {lead.image && (
+                  {isPhoto(lead) && (
                     <span className="relative block aspect-[16/9] bg-surface2 overflow-hidden">
-                      <img src={lead.image} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
+                      <img src={lead.image || ''} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
                       <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
                       <span className="absolute left-4 bottom-3 text-[11px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
                     </span>
                   )}
                   <span className="p-5 flex flex-col gap-2 flex-1">
-                    {!lead.image && <span className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{lead.source}</span>}
+                    {!isPhoto(lead) && <span className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{lead.source}</span>}
                     <span className="font-display text-lg sm:text-xl font-bold leading-snug text-ink break-words">{lead.title}</span>
                     {lead.summary && <span className="text-sm text-muted break-words">{lead.summary}</span>}
                     <span className="mt-auto pt-2 text-[11px] text-faint">{lead.published ? `${ago(lead.published)} · ` : ''}{tt("opens {0}", { 0: lead.source })}</span>
@@ -602,7 +603,7 @@ export function NewsBlock({ news, full, loading }: { news: HNews[]; full: boolea
                   {rest.map(n => (
                     <a key={n.link} href={n.link} target="_blank" rel="noreferrer" className="flex gap-3 p-2.5 rounded-2xl hover:bg-surface2/60 transition-colors">
                       <span className="w-24 h-16 sm:w-28 sm:h-[72px] rounded-xl overflow-hidden bg-surface2 flex-shrink-0 grid place-items-center">
-                        {n.image ? <img src={n.image} alt="" loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} /> : <span className="text-[10px] font-extrabold uppercase tracking-wide text-faint px-1 text-center">{n.source}</span>}
+                        <NewsPic n={n} />
                       </span>
                       <span className="min-w-0 flex flex-col gap-1">
                         <span className="text-sm font-bold leading-snug text-ink break-words">{n.title}</span>
@@ -624,7 +625,7 @@ export function NewsBlock({ news, full, loading }: { news: HNews[]; full: boolea
 
 /** The news column on wide screens (third column of the first row). */
 export function NewsRail({ news, loading }: { news: HNews[]; loading: string }) {
-  const lead = news.find(n => n.image) || news[0]
+  const lead = news.find(isPhoto) || news[0]
   const rest = lead ? news.filter(n => n !== lead).slice(0, 8) : []
   return (
     <section className="card p-3 max-h-[calc(100vh-6.5rem)] overflow-y-auto flex flex-col gap-2">
@@ -634,15 +635,15 @@ export function NewsRail({ news, loading }: { news: HNews[]; loading: string }) 
       ) : (
         <>
           <a href={lead.link} target="_blank" rel="noreferrer" className="shrink-0 rounded-2xl overflow-hidden bg-surface2/40 hover:bg-surface2/70 transition-colors flex flex-col">
-            {lead.image && (
+            {isPhoto(lead) && (
               <span className="relative block aspect-[16/9] bg-surface2 overflow-hidden">
-                <img src={lead.image} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
+                <img src={lead.image || ''} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
                 <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
                 <span className="absolute left-3 bottom-2 text-[10px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
               </span>
             )}
             <span className="p-3 flex flex-col gap-1.5 flex-1 min-w-0">
-              {!lead.image && <span className="text-[10px] font-extrabold uppercase tracking-wide text-accent">{lead.source}</span>}
+              {!isPhoto(lead) && <span className="text-[10px] font-extrabold uppercase tracking-wide text-accent">{lead.source}</span>}
               <span className="font-display font-bold leading-snug text-ink break-words">{lead.title}</span>
               {lead.summary && <span className="text-xs text-muted break-words">{lead.summary}</span>}
               <span className="text-[11px] text-faint">{lead.published ? ago(lead.published) : lead.source}</span>
@@ -651,7 +652,7 @@ export function NewsRail({ news, loading }: { news: HNews[]; loading: string }) 
           {rest.map(n => (
             <a key={n.link} href={n.link} target="_blank" rel="noreferrer" className="shrink-0 flex gap-3 p-2 rounded-2xl hover:bg-surface2/60 transition-colors">
               <span className="w-20 h-14 rounded-xl overflow-hidden bg-surface2 flex-shrink-0 grid place-items-center">
-                {n.image ? <img src={n.image} alt="" loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} /> : <span className="text-[9px] font-extrabold uppercase tracking-wide text-faint px-1 text-center">{n.source}</span>}
+                <NewsPic n={n} />
               </span>
               <span className="min-w-0 flex flex-col gap-1">
                 <span className="text-[13px] font-bold leading-snug text-ink break-words">{n.title}</span>

@@ -9,6 +9,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.howCalculated',
     'game.preview',
     'game.restTab',
+    'game.pastMatchLinks', // fix180: NflGame H2HForm meetings + form rows, GameTabs schedule rows
     'game.standingsTab',
     'game.liveChance',
     'game.swingChart',

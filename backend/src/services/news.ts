@@ -14,6 +14,7 @@ import logger from '../utils/logger';
 import { schoolName, collegeNick } from './nfl';
 import { db } from '../db';
 import { every, after } from './perf';
+import { isBlockedSource, JUNK_TITLE, YOUTH_WOMEN } from './newsBlocklist';
 
 type Sport = 'football' | 'basketball' | 'american-football';
 type Feed = { source: string; url: string; league?: string; sport?: Sport; search?: boolean };
@@ -184,6 +185,8 @@ const RISKY = new Set(['america', 'nice', 'santos', 'leon', 'austin', 'charlotte
 export interface NewsItem {
   title: string; link: string; source: string; published: string | null; summary: string; image: string | null;
   leagues: { code: string; name: string }[];
+  /** fix180: 'logo' = a league logo / team crest standing in for a missing picture */
+  imageKind?: 'photo' | 'logo';
 }
 
 db.exec(`
@@ -277,9 +280,9 @@ async function fetchFeed(f: Feed): Promise<Raw[]> {
  * Some feeds (ESPN) ship no picture with their items. The article page's own preview image (og:image — the one
  * the outlet provides for link previews) is used instead. Looked up once per article and stored with it.
  */
-async function previewImage(link: string): Promise<string | null> {
+async function previewImage(link: string, timeout = 6000): Promise<string | null> {
   try {
-    const res = await fetch(link, { signal: AbortSignal.timeout(6000), headers: UA });
+    const res = await fetch(link, { signal: AbortSignal.timeout(timeout), headers: UA });
     if (!res.ok) return null;
     const html = (await res.text()).slice(0, 300_000);
     const m = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]*content=["']([^"']+)["']/i)
@@ -289,6 +292,126 @@ async function previewImage(link: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* fix180: pictures, league names, junk                                 */
+/* ------------------------------------------------------------------ */
+
+db.exec(`CREATE TABLE IF NOT EXISTS news_pics (link TEXT PRIMARY KEY, url TEXT, image TEXT, at TEXT NOT NULL)`);
+const PIC_TIMEOUT = 3000;
+/**
+ * A Google News link → the publisher's article URL. The link no longer redirects: its own page carries a signature and
+ * a timestamp, and Google's decode call returns the URL (two requests, 3 s each). Null when that fails.
+ */
+async function resolveGoogleNews(link: string): Promise<string | null> {
+  const id = link.split('/articles/')[1]?.split('?')[0];
+  if (!id) return null;
+  try {
+    const page = await (await fetch(`https://news.google.com/articles/${id}`, { headers: UA, signal: AbortSignal.timeout(PIC_TIMEOUT) })).text();
+    const sig = page.match(/data-n-a-sg="([^"]+)"/)?.[1], ts = page.match(/data-n-a-ts="([^"]+)"/)?.[1];
+    if (!sig || !ts) return null;
+    const req = [[['Fbv4je', JSON.stringify(['garturlreq', [['X', 'X', ['X', 'X'], null, null, 1, 1, 'US:en', null, 1, null, null, null, null, null, 0, 1], 'X', 'X', 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0], id, Number(ts), sig]), null, 'generic']]];
+    const r = await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute', {
+      method: 'POST', headers: { ...UA, 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: 'f.req=' + encodeURIComponent(JSON.stringify(req)), signal: AbortSignal.timeout(PIC_TIMEOUT)
+    });
+    const url = (await r.text()).match(/\\"garturlres\\",\\"(https?:[^\\"]+)\\"/)?.[1] || null;
+    return url && /^https:\/\//.test(url) ? url : null;
+  } catch { return null; }
+}
+/** A story's picture: the publisher page's og:image / twitter:image (cached by link for 7 days, also when none). */
+export async function pictureFor(link: string): Promise<string | null> {
+  const c = db.prepare(`SELECT image, at FROM news_pics WHERE link = ?`).get(link) as any;
+  if (c && Date.now() - Date.parse(c.at) < 7 * 86400000) return c.image || null;
+  const url = /news\.google\.com/.test(link) ? await resolveGoogleNews(link) : link;
+  const image = url ? await previewImage(url, PIC_TIMEOUT) : null;
+  db.prepare(`INSERT OR REPLACE INTO news_pics (link, url, image, at) VALUES (?, ?, ?, ?)`).run(link, url, image, new Date().toISOString());
+  return image;
+}
+const picQueue = new Set<string>();
+let picWorkers = 0;
+/** Background picture lookups, 4 at a time; each found picture is saved on the story. */
+function queuePictures(links: string[]) {
+  for (const l of links) picQueue.add(l);
+  while (picWorkers < 4 && picQueue.size) {
+    picWorkers++;
+    void (async () => {
+      const setImg = db.prepare(`UPDATE news_items SET image = ? WHERE link = ? AND image IS NULL`);
+      while (picQueue.size) {
+        const link = picQueue.values().next().value as string;
+        picQueue.delete(link);
+        try { const img = await pictureFor(link); if (img) setImg.run(img, link); } catch { /* next */ }
+      }
+      picWorkers--;
+    })();
+  }
+}
+
+/** League name as the league page shows it (every sport): hand-written names, then the competitions we track. */
+const nameCache = new Map<string, { at: number; name: string | null }>();
+db.exec(`CREATE TABLE IF NOT EXISTS news_league_names (key TEXT PRIMARY KEY, name TEXT NOT NULL)`);
+export function leagueNameOf(code: string, sport: Sport = 'football'): string {
+  const fixed = sport === 'basketball' ? BB_LEAGUE_NAME.get(code) : sport === 'american-football' ? (code === 'NCAA' ? 'College football' : code === 'NFL' ? 'NFL' : undefined) : LEAGUE_NAME.get(code);
+  if (fixed) return fixed;
+  const k = `${sport}|${code}`, c = nameCache.get(k);
+  if (c && Date.now() - c.at < (c.name ? 3600 : 300) * 1000) return c.name || code;
+  let name: string | null = null;
+  try {
+    if (sport === 'basketball') name = (db.prepare(`SELECT name FROM bb_leagues WHERE code = ?`).get(code) as any)?.name || null;
+    else if (sport === 'football') {
+      const { afCompetitions } = require('./afMatches') as typeof import('./afMatches');
+      name = afCompetitions().find(x => x.code === code)?.name || null;
+      if (!name) name = (db.prepare(`SELECT competition_name AS n FROM predictions WHERE competition_code = ? AND competition_name IS NOT NULL ORDER BY utc_date DESC LIMIT 1`).get(code) as any)?.n || null;
+      if (!name && /^AF\d+$/.test(code)) name = (db.prepare(`SELECT name FROM af_extra_leagues WHERE league_id = ?`).get(Number(code.slice(2))) as any)?.name || null;
+      if (!name) name = ({ EC: 'European Championship', WC: 'World Cup' } as Record<string, string>)[code] || null;
+    }
+    // names seen before are kept (the provider's league list loads a while after a restart)
+    if (name) db.prepare(`INSERT OR REPLACE INTO news_league_names (key, name) VALUES (?, ?)`).run(k, name);
+    else name = (db.prepare(`SELECT name FROM news_league_names WHERE key = ?`).get(k) as any)?.name || null;
+  } catch { /* tables not ready */ }
+  nameCache.set(k, { at: Date.now(), name });
+  return name || code;
+}
+
+/** fix180: the picture a story without one gets — its league's logo (football / basketball) or the crest of the NFL /
+ *  college team it names; our own mark as the last resort (never a grey tile with a domain name). */
+const FD_AF: Record<string, number> = { PL: 39, ELC: 40, PD: 140, SA: 135, BL1: 78, FL1: 61, DED: 88, PPL: 94, CL: 2, BSA: 71, EC: 4, WC: 1 };
+let nflCrests: { at: number; list: { re: RegExp; logo: string; league: string }[] } | null = null;
+function fallbackPicture(r: any): string {
+  const codes = String(r.leagues || '').split(',').filter(Boolean);
+  if (r.sport === 'football') {
+    for (const c of codes) { const id = /^AF(\d+)$/.exec(c)?.[1] ?? FD_AF[c]; if (id) return `https://media.api-sports.io/football/leagues/${id}.png`; }
+  } else if (r.sport === 'basketball') {
+    for (const c of codes) {
+      try { const l = db.prepare(`SELECT league_id, logo FROM bb_leagues WHERE code = ?`).get(c) as any; if (l) return l.logo || `https://media.api-sports.io/basketball/leagues/${l.league_id}.png`; } catch { /* none */ }
+    }
+  } else {
+    if (!nflCrests || Date.now() - nflCrests.at > 3600 * 1000) {
+      const list: { re: RegExp; logo: string; league: string }[] = [];
+      try {
+        for (const t of db.prepare(`SELECT team_id, logo, league FROM nfl_teams WHERE logo IS NOT NULL`).all() as any[]) {
+          const names = nflTeamNamesById(t.team_id).filter(n => n.length >= 4);
+          if (names.length) list.push({ re: new RegExp(`(?<![\\p{L}])(?:${names.map(esc).join('|')})(?![\\p{L}])`, 'u'), logo: t.logo, league: t.league === 2 ? 'NCAA' : 'NFL' });
+        }
+      } catch { /* tables missing */ }
+      nflCrests = { at: Date.now(), list };
+    }
+    const text = norm(`${r.title} ${r.summary || ''}`);
+    const hit = nflCrests.list.find(x => (!codes.length || codes.includes(x.league)) && x.re.test(text));
+    if (hit) return hit.logo;
+  }
+  return '/logo-mark.png';
+}
+
+/** Stats / tips / youth / women / reserves / stats sites (every sport). */
+function isJunk(title: string, source: string, codes: string[], sport: Sport): boolean {
+  if (isBlockedSource(source) || JUNK_TITLE.test(title) || isBettingStory({ title, link: '' })) return true;
+  if (YOUTH_WOMEN.test(title)) {
+    const womensLeague = codes.some(c => /women|ladies|wsl|liga f\b|nwsl|wnba/i.test(leagueNameOf(c, sport)));
+    if (!womensLeague) return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -477,12 +600,8 @@ async function refresh() {
   buildMatcher(); // team lists can change (new season, promotions)
   buildBbMatcher();
   const fresh = storeRaws(raws);
-  // pictures for new stories whose feed has none (a few at a time)
-  const setImg = db.prepare(`UPDATE news_items SET image = ? WHERE link = ?`);
-  const todo = fresh.slice(0, 30);
-  for (let i = 0; i < todo.length; i += 5) {
-    await Promise.all(todo.slice(i, i + 5).map(async link => { const img = await previewImage(link); if (img) setImg.run(img, link); }));
-  }
+  // pictures for new stories whose feed has none (fix180: one background queue, 4 at a time)
+  queuePictures(fresh);
   lastRefresh = now;
   logger.info(`News refreshed: ${raws.length} stories from ${results.filter(r => r.status === 'fulfilled').length}/${feeds.length} feeds, ${fresh.length} new pictures looked up, ${Math.round((Date.now() - t0) / 1000)} s`);
 }
@@ -497,9 +616,15 @@ function storeRaws(raws: Raw[]): string[] {
   const titles = new Set<string>();
   db.exec('BEGIN');
   try {
+    const dupWithin48h = db.prepare(`SELECT 1 FROM news_items WHERE title = ? AND link != ? AND seen_at >= ? LIMIT 1`);
+    const since48 = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
     for (const it of raws) {
       const tkey = it.title.toLowerCase().slice(0, 60);
       const codes = leaguesFor(it.title, it.summary, it.feedLeague, it.sport);
+      // fix180: junk never stored — stats / live-score / tip pages, stats sites, youth / women / reserves (unless the
+      // league itself is a women's league), the same headline from another outlet within 48 h
+      if (isJunk(it.title, it.source, codes, it.sport)) continue;
+      if (!get.get(it.link) && dupWithin48h.get(it.title, it.link, since48)) continue;
       const old: any = get.get(it.link);
       if (old) {
         // the same story in another feed (league section) adds that league
@@ -510,7 +635,7 @@ function storeRaws(raws: Raw[]): string[] {
       if (titles.has(tkey)) continue; // same story twice in one refresh under two links
       titles.add(tkey);
       ins.run(it.link, it.title, it.source, it.published, it.summary, it.image, codes.length ? `,${codes.join(',')},` : '', now, it.sport);
-      if (!it.image && !/news\.google\.com/.test(it.link)) fresh.push(it.link);
+      if (!it.image) fresh.push(it.link); // fix180: Google News stories too (their publisher page is looked up)
     }
     db.prepare(`DELETE FROM news_items WHERE seen_at < ? AND (leagues = '' OR seen_at < ?)`)
       .run(new Date(Date.now() - 21 * 86400000).toISOString(), new Date(Date.now() - 60 * 86400000).toISOString());
@@ -633,8 +758,10 @@ export function startNewsScheduler() {
 
 function toItem(r: any): NewsItem {
   return {
-    title: r.title, link: r.link, source: r.source, published: r.published, summary: r.summary, image: r.image,
-    leagues: String(r.leagues || '').split(',').filter(Boolean).map((c: string) => ({ code: c, name: (r.sport === 'basketball' ? BB_LEAGUE_NAME.get(c) : LEAGUE_NAME.get(c)) || c }))
+    title: r.title, link: r.link, source: r.source, published: r.published, summary: r.summary,
+    // fix180: no picture of its own → the league logo / team crest (marked, so the page shows it whole, not cropped)
+    image: r.image || fallbackPicture(r), imageKind: r.image ? 'photo' : 'logo',
+    leagues: String(r.leagues || '').split(',').filter(Boolean).map((c: string) => ({ code: c, name: leagueNameOf(c, r.sport || 'football') }))
   };
 }
 const when = (r: any) => r.published || r.seen_at;
@@ -645,7 +772,7 @@ const when = (r: any) => r.published || r.seen_at;
  */
 const titleKey = (t: string) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 function dedupe(rows: any[]): any[] {
-  rows = rows.filter(r => !isBettingStory(r));
+  rows = rows.filter(r => !isBettingStory(r) && !isJunk(r.title, r.source, String(r.leagues || '').split(',').filter(Boolean), r.sport || 'football'));
   const out: any[] = [];
   const at = new Map<string, number>();
   for (const r of rows) {

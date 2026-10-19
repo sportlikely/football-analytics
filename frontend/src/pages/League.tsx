@@ -11,6 +11,7 @@ import { t as tt, LOCALE } from '../lib/i18n'
 import { hubFor } from '../lib/hubs'
 import { footballTeamHref } from '../lib/teamLink'
 import NameLink from '../components/sport/NameLink'
+import { NewsPic } from '../components/NewsList'
 
 /**
  * League page: /league/<code> (football-data codes like PL, API-Football codes like AF140).
@@ -376,11 +377,7 @@ function League() {
                   <li key={n.link}>
                     <a href={n.link} target="_blank" rel="noreferrer" className="flex gap-3 p-2 rounded-xl hover:bg-surface2/60 transition-colors">
                       <span className="w-20 h-14 rounded-lg overflow-hidden bg-surface2 flex-shrink-0 grid place-items-center">
-                        {n.image ? (
-                          <img src={n.image} alt="" loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} />
-                        ) : (
-                          <span className="text-[9px] font-extrabold uppercase tracking-wide text-faint px-1 text-center">{n.source}</span>
-                        )}
+                        <NewsPic n={n} />
                       </span>
                       <span className="min-w-0 flex flex-col gap-1">
                         <span className="text-[13px] font-bold leading-snug text-ink break-words">{n.title}</span>
