@@ -83,6 +83,7 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   `nflGameExtras.ts` (schedule & rest, standings, likely starters, numbers changed, written preview, scoring plays), `nfl_player_games` (career index).
   Basketball swing chart: `bbLive.ts` keeps `bb_live_samples` (fix178). `npm run parity` (frontend) must show zero 'todo'. **`NFL_PUBLIC=1`** opens /american-football to everyone (admins see it before);
   past seasons stay admin-only. Frontend `pages/nfl/*`, `lib/nfl.ts`.
+- Tennis (fix184, admin only, no pages or model yet): `tennis.ts` — data from Live Tennis API **Pro** (key `TENNIS_API_KEY`, 10,000 calls a day, reserve `TENNIS_RESERVE` 1,500), **singles only**, market prices (`tennis_prices`) are an **admin-only** benchmark, never on a public route. Stats computed from the point tape (`tennis_match_stats`). Admin: `/api/admin/tennis-probe`, `/api/admin/tennis/status`. Notes: `docs/notes/tennis-data.md`.
 - Accounts & admin: `auth.ts`, `twoFactor.ts`, `roles.ts`, `staffConsole.ts`, `securityLog.ts`, `crm.ts`, `billing.ts`
   (plans since fix147: Premium $8.99 / 6 months $48.49 / year $86.29 (60 unlocks a month), Pro $14.99 / $80.99 / $143.99
   (unlimited); pick packs $0.79 per pick ($0.59 with Premium); 3-day money-back guarantee built; the 3-day free trial is

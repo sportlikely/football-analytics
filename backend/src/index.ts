@@ -78,6 +78,7 @@ import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuali
 import { db } from './db';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { startAsn } from './services/asn';
+import { startTennisScheduler, tennisProbe, tennisStatus } from './services/tennis';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
@@ -995,6 +996,17 @@ app.get('/api/admin/nfl-probe', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: await nflProbe(req.query.refresh === '1') }); }
   catch (e: any) { res.status(502).json({ error: `NFL probe failed: ${e.message}` }); }
+});
+// Tennis data (fix184, admin only): what the Live Tennis API plan gives (one call per endpoint: status, plan error, key
+// names, one trimmed sample row; never the key) and the state of the tables, backfill, quota and jobs.
+app.get('/api/admin/tennis-probe', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: await tennisProbe() }); }
+  catch (e: any) { res.status(502).json({ error: `Tennis probe failed: ${e.message}` }); }
+});
+app.get('/api/admin/tennis/status', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: tennisStatus() }); } catch (e) { sendError(res, e, 'Tennis status failed'); }
 });
 // NFL model report (fix139, admin only): walk-forward test of nfl-v1 (each of the last 5 seasons tuned on the seasons
 // before it), baselines, calibration, the live settings. ?rebuild=1 re-tunes now (takes a minute; runs in the background).
@@ -3344,6 +3356,8 @@ server.listen(PORT, () => {
     ['geo', () => startGeo()],
     // fix183: data-centre networks (iptoasn.com), so the visitor counter leaves out servers
     ['asn', () => startAsn()],
+    // fix184: tennis data (Live Tennis API Pro, admin only)
+    ['tennis', () => startTennisScheduler()],
     // Daily database backup (services/backup.ts)
     ['backups', () => startBackups()]
   ];
