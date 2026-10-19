@@ -650,6 +650,9 @@ export function mixPredictions(match: any, v3: Prediction | null): Prediction[] 
   if (!v3 || v3.grid?.scope && v3.grid.scope !== 'league') return [];
   let fp: [number, number, number] | null = null;
   try { fp = featureProbs(match); } catch (e: any) { logger.warn(`feature model: ${e.message}`); }
+  // fix181: right after a deploy the feature state is still being built — the last saved v3-mix numbers of the match
+  // are served until it is ready (no jump to grid-v3 and back)
+  if (!fp && !STATE) return savedMix(match, v3);
   if (!fp) return [];
   const w = mixWeight();
   const v = [v3.home, v3.draw, v3.away];
@@ -667,6 +670,16 @@ export function mixPredictions(match: any, v3: Prediction | null): Prediction[] 
     }
   };
   return [out, feat];
+}
+
+const savedMixStmt = db.prepare(`SELECT p_home, p_draw, p_away, payload FROM predictions WHERE match_id = ? AND model = ?`);
+function savedMix(match: any, v3: Prediction): Prediction[] {
+  let r: any = null;
+  try { r = savedMixStmt.get(Number(match?.id), MIX_MODEL); } catch { return []; }
+  if (!r) return [];
+  let mix: any = null;
+  try { mix = r.payload ? JSON.parse(r.payload)?.mix ?? null : null; } catch { mix = null; }
+  return [{ ...v3, model: MIX_MODEL, home: r.p_home, draw: r.p_draw, away: r.p_away, beforeLineups: undefined, ...(mix ? { mix } : {}) } as Prediction];
 }
 
 /** Models hidden from visitors: feat-v1 always; v3-mix until it is live; grid-v3 once v3-mix is live (one "v3"). */

@@ -14,7 +14,8 @@ import logger from '../utils/logger';
 import { schoolName, collegeNick } from './nfl';
 import { db } from '../db';
 import { every, after } from './perf';
-import { isBlockedSource, JUNK_TITLE, YOUTH_WOMEN } from './newsBlocklist';
+import { isBlockedSource, JUNK_TITLE, YOUTH_WOMEN, SPAM, BUSINESS, mostlyNonLatin, otherSport, isBlockedDomain, blockDomain } from './newsBlocklist';
+import { isTrustedSource, domainOf } from './newsSources';
 
 type Sport = 'football' | 'basketball' | 'american-football';
 type Feed = { source: string; url: string; league?: string; sport?: Sport; search?: boolean };
@@ -203,6 +204,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_news_seen ON news_items(seen_at);
 `);
 try { db.exec(`ALTER TABLE news_items ADD COLUMN sport TEXT NOT NULL DEFAULT 'football'`); } catch { /* column exists */ }
+// fix181: the publisher's domain of a Google News search story (from the feed's <source url>)
+try { db.exec(`ALTER TABLE news_items ADD COLUMN domain TEXT`); } catch { /* column exists */ }
+
+/**
+ * fix181: two tiers. The home pages and the top leagues show the curated feeds only; Google News search stories
+ * (links on news.google.com) appear only on the page of a league they name (and its teams), when that league has
+ * fewer than 5 curated stories in 7 days.
+ */
+const TOP_LEAGUES: Record<string, Set<string>> = {
+  football: new Set(['PL', 'PD', 'SA', 'BL1', 'FL1', 'DED', 'PPL', 'CL', 'EC', 'WC', 'AF39', 'AF140', 'AF135', 'AF78', 'AF61', 'AF88', 'AF94', 'AF2', 'AF4', 'AF1']),
+  basketball: new Set(['NBA', 'EL']),
+  'american-football': new Set(['NFL'])
+};
+const isTop = (code: string, sport: Sport) => TOP_LEAGUES[sport]?.has(code.toUpperCase()) ?? false;
+const isSearchLink = (link: string) => /^https:\/\/news\.google\.com\//.test(link);
+const NOT_SEARCH = `link NOT LIKE 'https://news.google.com/%'`;
 
 const decode = (s: string) =>
   s
@@ -221,7 +238,7 @@ const tag = (block: string, name: string) => {
   return m ? decode(m[1]) : '';
 };
 
-type Raw = Omit<NewsItem, 'leagues'> & { feedLeague?: string; sport: Sport };
+type Raw = Omit<NewsItem, 'leagues'> & { feedLeague?: string; sport: Sport; search?: boolean; domain?: string | null };
 
 /**
  * Betting stories (fix138): odds, betting previews, parlays, sportsbooks and bookmaker brands never reach the site
@@ -244,6 +261,7 @@ async function fetchFeed(f: Feed): Promise<Raw[]> {
     if (!title || !/^https:\/\//.test(link)) continue;
     // fix176: search feeds (Google News) name the real outlet in <source> and add " - Outlet" to the headline
     const outlet = f.search ? tag(b, 'source') : '';
+    const srcUrl = f.search ? (b.match(/<source[^>]*url="([^"]+)"/i)?.[1] ?? null) : null;
     const cleanTitle = outlet && title.endsWith(` - ${outlet}`) ? title.slice(0, -(outlet.length + 3)) : title;
     if (isBettingStory({ title, summary: tag(b, 'description'), link })) continue;
     // football feeds: football only (some feeds mix in other sports: tennis, F1, cricket…)
@@ -266,6 +284,7 @@ async function fetchFeed(f: Feed): Promise<Raw[]> {
     const summary = tag(b, 'description').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); // some feeds escape their HTML
     items.push({
       title: cleanTitle, link, source: outlet || f.source, feedLeague: f.league, sport: f.sport || 'football',
+      search: !!f.search, domain: srcUrl ? domainOf(srcUrl) : null,
       published: d && !isNaN(d.getTime()) && d.getTime() <= Date.now() + 5 * 60000 ? d.toISOString() : null,
       summary: summary.length > 180 ? summary.slice(0, 177) + '…' : summary, image
     });
@@ -405,13 +424,90 @@ function fallbackPicture(r: any): string {
 }
 
 /** Stats / tips / youth / women / reserves / stats sites (every sport). */
-function isJunk(title: string, source: string, codes: string[], sport: Sport): boolean {
+function isJunk(title: string, source: string, codes: string[], sport: Sport, summary = ''): boolean {
   if (isBlockedSource(source) || JUNK_TITLE.test(title) || isBettingStory({ title, link: '' })) return true;
+  // fix181: spam / clickbait, another sport, business / broadcast items that name no team or league
+  if (isSpam(title)) return true;
+  if (otherSport(title, summary, sport)) return true;
+  if (BUSINESS.test(title) && !codes.length) return true;
   if (YOUTH_WOMEN.test(title)) {
     const womensLeague = codes.some(c => /women|ladies|wsl|liga f\b|nwsl|wnba/i.test(leagueNameOf(c, sport)));
     if (!womensLeague) return true;
   }
   return false;
+}
+
+const isSpam = (title: string) => SPAM.test(title) || mostlyNonLatin(title);
+
+/**
+ * fix181: does the text name the league — its name (exact, so "Ligue 1" ≠ "Ligue 2"; a generic name like "Premier
+ * League" only with its country), "<country> league", or one of its current teams? Search stories are filed under a
+ * league only this way, never because of the search that found them.
+ */
+const GENERIC_NAME = /^(premier league|super league|superliga|super liga|pro league|professional league|first league|first division|1\. liga|liga 1|ligue 1|ligue 2|primera divisi[oó]n|segunda divisi[oó]n|primera a|primera b|serie a|serie b|division 1|division 2|national league|championship|league one|league two|premiership|super lig|liga i|liga ii|1\. division|eredivisie|a league|b league|j1 league|k league 1|stars league|elite league|premier division|cup|super cup|league cup)$/i;
+const mentionCache = new Map<string, { at: number; names: RegExp | null; needCountry: RegExp | null; country: RegExp | null }>();
+function mentionRes(code: string, sport: Sport) {
+  const k = `${sport}|${code}`, c = mentionCache.get(k);
+  if (c && Date.now() - c.at < 6 * 3600 * 1000) return c;
+  const plain: string[] = [], generic: string[] = [], teams: string[] = [];
+  let country: string | null = null;
+  const name = leagueNameOf(code, sport);
+  const hand = sport === 'basketball' ? BB_NEWS_LEAGUES.find(l => l.code === code) : NEWS_LEAGUES.find(l => l.code === code);
+  // a generic name ("Ligue 2", "Premier League") counts only next to its country (Algeria's Ligue 2 is not France's)
+  for (const p of [...(hand?.phrases || []), ...(name && name !== code ? [name] : [])]) (GENERIC_NAME.test(p.trim()) && !isTop(code, sport) ? generic : plain).push(p);
+  const nq = NATIONAL_QUERIES[code];
+  if (nq) for (const m of nq.matchAll(/"([^"]+)"/g)) plain.push(m[1]);
+  const q = /^(.*?)\s*-\s*Qualification/i.exec(name || '');
+  if (q) plain.push(`${q[1]} qualifiers`, `${q[1]} qualifying`, `${q[1]} qualifier`);
+  try {
+    if (sport === 'football') {
+      const id = /^AF(\d+)$/.exec(code)?.[1] ? Number(code.slice(2)) : (hand as any)?.af;
+      try {
+        const { afCompetitions } = require('./afMatches') as typeof import('./afMatches');
+        country = afCompetitions().find(x => x.code === code)?.area?.name || null;
+      } catch { /* not loaded */ }
+      if (!country && id) country = (db.prepare(`SELECT country FROM af_extra_leagues WHERE league_id = ?`).get(id) as any)?.country || null;
+      if (id) {
+        const rows = db.prepare(`SELECT DISTINCT n FROM (SELECT home_name AS n FROM af_fixtures WHERE league_id = ? AND season = (SELECT MAX(season) FROM af_fixtures WHERE league_id = ?)
+          UNION SELECT away_name FROM af_fixtures WHERE league_id = ? AND season = (SELECT MAX(season) FROM af_fixtures WHERE league_id = ?))`).all(id, id, id, id) as any[];
+        for (const r of rows) {
+          const full = String(r.n || ''), short = full.replace(GENERIC, '').trim();
+          if (full.length >= 4 && !RISKY.has(norm(full).toLowerCase())) teams.push(full);
+          if (short !== full && short.length >= 4 && !RISKY.has(norm(short).toLowerCase())) teams.push(short);
+        }
+      }
+    } else if (sport === 'basketball') {
+      const l = db.prepare(`SELECT country FROM bb_leagues WHERE code = ?`).get(code) as any;
+      country = l?.country || null;
+      const rows = db.prepare(`SELECT DISTINCT n FROM (SELECT home_name AS n FROM bb_games WHERE code = ? AND season = (SELECT MAX(season) FROM bb_games WHERE code = ?)
+        UNION SELECT away_name FROM bb_games WHERE code = ? AND season = (SELECT MAX(season) FROM bb_games WHERE code = ?))`).all(code, code, code, code) as any[];
+      for (const r of rows) for (const n of bbTeamNames(String(r.n || ''), code)) if (n.length >= 4 && !BB_RISKY.has(n.toLowerCase())) teams.push(n);
+    } else {
+      for (const t of db.prepare(`SELECT team_id FROM nfl_teams WHERE league = ?`).all(code === 'NCAA' ? 2 : 1) as any[]) for (const n of nflTeamNamesById(t.team_id)) if (n.length >= 4) teams.push(n);
+    }
+  } catch { /* tables not ready */ }
+  if (country && /world|europe|international/i.test(country)) country = null;
+  const alt = (l: string[]) => {
+    const u = [...new Set(l.map(x => norm(x).trim()).filter(x => x.length >= 3))].sort((a, b) => b.length - a.length);
+    return u.length ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${u.map(esc).join('|')})(?![\\p{L}\\p{N}])`, 'u') : null;
+  };
+  // names are matched case-sensitively (proper nouns); "<country> league" too
+  const dem = country ? DEMONYM[country] : null;
+  const out = { at: Date.now(), names: alt([...plain, ...teams, ...(country ? [`${country} league`, `${country}'s league`] : []), ...(dem ? [`${dem} league`, `${dem} top flight`] : [])]), needCountry: alt(generic), country: country ? alt([country, ...(DEMONYM[country] ? [DEMONYM[country]] : [])]) : null };
+  mentionCache.set(k, out);
+  return out;
+}
+const DEMONYM: Record<string, string> = { 'Saudi-Arabia': 'Saudi', 'Saudi Arabia': 'Saudi', 'United-Arab-Emirates': 'UAE', 'United Arab Emirates': 'UAE', England: 'English', Spain: 'Spanish', Italy: 'Italian', Germany: 'German', France: 'French', Netherlands: 'Dutch', Portugal: 'Portuguese', Belgium: 'Belgian', Turkey: 'Turkish', Greece: 'Greek', Scotland: 'Scottish', Russia: 'Russian', Ukraine: 'Ukrainian', Egypt: 'Egyptian', Brazil: 'Brazilian', Argentina: 'Argentine', Mexico: 'Mexican', Japan: 'Japanese', 'South-Korea': 'Korean', China: 'Chinese', Australia: 'Australian', Qatar: 'Qatari', Hungary: 'Hungarian', Poland: 'Polish', Romania: 'Romanian', Austria: 'Austrian', Switzerland: 'Swiss', Denmark: 'Danish', Sweden: 'Swedish', Norway: 'Norwegian', Croatia: 'Croatian', Serbia: 'Serbian', Czechia: 'Czech', 'Czech-Republic': 'Czech', Morocco: 'Moroccan', Iran: 'Iranian', India: 'Indian' };
+export function mentionsLeague(code: string, sport: Sport, title: string, summary: string): boolean {
+  const text = norm(`${title} . ${summary || ''}`);
+  const m = mentionRes(code, sport);
+  if (m.names && m.names.test(text)) return true;
+  return !!(m.needCountry && m.country && m.needCountry.test(text) && m.country.test(text));
+}
+/** Codes a Google News search story is filed under: leagues it names (never the search alone). */
+function searchCodes(it: { title: string; summary: string; feedLeague?: string; sport: Sport }): string[] {
+  const cand = new Set([...(it.sport === 'american-football' ? [] : leaguesFor(it.title, it.summary, undefined, it.sport)), ...(it.feedLeague ? [it.feedLeague] : [])]);
+  return [...cand].filter(c => mentionsLeague(c, it.sport, it.title, it.summary));
 }
 
 /* ------------------------------------------------------------------ */
@@ -610,7 +706,7 @@ async function refresh() {
 function storeRaws(raws: Raw[]): string[] {
   const now = new Date().toISOString();
   const get = db.prepare(`SELECT leagues, image FROM news_items WHERE link = ?`);
-  const ins = db.prepare(`INSERT INTO news_items (link, title, source, published, summary, image, leagues, seen_at, sport) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const ins = db.prepare(`INSERT INTO news_items (link, title, source, published, summary, image, leagues, seen_at, sport, domain) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const upd = db.prepare(`UPDATE news_items SET leagues = ?, image = COALESCE(image, ?), published = COALESCE(published, ?) WHERE link = ?`);
   const fresh: string[] = [];
   const titles = new Set<string>();
@@ -620,10 +716,18 @@ function storeRaws(raws: Raw[]): string[] {
     const since48 = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
     for (const it of raws) {
       const tkey = it.title.toLowerCase().slice(0, 60);
-      const codes = leaguesFor(it.title, it.summary, it.feedLeague, it.sport);
+      // fix181: search stories — spam blocks its publisher's domain; trusted publishers only; filed only under leagues
+      // the story names
+      if (it.search) {
+        if (isBlockedDomain(it.domain)) continue;
+        if (isSpam(it.title)) { blockDomain(it.domain, it.title); continue; }
+        if (!isTrustedSource(it.domain, it.source)) continue;
+      }
+      const codes = it.search ? searchCodes(it) : leaguesFor(it.title, it.summary, it.feedLeague, it.sport);
+      if (it.search && !codes.length) continue;
       // fix180: junk never stored — stats / live-score / tip pages, stats sites, youth / women / reserves (unless the
       // league itself is a women's league), the same headline from another outlet within 48 h
-      if (isJunk(it.title, it.source, codes, it.sport)) continue;
+      if (isJunk(it.title, it.source, codes, it.sport, it.summary)) continue;
       if (!get.get(it.link) && dupWithin48h.get(it.title, it.link, since48)) continue;
       const old: any = get.get(it.link);
       if (old) {
@@ -634,7 +738,7 @@ function storeRaws(raws: Raw[]): string[] {
       }
       if (titles.has(tkey)) continue; // same story twice in one refresh under two links
       titles.add(tkey);
-      ins.run(it.link, it.title, it.source, it.published, it.summary, it.image, codes.length ? `,${codes.join(',')},` : '', now, it.sport);
+      ins.run(it.link, it.title, it.source, it.published, it.summary, it.image, codes.length ? `,${codes.join(',')},` : '', now, it.sport, it.domain ?? null);
       if (!it.image) fresh.push(it.link); // fix180: Google News stories too (their publisher page is looked up)
     }
     db.prepare(`DELETE FROM news_items WHERE seen_at < ? AND (leagues = '' OR seen_at < ?)`)
@@ -707,7 +811,7 @@ export function leagueTopics(): LeagueTopic[] {
     for (const l of BB_LEAGUES) if (!fed.has(`basketball|${l.code}`)) add(l.code, 'basketball', `${quote(l.name)}${place(l.name, l.country)} basketball`);
   } catch { /* basketball not loaded */ }
   // never a search for the Israeli league (house rule: no new Israel references on the site)
-  return [...out.values()].filter(t => t.code !== 'AF383' && !/israel/i.test(t.query));
+  return [...out.values()].filter(t => t.code !== 'AF383' && !/israel/i.test(t.query) && !isTop(t.code, t.sport));
 }
 /** The searches due this refresh (never searched or older than 3 h), oldest first. */
 function dueTopics(): LeagueTopic[] {
@@ -747,11 +851,54 @@ function refreshNow(): Promise<void> {
   return refreshing as Promise<void>;
 }
 
+/**
+ * fix181: the new rules once over what is stored — junk / spam / other sport / business deleted; search stories from
+ * untrusted publishers deleted and the rest re-filed under the leagues they name (none → deleted).
+ */
+export function purgeNews(): { checked: number; deleted: number; retagged: number } {
+  buildMatcher(); buildBbMatcher();
+  const rows = db.prepare(`SELECT n.link, n.title, n.source, n.summary, n.leagues, n.sport, n.domain, p.url AS pub FROM news_items n LEFT JOIN news_pics p ON p.link = n.link`).all() as any[];
+  const del = db.prepare(`DELETE FROM news_items WHERE link = ?`), tag = db.prepare(`UPDATE news_items SET leagues = ?, domain = COALESCE(domain, ?) WHERE link = ?`);
+  let deleted = 0, retagged = 0;
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      const sport: Sport = r.sport || 'football';
+      const codes = String(r.leagues || '').split(',').filter(Boolean);
+      if (isSearchLink(r.link)) {
+        const domain = r.domain || (r.pub ? domainOf(r.pub) : null);
+        if (isSpam(r.title)) { blockDomain(domain, r.title); del.run(r.link); deleted++; continue; }
+        if (isBlockedDomain(domain) || !isTrustedSource(domain, r.source)) { del.run(r.link); deleted++; continue; }
+        // re-filed: the leagues the text names, from the stored tags (the searched league among them)
+        const keep = new Set([...(sport === 'american-football' ? [] : leaguesFor(r.title, r.summary, undefined, sport)), ...codes].filter(c => mentionsLeague(c, sport, r.title, r.summary)));
+        if (!keep.size || isJunk(r.title, r.source, [...keep], sport, r.summary || '')) { del.run(r.link); deleted++; continue; }
+        const v = `,${[...keep].join(',')},`;
+        if (v !== r.leagues || (!r.domain && domain)) { tag.run(v, domain, r.link); retagged++; }
+        continue;
+      }
+      if (isJunk(r.title, r.source, codes, sport, r.summary || '')) { del.run(r.link); deleted++; }
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  logger.info(`News purge (fix181): ${rows.length} checked, ${deleted} deleted, ${retagged} re-filed`);
+  return { checked: rows.length, deleted, retagged };
+}
+
 let started = false;
 /** Refresh every 15 minutes (first run shortly after boot). */
 export function startNewsScheduler() {
   if (started) return;
   started = true;
+  // fix181: the purge runs once per database (before the first refresh)
+  after('news purge', () => {
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS news_meta (k TEXT PRIMARY KEY, v TEXT)`);
+      if (!db.prepare(`SELECT 1 FROM news_meta WHERE k = 'purge181'`).get()) {
+        purgeNews();
+        db.prepare(`INSERT OR REPLACE INTO news_meta (k, v) VALUES ('purge181', ?)`).run(new Date().toISOString());
+      }
+    } catch (e: any) { logger.warn(`news purge: ${e.message}`); }
+  }, 10 * 1000).unref();
   after('news', () => refreshNow(), 20 * 1000).unref();
   every('news', () => void refreshNow(), 15 * 60 * 1000).unref();
 }
@@ -772,7 +919,7 @@ const when = (r: any) => r.published || r.seen_at;
  */
 const titleKey = (t: string) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 function dedupe(rows: any[]): any[] {
-  rows = rows.filter(r => !isBettingStory(r) && !isJunk(r.title, r.source, String(r.leagues || '').split(',').filter(Boolean), r.sport || 'football'));
+  rows = rows.filter(r => !isBettingStory(r) && !isJunk(r.title, r.source, String(r.leagues || '').split(',').filter(Boolean), r.sport || 'football', r.summary || ''));
   const out: any[] = [];
   const at = new Map<string, number>();
   for (const r of rows) {
@@ -818,7 +965,13 @@ export async function newsFor(opts: { sport?: Sport; limit?: number; league?: st
     const lg = sport === 'american-football' && opts.league ? `%,${opts.league.toUpperCase()},%` : '%';
     const rows = db.prepare(`SELECT * FROM news_items WHERE sport = ? AND leagues LIKE ? AND COALESCE(published, seen_at) >= ? ORDER BY COALESCE(published, seen_at) DESC LIMIT 3000`)
       .all(sport, lg, new Date(Date.now() - 30 * 86400000).toISOString()) as any[];
-    return dedupe(rows.filter(r => re.test(norm(`${r.title} . ${r.summary}`)))).slice(0, limit).map(toItem);
+    const named = rows.filter(r => re.test(norm(`${r.title} . ${r.summary}`)));
+    // fix181: search stories only for a team with fewer than 5 curated ones, and never under a top league
+    const curated = dedupe(named.filter(r => !isSearchLink(r.link)));
+    const week = Date.now() - 7 * 86400000;
+    if (curated.filter(r => Date.parse(when(r)) >= week).length >= 5) return curated.slice(0, limit).map(toItem);
+    const extra = named.filter(r => isSearchLink(r.link) && !String(r.leagues || '').split(',').filter(Boolean).some((c: string) => isTop(c, sport)));
+    return dedupe([...curated, ...extra].sort((a, b) => when(b).localeCompare(when(a)))).slice(0, limit).map(toItem);
   }
   if (opts.league) {
     // the last 14 days; a quiet league (fewer than 8 stories) also gets its older stories, up to 60 days back
@@ -829,12 +982,18 @@ export async function newsFor(opts: { sport?: Sport; limit?: number; league?: st
       SELECT * FROM news_items WHERE sport = ? AND (leagues LIKE ? OR leagues LIKE ?) AND COALESCE(published, seen_at) >= ?
       ORDER BY COALESCE(published, seen_at) DESC LIMIT ?`);
     // fix177: nothing stored yet for this league — its news search runs now (the first visitor waits up to 8 s)
-    if (!(db.prepare(`SELECT 1 FROM news_items WHERE sport = ? AND (leagues LIKE ? OR leagues LIKE ?) LIMIT 1`).get(sport, `%,${code},%`, `%,${old},%`))) await searchNow(code, sport);
-    let rows = dedupe(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 14 * 86400000).toISOString(), limit * 2)).slice(0, limit);
-    if (rows.length < Math.min(8, limit)) rows = dedupe(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 60 * 86400000).toISOString(), Math.min(limit, 8) * 2)).slice(0, Math.min(limit, 8));
+    // fix181: a top league shows its curated stories only; another league adds search stories while it has fewer than
+    // 5 curated ones in 7 days
+    const curated7: any = db.prepare(`SELECT COUNT(*) AS n FROM news_items WHERE sport = ? AND (leagues LIKE ? OR leagues LIKE ?) AND ${NOT_SEARCH} AND COALESCE(published, seen_at) >= ?`)
+      .get(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 7 * 86400000).toISOString());
+    const withSearch = !isTop(code, sport) && curated7.n < 5;
+    if (withSearch && !(db.prepare(`SELECT 1 FROM news_items WHERE sport = ? AND (leagues LIKE ? OR leagues LIKE ?) LIMIT 1`).get(sport, `%,${code},%`, `%,${old},%`))) await searchNow(code, sport);
+    const pick = (rs: any[]) => dedupe(withSearch ? rs : rs.filter(r => !isSearchLink(r.link)));
+    let rows = pick(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 14 * 86400000).toISOString(), limit * 3)).slice(0, limit);
+    if (rows.length < Math.min(8, limit)) rows = pick(q.all(sport, `%,${code},%`, `%,${old},%`, new Date(Date.now() - 60 * 86400000).toISOString(), Math.min(limit, 8) * 3)).slice(0, Math.min(limit, 8));
     return rows.map(toItem);
   }
-  const rows = db.prepare(`SELECT * FROM news_items WHERE sport = ? AND COALESCE(published, seen_at) >= ? ORDER BY COALESCE(published, seen_at) DESC LIMIT 300`)
+  const rows = db.prepare(`SELECT * FROM news_items WHERE sport = ? AND ${NOT_SEARCH} AND COALESCE(published, seen_at) >= ? ORDER BY COALESCE(published, seen_at) DESC LIMIT 300`)
     .all(sport, new Date(Date.now() - (sport === 'football' ? 3 : 5) * 86400000).toISOString());
   return mix(dedupe(rows), limit).map(toItem);
 }
