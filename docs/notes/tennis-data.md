@@ -1,6 +1,6 @@
 # Tennis data (fix184, 19 Oct 2026)
 
-Admin only: no pages, no public routes, no model yet. **Singles only** (doubles skipped everywhere).
+Admin only: no pages, no public routes. **Singles only** (doubles skipped everywhere). The model (tennis-v1, fix190) is in `tennis-model.md`.
 Code: `backend/src/services/tennis.ts`. Admin: `GET /api/admin/tennis-probe`, `GET /api/admin/tennis/status`.
 
 ## Provider

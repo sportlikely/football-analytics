@@ -363,6 +363,16 @@ async function job(name: string, fn: () => Promise<string | void>) {
   catch (e: any) { j.lastError = e?.message || String(e); if (!(e instanceof TennisError && (e.status === 429 || e.plan || /^daily budget/.test(e.message)))) logger.warn(`tennis ${name}: ${j.lastError}`); }
   finally { j.running = false; }
 }
+/** fix190: the model's tuning waits while the live sync runs */
+export const tennisLiveBusy = () => !!jobs.get('live')?.running;
+/**
+ * fix190: one match's price history (Pro: /history/matches/{id}/prices, first page, ascending) — the admin market
+ * benchmark of tennis-v1 only; never a model input, never on a public route.
+ */
+export async function fetchHistoryPrices(id: number): Promise<any[] | null> {
+  const j = await tn(`/history/matches/${id}/prices`, { limit: 200 }, { kind: 'bulk' });
+  return j ? (Array.isArray(j.data) ? j.data : []) : null;
+}
 /** fix187: a job that did not run this time says why (status route). */
 function note(name: string, info: string) {
   const j = jobs.get(name) || { lastRun: null, lastOk: null, lastError: null, info: null, running: false };
@@ -473,6 +483,8 @@ async function syncHistory() {
   // the next sync starts a day back (late results and restatements)
   meta.set('history_from', new Date(Date.parse(startedAt) - 86400000).toISOString().slice(0, 10));
   const tapes = await fetchTapes(150);
+  // fix190: the new results into the live tennis-v1 ratings (loaded lazily: the model imports this file)
+  try { require('./tennisModel').tennisResultsHook(); } catch { /* model not loaded */ }
   return `${n} finished, ${tapes} tapes`;
 }
 async function fetchTapes(max: number): Promise<number> {

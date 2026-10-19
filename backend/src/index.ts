@@ -79,6 +79,7 @@ import { db } from './db';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { startAsn } from './services/asn';
 import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample } from './services/tennis';
+import { startTennisModelScheduler, tennisModelReport, tennisModelTick, tennisPredictions } from './services/tennisModel';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
@@ -1013,6 +1014,20 @@ app.get('/api/admin/tennis/sample', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: tennisSample({ tour: String(req.query.tour || ''), status: String(req.query.status || ''), limit: Number(req.query.limit) || 30 }) }); }
   catch (e) { sendError(res, e, 'Tennis sample failed'); }
+});
+// fix190: tennis-v1 (admin only): the walk-forward report (per tour / surface, baselines, sets and totals, market
+// benchmark), the live settings and the progress. ?rebuild=1 rebuilds the report (minutes, background), ?retune=1 the
+// live settings only.
+app.get('/api/admin/tennis-model', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (req.query.rebuild === '1' || req.query.retune === '1') void tennisModelTick(req.query.rebuild === '1' ? 'report' : 'retune');
+  try { res.json({ data: tennisModelReport() }); } catch (e) { sendError(res, e, 'Tennis model report failed'); }
+});
+// fix190: ?status=upcoming|done&tour=slam|atp|wta|challenger|itf&limit= — saved predictions with the outcome + the live record
+app.get('/api/admin/tennis/predictions', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: tennisPredictions({ status: String(req.query.status || ''), tour: String(req.query.tour || ''), limit: Number(req.query.limit) || 200 }) }); }
+  catch (e) { sendError(res, e, 'Tennis predictions failed'); }
 });
 // NFL model report (fix139, admin only): walk-forward test of nfl-v1 (each of the last 5 seasons tuned on the seasons
 // before it), baselines, calibration, the live settings. ?rebuild=1 re-tunes now (takes a minute; runs in the background).
@@ -3398,6 +3413,8 @@ server.listen(PORT, () => {
     ['asn', () => startAsn()],
     // fix184: tennis data (Live Tennis API Pro, admin only)
     ['tennis', () => startTennisScheduler()],
+    // fix190: tennis-v1 (admin only): report once the backfill reached 2023-01, weekly re-tune, predictions every 30 min
+    ['tennis model', () => startTennisModelScheduler()],
     // Daily database backup (services/backup.ts)
     ['backups', () => startBackups()]
   ];
