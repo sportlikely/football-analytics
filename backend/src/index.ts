@@ -86,6 +86,7 @@ import { refreshFromDetails } from './services/matchPreview';
 import { fontRoute, warmFonts } from './services/fonts';
 import { listFavorites, addFavorites, removeFavorite, MAX_FAVORITES } from './services/favorites';
 import { tuneV3Full, tuneStatus, isTuning } from './services/v3Tuner';
+import { cleanName, mayHaveSponsor, NAME_KEYS } from './services/sponsorNames';
 import { hiddenModels, v3MixBacktest, featureModelStatus, setConfig as setModelConfig, setMixLive, startFeatureModelScheduler } from './services/featureModel';
 import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, startModelDailyScheduler, dailyRunning } from './services/modelDaily';
 import { nflProbe, startNflScheduler, nflCurrentSeason, asLeague, LEAGUES, backfillPlayerGames } from './services/nfl';
@@ -191,8 +192,10 @@ app.use((req, res, next) => {
 });
 // Shadow models (featureModel.ts): feat-v1 always, and v3-mix until it is live (then grid-v3) never reach visitors —
 // they are stored and compared in the admin views only
+// fix182: displayed names (team / league / competition) never carry a betting sponsor ("Partizan Mozzart Bet" → "Partizan")
 app.set('json replacer', (key: string, value: any) =>
-  key === 'predictions' && Array.isArray(value) && value.some(p => p && typeof p.model === 'string')
+  typeof value === 'string' ? (NAME_KEYS.has(key) && mayHaveSponsor(value) ? cleanName(value) : value)
+  : key === 'predictions' && Array.isArray(value) && value.some(p => p && typeof p.model === 'string')
     ? (() => { const hide = hiddenModels(); return value.filter(p => !(p && hide.has(p.model))); })()
     : value);
 app.use(express.urlencoded({ extended: true }));

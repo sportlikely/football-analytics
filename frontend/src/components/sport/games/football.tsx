@@ -65,6 +65,8 @@ function useData(): GamesData {
       // a small line under the teams: the upset (Pro) before the game, the live win chance during it
       let note: SGame['note'] = null
       if (open && full && !live) { const up = Math.min(p!.home, p!.away), fav = Math.max(p!.home, p!.away); if (up >= 30 && fav - up >= 10) note = { text: `${tt("Upset watch")} · ${Math.round(up)}%`, tone: 'loss' } }
+      // fix182: a league game we can't predict (a play-off against a team without enough games) says so
+      if (!p && (m as any).unpredicted === 'few-games') note = { text: tt("Not predicted (team without enough games)"), tone: 'muted' }
       if (live && p?.live) {
         const l = p.live, k = l.home >= l.draw && l.home >= l.away ? 'H' : l.away >= l.draw ? 'A' : 'D'
         const v = Math.min(99, Math.round(k === 'H' ? l.home : k === 'D' ? l.draw : l.away))

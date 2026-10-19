@@ -714,6 +714,13 @@ function storeRaws(raws: Raw[]): string[] {
   try {
     const dupWithin48h = db.prepare(`SELECT 1 FROM news_items WHERE title = ? AND link != ? AND seen_at >= ? LIMIT 1`);
     const since48 = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    // fix182: the same match report in another language ("Highlights: A 2-3 B" / "Melhores momentos: A 2 x 3 B")
+    const byMatch = new Map<string, { link: string; english: boolean }>();
+    for (const r of db.prepare(`SELECT link, title FROM news_items WHERE seen_at >= ?`).all(since48) as any[]) {
+      const k = matchKey(r.title);
+      if (k && (!byMatch.has(k) || isEnglishTitle(r.title))) byMatch.set(k, { link: r.link, english: isEnglishTitle(r.title) });
+    }
+    const dropLink = db.prepare(`DELETE FROM news_items WHERE link = ?`);
     for (const it of raws) {
       const tkey = it.title.toLowerCase().slice(0, 60);
       // fix181: search stories — spam blocks its publisher's domain; trusted publishers only; filed only under leagues
@@ -729,6 +736,15 @@ function storeRaws(raws: Raw[]): string[] {
       // league itself is a women's league), the same headline from another outlet within 48 h
       if (isJunk(it.title, it.source, codes, it.sport, it.summary)) continue;
       if (!get.get(it.link) && dupWithin48h.get(it.title, it.link, since48)) continue;
+      const mk = matchKey(it.title);
+      if (mk && !get.get(it.link)) {
+        const seen = byMatch.get(mk);
+        if (seen && seen.link !== it.link) {
+          if (seen.english || !isEnglishTitle(it.title)) continue; // keep the English one
+          dropLink.run(seen.link); // the English report replaces the other language
+        }
+        byMatch.set(mk, { link: it.link, english: isEnglishTitle(it.title) });
+      }
       const old: any = get.get(it.link);
       if (old) {
         // the same story in another feed (league section) adds that league
@@ -914,6 +930,22 @@ function toItem(r: any): NewsItem {
 const when = (r: any) => r.published || r.seen_at;
 
 /**
+ * fix182: a match report's key — the teams either side of the score and the score ("al fateh|2-3|al khaleej"), so the
+ * same report in two languages ("Highlights: …" / "Melhores momentos: …", "2-3" / "2 x 3") is one story.
+ */
+const SCORE = /(\p{L}[\p{L}\p{N} .'’&-]{1,40}?)\s+(\d{1,2})\s*(?:-|–|—|x|:)\s*(\d{1,2})\s+(\p{L}[\p{L}\p{N} .'’&-]{1,40})/u;
+function matchKey(title: string): string | null {
+  const t = norm(String(title || '')).replace(/^[^:]{1,40}:\s*/, '').replace(/\([^)]*\)/g, ' ');
+  const m = SCORE.exec(t);
+  if (!m) return null;
+  const side = (s: string, last: boolean) => { const w = s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(x => x && !/^(vs?|v|and|e|y|und|et)$/.test(x)); return (last ? w.slice(-3) : w.slice(0, 3)).join(' '); };
+  const a = side(m[1], true), b = side(m[4], false);
+  return a && b ? `${a}|${m[2]}-${m[3]}|${b}` : null;
+}
+const NON_ENGLISH = /^(resumen|melhores momentos|os melhores momentos|gols|goles|zusammenfassung|tore|résumé|resume|buts|sintesi|gol|highlights e gol|özet|samenvatting|doelpunten|skrót|rezumat|sažetak|souhrn|resumo)\b|\b(empate|vit[oó]ria|derrota|victoria|sconfitta|vittoria|niederlage|sieg|défaite|victoire)\b/i;
+const isEnglishTitle = (t: string) => !NON_ENGLISH.test(norm(String(t || '')).trim());
+
+/**
  * One story per headline: titles compared lowercase without punctuation or spaces (the same story from two outlets or
  * under two links). Keeps the first (newest) one in place, but takes the copy with a picture when the first has none.
  */
@@ -923,6 +955,14 @@ function dedupe(rows: any[]): any[] {
   const out: any[] = [];
   const at = new Map<string, number>();
   for (const r of rows) {
+    // fix182: one report per match and score (the English one when the same report comes in several languages)
+    const mk = matchKey(r.title);
+    if (mk) {
+      const i = at.get(mk);
+      if (i === undefined) { at.set(mk, out.length); out.push(r); }
+      else if (!isEnglishTitle(out[i].title) && isEnglishTitle(r.title)) out[i] = r;
+      continue;
+    }
     const k = titleKey(r.title);
     if (!k) { out.push(r); continue; }
     const i = at.get(k);

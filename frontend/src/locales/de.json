@@ -1976,5 +1976,6 @@
  "Season leaders": "Saisonbeste",
  "From the box scores": "Aus den Spielstatistiken",
  "Even game": "Ausgeglichenes Spiel",
- "Both teams' win chances are within 3 points.": "Die Siegchancen beider Teams liegen weniger als 3 Punkte auseinander."
+ "Both teams' win chances are within 3 points.": "Die Siegchancen beider Teams liegen weniger als 3 Punkte auseinander.",
+ "Not predicted (team without enough games)": "Keine Prognose (Team mit zu wenigen Spielen)"
 }

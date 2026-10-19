@@ -130,7 +130,7 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
             </div>
           )
         })}
-        {g.note && !covered && <span className={`block text-[10px] font-bold truncate ${g.note.tone === 'live' ? 'text-live' : 'text-loss'}`}>{g.note.text}</span>}
+        {g.note && !covered && <span className={`block text-[10px] font-bold truncate ${g.note.tone === 'live' ? 'text-live' : g.note.tone === 'muted' ? 'text-faint font-semibold' : 'text-loss'}`}>{g.note.text}</span>}
         {full && g.chips.length > 0 && (
           <div className={`lg:hidden flex flex-wrap gap-x-3 text-[10px] text-muted ${roll ? 'pop-in' : ''}`}>
             {g.chips.map(c => <span key={c.key} className="whitespace-nowrap">{c.label} <span className={`num font-semibold ${c.strong ? 'text-accent' : 'text-ink'}`}>{c.value}</span></span>)}

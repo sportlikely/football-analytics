@@ -12,6 +12,7 @@ import { listGuides, getGuide } from './guides';
 import { HUBS, hubBySlug, hubByOld, hubForCode, hubOpen, buildHub, hubDescription, hubRange } from './hubs';
 import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, ui, longDate } from './seoText';
 import { fbLast as fbLastRaw, fbNext as fbNextRaw, fbH2h as fbH2hRaw, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById as bbGameByIdRaw, bbLast as bbLastRaw, bbNext as bbNextRaw, bbH2h as bbH2hRaw, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName as bbTeamNameRaw, BbGameRow } from './seoFacts';
+import { cleanText } from './sponsorNames';
 
 /*
  * fix175: the crawler pages' data, cached 10 minutes by function + arguments — never by language, so /it/match/1,
@@ -87,7 +88,8 @@ const nflWeekText = (key: string, league: 1 | 2 = 1) => (key === 'post' ? (leagu
 /** College titles keep the school name ("Alabama vs Georgia"); the NFL uses the nickname ("Chiefs"). */
 const nflNick = (name: string, league: 1 | 2 = 1) => (league === 2 ? schoolName(name) : name.split(/\s+/).pop() || name);
 
-const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+// fix182: every text a crawler page shows goes through the betting-sponsor cleaner (sponsorNames.ts)
+const esc = (s: unknown) => cleanText(String(s ?? '')).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const short = (iso: string, lang: Lang) => titleDate(iso, lang).replace(/[\s.,]*\d{4}\.?$/, '');
 const link = (lang: Lang, p: string) => (lang === 'en' ? p : `/${lang}${p === '/' ? '' : p}`);
 

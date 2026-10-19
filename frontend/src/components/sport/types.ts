@@ -37,7 +37,7 @@ export interface SGame extends HGame {
   weight: number
   chips: SChip[]
   /** a small line under the teams: "Upset watch · 34%" (loss) or "Now: Real 71%" (live) */
-  note?: { text: string; tone: 'loss' | 'live' } | null
+  note?: { text: string; tone: 'loss' | 'live' | 'muted' } | null
   /** finished games: our pick right / wrong */
   hit?: boolean | null
 }

@@ -13,7 +13,6 @@ import type express from 'express';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { roleByKey, ALL_PERMS, type Perm } from './roles';
-import { doubleChance } from '../utils/doubleChance';
 import { emailEnabled, sendVerificationCode, sendResetCode, sendEmailChangeCode, sendEmailChangedNotice } from './email';
 import { every } from './perf';
 import { isDisposable } from './disposableDomains';
@@ -606,18 +605,11 @@ export function clearSessionCookie(res: express.Response, secure: boolean) {
 // ---------- teaser (what free users receive instead of full predictions) ----------
 
 /**
- * Finished matches: the pick and confidence (the public record). Keeps the shape { model, locked, pick, confidence },
- * plus dc = our double-chance pick (fix120: the recommended pick), without its percentage.
+ * A locked prediction (any match that is not finished): nothing about it, not even which side or how confident —
+ * { model, locked } only (fix182: no pick / dc / confidence / draw or upset flags, in every endpoint).
+ * Finished matches are not locked: everyone sees their numbers and whether we were right (the public record; basketball
+ * and NFL work the same way).
  */
-export function teasePrediction(p: any) {
-  if (!p || typeof p !== 'object') return p;
-  if (p.locked) return { model: p.model, locked: true, pick: p.pick, dc: p.dc, confidence: p.confidence };
-  const h = Number(p.home), d = Number(p.draw), a = Number(p.away);
-  const pick = h >= d && h >= a ? 'H' : a >= d ? 'A' : 'D';
-  return { model: p.model, locked: true, pick, dc: doubleChance(h, d, a)?.k, confidence: p.confidence };
-}
-
-/** Matches not played yet: nothing about the prediction, not even which side or how confident ({ model, locked }). */
 export function hidePrediction(p: any) {
   if (!p || typeof p !== 'object') return p;
   return { model: p.model, locked: true };
@@ -636,12 +628,11 @@ export function teaseDeepExcept(value: any, keep: (id: number, status: string) =
   const has = 'prediction' in value || 'predictions' in value;
   const owner = has ? (typeof value.id === 'number' ? value : value.match && typeof value.match.id === 'number' ? value.match : null) : null;
   const status = String(owner?.status || '');
-  const open = !!owner && keep(owner.id, status);
-  const trim = FINISHED.has(status) ? teasePrediction : hidePrediction;
+  const open = !!owner && (keep(owner.id, status) || FINISHED.has(status));
   const out: any = {};
   for (const [k, v] of Object.entries(value)) {
-    if (k === 'prediction') out[k] = open || !v ? v : trim(v);
-    else if (k === 'predictions' && Array.isArray(v)) out[k] = open ? v : v.map(trim);
+    if (k === 'prediction') out[k] = open || !v ? v : hidePrediction(v);
+    else if (k === 'predictions' && Array.isArray(v)) out[k] = open ? v : v.map(hidePrediction);
     else out[k] = teaseDeepExcept(v, keep, depth + 1);
   }
   return out;

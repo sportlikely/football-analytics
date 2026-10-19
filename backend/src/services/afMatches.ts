@@ -23,7 +23,7 @@ import { predictV3 } from './gridModel';
 import { mixPredictions } from './featureModel';
 import { reportLive } from './liveScores';
 import { predictNational, isNationalTeam } from './nationalElo';
-import { predictClubEuro } from './clubElo';
+import { predictClubEuro, eloEuroMiss } from './clubElo';
 import { onExtraLeague } from './leagueConfig';
 import { every, after, yielder } from './perf';
 
@@ -678,8 +678,28 @@ function computeAfPredictions(m: any): Prediction[] {
 export function afWithPredictions(matches: any[]) {
   return matches.map(m => {
     const predictions = afPredictions(m);
-    return withLive({ ...m, prediction: mainPrediction(predictions), predictions });
+    return withLive({ ...m, prediction: mainPrediction(predictions), predictions, ...unpredicted(m, predictions) });
   });
+}
+
+/**
+ * fix182: a league game with no prediction at all (a play-off against a team from the division below: not in the
+ * table, no history) says why instead of showing an empty block.
+ */
+export function unpredicted(m: any, predictions: Prediction[]): { unpredicted?: 'few-games' } {
+  return !predictions.length && m?.competition?.type !== 'NATIONAL' && !FINISHED_FD.has(m?.status) ? { unpredicted: 'few-games' } : {};
+}
+const FINISHED_FD = new Set(['FINISHED', 'AWARDED', 'CANCELLED', 'POSTPONED']);
+
+/** fix182 (data health): why a game we predict fell back to the old table model (v1 / v2) instead of v3 / elo-euro / elo-intl. */
+export function fallbackReason(m: any): string {
+  const type = m?.competition?.type;
+  if (type === 'CUP' || m?.competition?.code === 'CL') return eloEuroMiss(m);
+  if (type === 'NATIONAL') return 'national-team Elo gave no number';
+  const group = groupForCompetition(m?.competition?.code);
+  if (!group) return 'league has no history group for v3';
+  const miss = (['homeTeam', 'awayTeam'] as const).filter(s => !fdNameFor(group, m[s]?.id)).map(s => `${m[s]?.name} not mapped to the ${group} history (team_map)`);
+  return miss.length ? miss.join('; ') : 'v3 state not built yet';
 }
 
 /**
@@ -846,6 +866,7 @@ export async function getAfMatchDetails(matchId: number) {
     match.status === 'FINISHED' ? Promise.resolve(null) : afMarket(fixtureId).catch(() => null)
   ]);
   const predictions = afPredictions(match);
+  Object.assign(match, unpredicted(match, predictions));
   return {
     match,
     prediction: mainPrediction(predictions),

@@ -16,6 +16,7 @@ import { refreshNbaInjuries, nbaInjuryStatus } from './bbInjuries';
 import { applyResultFixes, checkResults } from './bbResults';
 import { onBbExtraLeague } from './bbLeagueConfig';
 import { assertProviderCallAllowed } from './afUsage';
+import { cleanName } from './sponsorNames';
 
 const BASE = 'https://v1.basketball.api-sports.io';
 const KEY = () => process.env.API_BASKETBALL_KEY || process.env.API_FOOTBALL_KEY || '';
@@ -196,6 +197,15 @@ const FINISHED = new Set(['FT', 'AOT']);
 let storedHook: ((ids: number[]) => void) | null = null;
 export const setBbStoredHook = (fn: (ids: number[]) => void) => { storedHook = fn; };
 
+// fix182: names stored before the sponsor cleaner ("Partizan Mozzart Bet") are cleaned once at start-up
+try {
+  const fix = db.prepare(`UPDATE bb_games SET home_name = CASE WHEN home_name = ? THEN ? ELSE home_name END, away_name = CASE WHEN away_name = ? THEN ? ELSE away_name END WHERE home_name = ? OR away_name = ?`);
+  for (const r of db.prepare(`SELECT DISTINCT home_name AS n FROM bb_games UNION SELECT DISTINCT away_name FROM bb_games`).all() as any[]) {
+    const c = cleanName(r.n);
+    if (c !== r.n) fix.run(r.n, c, r.n, c, r.n, r.n);
+  }
+} catch { /* table not ready */ }
+
 function upsertGames(code: string, leagueId: number, season: string, list: any[]) {
   const up = db.prepare(`
     INSERT INTO bb_games (game_id, code, league_id, season, stage, kickoff, status, home_id, home_name, home_logo,
@@ -215,7 +225,7 @@ function upsertGames(code: string, leagueId: number, season: string, list: any[]
       const q = (x: any) => [x?.quarter_1, x?.quarter_2, x?.quarter_3, x?.quarter_4, x?.over_time].map((v: any) => (v == null ? null : Number(v)));
       up.run(
         g.id, code, leagueId, season, g.stage || g.week || null, new Date(g.date).toISOString(), st,
-        g.teams.home.id, g.teams.home.name, g.teams.home.logo || null, g.teams.away.id, g.teams.away.name, g.teams.away.logo || null,
+        g.teams.home.id, cleanName(g.teams.home.name), g.teams.home.logo || null, g.teams.away.id, cleanName(g.teams.away.name), g.teams.away.logo || null,
         g.scores?.home?.total ?? null, g.scores?.away?.total ?? null,
         JSON.stringify({ home: q(g.scores?.home), away: q(g.scores?.away) }), now,
         g.status?.timer != null && g.status.timer !== '' && Number.isFinite(Number(g.status.timer)) ? Number(g.status.timer) : null

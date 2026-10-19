@@ -87,11 +87,11 @@ function present(c: Core, full: boolean) {
     clock: state === 'live' && g.timer != null && ['Q1', 'Q2', 'Q3', 'Q4', 'OT'].includes(status)
       ? (() => { const len = status === 'OT' ? 5 : periodLen(g.code); return { played: g.timer, left: Math.max(0, len - g.timer) }; })()
       : null,
-    prediction: pred ? {
+    // locked (free / signed-out, game not finished): { model, locked } only — no hint of the prediction (fix182)
+    prediction: pred && !showAll ? { model: BB_MODEL, locked: true } : pred ? {
       model: BB_MODEL,
-      // locked (free / signed-out, game not finished): no hint of the prediction at all, like football's hidePrediction
-      pick: showAll ? pick : null,
-      locked: !showAll,
+      pick,
+      locked: false,
       ...(showAll ? {
         pHome: Math.round(pred.pHome * 1000) / 10, pAway: Math.round((1 - pred.pHome) * 1000) / 10,
         spread: r1(pred.margin), total: r1(pred.total), score: { home: Math.round(pred.home), away: Math.round(pred.away) },

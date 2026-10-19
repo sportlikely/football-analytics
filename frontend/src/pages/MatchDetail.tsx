@@ -809,7 +809,7 @@ function MatchDetail() {
                   </>
                   )
                 ) : (
-                  <p className="text-sm text-faint">{tt("No prediction available for this match yet.")}</p>
+                  <p className="text-sm text-faint">{(m as any).unpredicted === 'few-games' ? tt("Not predicted (team without enough games)") : tt("No prediction available for this match yet.")}</p>
                 )}
               </Section>
 

@@ -504,6 +504,20 @@ function findTeam(match: any, side: 'homeTeam' | 'awayTeam') {
   fdCache.set(t.id, found);
   return found ? ratings.get(found) || null : null;
 }
+/** fix182: why a cup match has no elo-euro number (data health): the side without a rating or with too few games. */
+export function eloEuroMiss(match: any): string {
+  if (!ratings.size) return 'club Elo not built yet';
+  const out: string[] = [];
+  for (const side of ['homeTeam', 'awayTeam'] as const) {
+    const r = findTeam(match, side);
+    if (!r) out.push(`${match[side]?.name || '?'}: no club Elo rating (not matched)`);
+    else if (r.n < 2) out.push(`${match[side]?.name}: only ${r.n} rated game`);
+  }
+  if (out.length) return out.join('; ');
+  try { predictClubEuro(match); } catch (e: any) { return `elo-euro failed: ${e.message}`; }
+  return 'elo-euro gave no number';
+}
+
 /** Admin check: how every Football-Data.org team of the given matches maps to a rated club. */
 export function fdTeamMapping(matches: any[]) {
   const out: { fd: string; af: string | null; games: number; cup: number }[] = [];

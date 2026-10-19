@@ -449,7 +449,9 @@ export const ALIASES: Record<string, string> = {
   'queens park': "queen's park",
   "queen's park": "queen's park",
   'sociedad b': 'real sociedad ii',
-  'real sociedad b': 'real sociedad ii'
+  'real sociedad b': 'real sociedad ii',
+  // fix182: Greece (football-data.co.uk spells it Levadeiakos)
+  'levadeiakos': 'levadiakos'
 };
 
 // Club-name filler that carries no identity. Distinguishing words such as "Real",

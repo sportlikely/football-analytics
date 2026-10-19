@@ -17,7 +17,7 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import footballDataAPI from './footballDataAPI';
-import { afUpcoming, afWithPredictions, afOverdue } from './afMatches';
+import { afUpcoming, afWithPredictions, afOverdue, fallbackReason } from './afMatches';
 import { afConfigured } from './apiFootball';
 import { feedState, bootedAt } from './freshness';
 import { emailEnabled, sendEmail, layout, section, esc, C, SITE } from './email';
@@ -49,6 +49,7 @@ async function allMatches(): Promise<any[]> {
   return [...fd, ...(await inBatches(afUpcoming(30), 25, b => afWithPredictions(b)))];
 }
 
+const loggedFallback = new Set<string>();
 export async function dataHealth(): Promise<{ level: Level; at: string; checks: Check[] }> {
   const now = Date.now();
   const checks: Check[] = [];
@@ -120,6 +121,19 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     id: 'missing-predictions', label: 'Upcoming games have a prediction', level: noPred.length > Math.max(3, soon.length * 0.1) ? 'warn' : 'ok',
     detail: `${soon.length - noPred.length} of ${soon.length} games in the next 48 h have a prediction`,
     items: noPred.slice(0, 15).map(gameName)
+  });
+  // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason
+  const OLD = new Set(['poisson-dc-v1', 'dc-history-v2']);
+  const fallback = matches.filter(m => !FINAL.includes(m.status) && m.prediction && OLD.has(m.prediction.model) && new Date(m.utcDate).getTime() < now + 30 * 86400000);
+  const fbItems = fallback.map(m => { let why = ''; try { why = fallbackReason(m); } catch (e: any) { why = e.message; } return `${gameName(m)} · ${m.competition?.name || m.competition?.code} · ${m.prediction.model} · ${why}`; });
+  // logged once a day per game
+  const day = new Date(now).toISOString().slice(0, 10);
+  for (const line of fbItems) { const k = `${day}|${line}`; if (!loggedFallback.has(k)) { loggedFallback.add(k); logger.warn(`v1 fallback: ${line}`); } }
+  if (loggedFallback.size > 5000) loggedFallback.clear();
+  checks.push({
+    id: 'v1-fallback', label: 'Games on v3 / club Elo / national Elo (no old-model fallback)', level: fallback.length ? 'warn' : 'ok',
+    detail: fallback.length ? `${fallback.length} game(s) in the next 30 days fell back to the old table model` : 'Every predicted game uses v3, elo-euro or elo-intl',
+    items: fbItems.slice(0, 40)
   });
   const badProb = matches.filter(m => {
     const p = m.prediction;
