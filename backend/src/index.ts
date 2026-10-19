@@ -76,7 +76,8 @@ import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
 import { db } from './db';
-import { trackVisit, visitorStats } from './services/visitors';
+import { trackVisit, visitorStats, visitSeen } from './services/visitors';
+import { startAsn } from './services/asn';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
@@ -310,6 +311,7 @@ app.use('/api', (req, _res, next) => {
   const verdict = claims ? crawlerVerdict(ipH, req.ip) : false;
   const crawler = verdict === true;
   (req as any).verifiedCrawler = crawler;
+  (req as any).crawlerClaim = claims ? verdict === true : null; // fix183: the visitor counter's crawler check
   notePageRequest(ua, crawler);
   if (claims && verdict === false) logScraperOnce(`fake:${ipH}`, req, 'crawler user-agent from an address that is not the search engine (DNS check failed): stored data only');
   const paid = req.access === 'premium' || req.access === 'pro';
@@ -386,7 +388,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|hub(\/|$)|basketball\/|nfl\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|hub(\/|$)|basketball\/|nfl\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -1408,6 +1410,13 @@ function sendError(res: express.Response, error: any, fallback: string) {
 }
 
 // ---------- REST ----------
+
+// fix183: the browser's "seen" beacon (a person: page visible 5+ s and a scroll / click / key / touch). Nothing stored
+// but the salted visitor hash, as for every visit; always 204 so the answer tells a script nothing.
+app.post('/api/visit/seen', (req, res) => {
+  try { visitSeen(req, (req as any).crawlerClaim ?? null); } catch { /* never fails the page */ }
+  res.status(204).end();
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime() });
@@ -3333,6 +3342,8 @@ server.listen(PORT, () => {
     ['data health', () => startDataHealthScheduler()],
     // Visitor countries: DB-IP country data, refreshed monthly (services/geo.ts)
     ['geo', () => startGeo()],
+    // fix183: data-centre networks (iptoasn.com), so the visitor counter leaves out servers
+    ['asn', () => startAsn()],
     // Daily database backup (services/backup.ts)
     ['backups', () => startBackups()]
   ];

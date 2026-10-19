@@ -100,32 +100,43 @@ export default function Games({ a }: { a: GamesAdapter }) {
   }
   const chosen = d.leagues.find(l => l.code === league)
   const panel = league !== 'ALL' && !favMode && a.leaguePanel ? a.leaguePanel(league) : null
+  // fix183b: a sport without a league list (American football) — no left column; the Live box sits above the games
+  const noList = !!a.noLeagueList
+  const liveBox = (wide: boolean) => (
+    <section className="card p-4 shrink-0">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display font-bold text-ink flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${live.length ? 'bg-live animate-pulseDot' : 'bg-faint'}`} />
+          {tt("Live")}</h2>
+        <span className="num text-xs text-faint">{live.length}</span>
+      </div>
+      {live.length === 0 ? <p className="text-xs text-faint">{a.noLive}</p> : (
+        <>
+          {liveOther && <p className="text-[11px] text-faint mb-2">{tt("Nothing in play in this league. Live elsewhere:")}</p>}
+          <ul className={wide ? 'grid sm:grid-cols-2 xl:grid-cols-3 gap-1' : 'space-y-1 max-h-60 overflow-y-auto'}>{live.map(g => <li key={g.id}><LiveRow g={g} /></li>)}</ul>
+        </>
+      )}
+    </section>
+  )
+  const cols = noList
+    ? (league === 'ALL' ? '2xl:grid-cols-[1fr_340px]' : panel ? 'xl:grid-cols-[1fr_320px]' : '')
+    : league === 'ALL' ? 'lg:grid-cols-[250px_1fr] 2xl:grid-cols-[250px_1fr_340px]' : panel ? 'lg:grid-cols-[250px_1fr] xl:grid-cols-[250px_1fr_320px]' : 'lg:grid-cols-[250px_1fr]'
 
   return (
     <div className={`max-w-[1400px] mx-auto px-4 sm:px-6 py-6 lg:py-8 pb-28 xl:pb-10 ${league === 'ALL' ? '2xl:max-w-[1760px]' : ''}`}>
-      <div className={`grid grid-cols-1 gap-6 lg:gap-8 items-start ${league === 'ALL' ? 'lg:grid-cols-[250px_1fr] 2xl:grid-cols-[250px_1fr_340px]' : panel ? 'lg:grid-cols-[250px_1fr] xl:grid-cols-[250px_1fr_320px]' : 'lg:grid-cols-[250px_1fr]'}`}>
+      <div className={`grid grid-cols-1 gap-6 lg:gap-8 items-start ${cols}`}>
+        {!noList && (
         <aside className="hidden lg:flex lg:sticky lg:top-20 flex-col gap-6 lg:max-h-[calc(100vh-6.5rem)]">
-          <section className="card p-4 shrink-0">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display font-bold text-ink flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${live.length ? 'bg-live animate-pulseDot' : 'bg-faint'}`} />
-                {tt("Live")}</h2>
-              <span className="num text-xs text-faint">{live.length}</span>
-            </div>
-            {live.length === 0 ? <p className="text-xs text-faint">{a.noLive}</p> : (
-              <>
-                {liveOther && <p className="text-[11px] text-faint mb-2">{tt("Nothing in play in this league. Live elsewhere:")}</p>}
-                <ul className="space-y-1 max-h-60 overflow-y-auto">{live.map(g => <li key={g.id}><LiveRow g={g} /></li>)}</ul>
-              </>
-            )}
-          </section>
+          {liveBox(false)}
           <LeagueSidebar {...side} />
           {league === 'ALL' && <section className="hidden lg:block 2xl:hidden shrink-0"><ResultsCard r={{ ...d.results, rows: d.results.rows ? d.results.rows.slice(0, 6) : null }} /></section>}
         </aside>
+        )}
 
         <div className="min-w-0">
           {a.top && <div className="mb-4">{a.top}</div>}
-          <MobileLeagueBar side={side} liveCount={live.length} live={live.map(g => <LiveRow key={g.id} g={g} />)} />
+          {noList && <div className="hidden lg:block mb-6">{liveBox(true)}</div>}
+          <MobileLeagueBar side={side} liveCount={live.length} live={live.map(g => <LiveRow key={g.id} g={g} />)} chips={!noList} />
           <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
             <div>
               <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink">{league === 'ALL' ? a.title : favMode ? tt("My favorites") : chosen?.name || a.title}</h1>
@@ -178,7 +189,7 @@ export default function Games({ a }: { a: GamesAdapter }) {
             </section>
           ))}
           {/* fix160: phones and tablets get Latest results under the games (the side column is desktop only) */}
-          {!panel && !d.loading && <section className="lg:hidden mt-8"><ResultsCard r={d.results} /></section>}
+          {!panel && !d.loading && <section className={`${noList ? '2xl:hidden' : 'lg:hidden'} mt-8`}><ResultsCard r={d.results} /></section>}
         </div>
 
         {panel}

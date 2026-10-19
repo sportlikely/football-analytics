@@ -3,13 +3,19 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 
 interface Visitors {
-  onlineNow: number; onlineSignedIn: number; onlineWindowMin: number
+  onlineNow: number; onlineSignedIn: number; onlineWindowMin: number; onlineAll?: number
   today: number; last7: number; last30: number; returning30: number
-  daily: { day: string; visitors: number; signedIn: number; hits: number }[]
+  // fix183: people only; what was filtered, and the old number (every API caller) kept for a week to compare
+  todayBots?: number; todayAll?: number; last7All?: number; last30All?: number; botReasons?: { reason: string; n: number }[]
+  peopleSince?: string; datacentre?: { loaded: boolean; status: string }
+  daily: { day: string; visitors: number; signedIn: number; hits: number; bots?: number; allCallers?: number }[]
   countingSince: string | null
   countries?: { last7: CountryRow[]; last30: CountryRow[]; since: string | null; geo: { loaded: boolean; status: string; source: string } }
 }
-interface CountryRow { country: string; visitors: number; signedIn: number }
+interface CountryRow { country: string; visitors: number; signedIn: number; bots?: number }
+const REASON: Record<string, string> = { 'no-signs': 'no signs of a person', ua: 'bot user-agent', crawler: 'search-engine crawlers', 'fake-crawler': 'fake crawlers', datacentre: 'data-centre networks', headless: 'headless browsers' }
+// the old "all API callers" number is shown for a week after the switch to people only, then goes
+const showOld = (since?: string) => !!since && Date.now() - Date.parse(since) < 8 * 86400000
 const flagOf = (cc: string) => (/^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map(c => 0x1f1e6 + c.charCodeAt(0) - 65)) : '🌐')
 let regionNames: Intl.DisplayNames | null = null
 try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }) } catch { /* old browser */ }
@@ -41,6 +47,7 @@ function Countries({ c }: { c: NonNullable<Visitors['countries']> }) {
               <span className="w-40 truncate text-ink">{nameOf(r.country)}</span>
               <span className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><span className="block h-full rounded-full bg-accent/70" style={{ width: `${(r.visitors / max) * 100}%` }} /></span>
               <span className="w-10 text-right num text-ink">{r.visitors}</span>
+              <span className="w-14 text-right num text-[11px] text-faint" title="bots / scripts filtered">{r.bots ? `+${r.bots} bots` : ''}</span>
               <span className="w-12 text-right num text-[11px] text-faint">{total ? Math.round((r.visitors / total) * 100) : 0}%</span>
             </li>
           ))}
@@ -48,7 +55,7 @@ function Countries({ c }: { c: NonNullable<Visitors['countries']> }) {
       )}
       {rows.length > 10 && <button type="button" onClick={() => setAll(v => !v)} className="mt-2 text-xs font-semibold text-accent">{all ? 'Show top 10' : `Show all ${rows.length} countries`}</button>}
       <p className="mt-3 text-[10px] text-faint">
-        Only the country is kept, never the IP{c.since ? ` · countries since ${new Date(c.since).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''} · "Unknown" = visits before countries were counted or unlisted addresses · IP data by <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="underline">DB-IP</a> (CC BY 4.0)
+        People only (bots / scripts filtered shown apart) · only the country is kept, never the IP{c.since ? ` · countries since ${new Date(c.since).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''} · "Unknown" = visits before countries were counted or unlisted addresses · IP data by <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="underline">DB-IP</a> (CC BY 4.0)
       </p>
     </div>
   )
@@ -68,12 +75,13 @@ export default function VisitorsCard() {
   if (err && !v) return null
 
   // the last 30 days, missing days as 0
-  const days: { day: string; visitors: number; signedIn: number }[] = []
+  const days: { day: string; visitors: number; signedIn: number; bots: number }[] = []
   for (let i = 29; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10)
     const r = v?.daily.find(x => x.day === d)
-    days.push({ day: d, visitors: r?.visitors || 0, signedIn: r?.signedIn || 0 })
+    days.push({ day: d, visitors: r?.visitors || 0, signedIn: r?.signedIn || 0, bots: r?.bots || 0 })
   }
+  const old = showOld(v?.peopleSince)
   const max = Math.max(1, ...days.map(d => d.visitors))
   const tile = (label: string, value: number | string | undefined, sub?: string, live = false) => (
     <div className={`rounded-xl border px-4 py-3 ${live ? 'border-live/40 bg-live/[0.07]' : 'border-line/60 bg-surface2/50'}`}>
@@ -88,18 +96,29 @@ export default function VisitorsCard() {
     <section className="card p-5 sm:p-6 mb-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
         <h2 className="font-display text-lg font-bold text-ink">Visitors</h2>
-        <span className="text-xs text-faint">one visitor = one IP address · admins and bots not counted{v?.countingSince ? ` · counting since ${new Date(v.countingSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}</span>
+        <span className="text-xs text-faint">one visitor = one person (the page was open 5+ s and used, or signed in) · admins, bots, crawlers, data-centre networks and headless browsers not counted{v?.peopleSince ? ` · people only since ${new Date(v.peopleSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.countingSince ? ` · counting since ${new Date(v.countingSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {tile('Online now', v?.onlineNow, v ? `${v.onlineSignedIn} signed in · last ${v.onlineWindowMin} min` : undefined, true)}
-        {tile('Today', v?.today)}
-        {tile('Last 7 days', v?.last7)}
-        {tile('Last 30 days', v?.last30, v ? `${v.returning30} came back on another day` : undefined)}
+        {tile('Online now', v?.onlineNow, v ? `people · ${v.onlineSignedIn} signed in · last ${v.onlineWindowMin} min` : undefined, true)}
+        <div className="rounded-xl border border-line/60 bg-surface2/50 px-4 py-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">Visitors today</div>
+          <div className="flex items-baseline gap-2 mt-1.5 flex-wrap">
+            <span className="num text-2xl font-extrabold leading-none text-ink">{v?.today ?? '–'}</span>
+            <span className="text-xs text-ink font-semibold">people</span>
+            {v?.todayBots != null && <span className="text-[11px] text-faint num" title={(v.botReasons || []).map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}>{v.todayBots} bots / scripts filtered</span>}
+          </div>
+          {old && v?.todayAll != null && <div className="text-[10px] text-faint mt-1 num">old count: {v.todayAll} all API callers</div>}
+        </div>
+        {tile('Last 7 days', v?.last7, old && v?.last7All != null ? `people · old count ${v.last7All} callers` : 'people')}
+        {tile('Last 30 days', v?.last30, v ? `${v.returning30} came back on another day${old && v.last30All != null ? ` · old count ${v.last30All}` : ''}` : undefined)}
       </div>
+      {v?.botReasons && v.botReasons.length > 0 && (
+        <p className="mt-2 text-[11px] text-faint">Filtered today: {v.botReasons.map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}{v.datacentre && !v.datacentre.loaded ? ` · data-centre list: ${v.datacentre.status}` : ''}{old && v.onlineAll != null ? ` · online now, all callers: ${v.onlineAll}` : ''}</p>
+      )}
       <div className="mt-5">
         <div className="flex items-end gap-[3px] h-28">
           {days.map(d => (
-            <div key={d.day} className="group relative flex-1 h-full flex flex-col justify-end" title={`${d.day}: ${d.visitors} visitors, ${d.signedIn} signed in`}>
+            <div key={d.day} className="group relative flex-1 h-full flex flex-col justify-end" title={`${d.day}: ${d.visitors} people, ${d.signedIn} signed in, ${d.bots} bots / scripts filtered`}>
               <div className="w-full rounded-t-[3px] bg-accent/70 group-hover:bg-accent transition-colors flex flex-col justify-end overflow-hidden" style={{ height: `${(d.visitors / max) * 100}%`, minHeight: d.visitors ? 2 : 0 }}>
                 <div className="w-full bg-home/80" style={{ height: d.visitors ? `${(d.signedIn / d.visitors) * 100}%` : 0 }} />
               </div>
@@ -109,7 +128,7 @@ export default function VisitorsCard() {
         <div className="flex justify-between text-[10px] text-faint mt-1.5 num">
           <span>{new Date(days[0].day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
           <span className="flex items-center gap-3">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-accent/70" />visitors per day</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-accent/70" />people per day</span>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-home/80" />signed in</span>
           </span>
           <span>Today</span>

@@ -69,6 +69,9 @@ export interface GamesAdapter {
   favoritesHref: string
   /** a league's panel on the right when one league is chosen (table, results …); none = no panel */
   leaguePanel?: (code: string) => ReactNode
+  /** fix183b: no league list (left panel, phone league chips): a sport whose leagues have their own switch (American
+   *  football: NFL | College). The Live box stays; the games list takes the width. */
+  noLeagueList?: boolean
   /** the switcher above the title (American football: NFL | College) */
   top?: ReactNode
   useData: () => GamesData

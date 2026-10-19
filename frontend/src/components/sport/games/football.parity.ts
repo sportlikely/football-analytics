@@ -6,6 +6,7 @@ export const PARITY_PROVIDES: ParityProvides = {
   keys: [
     'games.liveBox',
     'games.spotlight',
+    'games.leagueList', // fix183b: the left league list (and the phone league chips)
     'games.leaguePanel'
   ]
 }

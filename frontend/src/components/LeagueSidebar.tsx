@@ -177,7 +177,7 @@ type SidebarProps = Parameters<typeof LeagueSidebar>[0]
  * Phones and small tablets (below lg): the games come first. A live strip (when games are on), a row of chips
  * (all, favorites, pinned leagues) and a "Leagues" button that opens the full menu as a bottom sheet.
  */
-export function MobileLeagueBar({ side, live, liveCount }: { side: SidebarProps; live?: ReactNode[]; liveCount?: number }) {
+export function MobileLeagueBar({ side, live, liveCount, chips = true }: { side: SidebarProps; live?: ReactNode[]; liveCount?: number; chips?: boolean }) {
   const [sheet, setSheet] = useState(false)
   const byCode = new Map(side.leagues.map(l => [l.code, l]))
   const pins = side.pinned.map(c => byCode.get(c)).filter(Boolean) as SideLeague[]
@@ -198,7 +198,7 @@ export function MobileLeagueBar({ side, live, liveCount }: { side: SidebarProps;
           </div>
         </div>
       )}
-      <div className="flex gap-2 overflow-x-auto no-scrollbar px-4 sm:px-6 pb-1">
+      {chips && <div className="flex gap-2 overflow-x-auto no-scrollbar px-4 sm:px-6 pb-1">
         <button type="button" onClick={() => setSheet(true)} className={chip(false) + ' !border-accent/50'} aria-haspopup="dialog">
           <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M4 6h16M4 12h16M4 18h10" /></svg>
           {t('Leagues')}
@@ -219,7 +219,7 @@ export function MobileLeagueBar({ side, live, liveCount }: { side: SidebarProps;
             <span className="max-w-[140px] truncate">{l.name}</span>
           </button>
         ))}
-      </div>
+      </div>}
 
       {sheet && (
         <div className="fixed inset-0 z-[70] flex flex-col justify-end" role="dialog" aria-modal="true" aria-label={t('Leagues')}>

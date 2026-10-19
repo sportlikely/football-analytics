@@ -71,6 +71,8 @@ export function useNflGames(): GamesAdapter {
     defaultPinned: [league === 2 ? 'NCAA' : 'NFL'],
     favoritesHref: '/american-football/favorites',
     top: <LeagueSwitch />,
+    // fix183b: two leagues and the NFL | College switch above already chooses: no league list
+    noLeagueList: true,
     // fix174: the chosen league's standings (football's league panel)
     leaguePanel: () => <NflLeaguePanel league={league} />,
     useData

@@ -9,12 +9,17 @@ export interface ParityReport {
 }
 export const PARITY_REPORT: ParityReport = {
  "ok": true,
- "keys": 59,
+ "keys": 60,
  "gaps": [],
  "propGaps": [],
  "problems": [],
  "todo": [],
  "na": [
+  {
+   "key": "games.leagueList",
+   "sport": "nfl",
+   "reason": "only two leagues; the NFL / College switch replaces it"
+  },
   {
    "key": "league.logo",
    "sport": "nfl",

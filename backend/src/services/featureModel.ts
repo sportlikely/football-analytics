@@ -672,10 +672,11 @@ export function mixPredictions(match: any, v3: Prediction | null): Prediction[] 
   return [out, feat];
 }
 
-const savedMixStmt = db.prepare(`SELECT p_home, p_draw, p_away, payload FROM predictions WHERE match_id = ? AND model = ?`);
+// prepared on first use (fix183: the payload column is added by tracking.ts, which may load after this file)
+let savedMixStmt: ReturnType<typeof db.prepare> | null = null;
 function savedMix(match: any, v3: Prediction): Prediction[] {
   let r: any = null;
-  try { r = savedMixStmt.get(Number(match?.id), MIX_MODEL); } catch { return []; }
+  try { savedMixStmt ??= db.prepare(`SELECT p_home, p_draw, p_away, payload FROM predictions WHERE match_id = ? AND model = ?`); r = savedMixStmt.get(Number(match?.id), MIX_MODEL); } catch { return []; }
   if (!r) return [];
   let mix: any = null;
   try { mix = r.payload ? JSON.parse(r.payload)?.mix ?? null : null; } catch { mix = null; }
