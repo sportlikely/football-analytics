@@ -801,10 +801,11 @@ function NflRoutes() {
       <Route index element={<NflHome />} />
       <Route path="games" element={<NflGames />} />
       <Route path="today" element={<NflGames today />} />
-      {/* fix142: college football lists (games / teams / players by id are shared) */}
-      <Route path="college" element={<NflHome />} />
-      <Route path="college/games" element={<NflGames />} />
-      <Route path="college/today" element={<NflGames today />} />
+      {/* fix185: one sport — the old college list pages are the same pages filtered to college; the college
+          standings stay a page of their own (games / teams / players by id are shared) */}
+      <Route path="college" element={<Navigate to="/american-football?league=college" replace />} />
+      <Route path="college/games" element={<Navigate to="/american-football/games?league=college" replace />} />
+      <Route path="college/today" element={<Navigate to="/american-football/today?league=college" replace />} />
       <Route path="college/league" element={<NflLeague />} />
       <Route path="game/:id" element={<NflGame />} />
       <Route path="league" element={<NflLeague />} />

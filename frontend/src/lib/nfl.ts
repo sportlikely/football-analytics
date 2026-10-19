@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from './socket'
 import { t, LOCALE } from './i18n'
@@ -124,24 +124,39 @@ export const nflLeagueName = (l: NflLeague) => (l === 2 ? t('College football') 
 /** The model of the league and its strong-pick line (college has more mismatches: 75%). */
 export const nflModelOf = (l: NflLeague) => (l === 2 ? 'ncaa-v1' : 'nfl-v1')
 export const nflStrongAt = (l: NflLeague) => (l === 2 ? 75 : 70)
-const LKEY = 'nfl-league'
-let remembered: NflLeague = (() => { try { return localStorage.getItem(LKEY) === '2' ? 2 : 1 } catch { return 1 } })()
+// fix185: American football is one sport — home, games and today show NFL and college together (a filter in the URL,
+// useNflFilter). Only the standings page is per league; the league of the page last shown (in memory, no storage) picks
+// which standings the menu opens.
+let remembered: NflLeague = 1
 const subs = new Set<() => void>()
-/** Game / team / player pages tell which league they show (the menu and the switcher follow). */
+/** Game / team / player / standings pages tell which league they show (the menu's Standings link follows). */
 export function setNflLeague(l: NflLeague | undefined | null) {
   if (l !== 1 && l !== 2) return
   if (l === remembered) return
   remembered = l
-  try { localStorage.setItem(LKEY, String(l)) } catch { /* private mode */ }
   subs.forEach(f => f())
 }
-const LIST = /^\/american-football(\/college)?(\/(games|today|league))?\/?$/
-/** The league on screen: from the path on list pages, else the last one shown (game / team / player pages set it). */
+const LEAGUE_PAGE = /^\/american-football(\/college)?\/league\/?$/
+/** The league of a per-league page (standings: from the path; game / team / player pages set it). */
 export function useNflLeague() {
   const { pathname } = useLocation()
   const mem = useSyncExternalStore(cb => { subs.add(cb); return () => { subs.delete(cb) } }, () => remembered)
-  const m = pathname.match(LIST)
+  const m = pathname.match(LEAGUE_PAGE)
   const league: NflLeague = m ? (m[1] ? 2 : 1) : mem
   useEffect(() => { if (m) setNflLeague(league) }, [league, !!m])
-  return { league, base: nflBase(league), name: nflLeagueName(league), model: nflModelOf(league), strong: nflStrongAt(league), sub: m ? m[3] || '' : null }
+  return { league, base: nflBase(league), name: nflLeagueName(league), model: nflModelOf(league), strong: nflStrongAt(league), sub: m ? 'league' : null }
+}
+
+/** fix185: the list pages' league filter — All (default) · NFL · College, kept in the address as ?league=nfl|college. */
+export type NflFilter = 'all' | NflLeague
+export function useNflFilter() {
+  const [params, setParams] = useSearchParams()
+  const v = (params.get('league') || '').toLowerCase()
+  const filter: NflFilter = v === 'nfl' || v === '1' ? 1 : v === 'college' || v === '2' || v === 'ncaa' ? 2 : 'all'
+  const set = (f: NflFilter) => {
+    const next = new URLSearchParams(params)
+    if (f === 'all') next.delete('league'); else next.set('league', f === 2 ? 'college' : 'nfl')
+    setParams(next, { replace: true })
+  }
+  return { filter, set, param: filter === 'all' ? 'all' : String(filter) }
 }

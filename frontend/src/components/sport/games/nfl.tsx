@@ -4,9 +4,9 @@ import { API_URL } from '../../../lib/socket'
 import { t as tt } from '../../../lib/i18n'
 import { useAuth } from '../../../lib/auth'
 import { useFavorites, type Favorite } from '../../../lib/favorites'
-import { useNflFavorites, useNflLeague, nflLeagueName, nflBase, type NflGame, type NflLeague } from '../../../lib/nfl'
+import { useNflFavorites, useNflFilter, nflLeagueName, nflBase, type NflGame, type NflLeague } from '../../../lib/nfl'
 import { toGame, toResult } from '../../SportHome/nfl'
-import { LeagueSwitch, NflLeaguePanel } from '../../../pages/nfl/parts'
+import { NflLeagueChips, NflLeaguePanel } from '../../../pages/nfl/parts'
 import { winnerChips } from './basketball'
 import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 
@@ -22,7 +22,7 @@ const primetime = (g: NflGame) => new Date(g.kickoff).getUTCHours() < 4
 
 function useData(): GamesData {
   const { access } = useAuth()
-  const { league } = useNflLeague()
+  const { param: league } = useNflFilter()
   const favs = useNflFavorites()
   const { list } = useFavorites()
   const [games, setGames] = useState<NflGame[] | null>(null)
@@ -43,8 +43,11 @@ function useData(): GamesData {
   }, [access, league])
 
   return useMemo(() => {
-    const lg = leagueOf(league)
+    // fix185: both leagues mixed by time (each game in its own league); the filter chips choose one
+    const shown = (league === '2' ? [2] : league === '1' ? [1] : [1, 2]) as NflLeague[]
+    const lgs = new Map(shown.map(l => [l, leagueOf(l)]))
     const listOut: SGame[] = (games || []).filter(g => g.state === 'upcoming' || g.state === 'live').map(g => {
+      const lg = lgs.get(g.league === 2 ? 2 : 1) || leagueOf(g.league === 2 ? 2 : 1)
       const p = g.prediction
       const open = !!p && !p.locked && typeof p.pHome === 'number'
       // Spotlight: primetime first, then the closer the game
@@ -52,7 +55,7 @@ function useData(): GamesData {
       return { ...toGame(g), state: g.state as SGame['state'], league: lg, favWhy: favs.reasons(g).map(f => f.name), weight, chips: open ? winnerChips(p) : [] }
     })
     return {
-      loading: games === null, error, games: listOut, leagues: [lg],
+      loading: games === null, error, games: listOut, leagues: [...lgs.values()],
       results: { rows: results ? results.map(toResult) : null, days: 30, link: null },
       favTeams: favs.teams.map(f => ({ key: f.ref, name: f.name, logo: f.img || null, to: `/american-football/team/${f.ref}` })),
       favLeagues: list.filter(f => f.kind === 'nfl-league').map(f => f.ref),
@@ -61,20 +64,20 @@ function useData(): GamesData {
   }, [games, results, error, league, favs.all.length, list])
 }
 
-/** The adapter of the league on screen (NFL | College): the title follows it. */
+/** fix185: NFL and college together; the All · NFL · College chips (in the address) filter. */
 export function useNflGames(): GamesAdapter {
-  const { league } = useNflLeague()
+  const { filter } = useNflFilter()
   return {
-    title: league === 2 ? tt("College football games") : tt("NFL games"),
+    title: tt("American football games"),
     countLine: (n, days) => tt("{0} games in the next {1} days", { 0: n, 1: days }),
     noLive: tt("No games in play right now."),
-    defaultPinned: [league === 2 ? 'NCAA' : 'NFL'],
+    defaultPinned: ['NFL', 'NCAA'],
     favoritesHref: '/american-football/favorites',
-    top: <LeagueSwitch />,
-    // fix183b: two leagues and the NFL | College switch above already chooses: no league list
+    top: <NflLeagueChips />,
+    // fix183b: two leagues and the filter chips above already choose: no league list
     noLeagueList: true,
-    // fix174: the chosen league's standings (football's league panel)
-    leaguePanel: () => <NflLeaguePanel league={league} />,
+    // fix174: one league chosen in the chips → its standings on the right (football's league panel)
+    sidePanel: filter === 'all' ? null : <NflLeaguePanel league={filter} />,
     useData
   }
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
-import { useNflLeague, nflBase, type NflLeague } from '../../lib/nfl'
+import { useNflLeague, useNflFilter, nflBase, type NflLeague, type NflFilter } from '../../lib/nfl'
 import { t, LOCALE } from '../../lib/i18n'
 import { NFL_STATUS, timeOf, nick, record, useNflFavorites, nflRid, nflRstatus, type NflGame, type StandRow, type Standings } from '../../lib/nfl'
 import { SectionTitle, TeamLogo, dayTitle, BbPickBlock, LockIcon } from '../bb/parts'
@@ -17,7 +17,8 @@ import { useReveal, justRevealed } from '../../lib/reveal'
  */
 export function LeagueSwitch({ className = '' }: { className?: string }) {
   const { league, sub } = useNflLeague()
-  const to = (l: NflLeague) => nflBase(l) + (sub ? '/' + sub : '')
+  // fix185: on the standings page it opens the other league's standings; elsewhere the home filtered to that league
+  const to = (l: NflLeague) => (sub ? `${nflBase(l)}/${sub}` : `/american-football?league=${l === 2 ? 'college' : 'nfl'}`)
   const opt = (l: NflLeague, label: string) => (
     <Link key={l} to={to(l)} aria-current={league === l ? 'page' : undefined}
       className={`h-8 px-3.5 inline-flex items-center rounded-full text-xs font-bold transition-colors ${league === l ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}>{label}</Link>
@@ -26,6 +27,21 @@ export function LeagueSwitch({ className = '' }: { className?: string }) {
     <nav aria-label={t('League')} className={`inline-flex items-center gap-0.5 p-0.5 rounded-full border border-line bg-surface2/60 ${className}`}>
       {opt(1, 'NFL')}{opt(2, t('College'))}
     </nav>
+  )
+}
+
+/** fix185: the list pages' filter — All · NFL · College (the address keeps it: ?league=nfl|college). Chip style of the
+ *  other sports' filters. */
+export function NflLeagueChips({ className = '' }: { className?: string }) {
+  const { filter, set } = useNflFilter()
+  const chip = (active: boolean) => `shrink-0 inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full text-sm font-semibold border transition-colors ${active ? 'bg-accent text-bg border-accent' : 'bg-surface2/70 text-ink border-line/70 hover:border-accent/50'}`
+  const opt = (f: NflFilter, label: string) => (
+    <button key={String(f)} type="button" onClick={() => set(f)} aria-pressed={filter === f} className={chip(filter === f)}>{label}</button>
+  )
+  return (
+    <div role="group" aria-label={t('League')} className={`flex gap-2 overflow-x-auto no-scrollbar ${className}`}>
+      {opt('all', t('All'))}{opt(1, 'NFL')}{opt(2, t('College'))}
+    </div>
   )
 }
 

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t } from '../../lib/i18n'
-import { useNflLeague, nflBase, type Standings, type LeaderCat, type NflGame } from '../../lib/nfl'
+import { useNflLeague, type Standings, type LeaderCat, type NflGame } from '../../lib/nfl'
 import type { Favorite } from '../../lib/favorites'
 import { Skeleton, TeamLogo } from '../bb/parts'
 import NameLink, { href } from '../../components/sport/NameLink'
@@ -18,7 +18,6 @@ import { StandingsBlock, LeagueSwitch, NflGameRow } from './parts'
 export default function NflLeague() {
   const { league } = useNflLeague()
   const name = league === 2 ? t('College football') : 'NFL'
-  const base = nflBase(league)
   const [d, setD] = useState<(Standings & { leaders: LeaderCat[] }) | null | undefined>(undefined)
   const [games, setGames] = useState<NflGame[] | null>(null)
   const [record, setRecord] = useState<{ hitRate: number; n: number } | null>(null)
@@ -87,7 +86,7 @@ export default function NflLeague() {
       </>}
       right={<>
         {live.length > 0 && <Card title={t('Live now')}>{rows(live)}</Card>}
-        <Card title={t('Next games')} action={<Link to={`${base}/games`} className="text-xs font-bold text-accent">{t('All →')}</Link>}>
+        <Card title={t('Next games')} action={<Link to={`/american-football/games?league=${league === 2 ? 'college' : 'nfl'}`} className="text-xs font-bold text-accent">{t('All →')}</Link>}>
           {!games ? <Skeleton rows={5} /> : next.length ? <div className="max-h-[430px] overflow-y-auto overscroll-contain">{rows(next)}</div> : <p className="text-sm text-faint">{t('No games in the next two weeks.')}</p>}
         </Card>
         {(news === null || news === undefined || news.length > 0) && (

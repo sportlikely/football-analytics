@@ -1,6 +1,6 @@
 # SportLikely — backlog and decisions (updated 18 Oct 2026)
 
-Next free fix number: **fix186** (fix185 = American football as one sport, in progress) (fix152 done in four stages, a–d) (fix147 = pricing + pick packs, merged 18 Oct).
+Next free fix number: **fix186** (fix152 done in four stages, a–d) (fix147 = pricing + pick packs, merged 18 Oct).
 
 **Accuracy pages hidden from public on 14 Oct, Yarin's decision, until redesigned** (`/accuracy`, `/basketball/accuracy`: admins only, non-admins go to the sport's home; no nav tabs or record links for visitors; noindex, out of the sitemap; `/api/accuracy*` and `/api/public/record` still work). Keep this file current: when you ship something, move it to "Done" with its fix number.
 

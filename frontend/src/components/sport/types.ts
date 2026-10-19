@@ -72,6 +72,8 @@ export interface GamesAdapter {
   /** fix183b: no league list (left panel, phone league chips): a sport whose leagues have their own switch (American
    *  football: NFL | College). The Live box stays; the games list takes the width. */
   noLeagueList?: boolean
+  /** fix185: a panel on the right chosen by the adapter itself (American football: the filtered league's standings) */
+  sidePanel?: ReactNode
   /** the switcher above the title (American football: NFL | College) */
   top?: ReactNode
   useData: () => GamesData

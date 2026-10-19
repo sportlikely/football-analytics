@@ -26,10 +26,10 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
     { key: 'accuracy', label: 'Accuracy', to: '/basketball/accuracy', admin: true, tab: 'Accuracy' }
   ]
   if (sport === 'american-football') return [
-    // the list pages follow the league on screen (NFL | College, fix142)
-    { key: 'home', label: 'Home', to: nflBase, end: true, tab: 'Home' },
-    { key: 'games', label: 'Games', to: `${nflBase}/games`, tab: 'Games' },
-    { key: 'today', label: 'Today', to: `${nflBase}/today` },
+    // fix185: one home / games / today for NFL and college; the standings follow the league last shown
+    { key: 'home', label: 'Home', to: '/american-football', end: true, tab: 'Home' },
+    { key: 'games', label: 'Games', to: '/american-football/games', tab: 'Games' },
+    { key: 'today', label: 'Today', to: '/american-football/today' },
     { key: 'standings', label: 'Standings', to: `${nflBase}/league` },
     { key: 'favorites', label: 'Favorites', to: '/american-football/favorites', tab: 'Favorites' },
     { key: 'myPicks', label: 'My picks', to: '/american-football/my-picks' },

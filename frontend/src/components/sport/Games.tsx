@@ -99,7 +99,7 @@ export default function Games({ a }: { a: GamesAdapter }) {
     addTeamTo: a.favoritesHref
   }
   const chosen = d.leagues.find(l => l.code === league)
-  const panel = league !== 'ALL' && !favMode && a.leaguePanel ? a.leaguePanel(league) : null
+  const panel = (league !== 'ALL' && !favMode && a.leaguePanel ? a.leaguePanel(league) : null) ?? (favMode ? null : a.sidePanel ?? null)
   // fix183b: a sport without a league list (American football) — no left column; the Live box sits above the games
   const noList = !!a.noLeagueList
   const liveBox = (wide: boolean) => (
@@ -119,7 +119,7 @@ export default function Games({ a }: { a: GamesAdapter }) {
     </section>
   )
   const cols = noList
-    ? (league === 'ALL' ? '2xl:grid-cols-[1fr_340px]' : panel ? 'xl:grid-cols-[1fr_320px]' : '')
+    ? (panel ? 'xl:grid-cols-[1fr_320px]' : league === 'ALL' ? '2xl:grid-cols-[1fr_340px]' : '')
     : league === 'ALL' ? 'lg:grid-cols-[250px_1fr] 2xl:grid-cols-[250px_1fr_340px]' : panel ? 'lg:grid-cols-[250px_1fr] xl:grid-cols-[250px_1fr_320px]' : 'lg:grid-cols-[250px_1fr]'
 
   return (
@@ -193,7 +193,7 @@ export default function Games({ a }: { a: GamesAdapter }) {
         </div>
 
         {panel}
-        {league === 'ALL' && (
+        {league === 'ALL' && !panel && (
           <aside className="hidden 2xl:block 2xl:sticky 2xl:top-20"><ResultsCard r={d.results} /></aside>
         )}
       </div>

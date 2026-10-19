@@ -1977,5 +1977,9 @@
  "From the box scores": "D'après les feuilles de match",
  "Even game": "Match équilibré",
  "Both teams' win chances are within 3 points.": "Les chances de victoire des deux équipes sont à moins de 3 points.",
- "Not predicted (team without enough games)": "Pas de pronostic (équipe sans assez de matchs)"
+ "Not predicted (team without enough games)": "Pas de pronostic (équipe sans assez de matchs)",
+ "teams covered": "équipes couvertes",
+ "Who wins every NFL and college football game, with the chance of each side, the expected score and the reasons behind each pick. Every prediction is saved before kick-off and checked in public.": "Qui gagne chaque match de NFL et de football universitaire, avec la chance de chaque camp, le score attendu et les raisons de chaque choix. Chaque pronostic est enregistré avant le coup d'envoi et vérifié en public.",
+ "American football today": "Football américain aujourd'hui",
+ "American football games": "Matchs de football américain"
 }

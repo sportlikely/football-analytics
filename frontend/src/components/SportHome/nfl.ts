@@ -3,17 +3,19 @@ import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t as tt } from '../../lib/i18n'
 import { useAuth } from '../../lib/auth'
-import { useNflConfig, useNflFavorites, useNflLeague, NFL_STATUS, weekLabel, nick, nflRid, nflRstatus, nflBase, nflLeagueName, nflModelOf, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
+import { useNflConfig, useNflFavorites, useNflFilter, NFL_STATUS, weekLabel, nick, nflRid, nflRstatus, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
 import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
 
-/** NFL's adapter for components/SportHome (fix141): the data and labels of the NFL home. fix142: NFL | College toggle. */
+/** American football's adapter for components/SportHome (fix141). fix185: NFL and college together (one sport), every
+ *  row labelled with its league; ?league=nfl|college (the old college URLs) shows one. */
 
 /** Primetime: Thursday / Sunday / Monday night games start 00:00–03:59 UTC (8:15 pm Eastern). */
 const primetime = (g: NflGame) => new Date(g.kickoff).getUTCHours() < 4
 
 const lgOf = (g: NflGame): NflLeague => g.league || 1
-const compOf = (g: NflGame) => `${nflLeagueName(lgOf(g))} · ${weekLabel(g.weekKey, lgOf(g))}`
+// fix185: "NFL · Week 7" / "College · Week 8"
+const compOf = (g: NflGame) => `${lgOf(g) === 2 ? tt('College') : 'NFL'} · ${weekLabel(g.weekKey, lgOf(g))}`
 
 export function toGame(g: NflGame): HGame {
   const lg = lgOf(g)
@@ -45,7 +47,7 @@ export function toResult(g: NflGame): HResult {
 
 function useNflData(): SportHomeData {
   const { access } = useAuth()
-  const { league, base } = useNflLeague()
+  const { param: league } = useNflFilter()
   const full = access === 'pro' || access === 'admin'
   const [d, setD] = useState<Home | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -56,17 +58,18 @@ function useNflData(): SportHomeData {
     const load = () => axios.get(`${API_URL}/nfl/home`, { params: { league } }).then(r => setD(r.data.data)).catch(() => undefined).finally(() => setLoaded(true))
     load()
     axios.get(`${API_URL}/nfl/record`, { params: { days: 30, league } }).then(r => setRecord(r.data.data)).catch(() => setRecord({}))
-    axios.get(`${API_URL}/news`, { params: { sport: 'american-football', league: league === 2 ? 'NCAA' : 'NFL', limit: 10 } }).then(r => setNews(r.data.data || [])).catch(() => undefined)
+    axios.get(`${API_URL}/news`, { params: { sport: 'american-football', league: league === '2' ? 'NCAA' : league === '1' ? 'NFL' : undefined, limit: 10 } }).then(r => setNews(r.data.data || [])).catch(() => undefined)
     const iv = setInterval(load, 60 * 1000) // live scores
     return () => clearInterval(iv)
   }, [access, league])
 
   const notStarted = useMemo(() => (d?.upcoming || []).filter(g => new Date(g.kickoff).getTime() > Date.now()), [d])
   const week = useMemo(() => (d?.games || []).filter(g => g.state === 'upcoming' && new Date(g.kickoff).getTime() > Date.now()), [d])
-  // featured: the week's biggest games — both teams' win % added up, primetime a bit higher; up to 4, in kick-off order
+  // featured: the biggest coming games of either league — both teams' win % added up, primetime a bit higher, and an
+  // NFL game ahead of a college one when the two are close (fix185); up to 4, in kick-off order
   const featured = useMemo(() => {
     const pct = new Map((d?.standings?.rows || []).map(r => [r.team.id, r.games ? r.pct : 0.5]))
-    const score = (g: NflGame) => (pct.get(g.home.id) ?? 0.5) + (pct.get(g.away.id) ?? 0.5) + (primetime(g) ? 0.25 : 0)
+    const score = (g: NflGame) => (pct.get(g.home.id) ?? 0.5) + (pct.get(g.away.id) ?? 0.5) + (primetime(g) ? 0.25 : 0) + (lgOf(g) === 1 ? 0.3 : 0)
     return [...week].sort((a, b) => score(b) - score(a) || a.kickoff.localeCompare(b.kickoff)).slice(0, 4).sort((a, b) => a.kickoff.localeCompare(b.kickoff))
   }, [week, d?.standings])
   const featuredIds = useMemo(() => new Set(featured.map(g => g.id)), [featured])
@@ -84,33 +87,33 @@ function useNflData(): SportHomeData {
       rows: record ? winnerRecordRows(record.bands) : null, aside: tt("last {0} days", { 0: 30 }),
       note: tt("Picks right, every game counted. Each prediction is saved before kick-off and never edited."),
       link: { to: '/american-football/accuracy', label: tt("See the full record →") },
-      empty: { title: tt("Predictions start soon"), text: league === 2 ? tt("Once our college football model is live, every prediction is saved before kick-off and checked after the game, here and in public.") : tt("Once our NFL model is live, every prediction is saved before kick-off and checked after the game, here and in public.") }
+      empty: { title: tt("Predictions start soon"), text: league === '2' ? tt("Once our college football model is live, every prediction is saved before kick-off and checked after the game, here and in public.") : tt("Once our NFL model is live, every prediction is saved before kick-off and checked after the game, here and in public.") }
     },
     special: {
       title: tt("Upset watch"), tone: 'loss', open: full,
       items: upsetItems(notStarted, g => g.prediction ? { id: g.id, href: `/american-football/game/${g.id}`, league: compOf(g), date: g.kickoff, home: nick(g.home.name, lgOf(g)), away: nick(g.away.name, lgOf(g)), pHome: g.prediction.pHome, pAway: g.prediction.pAway, locked: g.prediction.locked } : null),
       empty: tt("No upsets on the radar this week."),
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
-      link: full ? { to: `${base}/games`, label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
+      link: full ? { to: '/american-football/games', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
     },
     results: { rows: resultRows, days: 30, link: { to: '/american-football/accuracy', label: tt("How accurate is the model? →") } },
     // fix174: first-visit tiles like football
-    introStats: winnerIntroStats(record?.bands, nflStrongAt(league), d?.standings ? { value: d.standings.rows.length, label: league === 2 ? tt('college teams covered') : tt('NFL teams covered') } : null)
+    // fix185: one record for both leagues (strong line 70%); teams covered = NFL + college
+    introStats: winnerIntroStats(record?.bands, league === '2' ? nflStrongAt(2) : nflStrongAt(1), d?.standings ? { value: d.standings.rows.length, label: league === '2' ? tt('college teams covered') : league === '1' ? tt('NFL teams covered') : tt('teams covered') } : null)
   }
 }
 
 /** NFL's adapter; the admin preview line comes from the config (not public yet). */
 export function useNflAdapter(): SportAdapter {
   const cfg = useNflConfig()
-  const { league, base } = useNflLeague()
-  const college = league === 2
   return {
     field: 'gridiron',
     banner: cfg && !cfg.public ? tt('Admin preview · not public yet') : null,
-    switcher: { value: String(league), options: [{ key: '1', label: 'NFL', to: nflBase(1) }, { key: '2', label: tt('College'), to: nflBase(2) }] },
+    // fix185: no NFL | College switch: one sport, both leagues together
+    switcher: null,
     labels: {
-      featured: tt("Featured game"), modelPrediction: tt("{0} prediction", { 0: nflModelOf(league) }), nextList: tt("Next kick-offs"), nextSection: tt("Next games"),
-      all: { to: `${base}/games`, label: tt("All games →") }, today: { to: `${base}/today`, label: tt("Today's predictions →") },
+      featured: tt("Featured game"), modelPrediction: tt("Our prediction"), nextList: tt("Next kick-offs"), nextSection: tt("Next games"),
+      all: { to: '/american-football/games', label: tt("All games →") }, today: { to: '/american-football/today', label: tt("Today's predictions →") },
       favorites: '/american-football/favorites', liveDetail: tt("Live score and box score →"),
       emptyHero: [tt("American football,"), tt("tested in public."), tt("The next games appear here as soon as they are scheduled.")],
       newsLoading: tt("Loading the latest news…"),
@@ -118,14 +121,14 @@ export function useNflAdapter(): SportAdapter {
     },
     intro: {
       title: tt("American football predictions"),
-      text: college ? tt("Who wins every college football game, with the chance of each side, the expected score and the reasons behind each pick. Every prediction is saved before kick-off and checked in public.") : tt("Who wins every NFL game, with the chance of each side, the expected score and the reasons behind each pick. Every prediction is saved before kick-off and checked in public."),
+      text: tt("Who wins every NFL and college football game, with the chance of each side, the expected score and the reasons behind each pick. Every prediction is saved before kick-off and checked in public."),
       bullets: [
         [tt("Every game"), tt("Win chances, point spread and total points, with the reasons behind each pick.")],
         [tt("Checked in public"), tt("Every prediction is saved before kick-off and scored after the game.")],
         [tt("Free to start"), tt("2 full picks every week. No card needed.")]
       ],
       cta: { to: '/signup', label: tt("Get 2 free picks a week") },
-      second: { to: `${base}/games`, label: tt("See the games") }
+      second: { to: '/american-football/games', label: tt("See the games") }
     },
     useData: useNflData
   }

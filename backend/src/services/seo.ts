@@ -189,7 +189,7 @@ export function bbLine(g: BbGameRow, lang: Lang): string {
 /** Today's games grouped by league, with their one-line facts (the /predictions/today pages and their API). */
 const todayCache = new Map<string, { at: number; v: ReturnType<typeof buildToday> }>();
 export type TodaySport = 'football' | 'basketball' | 'american-football';
-export function todayGroups(sport: TodaySport, lang: Lang, dayIso = new Date().toISOString().slice(0, 10), league: 1 | 2 = 1) {
+export function todayGroups(sport: TodaySport, lang: Lang, dayIso = new Date().toISOString().slice(0, 10), league: 1 | 2 | (1 | 2)[] = [1, 2]) {
   const k = `${sport}:${league}:${lang}:${dayIso}`, c = todayCache.get(k);
   if (c && Date.now() - c.at < 10 * 60 * 1000) return c.v;
   const v = buildToday(sport, lang, dayIso, league);
@@ -212,13 +212,15 @@ function nflLine(g: any, lang: Lang): string {
   return bits.join(' · ');
 }
 
-function buildToday(sport: TodaySport, lang: Lang, dayIso: string, league: 1 | 2 = 1) {
+function buildToday(sport: TodaySport, lang: Lang, dayIso: string, leagues: 1 | 2 | (1 | 2)[] = [1, 2]) {
   const groups = new Map<string, { league: string; code: string | null; games: any[] }>();
   if (sport === 'american-football') {
-    const name = league === 2 ? 'College football' : 'NFL', code = league === 2 ? 'NCAA' : 'NFL';
-    const rows = db.prepare(`SELECT game_id, season, kickoff, home_id, away_id, home_name, away_name, status, home_pts, away_pts FROM nfl_games WHERE league = ? ${HIDE_OTHER} AND kickoff >= ? AND kickoff <= ? AND (stage IS NULL OR stage NOT LIKE 'Pre%') AND (status IS NULL OR status NOT IN ('CANC','PST')) ORDER BY kickoff`)
-      .all(league, `${dayIso}T00:00:00.000Z`, `${dayIso}T23:59:59.999Z`) as any[];
+    // fix185: both leagues by default (NFL first, then college), each game in its league's group, by kick-off
+    const lgs = Array.isArray(leagues) ? leagues : [leagues];
+    const rows = db.prepare(`SELECT game_id, season, kickoff, home_id, away_id, home_name, away_name, status, home_pts, away_pts, league FROM nfl_games WHERE league IN (${lgs.map(() => '?').join(',')}) ${HIDE_OTHER} AND kickoff >= ? AND kickoff <= ? AND (stage IS NULL OR stage NOT LIKE 'Pre%') AND (status IS NULL OR status NOT IN ('CANC','PST')) ORDER BY league, kickoff`)
+      .all(...lgs, `${dayIso}T00:00:00.000Z`, `${dayIso}T23:59:59.999Z`) as any[];
     for (const g of rows) {
+      const name = g.league === 2 ? 'College football' : 'NFL', code = g.league === 2 ? 'NCAA' : 'NFL';
       if (!groups.has(code)) groups.set(code, { league: name, code, games: [] });
       groups.get(code)!.games.push({ id: g.game_id, kickoff: g.kickoff, home: g.home_name || 'TBD', away: g.away_name || 'TBD', homeId: g.home_id, awayId: g.away_id, score: g.home_pts != null && (g.status === 'FT' || g.status === 'AOT') ? [g.home_pts, g.away_pts] : null, line: nflLine(g, lang) });
     }
@@ -411,26 +413,28 @@ export function seoPage(rawPath: string): SeoInfo {
       // fix142: college football lists live under /american-football/college; game / team / player pages know their league
       const lg: 1 | 2 = /^\/american-football\/college(\/|$)/.test(path) ? 2 : 1;
       if (lg === 2) path = path.replace('/american-football/college', '/american-football');
-      const base = lg === 2 ? '/american-football/college' : '/american-football';
       let LN = lg === 2 ? 'College football' : 'NFL';
-      const nflNav = `<p><a href="/american-football">NFL</a> · <a href="/american-football/college">College football</a> · <a href="${base}/games">Games</a> · <a href="${base}/today">Today</a> · <a href="${base}/league">Standings</a></p>`;
+      // fix185: home / games / today show NFL and college together; the standings pages stay per league
+      const nflNav = `<p><a href="/american-football">American football</a> · <a href="/american-football/games">Games</a> · <a href="/american-football/today">Today</a> · <a href="/american-football/league">NFL standings</a> · <a href="/american-football/college/league">College football standings</a></p>`;
       const nflList = (gs: NflGame[]) => gs.length ? `<ul>${gs.map(g => `<li><a href="/american-football/game/${g.id}">${esc(g.home.name)} vs ${esc(g.away.name)}</a> · ${esc(nflWeekText(g.weekKey, g.league))} · ${short(g.kickoff, 'en')}${g.score ? ` · ${g.score.home}–${g.score.away}` : ''}</li>`).join('')}</ul>` : '<p>No games scheduled.</p>';
       const season = nflCurrentSeason(lg);
       const extra = { canonicalEn: true } as Partial<SeoInfo>;
       if (path === '/american-football/favorites') return page(`NFL favorites | ${BRAND}`, 'Your NFL teams.', '', { noindex: true });
       if (path === '/american-football' || path === '/american-football/games') {
-        const { current } = season ? nflWeeks(season, lg) : { current: null };
-        const games = season && current ? nflWeekGames(season, current, lg) : [];
-        const label = current ? nflWeekText(current, lg) : 'this week';
-        return page(path === '/american-football' ? `${LN} predictions, scores and standings · ${label} | ${BRAND}` : `${LN} games ${season || ''} · ${label} | ${BRAND}`,
-          `${LN} ${season || ''} ${label}: every game with each team's chance to win, kick-off times, live scores, results, standings, team analysis and player statistics.`,
-          `${nflNav}<h1>${LN} games · ${esc(label)}</h1><p>Every ${LN} game of ${esc(label)} with each team's chance to win, kick-off times and scores, the standings by conference${lg === 1 ? ' and division' : ''}, and each team's strengths and weaknesses.</p>${nflList(games)}`,
-          { ...extra, jsonld: games.slice(0, 20).map(g => sportsEvent(`${g.home.name} vs ${g.away.name}`, g.kickoff, g.home.name, g.away.name, `${SITE}/american-football/game/${g.id}`, LN, 'American Football')) });
+        // fix185: the next two weeks of both leagues, by kick-off
+        const now = Date.now();
+        const games = ([1, 2] as const).flatMap(l => nflGamesBetween(new Date(now - 6 * 3600 * 1000).toISOString(), new Date(now + 8 * 86400000).toISOString(), l))
+          .filter(g => g.state !== 'done').sort((a, b) => a.kickoff.localeCompare(b.kickoff));
+        const yr = nflCurrentSeason(1) || season || '';
+        return page(path === '/american-football' ? `American football predictions: NFL and college football ${yr} | ${BRAND}` : `American football games ${yr}: NFL and college | ${BRAND}`,
+          `Every NFL and college football game with each team's chance to win, the expected score, kick-off times, live scores, results, standings and team analysis. Every prediction is saved before kick-off and checked in public.`,
+          `${nflNav}<h1>${path === '/american-football' ? 'American football predictions' : 'American football games'}</h1><p>Who wins every NFL and college football game, with the chance of each side, the expected score and the reasons behind each pick. Every prediction is saved before kick-off and checked in public.</p>${nflList(games.slice(0, 80))}`,
+          { ...extra, jsonld: games.slice(0, 20).map(g => sportsEvent(`${g.home.name} vs ${g.away.name}`, g.kickoff, g.home.name, g.away.name, `${SITE}/american-football/game/${g.id}`, g.league === 2 ? 'College football' : 'NFL', 'American Football')) });
       }
       if (path === '/american-football/today') {
         const from = new Date(); from.setUTCHours(0, 0, 0, 0);
-        const games = nflGamesBetween(from.toISOString(), new Date(from.getTime() + 86400000).toISOString(), lg);
-        return page(`${LN} games today | ${BRAND}`, `Today’s ${LN} games with kick-off times and live scores.`, `${nflNav}<h1>${LN} games today</h1>${nflList(games)}`, extra);
+        const games = ([1, 2] as const).flatMap(l => nflGamesBetween(from.toISOString(), new Date(from.getTime() + 86400000).toISOString(), l)).sort((a, b) => a.kickoff.localeCompare(b.kickoff));
+        return page(`American football today: NFL and college games | ${BRAND}`, `Today’s NFL and college football games with kick-off times, live scores and each team's chance to win.`, `${nflNav}<h1>American football today</h1>${nflList(games)}`, extra);
       }
       if (path === '/american-football/league') {
         const st = season ? nflStandings(season, lg) : null;
@@ -650,9 +654,10 @@ function sitemapNfl(): string {
   // fix142: NFL and college football (college: games and teams of FBS only)
   for (const lg of [1, 2] as const) {
     const season = nflCurrentSeason(lg);
-    const base = lg === 2 ? '/american-football/college' : '/american-football';
     if (!season) continue;
-    for (const loc of [base, `${base}/games`, `${base}/today`, `${base}/league`]) urls.push({ loc, freq: 'daily', pri: loc === base ? '0.8' : '0.7', mod: today, enOnly: true });
+    // fix185: one home / games / today for both leagues (the old college list URLs redirect); a standings page each
+    const lists = lg === 1 ? ['/american-football', '/american-football/games', '/american-football/today', '/american-football/league'] : ['/american-football/college/league'];
+    for (const loc of lists) urls.push({ loc, freq: 'daily', pri: loc === '/american-football' ? '0.8' : '0.7', mod: today, enOnly: true });
     const fbs = lg === 2 ? `AND (home_id IN (SELECT team_id FROM nfl_teams WHERE league = 2 AND level = 'FBS') OR away_id IN (SELECT team_id FROM nfl_teams WHERE league = 2 AND level = 'FBS'))` : '';
     const now = new Date().toISOString();
     for (const g of db.prepare(`SELECT game_id, kickoff, updated_at FROM nfl_games WHERE league = ? AND season = ? AND (stage IS NULL OR stage NOT LIKE 'Pre%') AND (status IS NULL OR status NOT IN ('CANC','PST')) ${fbs} ORDER BY kickoff`).all(lg, season) as any[])

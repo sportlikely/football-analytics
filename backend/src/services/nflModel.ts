@@ -859,10 +859,12 @@ export function withNflPrediction<T extends NflGame>(g: T, full: boolean): T & {
  * The NFL record (fix141, home "Our record"): predictions saved before kick-off of finished games in the last `days`
  * (never a backtest), the share where the picked team won, all picks and by how sure we were. Ties don't count.
  */
-export function nflRecord(days = 30, league: LeagueId = 1) {
+export function nflRecord(days = 30, leagues: LeagueId | LeagueId[] = [1, 2]) {
+  // fix185: one combined record of the leagues asked (both by default); the bands are the same 60 / 70 / 80 lines
+  const lgs = (Array.isArray(leagues) ? leagues : [leagues]).filter(l => l === 1 || l === 2);
   const rows = db.prepare(`SELECT p.p_home, g.home_pts AS hs, g.away_pts AS as_ FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
-    WHERE g.league = ? AND p.kickoff >= ? AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.home_pts != g.away_pts`)
-    .all(league, new Date(Date.now() - days * 86400000).toISOString()) as any[];
+    WHERE g.league IN (${lgs.map(() => '?').join(',') || '1'}) AND p.kickoff >= ? AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.home_pts != g.away_pts`)
+    .all(...lgs, new Date(Date.now() - days * 86400000).toISOString()) as any[];
   return { days, bands: winnerBands(rows.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))) };
 }
 

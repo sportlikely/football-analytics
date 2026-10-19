@@ -23,6 +23,11 @@ export type LeagueId = 1 | 2;
 export const LEAGUES: LeagueId[] = [1, 2];
 export const leagueName = (l: LeagueId) => (l === 2 ? 'College football' : 'NFL');
 export const asLeague = (x: unknown): LeagueId => (String(x) === '2' || /^(college|ncaa)$/i.test(String(x)) ? 2 : 1);
+/** fix185: list pages show both leagues unless asked: missing / 'all' → [1, 2]; '1' / 'nfl' → [1]; '2' / 'college' → [2]. */
+export const asLeagues = (x: unknown): LeagueId[] => {
+  const s = String(x ?? '').toLowerCase();
+  return s === '1' || s === 'nfl' ? [1] : s === '2' || s === 'college' || s === 'ncaa' ? [2] : [1, 2];
+};
 /** NCAA: seasons of games kept, seasons with box scores. */
 const NCAA_SEASONS = 10, NCAA_BOX_SEASONS = 3;
 /**
