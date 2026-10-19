@@ -9,6 +9,7 @@ export default function BbAccuracy() {
   const cfg = useBbConfig()
   const a = useMemo(() => winnerAccuracy({
     title: t('Basketball accuracy'),
+    model: 'basketball',
     intro: t('Every pick is saved before tip-off and checked after the final buzzer. Nothing is removed. Pre-season games are not counted.'),
     url: '/basketball/record',
     gameHref: id => `/basketball/game/${id}`,

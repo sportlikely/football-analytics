@@ -24,6 +24,7 @@ export const PARITY = [
   { key: 'home.special', label: 'Special card (draw picks / upset watch)', football: true, basketball: true, nfl: true },
   { key: 'home.favorites', label: 'Your favorites rail', football: true, basketball: true, nfl: true },
   { key: 'home.news', label: 'News', football: true, basketball: true, nfl: true },
+  { key: 'home.modelName', label: 'Public model name on the featured card (SL <Sport> <version>, fix191)', football: true, basketball: true, nfl: true },
   /* ---------- games list ---------- */
   { key: 'games.liveBox', label: 'Live box on the games list', football: true, basketball: true, nfl: true },
   { key: 'games.spotlight', label: 'Spotlight', football: true, basketball: true, nfl: true },
@@ -48,6 +49,7 @@ export const PARITY = [
   { key: 'game.stats', label: 'Game stats', football: true, basketball: true, nfl: true },
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true },
+  { key: 'game.modelName', label: 'Public model name + version line under the prediction (ModelName, fix191)', football: true, basketball: true, nfl: true },
   /* ---------- team page ---------- */
   { key: 'team.analysis', label: 'Strengths & weaknesses', football: true, basketball: true, nfl: true },
   { key: 'team.ratingTiles', label: 'Model rating tiles', football: true, basketball: true, nfl: true },

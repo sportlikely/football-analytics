@@ -1,4 +1,5 @@
 import { t } from './i18n'
+import { slModel } from './modelNames'
 // Prediction shape served by the backend (see backend/src/services/predictionModel.ts)
 export interface Prediction {
   model: string
@@ -130,18 +131,19 @@ export function bookLabel(m: Market) {
   return BOOK_LABEL[m.bookmaker] || m.bookmaker.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-/** Our league model: grid-v3, or v3-mix once it is the published one (same "v3" for visitors). */
+/** Our league model: grid-v3, or v3-mix once it is the published one (both "SL Football 3.0" for visitors, fix191). */
 export const isV3 = (model?: string) => model === 'grid-v3' || model === 'v3-mix'
 
-/** Short and long labels for each model id. */
+/** Short and long labels for each model id. fix191: visitors see the public name (lib/modelNames), never the ids. */
+const SLF = slModel('football')
 export const MODEL_INFO: Record<string, { tag: string; name: string; desc: string }> = {
   'poisson-dc-v1': { tag: 'v1', name: t('Standings model'), desc: t('Poisson from the current league table') },
   'dc-history-v2': { tag: 'v2', name: t('History model'), desc: t('Dixon-Coles fitted on 3 seasons of results') },
-  'grid-v3': { tag: 'v3', name: t('Grid model'), desc: t('Scoring grid: value × relevance per parameter, 1000-point split') },
-  // v3-mix is shown as v3 (Yarin, Oct 2026): the grid averaged with our second model; no new public name
-  'v3-mix': { tag: 'v3', name: t('Grid model'), desc: t('Scoring grid: value × relevance per parameter, 1000-point split') },
-  'elo-intl': { tag: 'v3', name: t('v3 · national teams'), desc: t('Our national-team engine: rating from every senior international result since 2014, plus squad value') },
-  'elo-euro': { tag: 'v3', name: t('v3 · European cups'), desc: t('Our European-cup engine: cross-league club rating from domestic and UEFA cup results, plus squad value') }
+  'grid-v3': { tag: SLF, name: t('Grid model'), desc: t('Scoring grid: value × relevance per parameter, 1000-point split') },
+  // v3-mix is shown as SL Football 3.0 too (Yarin, Oct 2026): the grid averaged with our second model; no new public name
+  'v3-mix': { tag: SLF, name: t('Grid model'), desc: t('Scoring grid: value × relevance per parameter, 1000-point split') },
+  'elo-intl': { tag: SLF, name: t('{0} · national teams', { 0: SLF }), desc: t('Our national-team engine: rating from every senior international result since 2014, plus squad value') },
+  'elo-euro': { tag: SLF, name: t('{0} · European cups', { 0: SLF }), desc: t('Our European-cup engine: cross-league club rating from domestic and UEFA cup results, plus squad value') }
 }
 
 export function modelInfo(model: string) {

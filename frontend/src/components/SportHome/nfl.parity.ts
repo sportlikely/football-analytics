@@ -9,6 +9,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'home.results',
     'home.special',
     'home.favorites',
-    'home.news'
+    'home.news',
+    'home.modelName' // fix191: slModel('american-football') on the featured card
   ]
 }

@@ -27,6 +27,11 @@ is model work, the matching note, in the same commit.
 - **Model principle (Yarin):** a pick must make sense when someone looks at the stats. Keep home advantage, but a team
   with clearly worse form / table / head-to-head must not be made the favourite. Every model change is accepted only if
   it improves log loss / Brier on games it never saw (walk-forward or later seasons), never on the fitting data.
+- **Public model names (fix191):** visitors see "SL <Sport> <major.minor>" only (SL Football 3.0, SL Basketball 3.0, SL
+  American Football 1.0), from `frontend/src/lib/modelNames.ts` (backend twin `backend/src/utils/modelNames.ts`), never the
+  internal ids (grid-v3, bb-v3, nfl-v1 …); admin pages show both ("SL Football 3.0 (v3-mix)"). Major = a new model, minor = a
+  tested improvement that goes live: bump `version` and `since` in both modelNames files in the same commit. Weekly re-tunes
+  don't change the number. General branding says "the SL engine" (no sports listed).
 - **`BILLING_TEST_MODE`** must be removed before real payments go live. Don't wire real payment webhooks without Yarin.
 - **Team analysis for every sport:** Every sport has team analysis on the team page (strengths & weaknesses by fixed rules, model rating tiles, 1–10 league scores, rank over time, our record on the team) — build it with the sport, not later.
 - **List rows:** List rows in every sport use the fix127 block (commit 9b3f610): result cells with % (our pick highlighted) + 'Our pick · {words} · %' underneath. Phones too.

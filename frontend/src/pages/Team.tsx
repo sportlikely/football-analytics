@@ -8,6 +8,7 @@ import { errorText, useAuth } from '../lib/auth'
 import { TeamAnalysisCard, TeamRecordCard, type Analysis } from '../components/TeamAnalysis'
 import { nameKey } from '../lib/favorites'
 import { t, LOCALE } from '../lib/i18n'
+import { slModel } from '../lib/modelNames'
 import NameLink, { href } from '../components/sport/NameLink'
 
 interface Side { id: number; name: string; logo: string }
@@ -188,7 +189,7 @@ export default function Team() {
                 </div>
                 <div className="flex-1 flex items-center justify-end gap-3 min-w-0"><NameLink to={nextMatch.away.id === team.id ? null : href.team(nextMatch.away.id)} className="font-bold truncate text-right">{nextMatch.away.name}</NameLink><img src={nextMatch.away.logo} alt="" className="w-9 h-9 object-contain" /></div>
               </div>
-              {nextMatch.matchId && <Link to={`/match/${nextMatch.matchId}`} className="mt-4 inline-block text-sm font-bold text-accent">{t("v3 prediction and analysis →")}</Link>}
+              {nextMatch.matchId && <Link to={`/match/${nextMatch.matchId}`} className="mt-4 inline-block text-sm font-bold text-accent">{t("{0} prediction and analysis →", { 0: slModel('football') })}</Link>}
             </Card>
           )}
 

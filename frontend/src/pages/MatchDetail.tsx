@@ -20,6 +20,8 @@ import { footballTeamHref } from '../lib/teamLink'
 import NameLink, { href as hrefOf } from '../components/sport/NameLink'
 import RowLink from '../components/sport/RowLink'
 import { tNodes } from '../lib/tNodes'
+import { slModel } from '../lib/modelNames'
+import { ModelName } from '../components/sport/game/ModelName'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
 const CompCode = createContext<string | undefined>(undefined)
@@ -348,7 +350,7 @@ function GridBreakdown({ p, home, away }: { p: Prediction; home: Team; away: Tea
       )}
       {g.scope === 'national' || g.scope === 'cups' ? (
       <p className="mt-3 text-[11px] text-faint">
-        {g.scope === 'national' ? tt("v3's national-team engine. Each parameter is scored among all active national teams (5.5 = average) and weighted by how much it predicted results since 2018. Edge = how many points (out of 1000) that parameter moves toward one side. Friendlies count for less, because teams rotate their squads.") : tt("v3's European-cup engine. Each parameter is scored among all clubs playing in UEFA competitions (5.5 = average), from their league and cup games together, and weighted by how much it predicted past cup results. Edge = how many points (out of 1000) that parameter moves toward one side.")}
+        {g.scope === 'national' ? tt("{0}'s national-team engine. Each parameter is scored among all active national teams (5.5 = average) and weighted by how much it predicted results since 2018. Edge = how many points (out of 1000) that parameter moves toward one side. Friendlies count for less, because teams rotate their squads.", { 0: slModel('football') }) : tt("{0}'s European-cup engine. Each parameter is scored among all clubs playing in UEFA competitions (5.5 = average), from their league and cup games together, and weighted by how much it predicted past cup results. Edge = how many points (out of 1000) that parameter moves toward one side.", { 0: slModel('football') })}
       </p>
       ) : (
       <p className="mt-3 text-[11px] text-faint">
@@ -670,7 +672,7 @@ function MatchDetail() {
               <Section
                 id="prediction-card"
                 title={tt("Prediction")}
-                note={p ? [modelInfo(p.model).tag, modelInfo(p.model).name.replace(new RegExp(`^${modelInfo(p.model).tag} · `), ''), p.confidence ? CONFIDENCE_LABEL[p.confidence] : null].filter(Boolean).join(' · ') : undefined}
+                note={p ? [/* fix191: visitors see the public name only (v1 / v2 fallbacks too) */ p.model.startsWith('elo-') ? modelInfo(p.model).name : slModel('football'), p.confidence ? CONFIDENCE_LABEL[p.confidence] : null].filter(Boolean).join(' · ') : undefined}
               >
                 {p && p.locked ? (
                   <LockedPrediction pick={pick} dc={dc?.code || null} home={home} away={away} matchId={m.id} status={m.status} autoUnlock={wantReveal} onUnlocked={() => { setUnlockAnim(true); load(false) }} />
@@ -703,7 +705,7 @@ function MatchDetail() {
                                 title={info.desc}
                               >
                                 <span className="font-bold">{info.tag}</span>
-                                <span className="hidden sm:inline">{info.name}</span>
+                                <span className="hidden sm:inline">{info.name.replace(`${info.tag} · `, '')}</span>
                               </button>
                             )
                           })}
@@ -734,6 +736,7 @@ function MatchDetail() {
                       <div className={`rounded-full bg-draw ${inDc('D') ? '' : 'opacity-35'}`} style={{ width: `calc(${p.draw}% - 3px)` }} />
                       <div className={`rounded-full bg-away ${inDc('A') ? '' : 'opacity-35'}`} style={{ width: `calc(${p.away}% - 3px)` }} />
                     </div>
+                    <ModelName sport="football" className="mt-3" />
 
                     {p.live && LIVE.has(m.status) && <LiveChance p={p} home={home} away={away} paused={m.status === 'PAUSED'} />}
 
@@ -1271,8 +1274,8 @@ function LockedPrediction({ pick, dc, home, away, matchId, status, autoUnlock = 
         </div>
         <div className="absolute inset-0 grid place-items-center">
           <UnlockPrompt rid={matchId} status={status} autoUnlock={autoUnlock} onUnlocked={onUnlocked}
-            what={tt("The full prediction, why this pick, goals and the v3 breakdown.")}
-            premiumWhat={tt("The pick, win / draw / loss %, why this pick in plain words, goals, draw picks and the full v3 breakdown.")} />
+            what={tt("The full prediction, why this pick, goals and the {0} breakdown.", { 0: slModel('football') })}
+            premiumWhat={tt("The pick, win / draw / loss %, why this pick in plain words, goals, draw picks and the full {0} breakdown.", { 0: slModel('football') })} />
         </div>
       </div>
     </div>

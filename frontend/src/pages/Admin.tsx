@@ -7,6 +7,7 @@ import DataHealth from '../components/DataHealth'
 import VisitorsCard from '../components/VisitorsCard'
 import LeaguesCard from '../components/LeaguesCard'
 import { PARITY_REPORT } from '../lib/sportParity.report'
+import { slAdmin } from '../lib/modelNames'
 
 type Row = User & { lastLoginAt: string | null }
 
@@ -407,7 +408,7 @@ function ModelDailyCard() {
         <span className="text-xs text-faint">job 04:00 UTC · report 07:00 Israel time{d.running ? ' · running now' : ''}</span>
       </div>
       <p className="text-sm text-muted">
-        Published league model: <b className="text-ink">{d.mixLive ? 'v3-mix' : 'v3 (v3-mix in shadow)'}</b> · switch {d.mixMode} ·
+        Published league model: <b className="text-ink">{d.mixLive ? slAdmin('v3-mix') : `${slAdmin('grid-v3')}, v3-mix in shadow`}</b> · switch {d.mixMode} ·
         feature weight {d.champion.mixWeight} · feature fit {d.feature.active ? `${d.feature.active.cutoff} (${d.feature.active.train_games} games)` : 'not fitted yet'} ·
         champion since {d.champion.since}
       </p>

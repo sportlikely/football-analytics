@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t as tt } from '../../lib/i18n'
+import { slModel } from '../../lib/modelNames'
 import { useAuth } from '../../lib/auth'
 import { useBbConfig, useBbFavorites, liveLabel, bbRank, type BbGame } from '../../lib/bb'
 import { rid, rstatus, bbShort } from '../../pages/bb/parts'
@@ -113,7 +114,7 @@ export function useBasketballAdapter(): SportAdapter {
     field: 'court',
     banner: cfg && !cfg.public ? tt('Admin preview · not public yet') : null,
     labels: {
-      featured: tt("Featured game"), modelPrediction: tt("{0} prediction", { 0: 'bb-v3' }), nextList: tt("Next tip-offs"), nextSection: tt("Next games"),
+      featured: tt("Featured game"), modelPrediction: tt("{0} prediction", { 0: slModel('basketball') }), nextList: tt("Next tip-offs"), nextSection: tt("Next games"),
       all: { to: '/basketball/games', label: tt("All games →") }, today: { to: '/basketball/predictions/today', label: tt("Today's predictions →") },
       favorites: '/basketball/favorites', liveDetail: tt("Live score and box score →"),
       emptyHero: [tt("Basketball predictions,"), tt("tested in public."), tt("The next games appear here as soon as they are scheduled.")],

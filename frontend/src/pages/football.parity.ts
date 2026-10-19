@@ -22,6 +22,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.stats',
     'game.highlights',
     'game.savedBadge',
+    'game.modelName', // fix191: ModelName under the prediction
     'team.analysis',
     'team.ratingTiles',
     'team.scores',

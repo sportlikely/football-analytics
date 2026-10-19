@@ -4,6 +4,7 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
 import { t as tt, LOCALE } from '../lib/i18n'
+import { slAdmin } from '../lib/modelNames'
 
 type Outcome = 'H' | 'D' | 'A'
 
@@ -91,8 +92,8 @@ const OUTCOME_LABEL: Record<Outcome, string> = { H: 'Home', D: 'Draw', A: 'Away'
 const MODEL_LABEL: Record<string, string> = {
   'poisson-dc-v1': 'v1 · standings',
   'dc-history-v2': 'v2 · history (Dixon-Coles)',
-  'grid-v3': 'v3 · scoring grid',
-  'v3-mix': 'v3-mix · grid + feature model',
+  'grid-v3': `${slAdmin('grid-v3')} · scoring grid`,
+  'v3-mix': `${slAdmin('v3-mix')} · grid + feature model`,
   'feat-v1': 'feature model (logit + trees)'
 }
 // Last complete season (football-data.co.uk code: 2526 = 2025/26)

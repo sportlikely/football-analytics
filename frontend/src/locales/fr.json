@@ -1985,5 +1985,16 @@
  "Winter leagues: Dominican Republic, Venezuela, Mexico, Puerto Rico": "Ligues d'hiver : République dominicaine, Venezuela, Mexique, Porto Rico",
  "Run line and total runs": "Run line et total de points",
  "Starting pitchers, bullpen rest and line-ups": "Lanceurs partants, repos du bullpen et compositions",
- "Every sport we add, included": "Chaque sport que nous ajoutons, inclus"
+ "Every sport we add, included": "Chaque sport que nous ajoutons, inclus",
+ "{0} is analysing this match": "{0} analyse ce match",
+ "{0} · national teams": "{0} · équipes nationales",
+ "{0} · European cups": "{0} · coupes d'Europe",
+ "Full percentages, the {0} breakdown, draw picks, strong picks, team analysis and the complete track record.": "Pourcentages complets, le détail {0}, les nuls à suivre, les pronostics forts, l'analyse des équipes et le bilan complet.",
+ "The full prediction, why this pick, goals and the {0} breakdown.": "Le pronostic complet, pourquoi ce choix, les buts et le détail {0}.",
+ "The pick, win / draw / loss %, why this pick in plain words, goals, draw picks and the full {0} breakdown.": "Le pronostic, les % victoire / nul / défaite, pourquoi ce choix en termes simples, les buts, les nuls à suivre et le détail {0} complet.",
+ "{0} prediction and analysis →": "Pronostic et analyse {0} →",
+ "{0}'s national-team engine. Each parameter is scored among all active national teams (5.5 = average) and weighted by how much it predicted results since 2018. Edge = how many points (out of 1000) that parameter moves toward one side. Friendlies count for less, because teams rotate their squads.": "Le moteur équipes nationales de {0}. Chaque paramètre est noté parmi toutes les équipes nationales actives (5,5 = moyenne) et pondéré selon sa capacité à prédire les résultats depuis 2018. Avantage = combien de points (sur 1000) ce paramètre déplace vers un camp. Les matchs amicaux comptent moins, car les équipes font tourner leur effectif.",
+ "{0}'s European-cup engine. Each parameter is scored among all clubs playing in UEFA competitions (5.5 = average), from their league and cup games together, and weighted by how much it predicted past cup results. Edge = how many points (out of 1000) that parameter moves toward one side.": "Le moteur coupes d'Europe de {0}. Chaque paramètre est noté parmi tous les clubs engagés en compétitions UEFA (5,5 = moyenne), d'après leurs matchs de championnat et de coupe réunis, et pondéré selon sa capacité à prédire les résultats passés en coupe. Avantage = combien de points (sur 1000) ce paramètre déplace vers un camp.",
+ "Version {0} · updated {1}": "Version {0} · mise à jour le {1}",
+ "Version {0}": "Version {0}"
 }

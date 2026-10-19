@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t as tt } from '../../lib/i18n'
+import { slModel } from '../../lib/modelNames'
 import { useAuth } from '../../lib/auth'
 import { useNflConfig, useNflFavorites, useNflFilter, NFL_STATUS, weekLabel, nick, nflRid, nflRstatus, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
 import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
@@ -124,7 +125,7 @@ export function useNflAdapter(): SportAdapter {
     // fix185: no NFL | College switch: one sport, both leagues together
     switcher: null,
     labels: {
-      featured: tt("Featured game"), modelPrediction: tt("Our prediction"), nextList: tt("Next kick-offs"), nextSection: tt("Next games"),
+      featured: tt("Featured game"), modelPrediction: tt("{0} prediction", { 0: slModel('american-football') }), nextList: tt("Next kick-offs"), nextSection: tt("Next games"),
       all: { to: '/american-football/games', label: tt("All games →") }, today: { to: '/american-football/today', label: tt("Today's predictions →") },
       favorites: '/american-football/favorites', liveDetail: tt("Live score and box score →"),
       emptyHero: [tt("American football,"), tt("tested in public."), tt("The next games appear here as soon as they are scheduled.")],

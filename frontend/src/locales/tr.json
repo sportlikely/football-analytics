@@ -1985,5 +1985,16 @@
  "Winter leagues: Dominican Republic, Venezuela, Mexico, Puerto Rico": "Kış ligleri: Dominik Cumhuriyeti, Venezuela, Meksika, Porto Riko",
  "Run line and total runs": "Run line ve toplam sayı",
  "Starting pitchers, bullpen rest and line-ups": "İlk atıcılar, yedek atıcıların dinlenmesi ve kadrolar",
- "Every sport we add, included": "Eklediğimiz her spor dahil"
+ "Every sport we add, included": "Eklediğimiz her spor dahil",
+ "{0} is analysing this match": "{0} bu maçı analiz ediyor",
+ "{0} · national teams": "{0} · milli takımlar",
+ "{0} · European cups": "{0} · Avrupa kupaları",
+ "Full percentages, the {0} breakdown, draw picks, strong picks, team analysis and the complete track record.": "Tam yüzdeler, {0} dökümü, beraberlik tahminleri, güçlü tahminler, takım analizi ve eksiksiz sicil.",
+ "The full prediction, why this pick, goals and the {0} breakdown.": "Tam tahmin, neden bu tahmin, goller ve {0} dökümü.",
+ "The pick, win / draw / loss %, why this pick in plain words, goals, draw picks and the full {0} breakdown.": "Tahmin, galibiyet / beraberlik / mağlubiyet yüzdeleri, sade bir dille neden bu tahmin, goller, beraberlik tahminleri ve tam {0} dökümü.",
+ "{0} prediction and analysis →": "{0} tahmini ve analizi →",
+ "{0}'s national-team engine. Each parameter is scored among all active national teams (5.5 = average) and weighted by how much it predicted results since 2018. Edge = how many points (out of 1000) that parameter moves toward one side. Friendlies count for less, because teams rotate their squads.": "{0}'ün milli takım motoru. Her parametre, aktif tüm milli takımlar arasında puanlanır (5,5 = ortalama) ve 2018'den bu yana sonuçları ne kadar öngördüğüne göre ağırlıklandırılır. Avantaj = o parametrenin (1000 üzerinden) kaç puanı bir tarafa kaydırdığı. Hazırlık maçları daha az sayılır, çünkü takımlar kadrolarını döndürür.",
+ "{0}'s European-cup engine. Each parameter is scored among all clubs playing in UEFA competitions (5.5 = average), from their league and cup games together, and weighted by how much it predicted past cup results. Edge = how many points (out of 1000) that parameter moves toward one side.": "{0}'ün Avrupa kupası motoru. Her parametre, UEFA turnuvalarında oynayan tüm kulüpler arasında (5,5 = ortalama) lig ve kupa maçları birlikte alınarak puanlanır ve geçmiş kupa sonuçlarını ne kadar öngördüğüne göre ağırlıklandırılır. Avantaj = o parametrenin (1000 üzerinden) kaç puanı bir tarafa kaydırdığı.",
+ "Version {0} · updated {1}": "Sürüm {0} · {1} tarihinde güncellendi",
+ "Version {0}": "Sürüm {0}"
 }

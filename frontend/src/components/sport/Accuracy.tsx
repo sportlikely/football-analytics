@@ -5,6 +5,8 @@ import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { errorText, useAuth } from '../../lib/auth'
 import { t, LOCALE } from '../../lib/i18n'
+import { ModelName } from './game/ModelName'
+import type { ModelSport } from '../../lib/modelNames'
 
 /**
  * Accuracy / "Our record" (football's record page, shared by every sport since fix152b): period chips, the headline
@@ -36,6 +38,8 @@ export interface AccData {
 }
 export interface AccuracyAdapter {
   title: string
+  /** fix191: whose record this is (the public model name under the intro) */
+  model: ModelSport
   intro: string
   /** API path under API_URL; gets ?days= */
   url: string
@@ -144,6 +148,7 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
         <div>
           <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink">{a.title}</h1>
           <p className="text-sm text-muted mt-1 max-w-xl">{a.intro}</p>
+          <ModelName sport={a.model} className="mt-2" />
         </div>
         <div className="seg">
           {PERIODS.map(p => (

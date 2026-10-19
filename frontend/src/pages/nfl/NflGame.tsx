@@ -6,6 +6,7 @@ import { API_URL } from '../../lib/socket'
 import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
 import { useReveal } from '../../lib/reveal'
+import { slModelOf } from '../../lib/modelNames'
 import { NFL_STATUS, weekLabel, nick, nflTeamFav, nflRid, nflRstatus, setNflLeague, nflBase, nflLeagueName, nflModelOf, nflStrongAt, type NflGame as Game, type NflSide, type NflPred, type StandRow } from '../../lib/nfl'
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
@@ -243,8 +244,8 @@ function NflModelParts({ g, p, injuries }: { g: Game; p: NflPred; injuries: Data
       rows={rows}
       total={typeof p.homePts === 'number' ? { label: t('Predicted points'), h: String(Math.round(p.homePts)), a: String(Math.round(p.awayPts ?? 0)) } : null}
       note={w.blend
-        ? t('25 Elo points ≈ 1 point on the scoreboard. The rating margin is blended with efficiency (yards per play, turnovers) into the final margin; win chance from the margin. Model {0}.', { 0: p.model || nflModelOf(lg) })
-        : t('25 Elo points ≈ 1 point on the scoreboard; win chance from the expected margin. Model {0}.', { 0: p.model || nflModelOf(lg) })}
+        ? t('25 Elo points ≈ 1 point on the scoreboard. The rating margin is blended with efficiency (yards per play, turnovers) into the final margin; win chance from the margin. Model {0}.', { 0: slModelOf(p.model || nflModelOf(lg)) })
+        : t('25 Elo points ≈ 1 point on the scoreboard; win chance from the expected margin. Model {0}.', { 0: slModelOf(p.model || nflModelOf(lg)) })}
     />
   )
 }

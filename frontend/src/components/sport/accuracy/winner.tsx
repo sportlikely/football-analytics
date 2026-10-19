@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { t, LOCALE } from '../../../lib/i18n'
 import { TeamLogo } from '../../../pages/bb/parts'
 import { Card, Tick, pct, type AccuracyAdapter, type AccData } from '../Accuracy'
+import type { ModelSport } from '../../../lib/modelNames'
 
 /**
  * Accuracy adapter of the sports where our pick is the winner (basketball, NFL + college; it was WinnerAccuracy until
@@ -26,6 +27,7 @@ interface WinnerRecord {
 
 export interface WinnerOpts {
   title: string
+  model: ModelSport
   intro: string
   url: string
   gameHref: (id: number) => string
@@ -58,6 +60,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
 
   return {
     title: o.title,
+    model: o.model,
     intro: o.intro,
     url: o.url,
     calibrationText: t("Every chance we gave, for both teams of every game, grouped by the number we said. If our numbers are honest, the dots sit on the dashed line."),

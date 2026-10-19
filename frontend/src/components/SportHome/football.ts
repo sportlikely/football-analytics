@@ -6,6 +6,7 @@ import { useAuth } from '../../lib/auth'
 import { matchFame } from '../../lib/fame'
 import { useFavorites } from '../../lib/favorites'
 import { t as tt } from '../../lib/i18n'
+import { slModel } from '../../lib/modelNames'
 import type { SportAdapter, SportHomeData, HGame, HNews, HRecordRow, HResult, HSpecialItem } from './types'
 import { footballTeamHref } from '../../lib/teamLink'
 
@@ -227,12 +228,12 @@ function useFootballData(): SportHomeData {
 export const footballAdapter: SportAdapter = {
   field: 'pitch',
   labels: {
-    featured: tt("Featured match"), modelPrediction: tt("v3 prediction"), nextList: tt("Next kick-offs"), nextSection: tt("Next matches"),
+    featured: tt("Featured match"), modelPrediction: tt("{0} prediction", { 0: slModel('football') }), nextList: tt("Next kick-offs"), nextSection: tt("Next matches"),
     all: { to: '/matches', label: tt("All matches →") }, today: { to: '/predictions/today', label: tt("Today's predictions →") },
     favorites: '/favorites', liveDetail: tt("Live stats, lineups and events →"),
     emptyHero: [tt("Sports predictions,"), tt("tested in public."), tt("The next fixtures appear here as soon as they are scheduled.")],
     newsLoading: tt("Loading the latest football news…"),
-    premiumText: tt("Full percentages, the v3 breakdown, draw picks, strong picks, team analysis and the complete track record.")
+    premiumText: tt("Full percentages, the {0} breakdown, draw picks, strong picks, team analysis and the complete track record.", { 0: slModel('football') })
   },
   intro: {
     title: tt("Sports predictions, tested in public"), text: tt("Know what is likely before kick-off, and why."),
