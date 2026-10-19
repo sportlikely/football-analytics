@@ -747,7 +747,6 @@
  "Unlimited predictions, no counting": "Unbegrenzte Prognosen, ohne Zählen",
  "Everything in Premium": "Alles aus Premium",
  "Draw picks: the 2 likeliest draws every week": "Remis-Tipps: die 2 wahrscheinlichsten Unentschieden jede Woche",
- "Basketball now; tennis and UFC as they launch": "Basketball schon jetzt; Tennis und UFC, sobald sie starten",
  "Early access to new models and features": "Früher Zugang zu neuen Modellen und Funktionen",
  "You are back on Free (test).": "Du bist wieder auf Gratis (Test).",
  "You are on {0} now (test checkout, no payment taken).": "Du bist jetzt auf {0} (Test-Kauf, keine Zahlung erfolgt).",
@@ -1981,5 +1980,10 @@
  "teams covered": "Teams erfasst",
  "Who wins every NFL and college football game, with the chance of each side, the expected score and the reasons behind each pick. Every prediction is saved before kick-off and checked in public.": "Wer jedes NFL- und College-Football-Spiel gewinnt, mit der Chance jeder Seite, dem erwarteten Ergebnis und den Gründen für jeden Tipp. Jede Prognose wird vor dem Kick-off gespeichert und öffentlich überprüft.",
  "American football today": "American Football heute",
- "American football games": "American-Football-Spiele"
+ "American football games": "American-Football-Spiele",
+ "Baseball": "Baseball",
+ "Winter leagues: Dominican Republic, Venezuela, Mexico, Puerto Rico": "Winterligen: Dominikanische Republik, Venezuela, Mexiko, Puerto Rico",
+ "Run line and total runs": "Run Line und Gesamtzahl der Runs",
+ "Starting pitchers, bullpen rest and line-ups": "Startende Pitcher, Bullpen-Pausen und Aufstellungen",
+ "Every sport we add, included": "Jede Sportart, die wir hinzufügen, inklusive"
 }

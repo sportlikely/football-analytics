@@ -1,10 +1,10 @@
 /**
- * "Tell me when it opens" list for the sports that are coming (basketball, tennis, American football), Oct 2026.
+ * "Tell me when it opens" list for the sports that are coming (basketball, tennis, American football, baseball), Oct 2026.
  * One row per email and sport; signed-in users are linked to their account.
  */
 import { db } from '../db';
 
-export const COMING_SPORTS = ['basketball', 'tennis', 'american-football'] as const;
+export const COMING_SPORTS = ['basketball', 'tennis', 'american-football', 'baseball'] as const; // fix186: + baseball
 export type ComingSport = (typeof COMING_SPORTS)[number];
 
 db.exec(`

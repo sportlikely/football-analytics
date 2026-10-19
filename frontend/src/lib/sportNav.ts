@@ -49,4 +49,4 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
 }
 
 /** Staff "Past seasons" page of each sport (account menu). */
-export const PAST_OF: Record<SportId, string> = { football: '/past', basketball: '/basketball/past', 'american-football': '/american-football/past', tennis: '/past' }
+export const PAST_OF: Record<SportId, string> = { football: '/past', basketball: '/basketball/past', 'american-football': '/american-football/past', tennis: '/past', baseball: '/past' }

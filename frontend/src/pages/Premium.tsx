@@ -35,7 +35,7 @@ const PRO = [
   t("Unlimited predictions, no counting"),
   t("Everything in Premium"),
   t("Draw picks: the 2 likeliest draws every week"),
-  t("Basketball now; tennis and UFC as they launch"),
+  t("Every sport we add, included"),
   t("Early access to new models and features")
 ]
 

@@ -18,6 +18,11 @@ const PLAN: Record<Exclude<SportId, 'football'>, { leagues: string[]; picks: str
   'american-football': {
     leagues: ['NFL', 'College football (NCAA)'],
     picks: [t('Who wins, with the chance of each side'), t('Point spread and total points'), t('Quarterback and key-player availability')]
+  },
+  // fix186
+  baseball: {
+    leagues: ['MLB', 'NPB (Japan)', 'KBO (Korea)', 'CPBL (Taiwan)', 'Liga Mexicana de Béisbol', t('Winter leagues: Dominican Republic, Venezuela, Mexico, Puerto Rico'), 'Australian Baseball League'],
+    picks: [t('Who wins, with the chance of each side'), t('Run line and total runs'), t('Starting pitchers, bullpen rest and line-ups')]
   }
 }
 
@@ -32,7 +37,7 @@ export default function SportSoon({ sport }: { sport: Exclude<SportId, 'football
 
   useEffect(() => { if (user?.email) setEmail(user.email) }, [user?.email])
   useEffect(() => { setState('idle'); setError(null) }, [sport])
-  useEffect(() => { document.title = t('{0} · SportLikely', { 0: info.name }) }, [info.name])
+  useEffect(() => { document.title = t('{0} · SportLikely', { 0: t('{0} predictions', { 0: info.name }) }) }, [info.name])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()

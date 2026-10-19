@@ -754,6 +754,7 @@ function Shell() {
             <Route path="/crm" element={<ConsoleGate><Crm /></ConsoleGate>} />
             <Route path="/basketball/*" element={<BbRoutes />} />
             <Route path="/tennis/*" element={<SportSoon sport="tennis" />} />
+            <Route path="/baseball/*" element={<SportSoon sport="baseball" />} />
             <Route path="/american-football/*" element={<NflRoutes />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

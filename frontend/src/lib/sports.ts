@@ -1,7 +1,7 @@
 import { t } from './i18n'
 
 /** The sports of SportLikely. Football is live; the others open later (Oct 2026: "coming soon" pages). */
-export type SportId = 'football' | 'basketball' | 'tennis' | 'american-football'
+export type SportId = 'football' | 'basketball' | 'tennis' | 'american-football' | 'baseball'
 
 export interface Sport {
   id: SportId
@@ -18,7 +18,9 @@ export const SPORTS: Sport[] = [
   { id: 'basketball', name: t('Basketball'), icon: '🏀', path: '/basketball', live: false },
   { id: 'american-football', name: t('American football'), short: 'NFL', icon: '🏈', path: '/american-football', live: false },
   // fix145: tennis last (coming soon)
-  { id: 'tennis', name: t('Tennis'), icon: '🎾', path: '/tennis', live: false }
+  { id: 'tennis', name: t('Tennis'), icon: '🎾', path: '/tennis', live: false },
+  // fix186: baseball last (coming soon)
+  { id: 'baseball', name: t('Baseball'), icon: '⚾', path: '/baseball', live: false }
 ]
 
 /** The sport a page belongs to (everything outside another sport's section is football). */

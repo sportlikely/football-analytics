@@ -747,7 +747,6 @@
  "Unlimited predictions, no counting": "Sınırsız tahmin, sayım yok",
  "Everything in Premium": "Premium'daki her şey",
  "Draw picks: the 2 likeliest draws every week": "Beraberlik tahminleri: her hafta en olası 2 beraberlik",
- "Basketball now; tennis and UFC as they launch": "Basketbol şimdi; tenis ve UFC yayına girdikçe",
  "Early access to new models and features": "Yeni modellere ve özelliklere erken erişim",
  "You are back on Free (test).": "Tekrar Ücretsiz plandasın (test).",
  "You are on {0} now (test checkout, no payment taken).": "Artık {0} plandasın (test ödemesi, ücret alınmadı).",
@@ -1981,5 +1980,10 @@
  "teams covered": "takım kapsamında",
  "Who wins every NFL and college football game, with the chance of each side, the expected score and the reasons behind each pick. Every prediction is saved before kick-off and checked in public.": "Her NFL ve kolej futbolu maçını kimin kazanacağı; her tarafın şansı, beklenen skor ve her tahminin gerekçeleriyle. Her tahmin başlama vuruşundan önce kaydedilir ve herkesin önünde kontrol edilir.",
  "American football today": "Bugün Amerikan futbolu",
- "American football games": "Amerikan futbolu maçları"
+ "American football games": "Amerikan futbolu maçları",
+ "Baseball": "Beyzbol",
+ "Winter leagues: Dominican Republic, Venezuela, Mexico, Puerto Rico": "Kış ligleri: Dominik Cumhuriyeti, Venezuela, Meksika, Porto Riko",
+ "Run line and total runs": "Run line ve toplam sayı",
+ "Starting pitchers, bullpen rest and line-ups": "İlk atıcılar, yedek atıcıların dinlenmesi ve kadrolar",
+ "Every sport we add, included": "Eklediğimiz her spor dahil"
 }
