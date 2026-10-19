@@ -106,7 +106,7 @@ export default function NflGame() {
       render: () => (
         <>
           <WinnerPrediction
-            rid={nflRid(g)} status={nflRstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model={nflModelOf(lg)}
+            rid={nflRid(g)} status={nflRstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model={nflModelOf(lg)} sport="american-football"
             saved={t('Saved before kick-off')} updated={t('Updated until kick-off')} strongAt={nflStrongAt(lg)}
             stats={[
               { label: t('Expected margin'), value: typeof p?.margin === 'number' ? t('{0} by {1}', { 0: nick((p.margin >= 0 ? g.home : g.away).name, g.league), 1: Math.abs(p.margin).toFixed(1) }) : '–' },
@@ -244,8 +244,8 @@ function NflModelParts({ g, p, injuries }: { g: Game; p: NflPred; injuries: Data
       rows={rows}
       total={typeof p.homePts === 'number' ? { label: t('Predicted points'), h: String(Math.round(p.homePts)), a: String(Math.round(p.awayPts ?? 0)) } : null}
       note={w.blend
-        ? t('25 Elo points ≈ 1 point on the scoreboard. The rating margin is blended with efficiency (yards per play, turnovers) into the final margin; win chance from the margin. Model {0}.', { 0: slModelOf(p.model || nflModelOf(lg)) })
-        : t('25 Elo points ≈ 1 point on the scoreboard; win chance from the expected margin. Model {0}.', { 0: slModelOf(p.model || nflModelOf(lg)) })}
+        ? t('25 Elo points ≈ 1 point on the scoreboard. The rating margin is blended with efficiency (yards per play, turnovers) into the final margin; win chance from the margin. Model {0}.', { 0: slModelOf(p.model || nflModelOf(lg), 'american-football') })
+        : t('25 Elo points ≈ 1 point on the scoreboard; win chance from the expected margin. Model {0}.', { 0: slModelOf(p.model || nflModelOf(lg), 'american-football') })}
     />
   )
 }

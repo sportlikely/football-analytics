@@ -52,7 +52,7 @@ function core(g: Row) {
   }
   if (state === 'upcoming') {
     const p = predictGameCached(g); // fix159: cached, filled by the bb tick
-    if (p) pred = { pHome: p.pHome, margin: p.margin, total: p.total, home: p.home, away: p.away, savedAt: saved?.made_at || null, b2bHome: p.b2bHome, b2bAway: p.b2bAway, restHome: p.restHome, restAway: p.restAway, injHome: p.injHome || 0, injAway: p.injAway || 0 };
+    if (p) pred = { pHome: p.pHome, margin: p.margin, total: p.total, home: p.home, away: p.away, savedAt: saved?.made_at || null, b2bHome: p.b2bHome, b2bAway: p.b2bAway, restHome: p.restHome, restAway: p.restAway, injHome: p.injHome || 0, injAway: p.injAway || 0, newHome: p.newHome || null, newAway: p.newAway || null };
   }
   const pick = pred ? (pred.pHome >= 0.5 ? 'H' : 'A') : null;
   const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -97,6 +97,8 @@ function present(c: Core, full: boolean) {
         spread: r1(pred.margin), total: r1(pred.total), score: { home: Math.round(pred.home), away: Math.round(pred.away) },
         restHome: pred.restHome ?? null, restAway: pred.restAway ?? null, b2bHome: !!pred.b2bHome, b2bAway: !!pred.b2bAway,
         injHome: pred.injHome || 0, injAway: pred.injAway || 0,
+        // fix192: a side with no games in this league, rated from another of our leagues
+        newHome: pred.newHome || null, newAway: pred.newAway || null,
         live: c.live
       } : {}),
       hit: state === 'done' && g.hs !== null && !check ? (pick === 'H') === (g.hs > g.as_) : null

@@ -23,6 +23,7 @@ import { feedState, bootedAt } from './freshness';
 import { emailEnabled, sendEmail, layout, section, esc, C, SITE } from './email';
 import { lastDataAudit } from './dataAudit';
 import { every, after, slicer, inBatches } from './perf';
+import { missingPredictions } from './missingPredictions';
 
 type Level = 'ok' | 'warn' | 'fail';
 export interface Check { id: string; label: string; level: Level; detail: string; items?: string[] }
@@ -122,6 +123,22 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     detail: `${soon.length - noPred.length} of ${soon.length} games in the next 48 h have a prediction`,
     items: noPred.slice(0, 15).map(gameName)
   });
+  // fix192: every sport, next 7 days: games without a prediction, with the reason (target: zero; logged once a day)
+  try {
+    const mp = missingPredictions(matches, now);
+    const dayKey = new Date(now).toISOString().slice(0, 10);
+    for (const line of mp.items) { const k = `np|${dayKey}|${line}`; if (!loggedFallback.has(k)) { loggedFallback.add(k); logger.warn(`no prediction: ${line}`); } }
+    checks.push({
+      id: 'no-prediction-7d', label: 'Every game of the next 7 days has a prediction (all sports)', level: mp.items.length ? 'warn' : 'ok',
+      detail: mp.items.length
+        ? `${mp.items.length} of ${mp.checked} upcoming game(s) have no prediction${mp.off.length ? ` · ${mp.off.length} cancelled / postponed (not counted)` : ''}`
+        : `All ${mp.checked} upcoming games have a prediction${mp.off.length ? ` · ${mp.off.length} cancelled / postponed (not counted)` : ''}`,
+      items: [...mp.items.slice(0, 40), ...mp.off.slice(0, 10).map(x => `(not counted) ${x}`)]
+    });
+  } catch (e: any) {
+    checks.push({ id: 'no-prediction-7d', label: 'Every game of the next 7 days has a prediction (all sports)', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
+  await slice();
   // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason
   const OLD = new Set(['poisson-dc-v1', 'dc-history-v2']);
   const fallback = matches.filter(m => !FINAL.includes(m.status) && m.prediction && OLD.has(m.prediction.model) && new Date(m.utcDate).getTime() < now + 30 * 86400000);

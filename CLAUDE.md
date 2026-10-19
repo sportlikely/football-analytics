@@ -13,8 +13,8 @@ is model work, the matching note, in the same commit.
 
 - **No bookmakers on the public site.** No odds, no bookmaker names or links. Odds comparison exists for admins only
   (model quality). Ads policy reason. Public proof = hit rate, strong picks, calibration.
-- **Never mention Israel.** No Israeli league on the basketball site, no "Israel" anywhere in product copy. Israeli
-  football results exist in the data (Ligat Ha'Al, AF383) and stay as they are; don't add Israel references.
+- **Israel is treated like every other country** (Yarin, 19 Oct 2026): no special hiding and no highlighting. Ligat
+  Ha'al (AF383) is a normal predicted league. The Israeli basketball league is not added yet (ask Yarin first).
 - **Past seasons / backtests are admin-only** on every sport. The public record starts on launch day.
 - **Secrets:** never print, log, commit or ask for API keys, tokens or passwords. They live in Railway variables.
   Never change or delete `TOTP_KEY` or `BACKUP_KEY` (two-step login and backups would break).

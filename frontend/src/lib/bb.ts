@@ -25,6 +25,9 @@ export interface BbPrediction {
   b2bAway?: boolean
   injHome?: number
   injAway?: number
+  /** fix192: no games in this league yet, rated from another of our leagues */
+  newHome?: string | null
+  newAway?: string | null
   /** while the game is on: win chance now and the projected final score (from the prediction saved at tip-off) */
   live?: BbLiveChance | null
   hit: boolean | null

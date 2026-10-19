@@ -119,7 +119,7 @@ export default function BbGame() {
       render: () => (
         <>
           <WinnerPrediction
-            rid={rid(g)} status={rstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model="bb-v3"
+            rid={rid(g)} status={rstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model="bb-v3" sport="basketball"
             saved={t('Saved before tip-off')} updated={t('Updated until tip-off')} strongAt={70} showLockedPick
             stats={[
               { label: t('Point spread'), value: spreadText(g) || '–' },
@@ -238,7 +238,11 @@ export default function BbGame() {
 /** "Why we think so": the model's own reasons in plain words (ratings, home court, back-to-backs, talent, injuries). */
 function bbWhy(d: Detail): WhyRow[] {
   const g = d.game
-  return d.why.map(w => {
+  // fix192: a team with no games in this league yet starts from its rating in another of our leagues
+  const pr = g.prediction
+  const fresh: WhyRow[] = ([[pr?.newHome, g.home.name], [pr?.newAway, g.away.name]] as const).filter(([b]) => !!b)
+    .map(([, name]) => ({ tone: 'N' as const, text: t("New to this league: {0} have no games in it yet, so they start from their rating in another of our leagues, moved to this league's level.", { 0: name }) }))
+  return [...fresh, ...d.why.map(w => {
     const team = w.side === 'H' ? g.home : g.away
     const other = w.side === 'H' ? g.away : g.home
     const pv = d.preview
@@ -274,7 +278,7 @@ function bbWhy(d: Detail): WhyRow[] {
     }
     const shown = w.points !== 0 && w.kind !== 'b2bBoth'
     return { tone, text, sub: w.kind === 'attack', points: shown ? `${tone === 'N' ? '' : '+'}${pts} ${t('pts')}` : null }
-  })
+  })]
 }
 
 

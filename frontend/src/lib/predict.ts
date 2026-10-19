@@ -1,5 +1,5 @@
 import { t } from './i18n'
-import { slModel } from './modelNames'
+import { slModel, slModelOf } from './modelNames'
 // Prediction shape served by the backend (see backend/src/services/predictionModel.ts)
 export interface Prediction {
   model: string
@@ -29,6 +29,8 @@ export interface Prediction {
     gamesPlayed: { home: number; away: number }
     leagueAvgGoals: number
   }
+  /** fix192: a side with no games in the league yet, and the profile it starts from */
+  newcomer?: { home: 'promoted' | 'bottom3' | 'average' | null; away: 'promoted' | 'bottom3' | 'average' | null }
   /** Grid model (v3) breakdown — absent on v1/v2 */
   drawStreak?: { home: number; away: number }
   /** Match being played: win chance now, from the pre-match prediction + score, minute and red cards */
@@ -137,8 +139,8 @@ export const isV3 = (model?: string) => model === 'grid-v3' || model === 'v3-mix
 /** Short and long labels for each model id. fix191: visitors see the public name (lib/modelNames), never the ids. */
 const SLF = slModel('football')
 export const MODEL_INFO: Record<string, { tag: string; name: string; desc: string }> = {
-  'poisson-dc-v1': { tag: 'v1', name: t('Standings model'), desc: t('Poisson from the current league table') },
-  'dc-history-v2': { tag: 'v2', name: t('History model'), desc: t('Dixon-Coles fitted on 3 seasons of results') },
+  'poisson-dc-v1': { tag: SLF, name: t('Standings model'), desc: t('Poisson from the current league table') },
+  'dc-history-v2': { tag: SLF, name: t('History model'), desc: t('Dixon-Coles fitted on 3 seasons of results') },
   'grid-v3': { tag: SLF, name: t('Grid model'), desc: t('Scoring grid: value × relevance per parameter, 1000-point split') },
   // v3-mix is shown as SL Football 3.0 too (Yarin, Oct 2026): the grid averaged with our second model; no new public name
   'v3-mix': { tag: SLF, name: t('Grid model'), desc: t('Scoring grid: value × relevance per parameter, 1000-point split') },
@@ -147,7 +149,8 @@ export const MODEL_INFO: Record<string, { tag: string; name: string; desc: strin
 }
 
 export function modelInfo(model: string) {
-  return MODEL_INFO[model] || { tag: model, name: model, desc: '' }
+  // fix192: an id not listed here still shows the public name, never the id
+  return MODEL_INFO[model] || { tag: slModelOf(model, 'football'), name: slModelOf(model, 'football'), desc: '' }
 }
 
 /**

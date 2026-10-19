@@ -143,7 +143,13 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
     if (list.length) risks.push(tt("Missing: {0}.", { 0: list.join(' · ') }))
   }
   if (friendly || g.rows.some(r => /friendly/i.test(r.name))) risks.push(tt("It is a friendly: coaches rotate their squads, so results are harder to predict."))
-  if (p.confidence === 'low') risks.push(tt("One of the teams has played few games, so there is less to go on."))
+  // fix192: a team with no games in this league yet (play-off side from the division below, a promoted club)
+  for (const [basis, name] of [[p.newcomer?.home, home], [p.newcomer?.away, away]] as const) {
+    if (basis === 'promoted') risks.push(tt("New to this league: {0} has no games in it yet, so it starts from the level of the teams promoted into it in the last 3 seasons.", { 0: name }))
+    else if (basis === 'bottom3') risks.push(tt("New to this league: {0} has no games in it yet, so it starts from the level of the league's bottom three teams.", { 0: name }))
+    else if (basis === 'average') risks.push(tt("New to this league: {0} has no games in it yet, so it starts from the league average.", { 0: name }))
+  }
+  if (p.confidence === 'low' && !p.newcomer) risks.push(tt("One of the teams has played few games, so there is less to go on."))
   if (!risks.length) risks.push(tt("Nothing unusual: the teams, the form and the data all point the same way."))
 
   return (

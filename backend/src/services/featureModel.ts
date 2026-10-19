@@ -206,9 +206,9 @@ function newTeam(d: DivSt, season: number): TeamSt {
 }
 
 /** Feature vector for a game from the state before it (lineups / injuries of that fixture when stored). */
-function featuresFor(st: FeatState, f: Fx): { x: Float64Array; ok: boolean } {
+function featuresFor(st: FeatState, f: Fx, over: { home?: TeamSt; away?: TeamSt } = {}): { x: Float64Array; ok: boolean } {
   const d = divOf(st, f.div);
-  const h = teamOf(st, f.grp, f.home, d, f.season), a = teamOf(st, f.grp, f.away, d, f.season);
+  const h = over.home || teamOf(st, f.grp, f.home, d, f.season), a = over.away || teamOf(st, f.grp, f.away, d, f.season);
   const x = new Float64Array(NF);
   const elo = (h.elo + d.edge - a.elo) / 100;
   x[0] = elo; x[1] = Math.abs(elo);
@@ -625,6 +625,34 @@ export function fixtureByNames(st: FeatState, grp: string, home: string | null, 
   return null;
 }
 
+/**
+ * fix192: a side with fewer than `warmup` games in the league (a play-off team from the division below, a promoted
+ * club before its first games) is played as a newcomer: the average state of the division's bottom 3 over the last
+ * two seasons (same rule as grid-v3, where it beat the promoted-teams average out of sample). Kept per state.
+ */
+const newcomerSt = new WeakMap<FeatState, Map<string, TeamSt | null>>();
+function newcomerTeam(st: FeatState, grp: string, div: string, season: number): TeamSt | null {
+  let memo = newcomerSt.get(st);
+  if (!memo) newcomerSt.set(st, (memo = new Map()));
+  const key = `${grp}|${div}|${season}`;
+  if (memo.has(key)) return memo.get(key)!;
+  const recent = new Set<number>();
+  for (const f of st.fixtures.values())
+    if (f.grp === grp && f.div === div && f.season >= season - 1 && f.hg != null && FINISHED.has(String(f.status))) { recent.add(f.home); recent.add(f.away); }
+  const known = (id: number) => { const t = st.teams.get(`${grp}|${id}`); return t && t.games >= FEAT_CONF.warmup ? t : null; };
+  const pool = ([...recent].map(known).filter(Boolean) as TeamSt[]).sort((x, y) => x.elo - y.elo).slice(0, 3);
+  let out: TeamSt | null = null;
+  if (pool.length === 3) {
+    const avg = (g: (t: TeamSt) => number) => pool.reduce((s, t) => s + g(t), 0) / pool.length;
+    out = {
+      elo: avg(t => t.elo), gf: avg(t => t.gf), ga: avg(t => t.ga), xgf: avg(t => t.xgf), xga: avg(t => t.xga), sotf: avg(t => t.sotf), sota: avg(t => t.sota),
+      luck: [], homePts: avg(t => t.homePts), awayPts: avg(t => t.awayPts), games: FEAT_CONF.warmup, season, seasonGames: 0, lastXi: null
+    };
+  }
+  memo.set(key, out);
+  return out;
+}
+
 /** Feature-model probabilities (%) for a match about to be played, or null. */
 export function featureProbs(match: any): [number, number, number] | null {
   const act = activeFeatureModel();
@@ -635,7 +663,12 @@ export function featureProbs(match: any): [number, number, number] | null {
   if (!f) return null; // a fixture we don't have
   // a started / finished game: the state already holds its result, so only upcoming games get a fresh number
   if (!UPCOMING.has(String(f.status)) && Date.parse(f.kickoff) < Date.now()) return null;
-  const { x, ok } = featuresFor(st, f);
+  const over: { home?: TeamSt; away?: TeamSt } = {};
+  for (const side of ['home', 'away'] as const) {
+    const t = st.teams.get(`${f.grp}|${f[side]}`);
+    if (!t || t.games < FEAT_CONF.warmup) { const n = newcomerTeam(st, f.grp, f.div, f.season); if (n) over[side] = { ...n, lastXi: t?.lastXi ?? null }; }
+  }
+  const { x, ok } = featuresFor(st, f, over);
   if (!ok) return null;
   const p = predictWith(act.model, x);
   return [p[0] * 100, p[1] * 100, p[2] * 100];

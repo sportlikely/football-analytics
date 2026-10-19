@@ -120,6 +120,13 @@ export const CONV = {
   // club at this share of its division's median value (log scale). −1 = off.
   squadFloorRatio: 0.5, // tested 26 Sep 2026: no change in Brier/log loss on 2025-26 and 2026-27, removes impossible values
   useDivHint: 1, // take each team's division from the fixture being predicted (see buildState)
+  // fix192: a team with no games in the group (play-off side from the division below, a promoted club before its first
+  // game in a one-division group) starts from a "newcomer" profile instead of getting no prediction.
+  // 1 = average of the teams promoted into the division over the last 3 seasons (bottom-3 average when fewer than 3),
+  // 2 = bottom-3 average, 3 = division average, 0 = off (no prediction, as before).
+  // Tested 20 Oct 2026 on the 127 such games of 2024-25 … 2026-27 (all groups, never fitted): log loss bottom-3 1.0584,
+  // promoted 1.0625, league average 1.0883, league base rates 1.0704 (closing odds 1.0207) → bottom-3.
+  newcomer: 2,
   // availability rows (#13 injuries, #12 confirmed XI): value = 5.5 − k × (starter-equivalents missing)
   injK: 2.0, // backtest 2025-26: 1–4 all help a little, 2 best on hit rate
   xiK: 1.0,
@@ -290,6 +297,8 @@ interface TeamFeat {
   lastMatch: string | null;
   squadEur: number | null; // top-15 squad value, EUR (null = unknown)
   squadEst?: boolean; // value raised to the division floor (incomplete Transfermarkt data, usually a promoted club)
+  /** fix192: no games in this group yet: the newcomer profile (see newcomerFeat) */
+  newcomer?: 'promoted' | 'bottom3' | 'average';
   /** values 1–10 (rank within division) */
   v: Record<string, number>;
 }
@@ -723,8 +732,74 @@ function poisson1x2(lh: number, la: number) {
   return { H: H / t, D: D / t, A: A / t };
 }
 
+/*
+ * fix192: newcomers. A team with no games in the group gets the average profile of the division's bottom 3 (CONV.newcomer
+ * 2, the best out of sample), or of the teams that came up into it over the last 3 seasons (1), or the division (3).
+ * Memoised per state and mode (the live state is rebuilt every few hours).
+ */
+const NUM_FIELDS = ['ppgSeason', 'elo', 'attack', 'defence', 'formPts', 'form10Pts', 'homePpg', 'awayPpg', 'drawRate'] as const;
+const newcomerMemo = new WeakMap<GroupState, Map<string, { tpl: TeamFeat; basis: NonNullable<TeamFeat['newcomer']> } | null>>();
+function newcomerTemplate(state: GroupState, all: HistoryMatch[], div: string) {
+  const divisions = GROUPS[state.group]?.divisions || [div];
+  const rank = (d: string) => divisions.indexOf(d);
+  const inDiv = [...state.teams.values()].filter(t => t.division === div);
+  if (inDiv.length < 4) return null;
+  let pool: TeamFeat[] = [];
+  let basis: NonNullable<TeamFeat['newcomer']> = 'bottom3';
+  if (CONV.newcomer === 1) {
+    // the division each team played in, per season
+    const bySeason = new Map<string, Map<string, string>>();
+    for (const m of all) {
+      if (m.date >= state.asOf) continue;
+      let x = bySeason.get(m.season);
+      if (!x) bySeason.set(m.season, (x = new Map()));
+      x.set(m.home, m.division); x.set(m.away, m.division);
+    }
+    const seasons = [...bySeason.keys()].sort();
+    const arrivals = new Set<string>();
+    for (let i = Math.max(1, seasons.length - 3); i < seasons.length; i++) {
+      const cur = bySeason.get(seasons[i])!, prev = bySeason.get(seasons[i - 1])!;
+      cur.forEach((d, t) => {
+        if (d !== div) return;
+        const pd = prev.get(t);
+        if (pd === div) return;
+        if (pd && rank(pd) >= 0 && rank(pd) < rank(div)) return; // relegated from above: not a newcomer profile
+        arrivals.add(t);
+      });
+    }
+    pool = inDiv.filter(t => arrivals.has(t.name));
+    if (pool.length >= 3) basis = 'promoted';
+  }
+  if (CONV.newcomer === 3) { pool = inDiv; basis = 'average'; }
+  else if (basis === 'bottom3') pool = [...inDiv].sort((x, y) => x.elo - y.elo).slice(0, 3);
+  const avg = (f: (t: TeamFeat) => number) => pool.reduce((s, t) => s + f(t), 0) / pool.length;
+  const tpl: TeamFeat = { ...pool[0], division: div, played: 0, gamesLast8: 0, lastMatch: null, squadEur: null, squadEst: false, v: {} };
+  for (const k of NUM_FIELDS) tpl[k] = avg(t => t[k]);
+  tpl.formPts = Math.round(tpl.formPts); tpl.form10Pts = Math.round(tpl.form10Pts);
+  const keys = new Set(pool.flatMap(t => Object.keys(t.v)));
+  keys.forEach(k => { tpl.v[k] = Math.round(avg(t => t.v[k] ?? 5) * 10) / 10; });
+  tpl.v.fresh = 5; // unknown fixture load: neutral
+  tpl.rank = inDiv.filter(t => t.elo > tpl.elo).length + 1;
+  tpl.tier = (Math.min(3, Math.floor(((tpl.rank - 1) / inDiv.length) * 4)) + 1) as TeamFeat['tier'];
+  return { tpl, basis };
+}
+function newcomerFeat(state: GroupState, all: HistoryMatch[], name: string, div: string): TeamFeat | null {
+  let memo = newcomerMemo.get(state);
+  if (!memo) newcomerMemo.set(state, (memo = new Map()));
+  const key = `${CONV.newcomer}|${div}`;
+  if (!memo.has(key)) memo.set(key, newcomerTemplate(state, all, div));
+  const x = memo.get(key);
+  return x ? { ...x.tpl, name, v: { ...x.tpl.v }, newcomer: x.basis } : null;
+}
+
 export function scoreMatch(state: GroupState, all: HistoryMatch[], home: string, away: string, asOf: string, matchDate?: string): Prediction | null {
-  const h = state.teams.get(home), a = state.teams.get(away);
+  let h = state.teams.get(home), a = state.teams.get(away);
+  if ((!h || !a) && CONV.newcomer > 0 && home !== away) {
+    // the division of the game: the known side's, else the group's top division
+    const div = (h || a)?.division || GROUPS[state.group]?.divisions[0];
+    if (div && !h) h = newcomerFeat(state, all, home, div) || undefined;
+    if (div && !a) a = newcomerFeat(state, all, away, div) || undefined;
+  }
   if (!h || !a) return null;
   const derby = isDerby(home, away);
   const type = matchTypeFor(h, a, derby);
@@ -863,6 +938,7 @@ export function scoreMatch(state: GroupState, all: HistoryMatch[], home: string,
   for (const r of byEdge) reasons.push(`${r.name}: ${r.edge > 0 ? home : away} +${Math.abs(r.edge)}`);
   if (drawFactors > 8) reasons.push(`draw factors +${Math.round(drawFactors)} (${derby ? 'derby, ' : ''}draw-prone / league)`);
   if (lc) reasons.push(`league settings (${div}): ${describeLc(lc)}`);
+  for (const t of [h, a]) if (t.newcomer) reasons.unshift(`new to this league: ${t.name} has no games in it yet, so it starts from ${t.newcomer === 'promoted' ? 'the average of the teams promoted into it over the last 3 seasons' : t.newcomer === 'bottom3' ? 'the average of its bottom 3 teams' : 'the league average'}`);
   if (guarded) reasons.push(`common-sense check: form (last 10: ${h.form10Pts} vs ${a.form10Pts} pts, season ${h.ppgSeason.toFixed(2)} vs ${a.ppgSeason.toFixed(2)} ppg) and the factors agree, so the weaker side is not the favourite`);
 
   const evidence = Math.min(h.played, a.played);
@@ -881,6 +957,7 @@ export function scoreMatch(state: GroupState, all: HistoryMatch[], home: string,
   };
   return {
     model: MODEL_V3,
+    ...(h.newcomer || a.newcomer ? { newcomer: { home: h.newcomer || null, away: a.newcomer || null } } : {}),
     drawStreak: { home: last20(home), away: last20(away) },
     home: ptsH / 10, draw: drawPts / 10, away: ptsA / 10,
     expectedGoals: { home: Math.round(gH * 100) / 100, away: Math.round(gA * 100) / 100 },
@@ -959,9 +1036,11 @@ export function predictV3(match: any): Prediction | null {
   if (!group) return null;
   const live = liveState.get(group);
   if (!live) return null;
-  const home = fdNameFor(group, match.homeTeam?.id);
-  const away = fdNameFor(group, match.awayTeam?.id);
-  if (!home || !away) return null;
+  // fix192: a team the map doesn't know has no games in the group's history (a play-off side from the division below,
+  // a promoted club before its first game): it plays under its own name and scoreMatch gives it the newcomer profile
+  const home = fdNameFor(group, match.homeTeam?.id) || (CONV.newcomer ? match.homeTeam?.name : null);
+  const away = fdNameFor(group, match.awayTeam?.id) || (CONV.newcomer ? match.awayTeam?.name : null);
+  if (!home || !away || home === away) return null;
   const date = String(match.utcDate || '').slice(0, 10) || undefined;
   const res = withLiveConfig(() => scoreMatch(live.state, live.all, home, away, live.state.asOf, date));
   // Confirmed lineups are in and counted: also send the numbers from before them, so the page can show what changed

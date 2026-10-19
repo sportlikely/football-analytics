@@ -11,6 +11,7 @@ import { db } from '../db';
 import { doubleChance, DC_STRONG } from '../utils/doubleChance';
 import { Access } from './auth';
 import { PLANS, FREE_WEEKLY_UNLOCKS } from './billing';
+import { slModel } from '../utils/modelNames';
 
 const KEY = () => process.env.ANTHROPIC_API_KEY || '';
 const MODEL = () => process.env.ASSISTANT_MODEL || 'claude-haiku-4-5';
@@ -29,7 +30,7 @@ db.exec(`
 function siteGuide() {
   const premium = PLANS.find(p => p.id === 'premium'), pro = PLANS.find(p => p.id === 'pro'), proYear = PLANS.find(p => p.id === 'pro-year');
   return `SportLikely is a football prediction site. For every match it gives the chance of a home win, draw and away win, expected goals, over/under 2.5 and both-teams-to-score, with the reasons behind the pick.
-How the model works (v3): each team is scored 1–10 within its league on squad market value (Transfermarkt), overall strength (an Elo rating from every result, bigger wins count more), confirmed line-up vs the usual line-up, missing players, attack and defence against teams of that level, freshness (games in the last 8 days), home/away record and head-to-head (only with 3+ meetings). The difference between the two sides sets the home/away split; the draw chance starts from a goals model. National teams and European cups have their own engines. Weights were fitted on the 2024-25 and 2025-26 seasons and checked on 2026-27.
+Our model's public name is ${slModel('football')} (fix192: never call it v3, grid-v3, v3-mix or any other internal id). How the model works: each team is scored 1–10 within its league on squad market value (Transfermarkt), overall strength (an Elo rating from every result, bigger wins count more), confirmed line-up vs the usual line-up, missing players, attack and defence against teams of that level, freshness (games in the last 8 days), home/away record and head-to-head (only with 3+ meetings). The difference between the two sides sets the home/away split; the draw chance starts from a goals model. National teams and European cups have their own engines. Weights were fitted on the 2024-25 and 2025-26 seasons and checked on 2026-27.
 Record: every prediction is saved before kick-off and scored after the game; the Accuracy page shows the record and never edits past predictions. "Our pick" (football) = the double chance: the two most likely results together (1X = home or draw, X2 = draw or away, 12 = either team wins) with the sum of their chances; a settled pick is right when the result is one of the two. "Strong pick" = that double chance at 85% or more. The single most likely result (1X2) is also tracked, as "the hard calls". Basketball has no draws: the pick there is the likelier winner.
 Plans: Free accounts get ${FREE_WEEKLY_UNLOCKS} free match unlocks a week (reset Monday). Premium $${premium?.price}/month: ${premium?.unlocks} match unlocks a month. Pro $${pro?.price}/month (or $${proYear?.price}/year): every prediction in full, draw picks, team analysis. Payments on the Premium page.
 Pages: Home, Matches (filter by league, "My favorites"), match page tabs (Prediction, Statistics = averages of the last 10 games, Lineups = confirmed or expected XI from the last 5 games, H2H = last 10 meetings, Standings), Favorites (star leagues, teams, players; synced to the account), Accuracy, Draw picks (Pro), Past seasons, Account.

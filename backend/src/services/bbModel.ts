@@ -27,7 +27,9 @@ type Game = {
 };
 type Params = { k: number; r: number; b2b: number };
 type Team = { o: number; d: number; season: string; games: number; last: number; sg: number; ha: number };
-type Pred = { pHome: number; margin: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[] };
+type Pred = { pHome: number; margin: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
+/** fix192: how a team with no games in the league was rated ('other-league' = its rating there, moved to this league's level) */
+export type NewBasis = 'other-league' | 'bottom3';
 
 /**
  * Leagues "in testing" (8 Oct 2026 backtest): the model does not yet beat the simple "home team wins" rate there,
@@ -99,12 +101,16 @@ class League {
   sigmaT = 17;  // typical miss on the total
   n = 0;
   lastPlayed = new Map<number, number>(); // team → kickoff ms of its previous game (any status, by date)
+  /** fix192: where a team new to the league starts (after the league's first 100 games); null = the league average */
+  prior: ((id: number, now: number) => { o: number; d: number } | null) | null = null;
+  now = 0;
   constructor(public p: Params) {}
 
   team(id: number, season: string): Team {
     let t = this.teams.get(id);
     if (!t) {
-      t = { o: 0, d: 0, season, games: 0, last: 0, sg: 0, ha: 0 };
+      const pr = this.prior && this.n >= 100 ? this.prior(id, this.now) : null;
+      t = { o: pr?.o ?? 0, d: pr?.d ?? 0, season, games: 0, last: 0, sg: 0, ha: 0 };
       this.teams.set(id, t);
     } else if (t.season !== season) {
       t.o *= this.p.r;
@@ -117,6 +123,7 @@ class League {
   }
 
   predict(g: Game): Pred {
+    this.now = Date.parse(g.kickoff);
     const h = this.team(g.home_id, g.season), a = this.team(g.away_id, g.season);
     const ko = new Date(g.kickoff).getTime();
     const restOf = (id: number) => {
@@ -177,19 +184,23 @@ class League {
 type P2 = { k: number; kp: number; r: number; rp: number; rh: number; b2b: number; clip: number; early: number; kh: number };
 const P2_DEFAULT: P2 = { k: 0.05, kp: 0.05, r: 0.9, rp: 0.7, rh: 0.8, b2b: 1.5, clip: 40, early: 2, kh: 0.01 };
 const P2_LEAGUE: Record<string, Partial<P2>> = { NBA: { b2b: 3 } };
-type T2 = { o: number; d: number; p: number; h: number; season: string; n: number };
+type T2 = { o: number; d: number; p: number; h: number; season: string; n: number; tg?: number; at?: number };
 
 class LeagueV2 {
   teams = new Map<number, T2>();
   ppp = 105; pace = 90; hca = 3; sigma = 12; sigmaT = 17; n = 0; first = true;
+  /** fix192: same as League.prior, on the possession ratings */
+  prior: ((id: number, now: number) => { o: number; d: number } | null) | null = null;
+  now = 0;
   constructor(public p: P2) {}
   team(id: number, season: string): T2 {
     let t = this.teams.get(id);
-    if (!t) { t = { o: 0, d: 0, p: 0, h: 0, season, n: 0 }; this.teams.set(id, t); }
+    if (!t) { const pr = this.prior && this.n >= 100 ? this.prior(id, this.now) : null; t = { o: pr?.o ?? 0, d: pr?.d ?? 0, p: 0, h: 0, season, n: 0, tg: 0, at: 0 }; this.teams.set(id, t); }
     else if (t.season !== season) { t.o *= this.p.r; t.d *= this.p.r; t.p *= this.p.rp; t.h *= this.p.rh; t.season = season; t.n = 0; }
     return t;
   }
   predict(g: Game, restH: number | null, restA: number | null) {
+    this.now = Date.parse(g.kickoff);
     const H = this.team(g.home_id, g.season), A = this.team(g.away_id, g.season);
     const hca = this.hca + H.h;
     const b2bHome = restH !== null && restH < 1.4, b2bAway = restA !== null && restA < 1.4;
@@ -220,6 +231,7 @@ class LeagueV2 {
     const res = g.hs! - g.as_! - pr.margin;
     H.h += this.p.kh * w * res;
     H.n++; A.n++;
+    H.tg = (H.tg || 0) + 1; A.tg = (A.tg || 0) + 1; H.at = A.at = this.now;
     this.ppp += al * w * ((ah + aa) / 2 - this.ppp);
     this.hca += al * w * 0.5 * res;
     this.sigma = Math.sqrt(Math.max(36, this.sigma ** 2 + al * w * (res * res - this.sigma ** 2)));
@@ -244,8 +256,9 @@ function possessionsOf(code: string): Map<number, number> {
   return out;
 }
 
-function runV2(games: Game[], p: P2, poss: Map<number, number>, onPred?: (g: Game, pr: ReturnType<LeagueV2['predict']>, L: LeagueV2) => void) {
+function runV2(games: Game[], p: P2, poss: Map<number, number>, onPred?: (g: Game, pr: ReturnType<LeagueV2['predict']>, L: LeagueV2) => void, prior?: (L: LeagueV2) => LeagueV2['prior']) {
   const L = new LeagueV2(p);
+  if (prior) L.prior = prior(L);
   const last = new Map<number, number>();
   for (const g of games) {
     if (!done(g)) continue;
@@ -285,8 +298,9 @@ const fin = (m: Metrics) => m.n ? {
 } : { games: 0 };
 
 /** Run the model through a league's games in order. `onPred` sees every finished game's pre-game prediction. */
-function run(games: Game[], p: Params, onPred?: (g: Game, pr: Pred, L: League) => void) {
+function run(games: Game[], p: Params, onPred?: (g: Game, pr: Pred, L: League) => void, prior?: (L: League) => League['prior']) {
   const L = new League(p);
+  if (prior) L.prior = prior(L);
   for (const g of games) {
     if (!done(g)) continue;
     const pr = L.predict(g);
@@ -367,6 +381,8 @@ for (const k of [0.03, 0.05, 0.07, 0.09, 0.12]) for (const r of [0.5, 0.65, 0.8,
 
 type LeagueModel = { code: string; params: Params; L: League; L2: LeagueV2 | null; w2: number; tuneSeason: string | null; testSeasons: string[]; test: any; tune: any; compare?: any; builtAt: string; snaps?: Snap[] };
 const models = new Map<string, LeagueModel>();
+/** fix192 (data health): is the league's model built? */
+export const bbModelReady = (code: string) => models.has(code);
 
 // fix135: the k / r / b2b grid (60 fits) is re-tuned at most once a day per league; in between the ratings are refit
 // with the saved params. Kept in the database so a deploy doesn't re-tune 18 leagues at once.
@@ -378,6 +394,20 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
   const games = gamesOf(code);
   const seasons = [...new Set(games.filter(done).map(g => g.season))].sort();
   if (seasons.length < 2) return null;
+  // fix192: teams new to the league start from the newcomer prior (other leagues: their latest built ratings)
+  // (league levels kept per 30 days of the replay: the 60 tuning fits would otherwise solve them thousands of times)
+  const lvl = new Map<string, ReturnType<typeof leagueLevels>>();
+  const cached = (key: string, pools: Map<string, Map<number, Rated>>) => () => { let x = lvl.get(key); if (!x) lvl.set(key, (x = leagueLevels(pools))); return x; };
+  const prior1 = (Lx: League) => (id: number, now: number) => {
+    if (!NEWCOMER.mode) return null;
+    const pools = poolsWith(code, recentRated(Lx.teams, Lx.lastPlayed, now), now, false);
+    return newcomerPriorOf(id, code, pools, NEWCOMER.mode !== 3, cached(`1|${Math.floor(now / (30 * 86400000))}`, pools));
+  };
+  const prior2 = (Lx: LeagueV2) => (id: number, now: number) => {
+    if (!NEWCOMER.mode) return null;
+    const pools = poolsWith(code, v2Pool(Lx, now), now, true);
+    return newcomerPriorOf(id, code, pools, NEWCOMER.mode !== 3, cached(`2|${Math.floor(now / (30 * 86400000))}`, pools));
+  };
   // tuning season: the third-last finished season (the first is warm-up); test: every season after it
   const tuneSeason = seasons.length >= 4 ? seasons[seasons.length - 4] : seasons[0];
   const testSeasons = seasons.filter(s => s > tuneSeason);
@@ -389,7 +419,7 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
     let best: { p: Params; ll: number } | null = null;
     for (const p of GRID) {
       const m = emptyM();
-      run(games, p, (g, pr) => { if (g.season === tuneSeason && !isPreseason(g)) addM(m, pr, g); });
+      run(games, p, (g, pr) => { if (g.season === tuneSeason && !isPreseason(g)) addM(m, pr, g); }, prior1);
       const ll = m.n ? m.logLoss / m.n : Infinity;
       if (!best || ll < best.ll) best = { p, ll };
       await yieldLoop(); // fix165: the daily re-tune (60 fits) gives way to visitors between fits
@@ -410,7 +440,7 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
       snaps[c1].v1 = new Map([...Lx.teams.entries()].filter(([id]) => (Lx.lastPlayed.get(id) || 0) > Date.parse(cut[c1]) - 400 * 86400000).map(([id, t]) => [id, { o: t.o, d: t.d }]));
       c1++;
     }
-  });
+  }, prior1);
   await yieldLoop();
   const poss = possessionsOf(code);
   const P2v: P2 = { ...P2_DEFAULT, ...(P2_LEAGUE[code] || {}) };
@@ -421,7 +451,7 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
       snaps[c2].pace = Lx.pace; snaps[c2].ppp = Lx.ppp;
       c2++;
     }
-  }) : null;
+  }, prior2) : null;
   await yieldLoop();
   const blend = (a: Pred, b: Pred | undefined, w: number): Pred => !b || !w ? a : {
     ...b, pHome: w * b.pHome + (1 - w) * a.pHome, margin: w * b.margin + (1 - w) * a.margin, total: w * b.total + (1 - w) * a.total,
@@ -563,6 +593,104 @@ function prevKickoff(teamId: number, g: Game): number | undefined {
   return k ? new Date(k).getTime() : undefined;
 }
 
+/*
+ * fix192: newcomers. A team with no games in a league (Monaco in the EuroCup, a promoted club) started at the league
+ * average. Now: its rating in another of our leagues, moved to this league's level (leagueLevels: from every team that
+ * plays in two of our leagues, 10+ recent games in each), else still the league average (NEWCOMER: the bottom-3
+ * fallback lost out of sample). Same rule for the v1 points and the v2 possession ratings.
+ */
+type Rated = { o: number; d: number; games: number };
+const RECENT = 400 * 86400000;
+function recentRated<T extends Rated>(teams: Map<number, T>, last: Map<number, number> | null, now: number, minGames = 10) {
+  const out = new Map<number, T>();
+  for (const [id, t] of teams) if (t.games >= minGames && (!last || now - (last.get(id) || 0) < RECENT)) out.set(id, t);
+  return out;
+}
+function bottom3<T extends Rated>(pool: Map<number, T>): { o: number; d: number } | null {
+  const list = [...pool.values()].sort((x, y) => (x.o - x.d) - (y.o - y.d)).slice(0, 3);
+  if (list.length < 3) return null;
+  return { o: list.reduce((s, t) => s + t.o, 0) / 3, d: list.reduce((s, t) => s + t.d, 0) / 3 };
+}
+/**
+ * League levels from the teams that play in two of our leagues (EuroLeague + LNB, LNB + EuroCup …): a team's rating
+ * in league A plus A's level ≈ its rating in B plus B's level. Least squares, solved by a few hundred sweeps (18
+ * leagues), with a light pull to 0 so a league without links stays at 0. Separate levels for attack (o) and defence (d).
+ */
+function leagueLevels<T extends Rated>(pools: Map<string, Map<number, T>>) {
+  const pairs: { a: string; b: string; dO: number; dD: number }[] = [];
+  const byTeam = new Map<number, [string, T][]>();
+  for (const [code, pool] of pools) for (const [id, t] of pool) { let x = byTeam.get(id); if (!x) byTeam.set(id, (x = [])); x.push([code, t]); }
+  for (const list of byTeam.values()) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++)
+    pairs.push({ a: list[i][0], b: list[j][0], dO: list[i][1].o - list[j][1].o, dD: list[i][1].d - list[j][1].d });
+  const lo = new Map<string, number>(), ld = new Map<string, number>(), links = new Map<string, number>();
+  // each league's links as (other league, sign): a(t) = r_A(t) + level_A is the same in both leagues → level_a − level_b = −d
+  const adj = new Map<string, { o: string; dO: number; dD: number }[]>();
+  const push = (c: string, x: { o: string; dO: number; dD: number }) => { let l = adj.get(c); if (!l) adj.set(c, (l = [])); l.push(x); links.set(c, (links.get(c) || 0) + 1); };
+  for (const p of pairs) { push(p.a, { o: p.b, dO: -p.dO, dD: -p.dD }); push(p.b, { o: p.a, dO: p.dO, dD: p.dD }); }
+  for (let it = 0; it < 300; it++) for (const [code, l] of adj) {
+    let so = 0, sd = 0;
+    for (const x of l) { so += (lo.get(x.o) || 0) + x.dO; sd += (ld.get(x.o) || 0) + x.dD; }
+    lo.set(code, so / (l.length + 0.5)); ld.set(code, sd / (l.length + 0.5));
+  }
+  // leagues connected to each other through shared teams
+  const comp = new Map<string, number>();
+  let k = 0;
+  for (const start of adj.keys()) {
+    if (comp.has(start)) continue;
+    const stack = [start]; comp.set(start, ++k);
+    while (stack.length) { const c = stack.pop()!; for (const x of adj.get(c) || []) if (!comp.has(x.o)) { comp.set(x.o, k); stack.push(x.o); } }
+  }
+  return { lo, ld, links, comp };
+}
+/**
+ * The newcomer prior for team `id` in league `target`: its rating in the other leagues it plays in, moved by the league
+ * levels (both leagues need 3+ links to the rest and the same connected group), weighted by games; else (fallback) the
+ * average of the target's bottom 3. `pools`: every league's rated teams at the same moment, target included.
+ */
+export function newcomerPriorOf<T extends Rated>(id: number, target: string, pools: Map<string, Map<number, T>>, fallback = true, levels?: () => ReturnType<typeof leagueLevels>): { o: number; d: number; basis: NewBasis } | null {
+  const homes = [...pools].filter(([c, p]) => c !== target && p.has(id));
+  if (homes.length) {
+    const L = levels ? levels() : leagueLevels(pools);
+    let w = 0, o = 0, d = 0;
+    for (const [c, p] of homes) {
+      if ((L.links.get(c) || 0) < 3 || (L.links.get(target) || 0) < 3 || L.comp.get(c) !== L.comp.get(target)) continue;
+      const me = p.get(id)!, g = Math.min(80, me.games);
+      o += g * (me.o + (L.lo.get(c) || 0) - (L.lo.get(target) || 0)); d += g * (me.d + (L.ld.get(c) || 0) - (L.ld.get(target) || 0)); w += g;
+    }
+    if (w > 0) return { o: o / w, d: d / w, basis: 'other-league' };
+  }
+  if (!fallback) return null;
+  const b = bottom3(pools.get(target) || new Map<number, T>());
+  return b ? { ...b, basis: 'bottom3' } : null;
+}
+/**
+ * 0 = off (league average, before fix192), 1 = bottom 3 only, 2 = other league else bottom 3, 3 = other league else
+ * league average. Walk-forward test 20 Oct 2026 (bbNewcomerTest, 242 first games / 1,422 first-10 games of teams new
+ * to a league, all 18 leagues, 10 Oct database, other leagues moved by the league levels): log loss first game
+ * 0.6497 / 0.7585 / 0.6185 / 0.5982, first 10 games 0.6019 / 0.6327 / 0.5830 / 0.5833 → 3. New basketball teams are
+ * not weak (bottom 3 is clearly worse): only a rating from another league helps.
+ */
+export const NEWCOMER = { mode: 3 };
+/** v1 teams with 10+ games, the last one in the 400 days before `now`. */
+const ratedPool = (m: LeagueModel, now: number): Map<number, Rated> => recentRated(m.L.teams, m.L.lastPlayed, now);
+/** v2 teams with 10+ games, the last one in the 400 days before `now`. */
+function v2Pool(L2: LeagueV2, now: number): Map<number, Rated> {
+  const out = new Map<number, Rated>();
+  for (const [id, t] of L2.teams) if ((t.tg || 0) >= 10 && now - (t.at || 0) < RECENT) out.set(id, { o: t.o, d: t.d, games: t.tg || 0 });
+  return out;
+}
+/** Every league's rated teams (the latest built models; mode 1 = the target only), with `own` as the target's. */
+function poolsWith(code: string, own: Map<number, Rated>, now: number, v2: boolean): Map<string, Map<number, Rated>> {
+  const out = new Map<string, Map<number, Rated>>([[code, own]]);
+  if (NEWCOMER.mode >= 2) for (const [c, x] of models) if (c !== code && (!v2 || x.L2)) out.set(c, v2 ? v2Pool(x.L2!, now) : ratedPool(x, now));
+  return out;
+}
+function livePrior(code: string, id: number, now: number, v2: boolean) {
+  if (!NEWCOMER.mode) return null;
+  const m = models.get(code)!;
+  return newcomerPriorOf(id, code, poolsWith(code, v2 ? v2Pool(m.L2!, now) : ratedPool(m, now), now, v2), NEWCOMER.mode !== 3);
+}
+
 /** predictGame through the cache (same result; recomputed only when an input changed). */
 export function predictGameCached(g: Game): Pred | null {
   if (!models.has(g.code)) return null;
@@ -588,7 +716,15 @@ export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null 
   if (pa) L.lastPlayed.set(g.away_id, pa); else L.lastPlayed.delete(g.away_id);
   // predicting must not change the stored ratings (a new season shrinks them only for this prediction)
   const keep = [g.home_id, g.away_id].map(id => [id, L.teams.get(id) ? { ...L.teams.get(id)! } : null] as const);
-  const pr = L.predict(g);
+  // fix192: a side with no games in this league plays from the newcomer prior (restored with `keep` below)
+  const ko0 = new Date(g.kickoff).getTime();
+  const nb: { home?: NewBasis; away?: NewBasis } = {};
+  for (const [side, id] of [['home', g.home_id], ['away', g.away_id]] as const) {
+    if ((L.teams.get(id)?.games || 0) > 0) continue;
+    const pri = livePrior(g.code, id, ko0, false);
+    if (pri) { L.teams.set(id, { o: pri.o, d: pri.d, season: g.season, games: 0, last: 0, sg: 0, ha: 0 }); nb[side] = pri.basis; }
+  }
+  const pr: Pred = { ...L.predict(g), ...(nb.home ? { newHome: nb.home } : {}), ...(nb.away ? { newAway: nb.away } : {}) };
   for (const [id, t] of keep) { if (t) L.teams.set(id, t); else L.teams.delete(id); }
   for (const [id, old] of [[g.home_id, oldH], [g.away_id, oldA]] as [number, number | undefined][]) { if (old !== undefined) L.lastPlayed.set(id, old); else L.lastPlayed.delete(id); }
   const v3 = (x: Pred, sigma: number): Pred => {
@@ -602,6 +738,11 @@ export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null 
   // bb-v2: possession ratings, blended with v1 by the weight chosen on the tuning season
   const ko = new Date(g.kickoff).getTime();
   const keep2 = [g.home_id, g.away_id].map(id => [id, m.L2!.teams.get(id) ? { ...m.L2!.teams.get(id)! } : null] as const);
+  for (const id of [g.home_id, g.away_id]) {
+    if (m.L2.teams.has(id)) continue; // (n restarts every season; an entry means it has played here)
+    const pri = livePrior(g.code, id, ko, true);
+    if (pri) m.L2.teams.set(id, { o: pri.o, d: pri.d, p: 0, h: 0, season: g.season, n: 0 });
+  }
   const p2 = m.L2.predict(g, ph ? (ko - ph) / 86400000 : null, pa ? (ko - pa) / 86400000 : null);
   for (const [id, t] of keep2) { if (t) m.L2.teams.set(id, t); else m.L2.teams.delete(id); }
   const w = m.w2;
@@ -758,6 +899,46 @@ export function recordBbPredictions(codes?: string[]) {
     throw e;
   }
   return n;
+}
+
+/**
+ * fix192 research (admin): the newcomer prior, walk-forward over every league at once (v1 ratings, each league's saved
+ * k / r / b2b). Scores the first `firstN` games of every team that joined a league after its first 100 games, for
+ * mode 0 (league average, before fix192), 1 (bottom 3) and 2 (other league, else bottom 3). Nothing is stored.
+ */
+export function bbNewcomerTest(firstN = 10) {
+  const rows = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week FROM bb_games ORDER BY kickoff, game_id`).all() as Game[];
+  const saved = new Map((db.prepare(`SELECT code, k, r, b2b FROM bb_model_params`).all() as any[]).map(r => [r.code, { k: r.k, r: r.r, b2b: r.b2b } as Params]));
+  const out: Record<string, any> = {};
+  for (const mode of [0, 1, 2, 3]) {
+    const Ls = new Map<string, League>();
+    const get = (code: string) => {
+      let L = Ls.get(code);
+      if (!L) {
+        const Lx = (L = new League(saved.get(code) || { k: 0.07, r: 0.8, b2b: 1.5 }));
+        if (mode) Lx.prior = (id, now) => newcomerPriorOf(id, code, new Map([...Ls].filter(([c]) => mode >= 2 || c === code).map(([c, o]) => [c, recentRated(o.teams, o.lastPlayed, now)])), mode !== 3);
+        Ls.set(code, L);
+      }
+      return L;
+    };
+    const seen = new Map<string, number>(), fresh = new Set<string>();
+    const all = emptyM(), first = emptyM();
+    for (const g of rows) {
+      if (!done(g)) continue;
+      const L = get(g.code);
+      const keys = [`${g.code}|${g.home_id}`, `${g.code}|${g.away_id}`];
+      for (const k of keys) if (!seen.has(k)) { seen.set(k, 0); if (L.n >= 100) fresh.add(k); }
+      const pr = L.predict(g);
+      if (!isPreseason(g) && keys.some(k => fresh.has(k) && seen.get(k)! < firstN)) {
+        addM(all, pr, g);
+        if (keys.some(k => fresh.has(k) && seen.get(k) === 0)) addM(first, pr, g);
+      }
+      L.update(g, pr); L.played(g);
+      for (const k of keys) seen.set(k, seen.get(k)! + 1);
+    }
+    out[['league average (before)', 'bottom 3', 'other league, else bottom 3', 'other league, else league average'][mode]] = { firstGame: fin(first), [`first${firstN}`]: fin(all) };
+  }
+  return out;
 }
 
 /** fix174: mean miss of the expected margin and of the total points. */

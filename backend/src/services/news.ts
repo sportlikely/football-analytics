@@ -826,8 +826,8 @@ export function leagueTopics(): LeagueTopic[] {
     const { BB_LEAGUES } = require('./basketball') as typeof import('./basketball');
     for (const l of BB_LEAGUES) if (!fed.has(`basketball|${l.code}`)) add(l.code, 'basketball', `${quote(l.name)}${place(l.name, l.country)} basketball`);
   } catch { /* basketball not loaded */ }
-  // never a search for the Israeli league (house rule: no new Israel references on the site)
-  return [...out.values()].filter(t => t.code !== 'AF383' && !/israel/i.test(t.query) && !isTop(t.code, t.sport));
+  // fix192 (Yarin, 19 Oct): Ligat Ha'Al gets news like every other league (same quality filters)
+  return [...out.values()].filter(t => !isTop(t.code, t.sport));
 }
 /** The searches due this refresh (never searched or older than 3 h), oldest first. */
 function dueTopics(): LeagueTopic[] {

@@ -8,7 +8,7 @@ import UnlockPrompt from '../../UnlockPrompt'
 import { TeamLogo } from '../../../pages/bb/parts'
 import { Section } from './GamePage'
 import { ModelName } from './ModelName'
-import { slModelOf, sportOfModel } from '../../../lib/modelNames'
+import { slModelOf, type ModelSport } from '../../../lib/modelNames'
 
 /**
  * The prediction block of the sports where our pick is the winner (basketball, NFL + college; fix152c — it was
@@ -26,6 +26,8 @@ export interface WinnerPredictionProps {
   away: Side
   upcoming: boolean
   model: string
+  /** fix192: the page's sport, so an unknown model id still shows the right public name */
+  sport: ModelSport
   /** 'tip-off' / 'kick-off' wording */
   saved: string
   updated: string
@@ -79,7 +81,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
     if (window.location.hash === '#prediction') requestAnimationFrame(() => document.getElementById('prediction')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     if ((location.state as any)?.reveal && hidden) setAnim(true)
   }, [])
-  const note = p ? [slModelOf(p.model || x.model), x.upcoming ? x.updated : x.saved].join(' · ') : undefined
+  const note = p ? [slModelOf(p.model || x.model, x.sport), x.upcoming ? x.updated : x.saved].join(' · ') : undefined
   const total = typeof p?.total === 'number' ? p.total.toFixed(1) : '–'
 
   return (
@@ -100,7 +102,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
           <UnlockPrompt rid={x.rid} status={x.status} what={t('Win chances, point spread, total points and the predicted score, with the reasons behind the pick.')} />
         </div>
       ) : hidden || anim ? (
-        <RevealCover key={anim ? 'auto' : 'cover'} autoStart={anim} model={slModelOf(p.model || x.model)} onReveal={() => { setAnim(false); reveal() }} />
+        <RevealCover key={anim ? 'auto' : 'cover'} autoStart={anim} model={slModelOf(p.model || x.model, x.sport)} onReveal={() => { setAnim(false); reveal() }} />
       ) : (() => {
         const pick = p.pick || ((p.pHome || 0) >= 50 ? 'H' : 'A')
         const team = pick === 'H' ? x.home : x.away
@@ -125,7 +127,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
               <div className={`rounded-full bg-home ${pick === 'H' ? '' : 'opacity-35'}`} style={{ width: `calc(${p.pHome}% - 2px)` }} />
               <div className={`rounded-full bg-away ${pick === 'A' ? '' : 'opacity-35'}`} style={{ width: `calc(${p.pAway}% - 2px)` }} />
             </div>
-            <ModelName sport={sportOfModel(p.model || x.model) || 'basketball'} className="mt-3" />
+            <ModelName sport={x.sport} className="mt-3" />
             {!x.upcoming && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
                 <span className="px-2.5 py-1 rounded-full bg-surface2 border border-line font-semibold text-ink">{x.saved}</span>
