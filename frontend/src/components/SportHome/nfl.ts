@@ -28,7 +28,9 @@ export function toGame(g: NflGame): HGame {
   }
 }
 
-interface Home { season: number | null; live: NflGame[]; games: NflGame[]; upcoming: NflGame[]; results: NflGame[]; standings: Standings | null }
+interface Home { season: number | null; live: NflGame[]; games: NflGame[]; upcoming: NflGame[]; results: NflGame[]; standings: Standings | null
+  /** fix188: our model's rating, rank and (college) FBS / FCS of each team in the coming games */
+  ratings?: Record<number, { elo: number; rank: number; level: string | null }> }
 
 /** A finished game as "Latest results" shows it (fix152a: shared with the Games page). */
 export function toResult(g: NflGame): HResult {
@@ -65,13 +67,23 @@ function useNflData(): SportHomeData {
 
   const notStarted = useMemo(() => (d?.upcoming || []).filter(g => new Date(g.kickoff).getTime() > Date.now()), [d])
   const week = useMemo(() => (d?.games || []).filter(g => g.state === 'upcoming' && new Date(g.kickoff).getTime() > Date.now()), [d])
-  // featured: the biggest coming games of either league — both teams' win % added up, primetime a bit higher, and an
-  // NFL game ahead of a college one when the two are close (fix185); up to 4, in kick-off order
+  // fix188: featured = the biggest coming games by our model's ratings (both teams' strength added up): NFL games of the
+  // next 4 days first, then the top college games (both teams FBS and in our top 60), then later NFL games; never an
+  // FCS game. Up to 4, in kick-off order.
   const featured = useMemo(() => {
-    const pct = new Map((d?.standings?.rows || []).map(r => [r.team.id, r.games ? r.pct : 0.5]))
-    const score = (g: NflGame) => (pct.get(g.home.id) ?? 0.5) + (pct.get(g.away.id) ?? 0.5) + (primetime(g) ? 0.25 : 0) + (lgOf(g) === 1 ? 0.3 : 0)
-    return [...week].sort((a, b) => score(b) - score(a) || a.kickoff.localeCompare(b.kickoff)).slice(0, 4).sort((a, b) => a.kickoff.localeCompare(b.kickoff))
-  }, [week, d?.standings])
+    const rt = d?.ratings || {}
+    const now = Date.now(), within = (g: NflGame, days: number) => new Date(g.kickoff).getTime() - now < days * 86400000
+    const strength = (g: NflGame) => (rt[g.home.id]?.elo ?? 1500) + (rt[g.away.id]?.elo ?? 1500) + (primetime(g) ? 25 : 0)
+    const big = (s: NflGame['home']) => rt[s.id]?.level === 'FBS' && rt[s.id].rank <= 60
+    const byStrength = (list: NflGame[]) => [...list].sort((a, b) => strength(b) - strength(a) || a.kickoff.localeCompare(b.kickoff))
+    const nfl = notStarted.filter(g => lgOf(g) === 1 && within(g, 7))
+    const picked = [
+      ...byStrength(nfl.filter(g => within(g, 4))),
+      ...byStrength(notStarted.filter(g => lgOf(g) === 2 && within(g, 7) && big(g.home) && big(g.away))),
+      ...byStrength(nfl.filter(g => !within(g, 4)))
+    ]
+    return picked.slice(0, 4).sort((a, b) => a.kickoff.localeCompare(b.kickoff))
+  }, [notStarted, d?.ratings])
   const featuredIds = useMemo(() => new Set(featured.map(g => g.id)), [featured])
   const favs = useNflFavorites()
   const favNext = useMemo(() => notStarted.filter(g => favs.reasons(g).length > 0).slice(0, 10), [notStarted, favs.all.length])

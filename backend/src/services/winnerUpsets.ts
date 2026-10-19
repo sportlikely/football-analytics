@@ -1,11 +1,11 @@
 /**
  * Upset watch for the sports where the pick is the winner (fix144: basketball, NFL + college football). The same rule
  * and report shape as football's (services/upsetAlerts.ts → upsetWatchReport): games of the coming 7 days where our
- * model gives the underdog 30%+ and the favourite leads by 10+ points, and how those calls went — saved predictions
+ * model gives the underdog 20–45% (fix188) and the favourite leads by 10+ points, and how those calls went — saved predictions
  * only (made before tip-off / kick-off). Model only: no bookmakers. No draws in these sports (draw fields are null).
  */
 import { db } from '../db';
-import { WATCH, watchOf } from './upsetAlerts';
+import { WATCH, watchOf, watchBands, bandOf } from './upsetAlerts';
 import { BB_TRIAL, isPreseason } from './bbModel';
 
 export type WinnerSport = 'basketball' | 'american-football';
@@ -58,7 +58,7 @@ export function winnerUpsetReport(sport: WinnerSport) {
   }).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => b.upsetChance - a.upsetChance || a.date.localeCompare(b.date));
 
   let n = 0, upsets = 0, said = 0;
-  const bands = [[30, 35], [35, 40], [40, 101]].map(([lo, hi]) => ({ range: hi > 100 ? `${lo}%+` : `${lo}–${hi}%`, lo, hi, n: 0, upsets: 0, said: 0 }));
+  const bands = watchBands();
   const recent: any[] = [];
   for (const r of get(false)) {
     const w = cut(r);
@@ -66,7 +66,7 @@ export function winnerUpsetReport(sport: WinnerSport) {
     n++; said += w.upsetChance;
     const upset = (r.hs > r.as_ ? 'H' : 'A') === w.underdog;
     if (upset) upsets++;
-    const b = bands.find(x => w.upsetChance >= x.lo && w.upsetChance < x.hi)!;
+    const b = bandOf(bands, w.upsetChance);
     b.n++; b.said += w.upsetChance; if (upset) b.upsets++;
     recent.push({ matchId: r.id, league: r.league, date: r.date, home: r.home, away: r.away, score: `${r.hs}-${r.as_}`, underdog: w.underdog, upsetChance: r1(w.upsetChance), result: upset ? 'upset' : 'favourite' });
   }

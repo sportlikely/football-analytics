@@ -93,8 +93,8 @@ import { hiddenModels, v3MixBacktest, featureModelStatus, setConfig as setModelC
 import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, startModelDailyScheduler, dailyRunning } from './services/modelDaily';
 import { nflProbe, startNflScheduler, nflCurrentSeason, asLeague, asLeagues, LEAGUES, backfillPlayerGames } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
-import { withNflPrediction, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
-import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame, nflStandings, nflTeam, nflPlayer, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury } from './services/nflSite';
+import { withNflPrediction, nflRatings, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
+import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame, nflStandings, nflTeam, nflPlayer, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury, nflTeamRow } from './services/nflSite';
 import { nflLiveNow, nflLiveCurve } from './services/nflLive';
 import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents } from './services/nflGameExtras';
 import { askAssistant, assistantConfigured, messagesToday, assistantStats } from './services/assistant';
@@ -2476,11 +2476,19 @@ app.get('/api/nfl/home', (req, res) => {
       return { l, s, week: weeks.find(w => w.key === current) || null, games: current ? nflWeekGames(s, current, l) : [], standings: nflStandings(s, l) };
     });
     const stand = per.map(p => p.standings).filter(Boolean) as any[];
+    const upcoming = nflWith(req, lgs.flatMap(l => nflGamesBetween(new Date(now - 6 * 3600 * 1000).toISOString(), new Date(now + 14 * 86400000).toISOString(), l)).filter(g => g.state === 'upcoming').sort(byKick));
+    // fix188: model rating + rank (and FBS / FCS for college) of every team in the coming games: the featured games
+    const rate = new Map(lgs.map(l => [l, nflRatings(l)]));
+    const ratings: Record<number, { elo: number; rank: number; level: string | null }> = {};
+    for (const g of upcoming) for (const s of [g.home, g.away]) {
+      const r = rate.get(g.league)?.get(s.id);
+      if (r && !ratings[s.id]) ratings[s.id] = { ...r, level: g.league === 2 ? nflTeamRow(s.id)?.level || null : null };
+    }
     res.json({ data: {
       season, league, week: per.length === 1 ? per[0].week : null,
       live: nflWith(req, lgs.flatMap(l => nflLiveGames(l)).sort(byKick)),
       games: nflWith(req, per.flatMap(p => p.games).sort(byKick)),
-      upcoming: nflWith(req, lgs.flatMap(l => nflGamesBetween(new Date(now - 6 * 3600 * 1000).toISOString(), new Date(now + 14 * 86400000).toISOString(), l)).filter(g => g.state === 'upcoming').sort(byKick)),
+      upcoming, ratings,
       results: nflWith(req, lgs.flatMap(l => nflRecentResults(8, l)).sort((a, b) => b.kickoff.localeCompare(a.kickoff)).slice(0, 8)),
       // the table(s): one league's as before; both → the rows of both (teams covered, the featured game's strength)
       standings: stand.length === 1 ? stand[0] : stand.length ? { season, league: 'all', conferences: stand.flatMap(s => s.conferences), rows: stand.flatMap(s => s.rows) } : null,

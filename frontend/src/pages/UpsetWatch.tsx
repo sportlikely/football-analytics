@@ -7,7 +7,7 @@ import { t as tt, LOCALE } from '../lib/i18n'
 import { OurPickBadge } from '../components/DcPick'
 
 /*
- * Upset watch (Pro): games of the coming 7 days where our model gives the underdog 30% or more (and the favourite
+ * Upset watch (Pro): games of the coming 7 days where our model gives the underdog 20–45% (fix188; and the favourite
  * leads by 10+ points), and how those calls have gone. Model only, no bookmakers, no betting claims.
  * fix144: the same page for basketball and American football (/basketball/upset-watch, /american-football/upset-watch):
  * winner sports have no draw, so the draw bar and the draw numbers are left out.
@@ -30,7 +30,7 @@ interface Record_ {
   bands: { range: string; n: number; said: number | null; happened: number | null }[]
   since: string | null; recent: Recent[]
 }
-interface Report { rule: { minUnderdog: number; minGap: number }; upcoming: Watch[]; record: Record_ }
+interface Report { rule: { minUnderdog: number; maxUnderdog?: number; minGap: number }; upcoming: Watch[]; record: Record_ }
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -108,7 +108,7 @@ export default function UpsetWatch({ sport = 'football' }: { sport?: UpsetSport 
       <div>
         <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink">{tt("Upset watch")}</h1>
         <p className="text-muted mt-2 max-w-2xl">
-          {tt("Games of the coming week where the favourite is at risk: our model gives the underdog {0}% or more to win.", { 0: data?.rule.minUnderdog ?? 30 })}
+          {tt("Games of the coming week where the favourite is at risk: our model gives the underdog between {0}% and {1}% to win.", { 0: data?.rule.minUnderdog ?? 20, 1: data?.rule.maxUnderdog ?? 45 })}
         </p>
       </div>
 
@@ -131,7 +131,7 @@ export default function UpsetWatch({ sport = 'football' }: { sport?: UpsetSport 
           </div>
           {rec.n < 30 && (
             <p className="text-xs text-muted rounded-xl border border-line bg-surface2/40 px-3 py-2">
-              {draws ? tt("Only {0} games so far, too few to judge. On {1} games from past seasons, we said {2}% and the underdog won {3}%.", { 0: rec.n, 1: 635, 2: 30.9, 3: 28.7 }) : tt("Only {0} games so far, too few to judge.", { 0: rec.n })}
+              {tt("Only {0} games so far, too few to judge.", { 0: rec.n })}
             </p>
           )}
           <div className={`grid ${draws ? 'grid-cols-3' : 'grid-cols-2'} gap-3`}>
@@ -187,7 +187,7 @@ export default function UpsetWatch({ sport = 'football' }: { sport?: UpsetSport 
       )}
 
       <p className="text-xs text-faint max-w-2xl leading-relaxed">
-        {draws ? tt("An upset watch is not a tip: at 30–40% the favourite still wins or draws most of the time. It tells you which favourites are less safe than they look. Probabilities, not promises.") : tt("An upset watch is not a tip: at 30–40% the favourite still wins most of the time. It tells you which favourites are less safe than they look. Probabilities, not promises.")}
+        {draws ? tt("An upset watch is not a tip: at 20–45% the favourite still wins or draws most of the time. It tells you which favourites are less safe than they look. Probabilities, not promises.") : tt("An upset watch is not a tip: at 20–45% the favourite still wins most of the time. It tells you which favourites are less safe than they look. Probabilities, not promises.")}
       </p>
     </div>
   )

@@ -955,6 +955,21 @@ export function nflTeamModel(teamId: number) {
   };
 }
 
+/** fix188: every active team's model rating (Elo) and its rank in the league this season, for the home's featured games.
+ *  Empty while the first replay hasn't run (it is started, never awaited, like the team tiles). */
+export function nflRatings(league: LeagueId): Map<number, { elo: number; rank: number }> {
+  const out = new Map<number, { elo: number; rank: number }>();
+  if (!lives.has(league)) { void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`)); return out; }
+  const L = current(league);
+  if (!L) return out;
+  const done = L.games.filter(g => g.done);
+  if (!done.length) return out;
+  const season = Math.max(...done.map(g => g.season));
+  [...L.engine.teams.entries()].filter(([, t]) => t.season === season).sort((a, b) => b[1].elo - a[1].elo)
+    .forEach(([id, t], i) => out.set(id, { elo: Math.round(t.elo), rank: i + 1 }));
+  return out;
+}
+
 export const nflModelReport = (league: LeagueId = 1): Report | null => readSync(`${KEY_OF[league]}|report`);
 
 /* ---------- jobs ---------- */

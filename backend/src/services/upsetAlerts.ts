@@ -114,13 +114,18 @@ export function backtestUpsets(rule: Partial<UpsetRule> = {}, grid = false) {
 /* ------------------------------------------------------------------ */
 // The upset rule vs the market did not hold (claude/upset-alerts-test.md), so the Pro feature is content, not an
 // edge: games where OUR model gives the underdog a real chance. Judged by calibration ("when we say 33%, do 33% win?").
-export const WATCH = { minUnderdog: 30, minGap: 10 };
+// fix188: one rule in every sport: the underdog between 20% and 45% to win; a 45–55% game is a coin flip, not an upset
+export const WATCH = { minUnderdog: 20, maxUnderdog: 45, minGap: 10 };
+/** The record's bands (the same in every sport). */
+export const WATCH_BANDS: [number, number][] = [[20, 30], [30, 40], [40, 45]];
+export const watchBands = () => WATCH_BANDS.map(([lo, hi]) => ({ range: `${lo}–${hi}%`, lo, hi, n: 0, upsets: 0, said: 0 }));
+export const bandOf = <B extends { lo: number; hi: number }>(bands: B[], p: number) => bands.find((x, i) => p >= x.lo && (p < x.hi || i === bands.length - 1))!;
 
 /** Underdog side and numbers when a prediction makes the cut (probabilities in %), else null. */
 export function watchOf(ph: number, pd: number, pa: number) {
   const fav = ph >= pa ? 'H' : 'A';
   const fp = Math.max(ph, pa), up = Math.min(ph, pa);
-  if (up < WATCH.minUnderdog || fp - up < WATCH.minGap) return null;
+  if (up < WATCH.minUnderdog || up > WATCH.maxUnderdog || fp - up < WATCH.minGap) return null;
   return { favourite: fav as 'H' | 'A', underdog: (fav === 'H' ? 'A' : 'H') as 'H' | 'A', favChance: fp, upsetChance: up, draw: pd };
 }
 
@@ -168,7 +173,7 @@ export function upsetWatchReport() {
     WHERE p.settled = 1 AND r.outcome IN ('H','D','A') AND p.model IN ('grid-v3', 'elo-euro', 'elo-intl')
   `).all() as any[]);
   let n = 0, upsets = 0, draws = 0, said = 0, saidDraw = 0;
-  const bands = [[30, 35], [35, 40], [40, 101]].map(([lo, hi]) => ({ range: hi > 100 ? `${lo}%+` : `${lo}–${hi}%`, lo, hi, n: 0, upsets: 0, said: 0 }));
+  const bands = watchBands();
   const recent: any[] = [];
   for (const r of done) {
     const w = watchOf(r.p_home, r.p_draw, r.p_away);
@@ -177,7 +182,7 @@ export function upsetWatchReport() {
     const upset = r.outcome === w.underdog;
     if (upset) upsets++;
     if (r.outcome === 'D') draws++;
-    const b = bands.find(x => w.upsetChance >= x.lo && w.upsetChance < x.hi)!;
+    const b = bandOf(bands, w.upsetChance);
     b.n++; b.said += w.upsetChance; if (upset) b.upsets++;
     recent.push({ matchId: r.match_id, league: r.competition_name || r.competition_code, date: r.utc_date, home: r.home_team, away: r.away_team,
       score: `${r.home_goals}-${r.away_goals}`, underdog: w.underdog, upsetChance: r1(w.upsetChance), result: upset ? 'upset' : r.outcome === 'D' ? 'draw' : 'favourite' });
