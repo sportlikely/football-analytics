@@ -5,6 +5,7 @@ import { API_URL } from './socket'
 import { t, LOCALE } from './i18n'
 import { useAuth } from './auth'
 import { useFavorites, type Favorite } from './favorites'
+import { schoolOf } from './collegeNames'
 
 /** NFL site (fix137): types and helpers shared by the /american-football pages. Predictions: nfl-v1 (fix139). */
 
@@ -85,12 +86,13 @@ export const NFL_STATUS: Record<string, string> = {
 export const weekLabel = (key: string | null, league: NflLeague = 1) => (!key ? '' : key === 'post' ? (league === 2 ? t('Bowls') : t('Playoffs')) : t('Week {0}', { 0: key }))
 export const timeOf = (iso: string) => new Date(iso).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })
 export const dayOf = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' })
-/** College nicknames of two words ("Crimson Tide"): dropped whole to leave the school name. */
-const TWO_WORD = /\s(crimson tide|nittany lions|fighting irish|yellow jackets|golden gophers|blue devils|tar heels|red raiders|horned frogs|sun devils|golden bears|demon deacons|scarlet knights|mean green|golden hurricane|golden eagles|green wave|red wolves|black knights|thundering herd|golden flashes|blue raiders|fighting illini|rainbow warriors|wolf pack|golden panthers|black bears|blue hens|golden lions|fighting hawks|big green|big red|purple eagles|mountain hawks|delta devils|golden rams|red flash|red foxes|blue hose|golden griffins|fighting camels|river hawks)$/i
-/** "Ohio State Buckeyes" → "Ohio State", "Alabama Crimson Tide" → "Alabama" (fix142: college rows use the school). */
 /** fix151: a game may come without a team name (null): shown as "TBD", never a crash. */
 export const teamName = (name: string | null | undefined) => (typeof name === 'string' && name.trim() ? name : 'TBD')
-export const schoolName = (raw: string | null | undefined) => { const name = teamName(raw); const m = name.match(TWO_WORD); if (m) return name.slice(0, m.index); const w = name.split(/\s+/); return w.length > 1 ? w.slice(0, -1).join(' ') : name }
+/**
+ * "Ohio State Buckeyes" → "Ohio State", "Alabama Crimson Tide" → "Alabama" (fix142: college rows use the school); a name
+ * that already is a school ("South Dakota", "North Texas") stays whole (fix189, lib/collegeNames.ts).
+ */
+export const schoolName = (raw: string | null | undefined) => { const name = teamName(raw); return name === 'TBD' ? name : schoolOf(name) }
 /** "Kansas City Chiefs" → "Chiefs" for tight rows (the nickname is what people say); college: the school name. */
 export const nick = (raw: string | null | undefined, league: NflLeague = 1) => { if (league === 2) return schoolName(raw); const name = teamName(raw); const w = name.split(/\s+/); return w.length > 1 ? w[w.length - 1] : name }
 /** Reveal ids for NFL games (own negative range: never clashes with football ids or basketball's -id). */

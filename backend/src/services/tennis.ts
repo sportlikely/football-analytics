@@ -71,7 +71,14 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS tennis_calls (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0, errors INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS tennis_meta (k TEXT PRIMARY KEY, v TEXT);
   CREATE INDEX IF NOT EXISTS idx_tennis_matches_tour ON tennis_matches(tour, status);
+  CREATE INDEX IF NOT EXISTS idx_tennis_rankings_player ON tennis_rankings(player_id, date);
 `);
+/**
+ * fix189: a player's rank for match rows — the latest tennis_rankings table of their tour (singles) first, the
+ * /players/{id} rank (tennis_players.ranking) only as fallback. `p` = the tennis_players alias.
+ */
+const rankSql = (p: string) => `(SELECT r.rank FROM tennis_rankings r WHERE r.player_id = ${p}.id
+  AND r.date = (SELECT MAX(r2.date) FROM tennis_rankings r2 WHERE r2.tour = r.tour) LIMIT 1)`;
 // fix187: the player's ranking movement (from /players/{id}; the rankings fallback)
 try { db.exec(`ALTER TABLE tennis_players ADD COLUMN ranking_movement INTEGER`); } catch { /* column exists */ }
 const meta = {
@@ -376,7 +383,7 @@ async function syncFixtures() {
     await pages('/fixtures', { draw: 'singles' }, 25, 'core', rows => { tx(() => { for (const f of rows) if (storeFixture(f)) n++; }); });
   }
   const filled = fillTiers();
-  return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled from the tournament catalogue` : ''}`;
+  return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled (catalogue + history)` : ''}`;
 }
 
 /**
@@ -385,17 +392,67 @@ async function syncFixtures() {
  */
 function fillTiers(): number {
   const a = db.prepare(`UPDATE tennis_matches SET
-      tier = COALESCE(tier, (SELECT t.tier FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id)),
+      tier = COALESCE(NULLIF(tier, 'unknown'), (SELECT t.tier FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id)),
       surface = COALESCE(surface, (SELECT t.surface FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id)),
       indoor = COALESCE(indoor, (SELECT t.indoor FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id))
-    WHERE tier IS NULL AND tournament_id IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id AND t.tier IS NOT NULL)`).run();
+    WHERE (tier IS NULL OR tier = 'unknown') AND tournament_id IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id AND t.tier IS NOT NULL)`).run();
   const b = db.prepare(`UPDATE tennis_matches SET
       tournament_id = COALESCE(tournament_id, (SELECT t.id FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1)),
       tier = (SELECT t.tier FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1),
       surface = COALESCE(surface, (SELECT t.surface FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1)),
       indoor = COALESCE(indoor, (SELECT t.indoor FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1))
-    WHERE tier IS NULL AND tournament IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL)`).run();
-  return Number(a.changes) + Number(b.changes);
+    WHERE (tier IS NULL OR tier = 'unknown') AND tournament IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL)`).run();
+  return Number(a.changes) + Number(b.changes) + fillTiersFromHistory();
+}
+
+/** fix189: a tournament name without qualifying / country / year parts ("Almaty Open - Qualification (Kazakhstan) 2025" → "almaty open"). */
+const QUALI_RE = /\b(qualification|qualifying|qualifiers?|quali)\b/i;
+export function tournamentKey(name: string): string {
+  return name.toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s[-–—:]\s*(qualification|qualifying|qualifiers?|quali)\b.*$/, ' ')
+    .replace(new RegExp(QUALI_RE.source, 'gi'), ' ')
+    .replace(/\b(19|20)\d{2}\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/**
+ * fix189: upcoming matches still without a tier take it from our own history — the same tournament (tournamentKey) on
+ * the same tour with a tier, the most recent main draw first (catalogue rows after match rows). Qualifying rows get
+ * is_qualifying = 1 and the main draw's tier. Still nothing → tier 'unknown' (listed in tennis/status; refilled as soon
+ * as the API, the catalogue or the history has a tier).
+ */
+function fillTiersFromHistory(): number {
+  const todo = db.prepare(`SELECT id, tournament, tour FROM tennis_matches
+    WHERE status = 'upcoming' AND (tier IS NULL OR tier = 'unknown') AND tournament IS NOT NULL`).all() as any[];
+  if (!todo.length) return 0;
+  const known = new Map<string, { tier: string; surface: string | null; indoor: number | null }>();
+  const add = (tour: string | null, name: string | null, tier: string, surface: string | null, indoor: number | null) => {
+    if (!tour || !name) return;
+    const k = `${tour}|${tournamentKey(name)}`;
+    if (!known.has(k)) known.set(k, { tier, surface, indoor });
+  };
+  // main draws before qualifying, most recent first
+  for (const r of db.prepare(`SELECT tour, tournament, tier, MAX(surface) AS surface, MAX(indoor) AS indoor FROM tennis_matches
+      WHERE tier IS NOT NULL AND tier <> 'unknown' AND tournament IS NOT NULL AND tour IS NOT NULL
+      GROUP BY tour, tournament, tier ORDER BY MAX(COALESCE(is_qualifying, 0)), MAX(scheduled_at) DESC`).all() as any[]) {
+    add(r.tour, r.tournament, r.tier, r.surface, r.indoor);
+  }
+  for (const r of db.prepare(`SELECT tour, name, tier, surface, indoor FROM tennis_tournaments WHERE tier IS NOT NULL ORDER BY start_date DESC`).all() as any[]) {
+    add(r.tour, r.name, r.tier, r.surface, r.indoor);
+  }
+  const set = db.prepare(`UPDATE tennis_matches SET tier = ?, surface = COALESCE(surface, ?), indoor = COALESCE(indoor, ?),
+    is_qualifying = CASE WHEN ? = 1 THEN 1 ELSE is_qualifying END WHERE id = ?`);
+  const none = db.prepare(`UPDATE tennis_matches SET tier = 'unknown', is_qualifying = CASE WHEN ? = 1 THEN 1 ELSE is_qualifying END WHERE id = ?`);
+  let n = 0;
+  tx(() => {
+    for (const r of todo) {
+      const quali = QUALI_RE.test(r.tournament) ? 1 : 0;
+      const hit = known.get(`${r.tour}|${tournamentKey(r.tournament)}`);
+      if (hit) { set.run(hit.tier, hit.surface, hit.indoor, quali, r.id); n++; } else none.run(quali, r.id);
+    }
+  });
+  return n;
 }
 
 let liveCount = 0, lastLiveRun = 0;
@@ -726,7 +783,7 @@ export function tennisSample(o: { tour?: string; status?: string; limit?: number
   const status = ['upcoming', 'live', 'completed'].includes(String(o.status)) ? String(o.status) : 'upcoming';
   const limit = Math.min(200, Math.max(1, Number(o.limit) || 30));
   const where = status === 'upcoming' ? `AND m.scheduled_at >= ?` : status === 'completed' ? `AND m.scheduled_at <= ?` : `AND ? IS NOT NULL`;
-  const rows = db.prepare(`SELECT m.*, p1.ranking AS p1_rank, p2.ranking AS p2_rank FROM tennis_matches m
+  const rows = db.prepare(`SELECT m.*, ${rankSql('p1')} AS p1_trank, p1.ranking AS p1_prank, ${rankSql('p2')} AS p2_trank, p2.ranking AS p2_prank FROM tennis_matches m
       LEFT JOIN tennis_players p1 ON p1.id = m.p1_id LEFT JOIN tennis_players p2 ON p2.id = m.p2_id
     WHERE m.tour = ? AND m.status = ? ${where} ORDER BY m.scheduled_at ${status === 'completed' ? 'DESC' : 'ASC'} LIMIT ?`)
     .all(tour, status, new Date(Date.now() - 3 * 3600 * 1000).toISOString(), limit) as any[];
@@ -737,11 +794,15 @@ export function tennisSample(o: { tour?: string; status?: string; limit?: number
     } catch { /* none */ }
     return null;
   };
+  // fix189: rank from the latest rankings table first, /players/{id} as fallback; rankSource says which
+  const rank = (t: number | null, p: number | null) => (t != null ? { rank: t, rankSource: 'rankings' } : p != null ? { rank: p, rankSource: 'players' } : { rank: null, rankSource: null });
+  const rankingsMode = (() => { try { return JSON.parse(meta.get('rankings_mode') || 'null')?.mode ?? null; } catch { return null; } })();
   return {
-    tour, status, count: rows.length,
+    tour, status, count: rows.length, rankingsMode,
     rows: rows.map(r => ({
-      startUtc: r.scheduled_at, tournament: r.tournament, tier: r.tier, surface: r.surface, indoor: r.indoor == null ? null : !!r.indoor, round: r.round || r.round_code,
-      bestOf: r.best_of, p1: { name: r.p1_name, rank: r.p1_rank ?? null }, p2: { name: r.p2_name, rank: r.p2_rank ?? null },
+      startUtc: r.scheduled_at, tournament: r.tournament, tier: r.tier, qualifying: r.is_qualifying == null ? null : !!r.is_qualifying, surface: r.surface,
+      indoor: r.indoor == null ? null : !!r.indoor, round: r.round || r.round_code,
+      bestOf: r.best_of, p1: { name: r.p1_name, ...rank(r.p1_trank, r.p1_prank) }, p2: { name: r.p2_name, ...rank(r.p2_trank, r.p2_prank) },
       score: score(r), winner: r.winner === 1 ? r.p1_name : r.winner === 2 ? r.p2_name : null, outcome: r.outcome, source: r.source, id: r.id
     }))
   };
@@ -772,7 +833,10 @@ export function tennisStatus() {
     since2023: { completed: recent.n || 0, withStats: recent.withStats || 0, completeStats: recent.complete || 0, pctWithStats: recent.n ? Math.round((1000 * (recent.withStats || 0)) / recent.n) / 10 : null },
     tapeByMonth,
     rankings: { mode: (() => { try { return JSON.parse(meta.get('rankings_mode') || 'null'); } catch { return null; } })(), byTour: db.prepare(`SELECT tour, MAX(date) AS date, COUNT(*) AS n FROM tennis_rankings GROUP BY tour`).all() },
-    upcomingWithoutTier: (db.prepare(`SELECT COUNT(*) AS n FROM tennis_matches WHERE status = 'upcoming' AND tier IS NULL`).get() as any).n,
+    upcomingWithoutTier: (db.prepare(`SELECT COUNT(*) AS n FROM tennis_matches WHERE status = 'upcoming' AND (tier IS NULL OR tier = 'unknown')`).get() as any).n,
+    // fix189: tournaments still at tier 'unknown' after the catalogue and history fills — to map by hand
+    unknownTierTournaments: db.prepare(`SELECT tour, tournament, COUNT(*) AS matches, MIN(scheduled_at) AS firstMatch FROM tennis_matches
+      WHERE status = 'upcoming' AND (tier IS NULL OR tier = 'unknown') GROUP BY tour, tournament ORDER BY tour, tournament`).all(),
     backfill: { packages: { done: pkgs.length, of: monthsTotal, months: pkgs.slice(0, 40) }, archive: arch },
     quota: { callsToday: usedToday(), ourCountToday: callsToday(), limit: dayLimit(), reserve: RESERVE(), usage: usage ? { tier: usage.tier, calls: usage.calls, remaining: usage.remaining, readAt: new Date(usage.at).toISOString() } : null, backoffUntil: backoffUntil > Date.now() ? new Date(backoffUntil).toISOString() : null, blockedEndpoints: Object.fromEntries(blocked) },
     callsByDay: db.prepare(`SELECT day, calls, errors FROM tennis_calls ORDER BY day DESC LIMIT 14`).all(),

@@ -14,6 +14,7 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { timed, yieldLoop, every, after, slicer } from './perf';
+import { schoolOf } from './collegeNames';
 
 const BASE = 'https://v1.american-football.api-sports.io';
 const KEY = () => process.env.API_NFL_KEY || process.env.API_FOOTBALL_KEY || '';
@@ -40,10 +41,11 @@ const NCAA_SEASONS = 10, NCAA_BOX_SEASONS = 3;
 const FBS_CONF = /\b(fbs|i-?a|sec|southeastern|big ten|big 10|big 12|big twelve|acc|atlantic coast|pac-?12|pac-?twelve|pacific-?12|american athletic|aac|american( conference)?|mountain west|mwc|sun belt|mid-american|mac|conference usa|c-?usa)\b/i;
 const FCS_CONF = /\b(fcs|i-?aa|big sky|caa|colonial|coastal athletic|missouri valley|mvfc|southland|swac|southwestern athletic|meac|mid-eastern|ohio valley|ovc|big south|patriot|ivy|pioneer|northeast|nec|southern conference|socon|united athletic|uac|western athletic|wac|asun|atlantic sun)\b/i;
 const OTHER_CONF = /division (ii|iii|2|3)|\bd-?(ii|iii|2|3)\b|\bnaia\b|\bjuco\b|gulf south|great lakes|lone star|\bpsac\b|mid-america intercollegiate|\bmiaa\b|\bgliac\b|\brmac\b|\bnsic\b|south atlantic|great american|\bciaa\b|\bsiac\b|mountain east|great northwest|\bnescac\b|centennial|liberty league|empire 8/i;
-/** College nicknames of two words ("Crimson Tide"): dropped whole to leave the school name (same list as frontend lib/nfl.ts). */
-const TWO_WORD = /\s(crimson tide|nittany lions|fighting irish|yellow jackets|golden gophers|blue devils|tar heels|red raiders|horned frogs|sun devils|golden bears|demon deacons|scarlet knights|mean green|golden hurricane|golden eagles|green wave|red wolves|black knights|thundering herd|golden flashes|blue raiders|fighting illini|rainbow warriors|wolf pack|golden panthers|black bears|blue hens|golden lions|fighting hawks|big green|big red|purple eagles|mountain hawks|delta devils|golden rams|red flash|red foxes|blue hose|golden griffins|fighting camels|river hawks)$/i;
-/** "Ohio State Buckeyes" → "Ohio State", "Alabama Crimson Tide" → "Alabama". */
-export const schoolName = (name: string) => { const m = name.match(TWO_WORD); if (m) return name.slice(0, m.index); const w = name.split(/\s+/); return w.length > 1 ? w.slice(0, -1).join(' ') : name; };
+/**
+ * "Ohio State Buckeyes" → "Ohio State", "Alabama Crimson Tide" → "Alabama"; a name that already is a school ("South
+ * Dakota", "North Texas") stays whole (fix189: collegeNames.ts, same file as frontend lib/collegeNames.ts).
+ */
+export const schoolName = (name: string) => schoolOf(name);
 /** The nickname part ("Crimson Tide", "Buckeyes"). */
 export const collegeNick = (name: string) => name.slice(schoolName(name).length).trim();
 export type Level = 'FBS' | 'FCS' | 'other';
