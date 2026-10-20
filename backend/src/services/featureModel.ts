@@ -17,7 +17,7 @@
  * stored (shadow) but the site keeps showing grid-v3. See modelDaily.ts for the daily champion / challenger job.
  */
 import logger from '../utils/logger';
-import { timed, every, runSteps, runStepsAsync } from './perf';
+import { timed, every, runSteps, runStepsAsync, slicer } from './perf';
 import { db } from '../db';
 import { groupForCompetition, fdNameFor } from './history';
 import { playerKey } from './squadValues';
@@ -382,8 +382,10 @@ async function fitLogit(X: Float64Array[], Y: number[], C: number): Promise<numb
   const V = [new Float64Array(d), new Float64Array(d), new Float64Array(d)];
   const lam = 1 / (C * n);
   const lr = 0.5, mom = 0.9;
+  const slice = slicer();
   for (let it = 0; it < 400; it++) {
-    if (it % 25 === 0) await tick();
+    // fix194: every pass over the games may take ~10 ms: the thread is given back every ~30 ms (was every 25 passes)
+    await slice();
     const G = [new Float64Array(d), new Float64Array(d), new Float64Array(d)];
     for (let i = 0; i < n; i++) {
       const x = X[i];
@@ -407,6 +409,7 @@ async function fitLogit(X: Float64Array[], Y: number[], C: number): Promise<numb
 
 async function fitTrees(X: Float64Array[], Y: number[]) {
   const c = FEAT_CONF, n = X.length, D = c.depth, nLeaf = 1 << D, nInt = nLeaf - 1;
+  const slice = slicer(); // fix194: inside a round too (3 classes × depth levels), not once a round
   // quantile bins per feature
   const edges: Float64Array[] = [];
   const bin: Uint8Array[] = [];
@@ -418,6 +421,7 @@ async function fitTrees(X: Float64Array[], Y: number[]) {
     const bj = new Uint8Array(n);
     for (let i = 0; i < n; i++) { let lo = 0, hi = e.length; const x = X[i][j]; while (lo < hi) { const m = (lo + hi) >> 1; if (x > e[m]) lo = m + 1; else hi = m; } bj[i] = lo; }
     bin.push(bj);
+    await slice();
   }
   const cnt = [0, 0, 0];
   for (const y of Y) cnt[y]++;
@@ -436,6 +440,7 @@ async function fitTrees(X: Float64Array[], Y: number[]) {
       const tf = new Array(nInt).fill(-1), tt = new Array(nInt).fill(0);
       node.fill(0);
       for (let depth = 0; depth < D; depth++) {
+        await slice();
         const first = (1 << depth) - 1, count = 1 << depth;
         // histograms: node × feature × bin
         const nb = c.bins;

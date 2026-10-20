@@ -15,7 +15,7 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { GROUPS, loadGroupMatches } from './history';
-import { inBatches } from './perf';
+import { inBatches, slicer } from './perf';
 import {
   CONV, buildState, scoreMatch, withLiveConfig, weekDivs, LAST_DETAIL, TEAM_ROW_IDS, DRAW_ROW_IDS, rowRel, MatchType,
   leagueConvStatus, LeagueConv, storeTuning
@@ -405,6 +405,9 @@ async function fitVector(train: Item[], defs: ParamDef[], x0: Float64Array, free
   const f0 = f;
   const trail: { round: number; obj: number; stepScale: number }[] = [];
   let halvings = 0, round = 0;
+  // fix194: a round tries every parameter (each try = one pass over the training games): the thread is given back every
+  // ~30 ms, not once a round (the 04:00 daily job froze the server 1.2–1.8 s at a time on 20 Oct)
+  const slice = slicer();
   for (round = 1; round <= o.rounds; round++) {
     tuneProgress = { stage: `fitting round ${round} (obj ${f.toFixed(5)})`, done: round, total: o.rounds };
     let improved = false;
@@ -416,6 +419,7 @@ async function fitVector(train: Item[], defs: ParamDef[], x0: Float64Array, free
         if (nv === old) continue;
         x[i] = nv;
         const fn = objective(x);
+        await slice();
         if (fn < f - 1e-9) { f = fn; improved = true; break; }
         x[i] = old;
       }

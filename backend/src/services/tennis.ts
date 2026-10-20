@@ -22,7 +22,7 @@ import zlib from 'zlib';
 import readline from 'readline';
 import { db } from '../db';
 import logger from '../utils/logger';
-import { every, after, slicer, stalledWithin } from './perf';
+import { every, after, slicer, stalledWithin, yieldLoop, everyHeavy, afterHeavy, heavy } from './perf';
 
 const BASE = 'https://api.livetennisapi.com/api/public/v1';
 const KEY = () => process.env.TENNIS_API_KEY || '';
@@ -81,6 +81,9 @@ const rankSql = (p: string) => `(SELECT r.rank FROM tennis_rankings r WHERE r.pl
   AND r.date = (SELECT MAX(r2.date) FROM tennis_rankings r2 WHERE r2.tour = r.tour) LIMIT 1)`;
 // fix187: the player's ranking movement (from /players/{id}; the rankings fallback)
 try { db.exec(`ALTER TABLE tennis_players ADD COLUMN ranking_movement INTEGER`); } catch { /* column exists */ }
+// fix194: a player the provider removed (HTTP 410) is marked gone and not asked for again; the refresh list reads an index
+try { db.exec(`ALTER TABLE tennis_players ADD COLUMN gone INTEGER`); } catch { /* column exists */ }
+db.exec(`CREATE INDEX IF NOT EXISTS idx_tennis_players_updated ON tennis_players(updated_at)`);
 const meta = {
   get: (k: string): string | null => (db.prepare(`SELECT v FROM tennis_meta WHERE k = ?`).get(k) as any)?.v ?? null,
   set: (k: string, v: string) => db.prepare(`INSERT OR REPLACE INTO tennis_meta (k, v) VALUES (?, ?)`).run(k, v)
@@ -134,7 +137,7 @@ async function tn(path: string, params: Record<string, string | number | boolean
   } catch (e: any) {
     throw new TennisError(`${tpl}: ${e?.name === 'TimeoutError' ? 'timeout' : e?.message || 'network error'}`);
   }
-  countCall.run(today(), res.ok || res.status === 404 ? 0 : 1);
+  countCall.run(today(), res.ok || res.status === 404 || res.status === 410 ? 0 : 1);
   if (res.status === 429) { backoffUntil = Date.now() + 60_000; throw new TennisError(`${tpl}: rate limited (429), pausing 60 s`, 429); }
   if (res.status === 401 || res.status === 403) {
     let why = `HTTP ${res.status}`;
@@ -146,6 +149,8 @@ async function tn(path: string, params: Record<string, string | number | boolean
     throw new TennisError(`${tpl}: ${why}`, res.status, why === 'upgrade_required');
   }
   if (res.status === 404) { try { await res.body?.cancel(); } catch { /* none */ } return null; }
+  // fix194: 410 Gone = the provider removed this player / match: the caller marks it and stops asking
+  if (res.status === 410) { try { await res.body?.cancel(); } catch { /* none */ } throw new TennisError(`${tpl}: gone (410)`, 410); }
   if (!res.ok) throw new TennisError(`${tpl}: HTTP ${res.status}`, res.status);
   return o.raw ? res : res.json();
 }
@@ -373,7 +378,7 @@ async function job(name: string, fn: () => Promise<string | void>) {
   j.running = true;
   j.lastRun = nowIso();
   try { const info = await fn(); j.lastOk = nowIso(); j.lastError = null; if (info) j.info = info; }
-  catch (e: any) { j.lastError = e?.message || String(e); if (!(e instanceof TennisError && (e.status === 429 || e.plan || /^daily budget/.test(e.message)))) logger.warn(`tennis ${name}: ${j.lastError}`); }
+  catch (e: any) { j.lastError = e?.message || String(e); if (!(e instanceof TennisError && (e.status === 429 || e.status === 410 || e.plan || /^daily budget/.test(e.message)))) logger.warn(`tennis ${name}: ${j.lastError}`); }
   finally { j.running = false; }
 }
 /** fix190: the model's tuning waits while the live sync runs */
@@ -405,27 +410,32 @@ async function syncFixtures() {
     via = `fixtures (matches?status=upcoming failed: ${e.message})`;
     await pages('/fixtures', { draw: 'singles' }, 25, 'core', rows => { tx(() => { for (const f of rows) if (storeFixture(f)) n++; }); });
   }
-  const filled = fillTiers();
+  const filled = await fillTiers();
   return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled (catalogue + history)` : ''}`;
 }
 
 /**
  * fix187: matches without a tier (fixture rows, older rows) take tier / surface / indoor from tennis_tournaments — by
  * tournament_id, else by the same name on the same tour (exact, case-insensitive).
+ * fix194: only rows from 14 days back on (the time index; the two UPDATEs scanned the whole table every 15 minutes,
+ * ~2 s on 20 Oct). Older rows got their tier when they were stored, or from the finished-match sync.
  */
-function fillTiers(): number {
-  const a = db.prepare(`UPDATE tennis_matches SET
+async function fillTiers(): Promise<number> {
+  const since = new Date(Date.now() - 14 * 86400000).toISOString();
+  const a = db.prepare(`UPDATE tennis_matches INDEXED BY idx_tennis_matches_time SET
       tier = COALESCE(NULLIF(tier, 'unknown'), (SELECT t.tier FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id)),
       surface = COALESCE(surface, (SELECT t.surface FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id)),
       indoor = COALESCE(indoor, (SELECT t.indoor FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id))
-    WHERE (tier IS NULL OR tier = 'unknown') AND tournament_id IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id AND t.tier IS NOT NULL)`).run();
-  const b = db.prepare(`UPDATE tennis_matches SET
+    WHERE scheduled_at >= ? AND (tier IS NULL OR tier = 'unknown') AND tournament_id IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE t.id = tennis_matches.tournament_id AND t.tier IS NOT NULL)`).run(since);
+  await yieldLoop();
+  const b = db.prepare(`UPDATE tennis_matches INDEXED BY idx_tennis_matches_time SET
       tournament_id = COALESCE(tournament_id, (SELECT t.id FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1)),
       tier = (SELECT t.tier FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1),
       surface = COALESCE(surface, (SELECT t.surface FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1)),
       indoor = COALESCE(indoor, (SELECT t.indoor FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1))
-    WHERE (tier IS NULL OR tier = 'unknown') AND tournament IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL)`).run();
-  return Number(a.changes) + Number(b.changes) + fillTiersFromHistory();
+    WHERE scheduled_at >= ? AND (tier IS NULL OR tier = 'unknown') AND tournament IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL)`).run(since);
+  await yieldLoop();
+  return Number(a.changes) + Number(b.changes) + await fillTiersFromHistory();
 }
 
 /** fix189: a tournament name without qualifying / country / year parts ("Almaty Open - Qualification (Kazakhstan) 2025" → "almaty open"). */
@@ -444,37 +454,68 @@ export function tournamentKey(name: string): string {
  * the same tour with a tier, the most recent main draw first (catalogue rows after match rows). Qualifying rows get
  * is_qualifying = 1 and the main draw's tier. Still nothing → tier 'unknown' (listed in tennis/status; refilled as soon
  * as the API, the catalogue or the history has a tier).
+ * fix194: the tournament → tier map is built in pages of the primary key with yields (the GROUP BY over every match
+ * blocked the server ~2 s every 15 minutes) and kept for 6 hours; then only the rows stored since are added.
  */
-function fillTiersFromHistory(): number {
+type TierHit = { tier: string; surface: string | null; indoor: number | null; quali: number; at: string };
+const tierMap = { known: new Map<string, TierHit>(), builtAt: 0, since: '' };
+const tierKeep = (tour: string | null, name: string | null, h: TierHit) => {
+  if (!tour || !name) return;
+  const k = `${tour}|${tournamentKey(name)}`;
+  const o = tierMap.known.get(k);
+  // main draw before qualifying, then the most recent
+  if (!o || h.quali < o.quali || (h.quali === o.quali && h.at > o.at)) tierMap.known.set(k, h);
+};
+async function tierKnown(): Promise<Map<string, TierHit>> {
+  const slice = slicer(25);
+  const started = nowIso();
+  if (Date.now() - tierMap.builtAt > 6 * 3600 * 1000) {
+    tierMap.known = new Map();
+    const page = db.prepare(`SELECT id, tour, tournament, tier, surface, indoor, is_qualifying, scheduled_at FROM tennis_matches WHERE id > ? ORDER BY id LIMIT 2000`);
+    let after = -Number.MAX_SAFE_INTEGER;
+    for (;;) {
+      const rows = page.all(after) as any[];
+      if (!rows.length) break;
+      for (const r of rows) if (r.tier && r.tier !== 'unknown') tierKeep(r.tour, r.tournament, { tier: r.tier, surface: r.surface, indoor: r.indoor, quali: r.is_qualifying ? 1 : 0, at: r.scheduled_at || '' });
+      after = rows[rows.length - 1].id;
+      await yieldLoop();
+    }
+    tierMap.builtAt = Date.now();
+  } else {
+    // rows stored since the last look (updated_at is not indexed: the time index on the recent weeks is enough)
+    const rows = db.prepare(`SELECT tour, tournament, tier, surface, indoor, is_qualifying, scheduled_at FROM tennis_matches INDEXED BY idx_tennis_matches_time
+      WHERE scheduled_at >= ? AND updated_at >= ? AND tier IS NOT NULL AND tier <> 'unknown'`).all(new Date(Date.now() - 30 * 86400000).toISOString(), tierMap.since) as any[];
+    for (const r of rows) { tierKeep(r.tour, r.tournament, { tier: r.tier, surface: r.surface, indoor: r.indoor, quali: r.is_qualifying ? 1 : 0, at: r.scheduled_at || '' }); await slice(); }
+  }
+  tierMap.since = started;
+  return tierMap.known;
+}
+async function fillTiersFromHistory(): Promise<number> {
   const todo = db.prepare(`SELECT id, tournament, tour FROM tennis_matches
     WHERE status = 'upcoming' AND (tier IS NULL OR tier = 'unknown') AND tournament IS NOT NULL`).all() as any[];
   if (!todo.length) return 0;
-  const known = new Map<string, { tier: string; surface: string | null; indoor: number | null }>();
-  const add = (tour: string | null, name: string | null, tier: string, surface: string | null, indoor: number | null) => {
-    if (!tour || !name) return;
-    const k = `${tour}|${tournamentKey(name)}`;
-    if (!known.has(k)) known.set(k, { tier, surface, indoor });
-  };
-  // main draws before qualifying, most recent first
-  for (const r of db.prepare(`SELECT tour, tournament, tier, MAX(surface) AS surface, MAX(indoor) AS indoor FROM tennis_matches
-      WHERE tier IS NOT NULL AND tier <> 'unknown' AND tournament IS NOT NULL AND tour IS NOT NULL
-      GROUP BY tour, tournament, tier ORDER BY MAX(COALESCE(is_qualifying, 0)), MAX(scheduled_at) DESC`).all() as any[]) {
-    add(r.tour, r.tournament, r.tier, r.surface, r.indoor);
-  }
+  const fromMatches = await tierKnown();
+  // the catalogue comes after match rows (a tournament with match rows keeps its own tier)
+  const known = new Map<string, { tier: string; surface: string | null; indoor: number | null }>(fromMatches);
   for (const r of db.prepare(`SELECT tour, name, tier, surface, indoor FROM tennis_tournaments WHERE tier IS NOT NULL ORDER BY start_date DESC`).all() as any[]) {
-    add(r.tour, r.name, r.tier, r.surface, r.indoor);
+    if (!r.tour || !r.name) continue;
+    const k = `${r.tour}|${tournamentKey(r.name)}`;
+    if (!known.has(k)) known.set(k, { tier: r.tier, surface: r.surface, indoor: r.indoor });
   }
   const set = db.prepare(`UPDATE tennis_matches SET tier = ?, surface = COALESCE(surface, ?), indoor = COALESCE(indoor, ?),
     is_qualifying = CASE WHEN ? = 1 THEN 1 ELSE is_qualifying END WHERE id = ?`);
   const none = db.prepare(`UPDATE tennis_matches SET tier = 'unknown', is_qualifying = CASE WHEN ? = 1 THEN 1 ELSE is_qualifying END WHERE id = ?`);
   let n = 0;
-  tx(() => {
-    for (const r of todo) {
-      const quali = QUALI_RE.test(r.tournament) ? 1 : 0;
-      const hit = known.get(`${r.tour}|${tournamentKey(r.tournament)}`);
-      if (hit) { set.run(hit.tier, hit.surface, hit.indoor, quali, r.id); n++; } else none.run(quali, r.id);
-    }
-  });
+  for (let i = 0; i < todo.length; i += 300) {
+    tx(() => {
+      for (const r of todo.slice(i, i + 300)) {
+        const quali = QUALI_RE.test(r.tournament) ? 1 : 0;
+        const hit = known.get(`${r.tour}|${tournamentKey(r.tournament)}`);
+        if (hit) { set.run(hit.tier, hit.surface, hit.indoor, quali, r.id); n++; } else none.run(quali, r.id);
+      }
+    });
+    await yieldLoop();
+  }
   return n;
 }
 
@@ -502,21 +543,29 @@ async function syncHistory() {
   meta.set('history_from', new Date(Date.parse(startedAt) - 86400000).toISOString().slice(0, 10));
   const tapes = await fetchTapes(150);
   // fix190: the new results into the live tennis-v1 ratings (loaded lazily: the model imports this file)
-  try { require('./tennisModel').tennisResultsHook(); } catch { /* model not loaded */ }
+  // fix194: in slices (it read and replayed up to 8,000 rows in one go)
+  let hook: (() => Promise<void>) | null = null;
+  try { hook = require('./tennisModel').tennisResultsHook; } catch { /* model not loaded */ }
+  if (hook) await hook();
   return `${n} finished, ${tapes} tapes`;
 }
 async function fetchTapes(max: number): Promise<number> {
+  // fix194: the last 45 days only (older months come with the monthly tape packages) on the time index, and the
+  // "no tape" marks by key (the query scanned every match since 2023 and every meta row: part of the 2 s stalls)
   const todo = db.prepare(`
-    SELECT m.id FROM tennis_matches m WHERE m.id > 0 AND m.status = 'completed' AND m.scheduled_at >= '2023-01-01'
+    SELECT m.id FROM tennis_matches m INDEXED BY idx_tennis_matches_time WHERE m.scheduled_at >= ? AND m.id > 0 AND m.status = 'completed'
       AND NOT EXISTS (SELECT 1 FROM tennis_match_stats s WHERE s.match_id = m.id) AND COALESCE(m.outcome, '') NOT IN ('walkover')
-      AND m.id NOT IN (SELECT CAST(substr(k, 7) AS INTEGER) FROM tennis_meta WHERE k LIKE 'notape%')
-    ORDER BY CASE WHEN m.tour IN ('atp', 'wta') THEN 0 WHEN m.tour = 'challenger' THEN 1 ELSE 2 END, m.scheduled_at DESC LIMIT ?`).all(max) as any[];
+      AND NOT EXISTS (SELECT 1 FROM tennis_meta x WHERE x.k = 'notape' || m.id)
+    ORDER BY CASE WHEN m.tour IN ('atp', 'wta') THEN 0 WHEN m.tour = 'challenger' THEN 1 ELSE 2 END, m.scheduled_at DESC LIMIT ?`)
+    .all(new Date(Date.now() - 45 * 86400000).toISOString(), max) as any[];
+  const hasStats = db.prepare(`SELECT 1 FROM tennis_match_stats WHERE match_id = ?`);
   const slice = slicer();
   let n = 0;
   for (const r of todo) {
     if (!canSpend('bulk')) break;
-    const obj = await tn(`/history/matches/${r.id}`, {}, { kind: 'bulk' });
-    if (obj && storeTape(obj) && db.prepare(`SELECT 1 FROM tennis_match_stats WHERE match_id = ?`).get(r.id)) n++;
+    let obj: any;
+    try { obj = await tn(`/history/matches/${r.id}`, {}, { kind: 'bulk' }); } catch (e: any) { if (e instanceof TennisError && e.status === 410) obj = null; else throw e; }
+    if (obj && storeTape(obj) && hasStats.get(r.id)) n++;
     else meta.set(`notape${r.id}`, nowIso()); // no usable tape: not asked again
     await slice();
   }
@@ -526,23 +575,35 @@ async function fetchTapes(max: number): Promise<number> {
 /** Players on first sight (no bio yet) and weekly; at most `max` per run. */
 const upPlayer = db.prepare(`UPDATE tennis_players SET name = COALESCE(?, name), country = COALESCE(?, country), tour = COALESCE(?, tour), hand = ?, dob = ?, height = ?,
   ranking = ?, ranking_points = ?, stats = ?, updated_at = ? WHERE id = ?`);
+const setGone = db.prepare(`UPDATE tennis_players SET gone = 1, updated_at = ? WHERE id = ?`);
+const setMovement = db.prepare(`UPDATE tennis_players SET ranking_movement = ? WHERE id = ?`);
+const dropPlayer = db.prepare(`DELETE FROM tennis_players WHERE id = ?`);
 async function syncPlayers(max = 120) {
   const week = new Date(Date.now() - 7 * 86400000).toISOString();
-  const todo = db.prepare(`SELECT id FROM tennis_players WHERE updated_at IS NULL OR updated_at < ? ORDER BY updated_at IS NOT NULL, COALESCE(ranking, 9999) LIMIT ?`).all(week, max) as any[];
+  // fix194: new players first (best ranked first), then the oldest refresh — both read the updated_at index; gone players never
+  const fresh = db.prepare(`SELECT id FROM tennis_players WHERE updated_at IS NULL AND gone IS NULL ORDER BY COALESCE(ranking, 9999) LIMIT ?`).all(max) as any[];
+  const old = fresh.length < max
+    ? db.prepare(`SELECT id FROM tennis_players WHERE updated_at < ? AND gone IS NULL ORDER BY updated_at LIMIT ?`).all(week, max - fresh.length) as any[] : [];
+  const todo = [...fresh, ...old];
   const slice = slicer();
-  let n = 0;
+  let n = 0, gone = 0;
   for (const r of todo) {
     if (!canSpend('bulk')) break;
-    const p = await tn(`/players/${r.id}`, {}, { kind: 'bulk' });
+    let p: any;
+    try { p = await tn(`/players/${r.id}`, {}, { kind: 'bulk' }); } catch (e: any) {
+      // fix194: 410 = the provider removed the player: marked gone, not asked again (was a warning every 20 min)
+      if (e instanceof TennisError && e.status === 410) { setGone.run(nowIso(), r.id); gone++; continue; }
+      throw e;
+    }
     if (!p) { upPlayer.run(null, null, null, null, null, null, null, null, null, nowIso(), r.id); continue; }
-    if (p.is_doubles_team) { db.prepare(`DELETE FROM tennis_players WHERE id = ?`).run(r.id); continue; }
+    if (p.is_doubles_team) { dropPlayer.run(r.id); continue; }
     upPlayer.run(str(p.name), str(p.country), str(p.tour), str(p.hand), str(p.birthday), num(p.height_cm ?? p.height), num(p.ranking), num(p.ranking_points),
       p.stats ? JSON.stringify(p.stats) : null, nowIso(), r.id);
-    if (num(p.ranking_movement) !== null) db.prepare(`UPDATE tennis_players SET ranking_movement = ? WHERE id = ?`).run(num(p.ranking_movement), r.id);
+    if (num(p.ranking_movement) !== null) setMovement.run(num(p.ranking_movement), r.id);
     n++;
     await slice();
   }
-  return `${n} players`;
+  return `${n} players${gone ? `, ${gone} gone (410)` : ''}`;
 }
 
 async function syncRankings() {
@@ -594,7 +655,7 @@ async function syncTournaments() {
       }
     });
   });
-  const filled = fillTiers();
+  const filled = await fillTiers();
   return `${n} tournaments${filled ? `, ${filled} match tiers filled` : ''}`;
 }
 
@@ -609,7 +670,11 @@ async function syncStoppages(max = 150) {
   let n = 0;
   for (const id of ids) {
     if (!canSpend('bulk')) break;
-    const j = await tn(`/players/${id}/stoppages`, { since, limit: 200 }, { kind: 'bulk' });
+    let j: any;
+    try { j = await tn(`/players/${id}/stoppages`, { since, limit: 200 }, { kind: 'bulk' }); } catch (e: any) {
+      if (e instanceof TennisError && e.status === 410) { setGone.run(nowIso(), id); continue; } // fix194
+      throw e;
+    }
     tx(() => { for (const s of j?.data || []) if (num(s.match_id) !== null && str(s.kind) && str(s.at)) { ins.run(id, num(s.match_id), str(s.kind), str(s.at), num(s.duration_seconds)); n++; } });
     await slice();
   }
@@ -646,15 +711,32 @@ async function streamFile(path: string, params: Record<string, any>, onLine: (o:
   const gz = /gzip/.test(res.headers.get('content-type') || '') || /\.gz/.test(res.headers.get('content-disposition') || '');
   const input = gz ? body.pipe(zlib.createGunzip()) : body;
   const rl = readline.createInterface({ input, crlfDelay: Infinity });
-  const slice = slicer();
-  let n = 0, batch: any[] = [];
-  const flush = () => { if (batch.length) { const b = batch; batch = []; tx(() => { for (const o of b) onLine(o); }); } };
+  // fix194: a tape line can be ~100 KB of JSON: lines are parsed and stored in ~25 ms slices (one transaction per slice,
+  // never open across an await), not 200 at once (the "backfill packages" stalls of 0.5–2 s on 20 Oct)
+  let n = 0, batch: string[] = [];
+  const drain = async () => {
+    let i = 0;
+    while (i < batch.length) {
+      const t = Date.now();
+      tx(() => {
+        while (i < batch.length && Date.now() - t < 25) {
+          const line = batch[i++];
+          let o: any;
+          try { o = JSON.parse(line); } catch { continue; } // a broken line is skipped
+          n++;
+          onLine(o);
+        }
+      });
+      await yieldLoop();
+    }
+    batch = [];
+  };
   for await (const line of rl) {
     if (!line.trim()) continue;
-    try { batch.push(JSON.parse(line)); n++; } catch { /* a broken line is skipped */ }
-    if (batch.length >= 200) { flush(); await slice(); }
+    batch.push(line);
+    if (batch.length >= 50) await drain();
   }
-  flush();
+  await drain();
   return n;
 }
 
@@ -724,22 +806,23 @@ export function startTennisScheduler() {
   started = true;
   if (!KEY()) { logger.info('tennis: TENNIS_API_KEY not set — tennis jobs off'); return; }
   const runUsage = () => readUsage().catch(e => { const j = jobs.get('usage') || { lastRun: null, lastOk: null, lastError: null, info: null, running: false }; j.lastError = e.message; jobs.set('usage', j); });
+  // fix194: the jobs that write many rows run in the heavy-job queue (one at a time, never with the daily model job or
+  // the player-page warm-up); usage, live and prices are small and stay on their own timers
   after('tennis start', async () => {
     await runUsage();
-    await job('fixtures', syncFixtures);
     await job('live', syncLive);
-    await job('tournaments', syncTournaments);
+    void heavy('tennis fixtures', () => job('fixtures', syncFixtures)).then(() => heavy('tennis tournaments', () => job('tournaments', syncTournaments)));
   }, 60 * 1000).unref();
   every('tennis usage', runUsage, 30 * 60 * 1000).unref();
-  every('tennis fixtures', () => job('fixtures', syncFixtures), 15 * 60 * 1000).unref();
+  everyHeavy('tennis fixtures', () => job('fixtures', syncFixtures), 15 * 60 * 1000).unref();
   // live: every minute while something is live, else every 10 minutes
   every('tennis live', () => (liveCount > 0 || Date.now() - lastLiveRun >= 10 * 60 * 1000 ? job('live', syncLive) : undefined), 60 * 1000).unref();
-  every('tennis history', () => job('history', syncHistory), 30 * 60 * 1000).unref();
-  every('tennis players', () => job('players', () => syncPlayers()), 20 * 60 * 1000).unref();
-  every('tennis rankings', () => job('rankings', syncRankings), 24 * 3600 * 1000).unref();
-  after('tennis rankings first', () => job('rankings', syncRankings), 5 * 60 * 1000).unref();
-  every('tennis tournaments', () => job('tournaments', syncTournaments), 24 * 3600 * 1000).unref();
-  every('tennis stoppages', () => job('stoppages', () => syncStoppages()), 6 * 3600 * 1000).unref();
+  everyHeavy('tennis history', () => job('history', syncHistory), 30 * 60 * 1000).unref();
+  everyHeavy('tennis players', () => job('players', () => syncPlayers()), 20 * 60 * 1000).unref();
+  everyHeavy('tennis rankings', () => job('rankings', syncRankings), 24 * 3600 * 1000).unref();
+  afterHeavy('tennis rankings', () => job('rankings', syncRankings), 5 * 60 * 1000).unref();
+  everyHeavy('tennis tournaments', () => job('tournaments', syncTournaments), 24 * 3600 * 1000).unref();
+  everyHeavy('tennis stoppages', () => job('stoppages', () => syncStoppages()), 6 * 3600 * 1000).unref();
   every('tennis prices', () => job('prices', syncPrices), 10 * 60 * 1000).unref();
   // backfill: one month / one archive step every 5 min (fix187; ~25 s each), always under the reserve; skipped while a
   // live sync runs or when the event loop was blocked > 500 ms in the last minute
@@ -748,9 +831,10 @@ export function startTennisScheduler() {
     if (stalledWithin(60 * 1000, 500)) { note(name, 'skipped: event loop blocked > 500 ms in the last minute'); return; }
     return job(name, fn);
   };
-  every('tennis backfill packages', calm('backfill packages', backfillPackages), 5 * 60 * 1000).unref();
-  every('tennis backfill archive', calm('backfill archive', backfillArchive), 5 * 60 * 1000).unref();
-  after('tennis backfill first', async () => { await job('backfill packages', backfillPackages); await job('backfill archive', backfillArchive); }, 8 * 60 * 1000).unref();
+  everyHeavy('tennis backfill packages', calm('backfill packages', backfillPackages), 5 * 60 * 1000).unref();
+  everyHeavy('tennis backfill archive', calm('backfill archive', backfillArchive), 5 * 60 * 1000).unref();
+  afterHeavy('tennis backfill packages', () => job('backfill packages', backfillPackages), 8 * 60 * 1000).unref();
+  afterHeavy('tennis backfill archive', () => job('backfill archive', backfillArchive), 9 * 60 * 1000).unref();
 }
 
 /* ------------------------------------------------------------------ */

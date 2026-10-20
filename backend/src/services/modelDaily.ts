@@ -30,7 +30,7 @@ import { v3WindowRun, liveVector, applyVector, isTuning } from './v3Tuner';
 import { clearPredictionCache } from './predCache';
 import { sendEmail, emailEnabled, SITE, esc } from './email';
 import { lastDataHealth } from './dataHealth';
-import { every, after, timed, slicer, yieldLoop } from './perf';
+import { timed, slicer, yieldLoop, heavy } from './perf';
 import {
   buildFeatures, buildFeaturesAsync, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
   fixtureByNames, getConfig, setConfig, mixWeight, mixMode, mixLive, setMixLive, scoreProbs, FEAT_MODEL, MIX_MODEL,
@@ -380,12 +380,16 @@ export function startModelDailyScheduler() {
     const lp = localParts(now);
     const row: any = db.prepare(`SELECT ran_at, report_sent_at FROM model_daily WHERE date = ?`).get(lp.date);
     // 04:00–20:59 UTC only: late in the UTC evening the Jerusalem date is already tomorrow's
+    // fix194: in the heavy-job queue (never with the tennis jobs or the player-page warm-up)
     if (now.getUTCHours() >= 4 && now.getUTCHours() < 21 && !row?.ran_at && !running && process.env.MODEL_DAILY !== 'off')
-      await timed('model daily job', () => runModelDaily()).catch(e => logger.warn(`model daily: ${e.message}`));
+      await heavy('model daily job', () => timed('model daily job', () => runModelDaily())).catch(e => logger.warn(`model daily: ${e.message}`));
     // the report waits for the job when it is still running at 07:00 (until 09:00 local at the latest)
     if (lp.hour >= 7 && lp.hour < 12 && !row?.report_sent_at && (!running || lp.hour >= 9))
       await timed('model report', () => sendMorningReport()).catch(e => logger.warn(`model report: ${e.message}`));
   };
-  after('model daily', tick, 3 * 60 * 1000);
-  every('model daily', tick, 5 * 60 * 1000);
+  // fix194: the tick is a plain timer (it only looks at the clock); the job and the report carry their own labels, so a
+  // tick waiting in the heavy queue is not reported as running
+  const run = () => { tick().catch(e => logger.warn(`model daily: ${e?.message || e}`)); };
+  setTimeout(run, 3 * 60 * 1000).unref();
+  setInterval(run, 5 * 60 * 1000).unref();
 }

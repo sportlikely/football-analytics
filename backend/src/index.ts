@@ -6,7 +6,7 @@ import { runLinkCheck, lastLinkCheck, linkCheckTick } from './services/linkCheck
 import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
 import { sendMail as sendMailFix168 } from './services/email';
-import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail } from './services/perf';
+import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
 import { Server } from 'socket.io';
@@ -1021,7 +1021,8 @@ app.get('/api/admin/tennis/sample', (req, res) => {
 // live settings only.
 app.get('/api/admin/tennis-model', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  if (req.query.rebuild === '1' || req.query.retune === '1') void tennisModelTick(req.query.rebuild === '1' ? 'report' : 'retune');
+  // fix194: in the heavy-job queue like the scheduled ticks
+  if (req.query.rebuild === '1' || req.query.retune === '1') { const f = req.query.rebuild === '1' ? 'report' : 'retune'; void heavy('tennis model (admin)', () => timed('tennis model (admin)', () => tennisModelTick(f))).catch(() => undefined); }
   try { res.json({ data: tennisModelReport() }); } catch (e) { sendError(res, e, 'Tennis model report failed'); }
 });
 // fix190: ?status=upcoming|done&tour=slam|atp|wta|challenger|itf&limit= — saved predictions with the outcome + the live record

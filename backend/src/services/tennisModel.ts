@@ -39,7 +39,7 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { winnerBands, winnerByConfidence } from '../utils/winnerBands';
-import { slicer, yieldLoop, timed, every, after } from './perf';
+import { slicer, yieldLoop, timed, heavy, everyHeavy, afterHeavy } from './perf';
 import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
 
 export const TENNIS_MODEL = 'tennis-v1';
@@ -180,10 +180,13 @@ function addRank(c: Ctx, idx: number, t: number, r: number) {
   if (!h) { h = { t: [], r: [] }; c.rankHist.set(idx, h); }
   h.t.push(t); h.r.push(r);
 }
-function sortRanks(c: Ctx) {
+/** fix194: in slices (thousands of players × hundreds of weekly ranks each) */
+async function sortRanks(c: Ctx) {
+  const slice = shared;
   for (const h of c.rankHist.values()) {
     const o = h.t.map((_, i) => i).sort((a, b) => h.t[a] - h.t[b]);
     h.t = o.map(i => h.t[i]); h.r = o.map(i => h.r[i]);
+    await slice();
   }
 }
 const keyOf = (c: Ctx, id: number, source: string) => (source === 'archive' ? c.archMap.get(id) ?? `a${id}` : `p${id}`);
@@ -265,20 +268,44 @@ const DONE_WHERE = `m.status = 'completed' AND m.winner IN (1, 2) AND m.p1_id IS
   AND COALESCE(m.outcome, '') NOT IN ('walkover', 'abandoned', 'unresolved') AND COALESCE(m.draw, 'singles') = 'singles'`;
 
 /** Archive player ids → our ids: the same id with the same name, else a unique player with the same (or initial + last) name. */
+/**
+ * fix194: big tables are read in primary-key pages with yields (whole-table reads + the UNION blocked the server
+ * ~2 s at the model's first run): archive rows are the negative ids.
+ */
+async function pagedRows(sql: string, start: number, size = 2000): Promise<any[]> {
+  const st = db.prepare(sql);
+  const out: any[] = [];
+  let after = start;
+  for (;;) {
+    const rows = st.all(after, size) as any[];
+    if (!rows.length) break;
+    for (const r of rows) out.push(r);
+    after = rows[rows.length - 1].id;
+    await yieldLoop();
+  }
+  return out;
+}
+const allPlayers = (cols: string) => pagedRows(`SELECT ${cols} FROM tennis_players WHERE id > ? ORDER BY id LIMIT ?`, -Number.MAX_SAFE_INTEGER);
 async function archiveMap(): Promise<Map<number, string>> {
   const out = new Map<number, string>();
-  const arch = db.prepare(`SELECT p1_id AS id, p1_name AS name FROM tennis_matches WHERE source = 'archive' AND p1_id IS NOT NULL
-    UNION SELECT p2_id, p2_name FROM tennis_matches WHERE source = 'archive' AND p2_id IS NOT NULL`).all() as any[];
+  const names = new Map<number, string>();
+  for (const r of await pagedRows(`SELECT id, p1_id, p1_name, p2_id, p2_name FROM tennis_matches WHERE id > ? AND id < 0 ORDER BY id LIMIT ?`, -Number.MAX_SAFE_INTEGER)) {
+    if (r.p1_id != null && !names.has(r.p1_id)) names.set(r.p1_id, r.p1_name);
+    if (r.p2_id != null && !names.has(r.p2_id)) names.set(r.p2_id, r.p2_name);
+  }
+  const arch = [...names].map(([id, name]) => ({ id, name }));
   if (!arch.length) return out;
-  const players = db.prepare(`SELECT id, name FROM tennis_players`).all() as any[];
-  const byId = new Map(players.map(p => [p.id as number, normName(p.name)]));
+  const players = await allPlayers('id, name');
+  const slice = shared;
+  const byId = new Map<number, string>();
   const full = new Map<string, number | null>(), short = new Map<string, number | null>();
   for (const p of players) {
     const f = normName(p.name), s = shortName(p.name);
+    byId.set(p.id, f);
     if (f) full.set(f, full.has(f) ? null : p.id);
     if (s) short.set(s, short.has(s) ? null : p.id);
+    await slice();
   }
-  const slice = shared;
   for (const a of arch) {
     const n = normName(a.name);
     if (byId.get(a.id) === n && n) out.set(a.id, `p${a.id}`);
@@ -292,7 +319,7 @@ async function archiveMap(): Promise<Map<number, string>> {
 async function newCtx(): Promise<Ctx> {
   const c: Ctx = { reg: new Reg(), tkeys: new Map(), tkName: [], ruleOfKey: new Map(), rankHist: new Map(), archMap: await archiveMap(),
     playerRank: new Map(), playerCountry: new Map(), playerTour: new Map(), stops: new Map() };
-  for (const p of db.prepare(`SELECT id, country, tour, ranking FROM tennis_players`).all() as any[]) {
+  for (const p of await allPlayers('id, country, tour, ranking')) {
     c.playerCountry.set(p.id, p.country ?? null); c.playerTour.set(p.id, p.tour ?? null);
     if (p.ranking > 0) c.playerRank.set(p.id, p.ranking);
   }
@@ -300,15 +327,23 @@ async function newCtx(): Promise<Ctx> {
   for (const r of db.prepare(`SELECT r.player_id, r.rank FROM tennis_rankings r WHERE r.player_id IS NOT NULL AND r.date = (SELECT MAX(date) FROM tennis_rankings r2 WHERE r2.tour = r.tour)`).all() as any[]) c.playerRank.set(r.player_id, r.rank);
   return c;
 }
+/**
+ * fix194: pages by rowid (the keyset on date || rank could use no index: every page of 20,000 scanned and sorted the
+ * whole table — the "tennis model first + tennis ratings" 2.1 s stalls). The order does not matter: sortRanks follows.
+ */
 async function loadRankHistory(c: Ctx) {
-  let after = '';
-  const slice = shared;
+  let after = 0;
+  const page = db.prepare(`SELECT player_id, date, rank, rowid AS rid FROM tennis_rankings WHERE rowid > ? ORDER BY rowid LIMIT 5000`);
   for (;;) {
-    const rows = db.prepare(`SELECT player_id, date, rank, rowid AS rid FROM tennis_rankings WHERE player_id IS NOT NULL AND (date || '|' || printf('%06d', rank)) > ? ORDER BY date, rank LIMIT 20000`).all(after) as any[];
+    const rows = page.all(after) as any[];
     if (!rows.length) break;
-    for (const r of rows) { const i = c.reg.idx.get(`p${r.player_id}`); if (i !== undefined) addRank(c, i, Date.parse(`${r.date}T00:00:00Z`), r.rank); }
-    const l = rows[rows.length - 1]; after = `${l.date}|${String(l.rank).padStart(6, '0')}`;
-    await slice();
+    for (const r of rows) {
+      if (r.player_id == null) continue;
+      const i = c.reg.idx.get(`p${r.player_id}`);
+      if (i !== undefined) addRank(c, i, Date.parse(`${r.date}T00:00:00Z`), r.rank);
+    }
+    after = rows[rows.length - 1].rid;
+    await yieldLoop();
   }
 }
 function loadStops(c: Ctx) {
@@ -326,9 +361,10 @@ function loadStops(c: Ctx) {
  * match tiebreak instead of the set). Slams since 2022 → 1. Other events → 2 when most of their deciding sets read like a
  * match tiebreak (1-0, or a winner's count of 8+: a tour event has no advantage final set).
  */
-function detectRules(c: Ctx, R: Rows) {
+async function detectRules(c: Ctx, R: Rows) {
   const cnt = new Map<number, [number, number]>();
   for (let i = 0; i < R.n; i++) {
+    if ((i & 8191) === 0) await shared(); // fix194
     if (R.cat[i] === 0 || !R.sets[i] || R.sets[i] !== R.bo[i]) continue;
     const a = R.lastA[i], b = R.lastB[i], hi = Math.max(a, b), lo = Math.min(a, b);
     const x = cnt.get(R.tk[i]) || [0, 0];
@@ -350,18 +386,21 @@ function applyRules(c: Ctx, R: Rows) {
 /** Every finished singles match in time order (archive first), in pages with yields. */
 async function loadData(): Promise<{ c: Ctx; R: Rows }> {
   const c = await newCtx();
-  const n = (db.prepare(`SELECT COUNT(*) AS n FROM tennis_matches m WHERE ${DONE_WHERE}`).get() as any).n as number;
+  // fix194: every row as the capacity (a plain COUNT reads the smallest index; the filtered one decoded every row)
+  const n = (db.prepare(`SELECT COUNT(*) AS n FROM tennis_matches`).get() as any).n as number;
   const R = new Rows(n + 10);
   // keyset pages on the time index (no sort of the whole table per page): the rest of the last timestamp, then later ones
+  // fix194: pages of 1,000 (was 4,000) and the parse in slices
+  const PAGE = 1000;
   let at = '', id = 0;
   const slice = shared;
-  const same = db.prepare(`${MATCH_SQL} WHERE ${DONE_WHERE} AND m.scheduled_at = ? AND m.id > ? ORDER BY m.id LIMIT 4000`);
+  const same = db.prepare(`${MATCH_SQL} WHERE ${DONE_WHERE} AND m.scheduled_at = ? AND m.id > ? ORDER BY m.id LIMIT ${PAGE}`);
   const later = db.prepare(`${MATCH_SQL} WHERE ${DONE_WHERE} AND m.scheduled_at > ? ORDER BY m.scheduled_at, m.id LIMIT ?`);
   for (;;) {
     let rows = at ? (same.all(at, id) as any[]) : [];
-    if (rows.length < 4000) rows = rows.concat(later.all(at, 4000 - rows.length) as any[]);
+    if (rows.length < PAGE) rows = rows.concat(later.all(at, PAGE - rows.length) as any[]);
     if (!rows.length) break;
-    for (const r of rows) if (R.n < R.id.length) parseInto(c, R, r, false);
+    for (let k = 0; k < rows.length; k++) { if (R.n < R.id.length) parseInto(c, R, rows[k], false); if ((k & 127) === 0) await slice(); }
     const l = rows[rows.length - 1]; at = l.scheduled_at; id = l.id;
     await yieldLoop();
   }
@@ -374,14 +413,14 @@ async function loadData(): Promise<{ c: Ctx; R: Rows }> {
     await slice();
   }
   await loadRankHistory(c);
-  sortRanks(c);
+  await sortRanks(c);
   // ranks of non-archive rows: as of the match (rank history now loaded)
   for (let i = 0; i < R.n; i++) {
     if (!Number.isFinite(R.r1[i])) R.r1[i] = rankAt(c, R.p1[i], R.t[i]);
     if (!Number.isFinite(R.r2[i])) R.r2[i] = rankAt(c, R.p2[i], R.t[i]);
     if (i % 5000 === 0) await slice();
   }
-  detectRules(c, R);
+  await detectRules(c, R);
   loadStops(c);
   return { c, R };
 }
@@ -1194,9 +1233,15 @@ function marketBench() {
 /* Live: ratings after each result, predictions of the next 48 h        */
 /* ------------------------------------------------------------------ */
 
-interface LiveState { s: Settings; c: Ctx; A: AEng; B: BEng; F: FEng; builtAt: number; lastT: number; recent: Set<number>; stale: boolean }
+/**
+ * fix194: the ratings are built once (and again when the settings change, or after 7 days for restated old results);
+ * new results are added incrementally. `changed` = when each player's rating last moved (the predictions of the next 48 h
+ * are only recomputed for players whose ratings moved since).
+ */
+interface LiveState { s: Settings; c: Ctx; A: AEng; B: BEng; F: FEng; builtAt: number; lastT: number; recent: Set<number>; stale: boolean; changed: Map<number, number> }
 let liveState: LiveState | null = null;
-let liveBuilding: Promise<void> | null = null;
+let liveBuilding: Promise<unknown> | null = null;
+const REBUILD_MS = 7 * DAY;
 
 async function buildLive(): Promise<void> {
   const s: Settings | null = store.get('settings');
@@ -1208,35 +1253,64 @@ async function buildLive(): Promise<void> {
   for (let i = 0; i < R.n; i++) {
     A.update(R, i); B.update(R, i); F.update(R, i);
     if (R.t[i] > Date.now() - 30 * DAY) recent.add(R.id[i]);
-    if ((i & 1023) === 0) await slice();
+    if ((i & 511) === 0) await slice();
   }
-  liveState = { s, c, A, B, F, builtAt: Date.now(), lastT: R.n ? R.t[R.n - 1] : 0, recent, stale: false };
+  liveState = { s, c, A, B, F, builtAt: Date.now(), lastT: R.n ? R.t[R.n - 1] : 0, recent, stale: false, changed: new Map() };
 }
+/** the ratings need a full replay: none yet, other settings, or a week old */
+function needsBuild(): boolean {
+  const L = liveState;
+  if (!L || L.stale || Date.now() - L.builtAt > REBUILD_MS) return true;
+  const s: Settings | null = store.get('settings');
+  return !!s && s.at !== L.s.at;
+}
+/** pages (player model): the replay is queued as a heavy job; the old ratings serve until the new ones are ready */
 function ensureLive(): LiveState | null {
-  if (liveState && !liveState.stale && Date.now() - liveState.builtAt < 24 * 3600 * 1000) return liveState;
-  if (!liveBuilding) liveBuilding = timed('tennis ratings', buildLive).catch(e => { logger.warn(`${TENNIS_MODEL} replay: ${e.message}`); }).finally(() => { liveBuilding = null; });
-  return liveState; // the old ratings serve until the new ones are ready
+  if (!needsBuild()) return liveState;
+  if (!liveBuilding) {
+    liveBuilding = heavy('tennis ratings', () => (needsBuild() ? timed('tennis ratings', buildLive) : undefined))
+      .catch(e => { logger.warn(`${TENNIS_MODEL} replay: ${e.message}`); }).finally(() => { liveBuilding = null; });
+  }
+  return liveState;
 }
 const grow = (L: LiveState) => { L.A.ensure(L.c.reg.size + 10); L.B.ensure(L.c.reg.size + 10); };
 
-/** Finished matches since the last look → the live ratings (in time order; an old one → a full replay). */
-export function applyNewResults(): number {
+/**
+ * Finished matches since the last look → the live ratings (in time order; an old one → the weekly full replay).
+ * fix194: read in keyset pages of 1,000 and replayed in slices (was up to 8,000 rows in one go after every results sync).
+ */
+export async function applyNewResults(): Promise<number> {
   const L = liveState;
   if (!L || L.stale) return 0;
-  // finished matches of the last days (time index) that are not in the ratings yet
-  const rows = (db.prepare(`${MATCH_SQL} WHERE ${DONE_WHERE} AND m.scheduled_at >= ? ORDER BY m.scheduled_at, m.id LIMIT 8000`)
-    .all(new Date(L.lastT - 3 * DAY).toISOString()) as any[]).filter(r => !L.recent.has(r.id));
-  if (!rows.length) return 0;
+  const PAGE = 1000, MAX = 8000;
+  const same = db.prepare(`${MATCH_SQL} WHERE ${DONE_WHERE} AND m.scheduled_at = ? AND m.id > ? ORDER BY m.id LIMIT ${PAGE}`);
+  const later = db.prepare(`${MATCH_SQL} WHERE ${DONE_WHERE} AND m.scheduled_at > ? ORDER BY m.scheduled_at, m.id LIMIT ?`);
+  const rows: any[] = [];
+  let at = new Date(L.lastT - 3 * DAY - 1).toISOString(), id = 0, first = true;
+  while (rows.length < MAX) {
+    let page = first ? [] : (same.all(at, id) as any[]);
+    first = false;
+    if (page.length < PAGE) page = page.concat(later.all(at, PAGE - page.length) as any[]);
+    if (!page.length) break;
+    for (const r of page) if (!L.recent.has(r.id)) rows.push(r);
+    const l = page[page.length - 1]; at = l.scheduled_at; id = l.id;
+    await yieldLoop();
+  }
+  if (!rows.length || liveState !== L) return 0;
+  const slice = shared;
   const R = new Rows(rows.length);
-  for (const r of rows) parseInto(L.c, R, r, false);
+  for (let k = 0; k < rows.length; k++) { parseInto(L.c, R, rows[k], false); if ((k & 127) === 0) await slice(); }
   applyRules(L.c, R);
   grow(L);
   let n = 0;
+  const now = Date.now();
   for (let i = 0; i < R.n; i++) {
-    // an old row touched again (a tape added, a restatement): left to the daily full replay
-    if (R.t[i] < L.lastT - 3 * DAY) continue;
+    // an old row touched again (a tape added, a restatement): left to the weekly full replay
+    if (R.t[i] < L.lastT - 3 * DAY || L.recent.has(R.id[i])) continue;
     L.A.update(R, i); L.B.update(R, i); L.F.update(R, i);
+    L.changed.set(R.p1[i], now); L.changed.set(R.p2[i], now);
     L.recent.add(R.id[i]); L.lastT = Math.max(L.lastT, R.t[i]); n++;
+    if ((i & 255) === 0) await slice();
   }
   return n;
 }
@@ -1295,16 +1369,34 @@ function whyLines(L: LiveState, R: Rows, i: number, nm: [string, string], a: Ret
   return out;
 }
 
-/** Predictions of the next 48 h (not started), saved until the start; the first version is remembered. */
+/**
+ * Predictions of the next 48 h (not started), saved until the start; the first version is remembered.
+ * fix194: incremental — a match is recomputed only when it has no prediction yet, when the ratings were rebuilt or one of
+ * its players' ratings moved since its prediction, or when its prediction is 6 hours old (time, tier or surface changed);
+ * written 200 rows per transaction with yields (all 3,000 were written in one block).
+ */
+let predsSkipped = 0;
 export async function saveTennisPredictions(): Promise<number> {
-  const L = ensureLive();
+  const L = liveState;
   if (!L) return 0;
   const now = new Date();
   const rows = db.prepare(`${MATCH_SQL} WHERE m.status = 'upcoming' AND m.p1_id IS NOT NULL AND m.p2_id IS NOT NULL AND m.scheduled_at > ? AND m.scheduled_at < ?
     AND COALESCE(m.draw, 'singles') = 'singles' ORDER BY m.scheduled_at LIMIT 3000`).all(now.toISOString(), new Date(now.getTime() + 48 * 3600000).toISOString()) as any[];
+  const madeAt = db.prepare(`SELECT made_at FROM tennis_predictions WHERE match_id = ?`);
+  const slice = shared;
   const R = new Rows(rows.length);
   const names: [string, string][] = [];
-  for (const r of rows) if (parseInto(L.c, R, { ...r, winner: 0 }, true)) names.push([r.p1_name || 'Player 1', r.p2_name || 'Player 2']);
+  predsSkipped = 0;
+  for (let k = 0; k < rows.length; k++) {
+    const r = rows[k];
+    if ((k & 127) === 0) await slice();
+    if (!parseInto(L.c, R, { ...r, winner: 0 }, true)) continue;
+    const i = R.n - 1;
+    const prev = Date.parse((madeAt.get(r.id) as any)?.made_at || '');
+    const moved = Math.max(L.builtAt, L.changed.get(R.p1[i]) || 0, L.changed.get(R.p2[i]) || 0);
+    if (Number.isFinite(prev) && prev > moved && now.getTime() - prev < 6 * 3600000) { R.n--; predsSkipped++; continue; } // unchanged
+    names.push([r.p1_name || 'Player 1', r.p2_name || 'Player 2']);
+  }
   applyRules(L.c, R);
   grow(L);
   const up = db.prepare(`INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at)
@@ -1312,21 +1404,23 @@ export async function saveTennisPredictions(): Promise<number> {
     p1 = excluded.p1, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
     WHERE tennis_predictions.scheduled_at IS NULL OR tennis_predictions.scheduled_at > excluded.made_at`);
   const out: { id: number; at: string; pr: TennisPred }[] = [];
-  const slice = shared;
   for (let i = 0; i < R.n; i++) {
     out.push({ id: R.id[i], at: new Date(R.t[i]).toISOString(), pr: predictRow(L, R, i, names[i]) });
     await slice();
   }
   const at = new Date().toISOString();
-  db.exec('BEGIN');
-  try {
-    // a match that started while we were computing keeps the prediction it had at the start
-    for (const o of out) if (Date.parse(o.at) > Date.now()) {
-      up.run(o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
-        JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at);
-    }
-    db.exec('COMMIT');
-  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  for (let k = 0; k < out.length; k += 200) {
+    db.exec('BEGIN');
+    try {
+      // a match that started while we were computing keeps the prediction it had at the start
+      for (const o of out.slice(k, k + 200)) if (Date.parse(o.at) > Date.now()) {
+        up.run(o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
+          JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at);
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    await yieldLoop();
+  }
   return out.length;
 }
 
@@ -1399,10 +1493,11 @@ export async function tennisModelTick(force: 'report' | 'retune' | null = null):
     } else if (force === 'retune' || weekly) {
       await timed('tennis model retune', retuneLive);
     }
-    if (!liveState || liveState.stale) { ensureLive(); if (liveBuilding) await liveBuilding; }
-    const applied = applyNewResults();
+    // fix194: the full replay only when needed (this tick already runs in the heavy-job queue: no heavy() inside)
+    if (needsBuild()) await timed('tennis ratings', buildLive);
+    const applied = await applyNewResults();
     const n = await saveTennisPredictions();
-    lastTick = { at: new Date().toISOString(), info: `${applied} new results in the ratings, ${n} predictions saved` };
+    lastTick = { at: new Date().toISOString(), info: `${applied} new results in the ratings, ${n} predictions saved (${predsSkipped} unchanged)` };
   } catch (e: any) {
     progress.error = `${new Date().toISOString()}: ${e.message}`;
     setPhase(null);
@@ -1410,14 +1505,15 @@ export async function tennisModelTick(force: 'report' | 'retune' | null = null):
   } finally { busy = false; }
 }
 /** after the tennis results job (services/tennis.ts): new results into the live ratings */
-export function tennisResultsHook() { try { applyNewResults(); } catch (e: any) { logger.warn(`${TENNIS_MODEL} results: ${e.message}`); } }
+export async function tennisResultsHook(): Promise<void> { try { await applyNewResults(); } catch (e: any) { logger.warn(`${TENNIS_MODEL} results: ${e.message}`); } }
 
 let started = false;
 export function startTennisModelScheduler() {
   if (started) return;
   started = true;
-  after('tennis model first', () => tennisModelTick(), 12 * 60 * 1000).unref();
-  every('tennis model', () => tennisModelTick(), 30 * 60 * 1000).unref();
+  // fix194: in the heavy-job queue (never with the other tennis jobs, the daily model job or the player-page warm-up)
+  afterHeavy('tennis model', () => tennisModelTick(), 12 * 60 * 1000).unref();
+  everyHeavy('tennis model', () => tennisModelTick(), 30 * 60 * 1000).unref();
 }
 
 /* ------------------------------------------------------------------ */

@@ -195,6 +195,62 @@ export function every(label: string, fn: () => unknown, ms: number): NodeJS.Time
   return setInterval(() => { timed(label, fn).catch(e => logger.warn(`${label}: ${e?.message || e}`)); }, ms);
 }
 
+/*
+ * fix194: one heavy background job at a time (model daily, player pages warm, the tennis jobs). On 20 Oct the 04:04 UTC
+ * daily job, the player-page warm-up and the tennis jobs ran together and the slices of all three added up to 1–2 s
+ * stalls. A job asks for its turn with heavy(label, fn); a label already running or waiting is not queued twice (the
+ * next tick of its timer comes soon enough). Never call heavy() from inside a heavy job: it would wait for itself.
+ */
+const heavyQueue: { label: string; run: () => void }[] = [];
+const heavyWaiting = new Set<string>();
+let heavyNow: string | null = null;
+let heavySince = 0;
+let heavyTurn = 0;
+const heavyNext = () => {
+  if (heavyNow) return;
+  const next = heavyQueue.shift();
+  if (next) next.run();
+};
+// a job that never ends (a hung download) must not stop the others for ever: after 45 min the queue moves on
+const HEAVY_MAX_MS = 45 * 60 * 1000;
+setInterval(() => {
+  if (!heavyNow || Date.now() - heavySince < HEAVY_MAX_MS) return;
+  logger.warn(`heavy job "${heavyNow}" still running after ${Math.round((Date.now() - heavySince) / 60000)} min: the queue moves on`);
+  heavyNow = null;
+  heavyTurn++;
+  heavyNext();
+}, 60 * 1000).unref();
+export function heavy<T>(label: string, fn: () => T | Promise<T>): Promise<T | undefined> {
+  if (heavyWaiting.has(label) || heavyNow === label) return Promise.resolve(undefined);
+  heavyWaiting.add(label);
+  return new Promise<T | undefined>((resolve, reject) => {
+    heavyQueue.push({
+      label,
+      run: () => {
+        heavyWaiting.delete(label);
+        heavyNow = label;
+        heavySince = Date.now();
+        const turn = ++heavyTurn;
+        Promise.resolve().then(fn).then(resolve, reject).finally(() => {
+          if (turn !== heavyTurn) return; // released by the 45-min watchdog: the queue already moved on
+          heavyNow = null;
+          setImmediate(heavyNext);
+        });
+      }
+    });
+    heavyNext();
+  });
+}
+/** the heavy job running now and the ones waiting (for /api/perf) */
+export const heavyStatus = () => ({ running: heavyNow, forMs: heavyNow ? Date.now() - heavySince : 0, waiting: heavyQueue.map(q => q.label) });
+/** every() for a heavy job: timed only while it runs (the wait in the queue is not counted as running) */
+export function everyHeavy(label: string, fn: () => unknown, ms: number): NodeJS.Timeout {
+  return setInterval(() => { heavy(label, () => timed(label, fn)).catch(e => logger.warn(`${label}: ${e?.message || e}`)); }, ms);
+}
+export function afterHeavy(label: string, fn: () => unknown, ms: number): NodeJS.Timeout {
+  return setTimeout(() => { heavy(label, () => timed(label, fn)).catch(e => logger.warn(`${label}: ${e?.message || e}`)); }, ms);
+}
+
 export function perfStatus() {
   const since = Date.now() - 3600 * 1000;
   const recent = stalls.filter(s => new Date(s.at).getTime() >= since);
@@ -203,6 +259,7 @@ export function perfStatus() {
     stallsLastHour: recent.length,
     worstLastHour: recent.reduce((m, s) => Math.max(m, s.ms), 0),
     running: runningLabel(),
+    heavy: heavyStatus(),
     liveThisHour: Object.fromEntries(liveHour),
     recentStalls: stalls.slice(-25).reverse(),
     // maxMs = longest run (waits for the data providers included); maxStallMs = worst event-loop freeze while it ran

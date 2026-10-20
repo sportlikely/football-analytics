@@ -14,7 +14,7 @@ import logger from '../utils/logger';
 import { afGet, afRemaining, afConfigured } from './apiFootball';
 import { pageBudgetLeft, isCrawlerRequest, noProviderCalls, outsideRequest } from './afUsage';
 import { resolveAfTeamId, competitionName, teamNameOf } from './teamPage';
-import { every } from './perf';
+import { everyHeavy, yieldLoop } from './perf';
 
 const AF_OFFSET = 1_000_000_000;
 // fix166: 24 h (was 12 h); 3 h while his club has played in the last 24 h (the provider's numbers catch up)
@@ -589,12 +589,14 @@ export function warmPlayers(ids: number[]) {
   while (warmQueue.size > 2000) warmQueue.delete(warmQueue.values().next().value as number);
   if (!warmTimer && warmQueue.size) {
     // fix166: started outside the visitor's request — warm-ups are background work, not that visitor's page calls
-    warmTimer = outsideRequest(() => every('player pages warm', async () => {
+    // fix194: in the heavy-job queue (never with the daily model job or the tennis jobs)
+    warmTimer = outsideRequest(() => everyHeavy('player pages warm', async () => {
       if (!warmQueue.size) { clearInterval(warmTimer!); warmTimer = null; return; }
       if (afRemaining() < 20000 || pageBudgetLeft() < 150) return; // fix140: visitors first, warm-ups give way
       for (const pid of [...warmQueue].slice(0, 3)) {
         warmQueue.delete(pid);
         try { await pageData(pid); } catch { /* skipped */ }
+        await yieldLoop();
       }
     }, 60 * 1000));
     warmTimer.unref?.();
