@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
+import { Section } from '../../components/sport/game/GamePage'
 import { t, LOCALE } from '../../lib/i18n'
 import { useTennisTour, tennisHref, flagOf, surname, setsText, tierLabel, surfaceName, SURFACE_DOT, type TourFilter, type TMatch } from '../../lib/tennis'
 
@@ -86,3 +87,75 @@ export function TennisTournamentPanel({ tkey }: { tkey: string }) {
 }
 
 export const dayTime = (iso: string) => new Date(iso).toLocaleString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+/** a player's finished match as the match and player pages list it */
+export interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; opponent: { id: number | null; name: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
+
+/** W / L, the opponent (their page), the tournament (its page), the score (the match page) */
+export function FormList({ list, title, empty }: { list: Played[]; title?: ReactNode; empty?: string }) {
+  return (
+    <div className="min-w-0">
+      {title && <div className="label pb-1.5">{title}</div>}
+      {!list.length ? <p className="text-sm text-faint">{empty || t('No recent matches.')}</p> : (
+        <ul className="divide-y divide-line/50">
+          {list.map(x => (
+            <li key={x.id} className="flex items-center gap-2 py-1.5 text-sm px-1">
+              <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold flex-shrink-0 ${x.won ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{x.won ? t('W') : t('L')}</span>
+              <span className="min-w-0 flex-1">
+                <PlayerName p={{ ...x.opponent, rank: null, logo: null }} className="block truncate" />
+                <span className="block text-[11px] text-faint truncate"><Link to={tennisHref.tournament(x.tkey)} className="hover:text-accent">{x.tournament}</Link>{x.round ? ` · ${x.round}` : ''}</span>
+              </span>
+              <Link to={tennisHref.match(x.id)} className="num text-xs text-muted shrink-0 hover:text-accent inline-flex gap-1.5">{x.score.split(' ').filter(Boolean).map((v, i) => <span key={i}>{v.replace('-', '–')}</span>)}{x.retired ? <span>{t('ret.')}</span> : null}</Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** one round of a tournament's draw (from our matches) */
+export interface DrawRound { code: string; name: string; qualifying: boolean; matches: TMatch[] }
+
+/** The draw: rounds from our matches, the latest round first; `m` = the match to highlight (the match page) */
+export function DrawTab({ m, rounds }: { m: TMatch | null; rounds: DrawRound[] }) {
+  const main = rounds.filter(r => !r.qualifying), quali = rounds.filter(r => r.qualifying)
+  const block = (r: DrawRound) => (
+    <div key={(r.qualifying ? 'q' : '') + r.code} className="min-w-0">
+      <div className="label pb-1">{r.qualifying ? `${t('Qualifying')} · ${r.name}` : r.name}</div>
+      <ul className="space-y-1.5">
+        {r.matches.map(x => {
+          const on = m && x.id === m.id
+          const w = x.winner
+          return (
+            <li key={x.id}>
+              <Link to={tennisHref.match(x.id)} className={`block rounded-xl border px-3 py-2 text-sm hover:border-accent/50 ${on ? 'border-accent/70 bg-accent/10' : 'border-line/60 bg-surface2/30'}`}>
+                {([1, 2] as const).map(k => {
+                  const s = k === 1 ? x.home : x.away
+                  return (
+                    <div key={k} className="flex items-center justify-between gap-2">
+                      <span className={`truncate ${w === k ? 'font-bold text-ink' : w ? 'text-muted' : 'text-ink/85'}`}>{flagOf(s.country)} {s.name}{s.rank ? <span className="ml-1 text-[10px] text-faint num">{s.rank}</span> : null}</span>
+                      <span className="num text-xs text-muted shrink-0 inline-flex gap-2">{x.score ? x.score.sets.map((v, i) => <span key={i}>{v[k - 1]}</span>) : null}</span>
+                    </div>
+                  )
+                })}
+                {x.state === 'upcoming' && <div className="text-[11px] text-faint mt-0.5">{new Date(x.start).toLocaleString(LOCALE, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
+                {x.state === 'live' && <div className="text-[11px] text-live font-bold mt-0.5">{t('LIVE')}</div>}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+  return (
+    <Section title={t('Draw')} note={m ? m.tournament.name : undefined}>
+      {!main.length && !quali.length ? <p className="text-sm text-faint">{t('The draw appears once the matches are scheduled.')}</p> : (
+        <div className="space-y-6">
+          {main.length > 0 && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{[...main].reverse().map(block)}</div>}
+          {quali.length > 0 && <details><summary className="cursor-pointer text-sm font-semibold text-muted">{t('Qualifying')}</summary><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 mt-3">{[...quali].reverse().map(block)}</div></details>}
+        </div>
+      )}
+    </Section>
+  )
+}

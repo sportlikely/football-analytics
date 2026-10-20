@@ -29,6 +29,19 @@ export const tournamentOf = (m: TMatch, level: number): SLeague => ({
 const LEVEL: Record<string, number> = { 'Grand Slam': 0, '1000': 1, '500': 2, '250': 3, Challenger: 4, ITF: 5 }
 export const levelOf = (m: TMatch) => (LEVEL[m.tournament.level] ?? 6) * 10 + (m.tour === 'wta' ? 1 : 0)
 
+/** one match as the shared list rows show it (Matches, Favorites, the player and tournament pages) */
+export function tennisSGame(m: TMatch, lg: SLeague = tournamentOf(m, levelOf(m)), favWhy: string[] = []): SGame {
+  const p = m.prediction
+  const open = !!p && !p.locked && typeof p.pHome === 'number'
+  // Spotlight: the bigger the event and the closer the match, the higher
+  const weight = open ? (6 - Math.min(6, Math.floor(levelOf(m) / 10))) / 3 + (1 - Math.abs(p!.pHome! - 50) / 50) : 0
+  return {
+    ...toGame(m), state: m.state as SGame['state'], league: lg, favWhy, weight, chips: tennisChips(p),
+    note: m.state === 'live' && open && p!.live ? { text: tt("Now: {0} {1}%", { 0: (p!.live.pHome >= p!.live.pAway ? m.home : m.away).name.split(' ').pop(), 1: Math.round(Math.max(p!.live.pHome, p!.live.pAway)) }), tone: 'live' as const } : null,
+    hit: m.state === 'done' ? p?.hit ?? null : undefined
+  }
+}
+
 function useData(): GamesData {
   const { access } = useAuth()
   const { tour } = useTennisTour()
@@ -56,14 +69,7 @@ function useData(): GamesData {
     const games: SGame[] = (matches || []).filter(m => m.state === 'upcoming' || m.state === 'live').map(m => {
       const lg = leagues.get(m.tournament.key) || tournamentOf(m, levelOf(m))
       leagues.set(m.tournament.key, lg)
-      const p = m.prediction
-      const open = !!p && !p.locked && typeof p.pHome === 'number'
-      // Spotlight: the bigger the event and the closer the match, the higher
-      const weight = open ? (6 - Math.min(6, Math.floor(levelOf(m) / 10))) / 3 + (1 - Math.abs(p!.pHome! - 50) / 50) : 0
-      return {
-        ...toGame(m), state: m.state as SGame['state'], league: lg, favWhy: favs.reasons(m).map(f => f.name), weight, chips: tennisChips(p),
-        note: m.state === 'live' && open && p!.live ? { text: tt("Now: {0} {1}%", { 0: (p!.live.pHome >= p!.live.pAway ? m.home : m.away).name.split(' ').pop(), 1: Math.round(Math.max(p!.live.pHome, p!.live.pAway)) }), tone: 'live' as const } : null
-      }
+      return tennisSGame(m, lg, favs.reasons(m).map(f => f.name))
     })
     return {
       loading: matches === null, error, games, leagues: [...leagues.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),

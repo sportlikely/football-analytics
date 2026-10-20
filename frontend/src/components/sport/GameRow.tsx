@@ -34,7 +34,8 @@ export function PredBlock({ pred, roll = false }: { pred: Extract<HPred, { kind:
         <span className="flex items-center gap-1 text-[10px] leading-none whitespace-nowrap">
           <span className="text-faint">{tt("Our pick")}</span>
           {pred.pick.help ? <DcHelp /> : <span aria-hidden className="text-faint">·</span>}
-          <span className="font-bold text-ink">{pred.pick.words}</span>
+          {/* fix193b: a long name gives way on phones (never pushes the % off a narrow card) */}
+          <span className="font-bold text-ink min-w-0 max-w-[7.5rem] sm:max-w-none truncate">{pred.pick.words}</span>
           {pred.pick.pct !== null && <><span aria-hidden className="text-faint">·</span><span className="num font-extrabold text-accent">{pred.pick.pct}%</span></>}
         </span>
       )}

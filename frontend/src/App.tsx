@@ -100,6 +100,10 @@ const NflFavorites = page(() => import('./pages/nfl/NflFavorites'))
 const TennisHome = page(() => import('./pages/tennis/TennisHome'))
 const TennisMatches = page(() => import('./pages/tennis/TennisMatches'))
 const TennisMatch = page(() => import('./pages/tennis/TennisMatch'))
+const TennisPlayer = page(() => import('./pages/tennis/TennisPlayer'))
+const TennisTournament = page(() => import('./pages/tennis/TennisTournament'))
+const TennisRankings = page(() => import('./pages/tennis/TennisRankings'))
+const TennisFavorites = page(() => import('./pages/tennis/TennisFavorites'))
 const Terms = page(() => import('./pages/Legal').then(m => ({ default: m.Terms })))
 const Privacy = page(() => import('./pages/Legal').then(m => ({ default: m.Privacy })))
 const NotFound = page(() => import('./pages/Legal').then(m => ({ default: m.NotFound })))
@@ -819,6 +823,10 @@ function TennisRoutes() {
       <Route path="matches" element={<TennisMatches />} />
       <Route path="today" element={<TennisMatches today />} />
       <Route path="match/:id" element={<TennisMatch />} />
+      <Route path="player/:id" element={<TennisPlayer />} />
+      <Route path="tournament/:key" element={<TennisTournament />} />
+      <Route path="rankings" element={<TennisRankings />} />
+      <Route path="favorites" element={<TennisFavorites />} />
       <Route path="upset-watch" element={<PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming matches where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}><UpsetWatch sport="tennis" /></PremiumGate>} />
       <Route path="*" element={<NotFound />} />
     </Routes>

@@ -257,11 +257,11 @@ export function serveReturn(pid: number | null, before: string, surface: string 
   const v = (a: Agg, games: number) => ({ ...aggView(a), breakPct: pctOf(a.bp_conv, games) });
   return { last52: v(all, rg), surface: surface ? v(surf, rgS) : null };
 }
-interface Played { id: number; start: string; tournament: string; surface: string | null; round: string | null; opponent: { id: number | null; name: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
+interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; opponent: { id: number | null; name: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
 /** a player's finished matches before `before`, newest first */
 export function playedBefore(pid: number | null, before: string, limit = 10, since?: string): Played[] {
   if (!pid) return [];
-  const rows = db.prepare(`SELECT m.id, m.scheduled_at, m.tournament, m.surface, m.round, m.p1_id, m.p1_name, m.p2_id, m.p2_name, m.winner, m.games, m.outcome, m.extra,
+  const rows = db.prepare(`SELECT m.id, m.scheduled_at, m.tournament, m.tour, m.surface, m.round, m.p1_id, m.p1_name, m.p2_id, m.p2_name, m.winner, m.games, m.outcome, m.extra,
       p1.country AS c1, p2.country AS c2, (SELECT MAX(s.duration_s) FROM tennis_match_stats s WHERE s.match_id = m.id) AS dur
     FROM tennis_matches m LEFT JOIN tennis_players p1 ON p1.id = m.p1_id LEFT JOIN tennis_players p2 ON p2.id = m.p2_id
     WHERE m.id IN (SELECT id FROM tennis_matches WHERE p1_id = ? AND scheduled_at < ? AND scheduled_at >= ? UNION SELECT id FROM tennis_matches WHERE p2_id = ? AND scheduled_at < ? AND scheduled_at >= ?)
@@ -273,7 +273,7 @@ export function playedBefore(pid: number | null, before: string, limit = 10, sin
     const sets = Array.isArray(g?.[0]) ? g[0].map((x: any, i: number) => (me === 1 ? `${x}-${g[1][i]}` : `${g[1][i]}-${x}`)) : [];
     const ex = parse(r.extra);
     return {
-      id: r.id, start: r.scheduled_at, tournament: r.tournament, surface: r.surface ? String(r.surface).toLowerCase() : null, round: r.round,
+      id: r.id, start: r.scheduled_at, tournament: r.tournament, tkey: tournamentSlug(r.tour, r.tournament || ''), surface: r.surface ? String(r.surface).toLowerCase() : null, round: r.round,
       opponent: me === 1 ? { id: r.p2_id, name: r.p2_name, country: r.c2 || null } : { id: r.p1_id, name: r.p1_name, country: r.c1 || null },
       won: r.winner === me, score: sets.join(' '), sets: sets.length, minutes: r.dur ? Math.round(r.dur / 60) : ex?.minutes ? Math.round(ex.minutes) : null,
       retired: /retired/.test(String(r.outcome || ''))
@@ -441,4 +441,196 @@ export function tennisTournament(key: string, full: boolean | ((rid: number) => 
     draw, champions: [...champions.values()].slice(0, 12),
     record: { n: recRows.length, right: hits, pct: recRows.length ? Math.round((1000 * hits) / recRows.length) / 10 : null }
   };
+}
+
+/* ---------- player page (fix193b) ---------- */
+
+/** a player's tour for the comparisons and the model: the latest rankings table they are in, else their matches */
+function womenOf(pid: number): boolean {
+  const r = db.prepare(`SELECT tour FROM tennis_rankings WHERE player_id = ? ORDER BY date DESC LIMIT 1`).get(pid) as any;
+  if (r?.tour) return r.tour === 'wta';
+  const p = db.prepare(`SELECT tour FROM tennis_players WHERE id = ?`).get(pid) as any;
+  if (p?.tour === 'wta') return true;
+  const w = db.prepare(`SELECT 1 FROM tennis_matches WHERE (p1_id = ? OR p2_id = ?) AND tour = 'wta' LIMIT 1`).get(pid, pid);
+  return !!w;
+}
+
+/**
+ * The 1–10 scores of the player page: serve and return numbers of the last 52 weeks against everyone of the same
+ * tour (men / women) with at least 8 matches with stats; 10 = the best tenth. Cached 6 hours (one grouped read).
+ */
+interface PoolRow { pid: number; w: number; n: number; svc: number | null; ret: number | null; hold: number | null; brk: number | null; bps: number | null; bpc: number | null; tb: number | null; tbn: number; win: number | null; played: number }
+let pool: { at: number; rows: Map<number, PoolRow>; sorted: Record<string, [number[], number[]]> } | null = null;
+const MEASURES: { id: keyof PoolRow; label: string; min?: (r: PoolRow) => boolean }[] = [
+  { id: 'win', label: 'Matches won' },
+  { id: 'svc', label: 'Service points won' },
+  { id: 'ret', label: 'Return points won' },
+  { id: 'hold', label: 'Service games held' },
+  { id: 'brk', label: 'Return games broken' },
+  { id: 'bps', label: 'Break points saved' },
+  { id: 'bpc', label: 'Break points converted' },
+  { id: 'tb', label: 'Tiebreaks won', min: r => r.tbn >= 5 }
+];
+function playerPool() {
+  if (pool && Date.now() - pool.at < 6 * 3600e3) return pool;
+  const since = new Date(Date.now() - 365 * DAY).toISOString(), now = new Date().toISOString();
+  const rows = db.prepare(`SELECT s.player_id AS pid, MAX(CASE WHEN m.tour = 'wta' THEN 1 ELSE 0 END) AS w, COUNT(*) AS n,
+      SUM(s.svc_pts) AS sp, SUM(s.svc_won) AS sw, SUM(s.ret_pts) AS rp, SUM(s.ret_won) AS rw, SUM(s.svc_games) AS sg, SUM(s.svc_held) AS sh,
+      SUM(s.bp_faced) AS bf, SUM(s.bp_saved) AS bs, SUM(s.bp_had) AS bh, SUM(s.bp_conv) AS bc, SUM(s.tb_played) AS tp, SUM(s.tb_won) AS tw, SUM(o.svc_games) AS og
+    FROM tennis_match_stats s JOIN tennis_matches m ON m.id = s.match_id
+      LEFT JOIN tennis_match_stats o ON o.match_id = s.match_id AND o.player <> s.player
+    WHERE m.scheduled_at >= ? AND m.scheduled_at < ? AND m.source <> 'archive' AND s.svc_pts > 0 AND s.player_id IS NOT NULL
+    GROUP BY s.player_id`).all(since, now) as any[];
+  // won / played (every finished singles match, with or without stats)
+  const wl = new Map<number, [number, number]>();
+  for (const r of db.prepare(`SELECT p1_id, p2_id, winner FROM tennis_matches WHERE scheduled_at >= ? AND scheduled_at < ? AND status = 'completed' AND winner IN (1, 2)
+      AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(since, now) as any[]) {
+    for (const [pid, me] of [[r.p1_id, 1], [r.p2_id, 2]] as [number, number][]) {
+      if (!pid) continue;
+      const x = wl.get(pid) || [0, 0]; x[1]++; if (r.winner === me) x[0]++; wl.set(pid, x);
+    }
+  }
+  const p = (a: number, b: number) => (b > 0 ? (100 * a) / b : null);
+  const out = new Map<number, PoolRow>();
+  for (const r of rows) {
+    const x = wl.get(r.pid) || [0, 0];
+    out.set(r.pid, {
+      pid: r.pid, w: r.w, n: r.n, svc: p(r.sw, r.sp), ret: p(r.rw, r.rp), hold: p(r.sh, r.sg), brk: p(r.bc, r.og), bps: p(r.bs, r.bf), bpc: p(r.bc, r.bh),
+      tb: p(r.tw, r.tp), tbn: r.tp || 0, win: x[1] >= 8 ? p(x[0], x[1]) : null, played: x[1]
+    });
+  }
+  const sorted: Record<string, [number[], number[]]> = {};
+  for (const ms of MEASURES) {
+    const lists: [number[], number[]] = [[], []];
+    for (const r of out.values()) if (r.n >= 8 && r[ms.id] !== null && (!ms.min || ms.min(r))) lists[r.w ? 1 : 0].push(r[ms.id] as number);
+    lists[0].sort((a, b) => a - b); lists[1].sort((a, b) => a - b);
+    sorted[ms.id] = lists;
+  }
+  pool = { at: Date.now(), rows: out, sorted };
+  return pool;
+}
+/** strengths ≥ 8, weaknesses ≤ 3 (1–10 against the same tour); at least 8 matches with stats in 52 weeks */
+function playerAnalysis(pid: number, women: boolean) {
+  const P = playerPool();
+  const me = P.rows.get(pid);
+  if (!me || me.n < 8) return null;
+  const g = women ? 1 : 0;
+  const measures = MEASURES.map(ms => {
+    const v = me[ms.id] as number | null;
+    const list = P.sorted[ms.id][g];
+    if (v === null || (ms.min && !ms.min(me)) || list.length < 20) return { id: ms.id, label: ms.label, value: v === null ? null : Math.round(v * 10) / 10, text: v === null ? null : `${Math.round(v)}%`, rank: null, of: null, score: null };
+    let below = 0; for (const x of list) if (x < v) below++; else break;
+    let above = 0; for (let i = list.length - 1; i >= 0 && list[i] > v; i--) above++;
+    // ties count half (a value everyone shares is a 5, not a 1)
+    const share = (below + (list.length - below - above) / 2) / list.length;
+    const score = Math.max(1, Math.min(10, Math.ceil(share * 10)));
+    return { id: ms.id, label: ms.label, value: Math.round(v * 10) / 10, text: `${Math.round(v)}%`, rank: above + 1, of: list.length, score };
+  });
+  const scored = measures.filter(m => m.score !== null);
+  return {
+    matches: me.n, measures,
+    strengths: scored.filter(m => m.score! >= 8).sort((a, b) => b.score! - a.score!),
+    weaknesses: scored.filter(m => m.score! <= 3).sort((a, b) => a.score! - b.score!)
+  };
+}
+/** our record on a player: predictions saved before the start of their finished matches since the public start */
+function playerRecord(pid: number) {
+  const since = `${tennisRecordSince()}T00:00:00Z`;
+  const rows = db.prepare(`SELECT p.p1, p.cat, m.winner, m.tour, m.tier, m.tournament, m.source, m.outcome, m.status FROM tennis_predictions p JOIN tennis_matches m ON m.id = p.match_id
+    WHERE m.id IN (SELECT id FROM tennis_matches WHERE p1_id = ? UNION SELECT id FROM tennis_matches WHERE p2_id = ?)
+      AND m.status = 'completed' AND m.winner IN (1, 2) AND p.made_at <= p.scheduled_at AND p.scheduled_at >= ? AND m.source <> 'archive'`).all(pid, pid, since) as any[];
+  let games = 0, right = 0, strong = 0, strongRight = 0;
+  for (const r of rows) {
+    const cls = classify(r.tour, r.tier, r.tournament, r.source || 'live');
+    if (!cls || cls.cat === 4 || /walkover|abandoned|unresolved|cancel/.test(String(r.outcome || ''))) continue;
+    const hit = (r.p1 >= 0.5) === (r.winner === 1);
+    games++; if (hit) right++;
+    if (100 * Math.max(r.p1, 1 - r.p1) >= tennisStrongLine((['slam', 'atp', 'wta', 'challenger', 'itf'] as const)[cls.cat])) { strong++; if (hit) strongRight++; }
+  }
+  return { games, right, strong, strongRight };
+}
+/** Everything the player page shows. `full` = paid viewer (model tiles, the 1–10 scores, strengths / weaknesses). */
+export function tennisPlayer(pid: number, full: boolean | ((rid: number) => boolean), paid: boolean, admin: boolean) {
+  const p = db.prepare(`SELECT id, name, country, tour, hand, dob, height, ranking, ranking_points FROM tennis_players WHERE id = ?`).get(pid) as any;
+  if (!p || !p.name) return null;
+  const women = womenOf(pid);
+  const now = new Date().toISOString();
+  // ranking now and over the last 12 months (one point per table date)
+  const trend = (db.prepare(`SELECT date, rank, points, tour FROM tennis_rankings WHERE player_id = ? AND date >= ? ORDER BY date`).all(pid, new Date(Date.now() - 365 * DAY).toISOString().slice(0, 10)) as any[])
+    .filter(r => r.tour === 'atp' || r.tour === 'wta');
+  const latest = trend[trend.length - 1] || null;
+  const rank = latest ? latest.rank : p.ranking ?? null;
+  const points = latest ? latest.points : p.ranking_points ?? null;
+  const recent = playedBefore(pid, now, 15);
+  // matches to come (and live), with our predictions
+  const next = (db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.id IN (SELECT id FROM tennis_matches WHERE p1_id = ? AND scheduled_at >= ? UNION SELECT id FROM tennis_matches WHERE p2_id = ? AND scheduled_at >= ?)
+      AND ${MATCH_PUBLIC} ORDER BY m.scheduled_at LIMIT 10`).all(pid, new Date(Date.now() - DAY).toISOString(), pid, new Date(Date.now() - DAY).toISOString()) as any[])
+    .map(shapeMatch).filter((m): m is TMatch => !!m && (m.state === 'upcoming' || m.state === 'live') && (m.tour !== 'itf' || admin));
+  const upcoming = withTennisPredictions(next.slice(0, 4), full);
+  // stoppages of the last 12 months: medical timeouts and the like (tennis_stoppages) + retirements from the results
+  const stops = (db.prepare(`SELECT s.kind, s.at, s.match_id, m.tournament FROM tennis_stoppages s LEFT JOIN tennis_matches m ON m.id = s.match_id
+      WHERE s.player_id = ? AND s.at >= ? ORDER BY s.at DESC LIMIT 20`).all(pid, new Date(Date.now() - 365 * DAY).toISOString()) as any[])
+    .map(s => ({ kind: /medical|injur|timeout/i.test(s.kind) ? 'medical' : /retir/i.test(s.kind) ? 'retired' : 'other', at: s.at, matchId: s.match_id, tournament: s.tournament || null }));
+  const retired = playedBefore(pid, now, 60, new Date(Date.now() - 365 * DAY).toISOString()).filter(x => x.retired && !x.won)
+    .map(x => ({ kind: 'retired', at: x.start, matchId: x.id, tournament: x.tournament }));
+  const seen = new Set(stops.map(s => `${s.matchId}${s.kind}`));
+  const stoppages = [...stops, ...retired.filter(r => !seen.has(`${r.matchId}retired`))].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 12);
+  const year = new Date().getUTCFullYear();
+  const thisYear = playedBefore(pid, now, 200, `${year}-01-01`);
+  const age = p.dob ? Math.floor((Date.now() - Date.parse(p.dob)) / (365.2425 * DAY)) : null;
+  const analysis = playerAnalysis(pid, women);
+  return {
+    player: { id: p.id, name: p.name, country: p.country || null, hand: p.hand || null, dob: p.dob || null, age: age && age > 10 && age < 60 ? age : null, height: p.height || null, tour: women ? 'wta' : 'atp', women, rank, points },
+    rankTrend: trend.map(r => ({ date: r.date, rank: r.rank })),
+    season: { year, won: thisYear.filter(x => x.won).length, lost: thisYear.filter(x => !x.won).length },
+    form: recent.slice(0, 10).reverse().map(x => (x.won ? 'W' : 'L')),
+    model: paid ? tennisPlayerModel(pid, women) : null, modelLocked: !paid,
+    analysis: !analysis ? null : paid ? analysis : { locked: true, matches: analysis.matches, notesCount: analysis.strengths.length + analysis.weaknesses.length, measures: [], strengths: [], weaknesses: [] },
+    recent, upcoming, stoppages, record: playerRecord(pid)
+  };
+}
+
+/* ---------- rankings (fix193b) ---------- */
+
+/** ATP or WTA singles rankings: the latest table, top 200, with the move against the table a week or more before */
+export function tennisRankings(tour: 'atp' | 'wta', n = 200) {
+  const d = (db.prepare(`SELECT MAX(date) AS d FROM tennis_rankings WHERE tour = ?`).get(tour) as any)?.d;
+  if (!d) return { tour, date: null, previous: null, rows: [] as any[] };
+  const prev = (db.prepare(`SELECT MAX(date) AS d FROM tennis_rankings WHERE tour = ? AND date <= ?`).get(tour, new Date(Date.parse(d) - 6 * DAY).toISOString().slice(0, 10)) as any)?.d || null;
+  const rows = db.prepare(`SELECT r.rank, r.player_id, r.player_name, r.points, p.country, p.name AS pname,
+      ${prev ? `(SELECT o.rank FROM tennis_rankings o WHERE o.tour = r.tour AND o.date = ? AND o.player_id = r.player_id LIMIT 1)` : 'NULL'} AS prev
+    FROM tennis_rankings r LEFT JOIN tennis_players p ON p.id = r.player_id WHERE r.tour = ? AND r.date = ? ORDER BY r.rank LIMIT ?`)
+    .all(...(prev ? [prev] : []), tour, d, n) as any[];
+  return {
+    tour, date: d, previous: prev,
+    rows: rows.map(r => ({ rank: r.rank, id: r.player_id || null, name: r.pname || r.player_name || '', country: r.country || null, points: r.points ?? null, move: r.prev ? r.prev - r.rank : null, isNew: !!prev && !r.prev }))
+  };
+}
+
+/* ---------- search (fix193b): players, tournaments, coming matches — the same shape as basketball / NFL ---------- */
+
+export function tennisSearch(q: string, admin: boolean) {
+  const term = q.replace(/[%_]/g, '').trim();
+  if (term.length < 2) return { teams: [], players: [], leagues: [], games: [] };
+  const like = `%${term}%`, start = `${term}%`, word = `% ${term}%`;
+  const players = (db.prepare(`SELECT p.id, p.name, p.country, COALESCE(${rankSql('p')}, p.ranking) AS rank, p.tour FROM tennis_players p
+    WHERE p.name LIKE ? AND COALESCE(p.tour, '') <> 'itf' ORDER BY (p.name LIKE ? OR p.name LIKE ?) DESC, (rank IS NULL), rank, p.name LIMIT 8`).all(like, start, word) as any[])
+    .map(p => ({ id: p.id, name: p.name, team: p.country || '', teamLogo: null, league: p.tour === 'wta' ? 'WTA' : 'ATP', position: p.rank ? `#${p.rank}` : null }));
+  const seen = new Set<string>();
+  const leagues: { code: string; name: string; country: string; logo: null }[] = [];
+  for (const r of db.prepare(`SELECT tournament, tour, tier, MAX(scheduled_at) AS at FROM tennis_matches WHERE tournament LIKE ? AND source <> 'archive' AND scheduled_at >= ?
+      GROUP BY tournament, tour ORDER BY at DESC LIMIT 40`).all(like, new Date(Date.now() - 400 * DAY).toISOString()) as any[]) {
+    const cls = classify(r.tour, r.tier, r.tournament, 'live');
+    if (!cls || (cls.cat === 4 && !admin)) continue;
+    const key = tournamentSlug(r.tour, r.tournament);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    leagues.push({ code: key, name: String(r.tournament).replace(/\s*[-–]\s*(qualification|qualifying).*$/i, '').trim(), country: tierLabel(r.tier, r.tour), logo: null });
+    if (leagues.length >= 5) break;
+  }
+  const games = (db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE (m.p1_name LIKE ? OR m.p2_name LIKE ?) AND m.scheduled_at >= ? AND m.scheduled_at < ? AND ${MATCH_PUBLIC} ORDER BY m.scheduled_at LIMIT 30`)
+    .all(like, like, new Date(Date.now() - 5 * 3600e3).toISOString(), new Date(Date.now() + 7 * DAY).toISOString()) as any[])
+    .map(shapeMatch).filter((m): m is TMatch => !!m && (m.tour !== 'itf' || admin) && m.state !== 'off').slice(0, 6)
+    .map(m => ({ id: m.id, kickoff: m.start, status: m.state === 'live' ? 'LIVE' : 'NS', league: m.tournament.name, home: m.home.name, away: m.away.name }));
+  return { teams: [], players, leagues, games };
 }

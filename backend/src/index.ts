@@ -80,7 +80,7 @@ import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { startAsn } from './services/asn';
 import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample } from './services/tennis';
 import { startTennisModelScheduler, tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
-import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch, tennisRecord, levelRank, tennisTournament } from './services/tennisSite';
+import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch, tennisRecord, levelRank, tennisTournament, tennisPlayer, tennisRankings, tennisSearch } from './services/tennisSite';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
@@ -2063,7 +2063,10 @@ app.get('/api/search', async (req, res) => {
     // fix144: NFL + college football teams, players and coming games, same shape
     let americanFootball: any = null;
     if (nflPublic() || req.access === 'admin') { try { americanFootball = nflSearch(q); } catch { americanFootball = null; } }
-    res.json({ data: { teams, players, matches, competitions, basketball, americanFootball }, timestamp: new Date().toISOString() });
+    // fix193b: tennis players, tournaments and coming matches, same shape
+    let tennis: any = null;
+    if (tennisPublic() || req.access === 'admin') { try { tennis = tennisSearch(q, req.access === 'admin'); } catch { tennis = null; } }
+    res.json({ data: { teams, players, matches, competitions, basketball, americanFootball, tennis }, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Search failed');
   }
@@ -2711,6 +2714,19 @@ app.get('/api/tennis/tournament/:key([a-z0-9-]{3,90})', (req, res) => {
     if (!d) return res.status(404).json({ error: 'Tournament not found' });
     res.json({ data: d });
   } catch (e) { sendError(res, e, 'Failed to load the tournament'); }
+});
+app.get('/api/tennis/player/:id(\\d+)', (req, res) => {
+  try {
+    const f = fullFor(req, tennisRid);
+    // fix193b: like the other sports — our record on the player is public; model tiles, the 1–10 scores and the
+    // strengths / weaknesses are paid (free: a locked preview with how many we found)
+    const d = tennisPlayer(parseInt(req.params.id, 10), typeof f === 'function' ? (rid: number) => f(-rid - 4e9) : f, isPaid(req.access || 'anon'), tnAdmin(req));
+    if (!d) return res.status(404).json({ error: 'Player not found' });
+    res.json({ data: d });
+  } catch (e) { sendError(res, e, 'Failed to load the player'); }
+});
+app.get('/api/tennis/rankings', (req, res) => {
+  try { res.json({ data: tennisRankings(req.query.tour === 'wta' ? 'wta' : 'atp') }); } catch (e) { sendError(res, e, 'Failed to load the rankings'); }
 });
 app.get('/api/tennis/upset-watch', (req, res) => {
   if (!proGate(req, res)) return;

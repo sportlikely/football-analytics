@@ -13,10 +13,9 @@ import GamePage, { useGameTab, GameNews, Section, fmtGameDate, fmtGameTime, type
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
 import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts'
-import { PlayerName, SurfaceTag } from './parts'
+import { PlayerName, SurfaceTag, FormList, DrawTab, type Played, type DrawRound } from './parts'
 
 interface SR { matches: number; servicePointsWon: number | null; returnPointsWon: number | null; holdPct: number | null; breakPct: number | null; bpSaved: number | null; bpConverted: number | null; tiebreaksWon: number | null; tiebreaks: number }
-interface Played { id: number; start: string; tournament: string; surface: string | null; round: string | null; opponent: { id: number | null; name: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
 interface Rating { elo: number; rank: number; of: number; surfaces: { surface: string; elo: number; matches: number }[]; serve: number; ret: number; tourServe: number; form: { won: number; played: number }; matches: number; lastMatch: string | null }
 interface Rest { last3: { matches: number; sets: number; hours: number | null }; last7: { matches: number; sets: number; hours: number | null }; last14: { matches: number; sets: number; hours: number | null }
   yesterday: { minutes: number | null; sets: number; hoursAgo: number } | null; daysSinceLast: number | null; newTournament: boolean; surfaceSwitch: { from: string; to: string } | null
@@ -29,7 +28,7 @@ interface Data {
   ratings: { home: Rating | null; away: Rating | null }
   schedule: { home: Rest | null; away: Rest | null }
   h2h: { list: TMatch[]; won: [number, number]; bySurface: { surface: string; won: [number, number] }[] }
-  draw: { code: string; name: string; qualifying: boolean; matches: TMatch[] }[]
+  draw: DrawRound[]
 }
 const TABS = ['prediction', 'stats', 'form', 'rest', 'h2h', 'draw']
 
@@ -281,26 +280,6 @@ function ServeReturn({ m, d }: { m: TMatch; d: Data }) {
   )
 }
 
-function FormList({ list, title }: { list: Played[]; title: ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <div className="label pb-1.5">{title}</div>
-      {!list.length ? <p className="text-sm text-faint">{t('No recent matches.')}</p> : (
-        <ul className="divide-y divide-line/50">
-          {list.map(x => (
-            <li key={x.id}>
-              <Link to={tennisHref.match(x.id)} className="flex items-center gap-2 py-1.5 text-sm hover:bg-surface2/50 rounded-lg px-1">
-                <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold flex-shrink-0 ${x.won ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{x.won ? t('W') : t('L')}</span>
-                <span className="min-w-0 flex-1 truncate">{flagOf(x.opponent.country)} {x.opponent.name}<span className="block text-[11px] text-faint truncate">{x.tournament}{x.round ? ` · ${x.round}` : ''}</span></span>
-                <span className="num text-xs text-muted shrink-0">{x.score}{x.retired ? ` ${t('ret.')}` : ''}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
 function FormSurface({ m, d }: { m: TMatch; d: Data }) {
   const rh = d.ratings.home, ra = d.ratings.away
   const surf = (r: Rating | null, s: string) => r?.surfaces.find(x => x.surface === s)?.elo ?? null
@@ -387,44 +366,3 @@ function H2H({ m, d }: { m: TMatch; d: Data }) {
 }
 
 /** the tournament's draw by round, this match highlighted */
-export function DrawTab({ m, rounds }: { m: TMatch | null; rounds: Data['draw'] }) {
-  const main = rounds.filter(r => !r.qualifying), quali = rounds.filter(r => r.qualifying)
-  const block = (r: Data['draw'][number]) => (
-    <div key={(r.qualifying ? 'q' : '') + r.code} className="min-w-0">
-      <div className="label pb-1">{r.qualifying ? `${t('Qualifying')} · ${r.name}` : r.name}</div>
-      <ul className="space-y-1.5">
-        {r.matches.map(x => {
-          const on = m && x.id === m.id
-          const w = x.winner
-          return (
-            <li key={x.id}>
-              <Link to={tennisHref.match(x.id)} className={`block rounded-xl border px-3 py-2 text-sm hover:border-accent/50 ${on ? 'border-accent/70 bg-accent/10' : 'border-line/60 bg-surface2/30'}`}>
-                {([1, 2] as const).map(k => {
-                  const s = k === 1 ? x.home : x.away
-                  return (
-                    <div key={k} className="flex items-center justify-between gap-2">
-                      <span className={`truncate ${w === k ? 'font-bold text-ink' : w ? 'text-muted' : 'text-ink/85'}`}>{flagOf(s.country)} {s.name}{s.rank ? <span className="ml-1 text-[10px] text-faint num">{s.rank}</span> : null}</span>
-                      <span className="num text-xs text-muted shrink-0">{x.score ? x.score.sets.map(v => v[k - 1]).join(' ') : ''}</span>
-                    </div>
-                  )
-                })}
-                {x.state === 'upcoming' && <div className="text-[11px] text-faint mt-0.5">{new Date(x.start).toLocaleString(LOCALE, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
-                {x.state === 'live' && <div className="text-[11px] text-live font-bold mt-0.5">{t('LIVE')}</div>}
-              </Link>
-            </li>
-          )
-        })}
-      </ul>
-    </div>
-  )
-  return (
-    <Section title={t('Draw')} note={m ? m.tournament.name : undefined}>
-      {!main.length && !quali.length ? <p className="text-sm text-faint">{t('The draw appears once the matches are scheduled.')}</p> : (
-        <div className="space-y-6">
-          {main.length > 0 && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{[...main].reverse().map(block)}</div>}
-          {quali.length > 0 && <details><summary className="cursor-pointer text-sm font-semibold text-muted">{t('Qualifying')}</summary><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 mt-3">{[...quali].reverse().map(block)}</div></details>}
-        </div>
-      )}
-    </Section>
-  )
-}

@@ -27,7 +27,7 @@ export interface FavoritesAdapter {
   self: string
 }
 
-const TITLE: Record<string, string> = { team: t('Teams'), 'bb-team': t('Teams'), 'nfl-team': t('Teams'), player: t('Players'), 'bb-player': t('Players'), 'nfl-player': t('Players'), league: t('Leagues'), 'bb-league': t('Leagues'), 'nfl-league': t('Leagues') }
+const TITLE: Record<string, string> = { team: t('Teams'), 'bb-team': t('Teams'), 'nfl-team': t('Teams'), player: t('Players'), 'bb-player': t('Players'), 'nfl-player': t('Players'), league: t('Leagues'), 'bb-league': t('Leagues'), 'nfl-league': t('Leagues'), 'tennis-player': t('Players'), 'tennis-tournament': t('Tournaments') }
 const dayKey = (iso: string) => { const d = new Date(iso); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() }
 
 export default function Favorites({ a }: { a: FavoritesAdapter }) {
@@ -82,7 +82,7 @@ export default function Favorites({ a }: { a: FavoritesAdapter }) {
                   <span className="num text-xs text-faint">{items.length}</span>
                 </div>
                 {items.length === 0 ? (
-                  <p className="text-xs text-faint">{/player/.test(kind) ? t("Star a player on its page.") : /league/.test(kind) ? (a.browse.to === '/matches' ? t("Star a league on its page or in the Matches list.") : t("Star a league on its page or in the Games list.")) : t("Star a team on its page or on a game page.")}</p>
+                  <p className="text-xs text-faint">{/player/.test(kind) ? t("Star a player on its page.") : kind === 'tennis-tournament' ? t("Star a tournament on its page or in the Matches list.") : /league/.test(kind) ? (a.browse.to === '/matches' ? t("Star a league on its page or in the Matches list.") : t("Star a league on its page or in the Games list.")) : t("Star a team on its page or on a game page.")}</p>
                 ) : (
                   <ul className="space-y-1">
                     {items.map(f => {

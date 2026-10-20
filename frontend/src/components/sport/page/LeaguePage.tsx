@@ -49,12 +49,13 @@ export default function LeaguePage(p: LeaguePageProps) {
           <span className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/90 grid place-items-center flex-shrink-0 p-2">
             {p.logo ? <img src={p.logo} alt="" className="w-full h-full object-contain" /> : <span className="text-2xl">🏆</span>}
           </span>
-          <div className="min-w-0 flex-1">
+          {/* fix193b: the name keeps at least 12rem on phones; the record box wraps under it instead */}
+          <div className="min-w-[12rem] flex-1">
             <div className="flex items-center gap-2 text-xs text-faint">
               {p.country.flag && <img src={p.country.flag} alt="" className="w-4 h-3 object-cover rounded-[2px]" />}
               <span>{p.country.name}</span>
             </div>
-            <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink truncate">{p.name}</h1>
+            <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink [overflow-wrap:anywhere]">{p.name}</h1>
             {p.sub && <p className="text-sm text-muted">{p.sub}</p>}
             {p.hub && <Link to={p.hub.to} className="mt-1 inline-block text-sm font-bold text-accent">{p.hub.label}</Link>}
             {p.fav && <div><FavStar label className="mt-2" fav={p.fav} /></div>}

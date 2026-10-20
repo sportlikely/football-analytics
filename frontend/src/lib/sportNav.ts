@@ -25,12 +25,15 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
     { key: 'upsets', label: 'Upset watch', to: '/basketball/upset-watch', tab: 'Upsets' },
     { key: 'accuracy', label: 'Accuracy', to: '/basketball/accuracy', admin: true, tab: 'Accuracy' }
   ]
-  // fix193: tennis — Home · Matches · Today · Rankings · Favorites · Upset watch (Pro) · Accuracy (admins)
+  // fix193: tennis — Home · Matches · Today · Rankings · Favorites · Upset watch (Pro) · Accuracy (admins); Rankings
+  // takes Upset watch's phone tab (five tabs + search, like the other sports)
   if (sport === 'tennis') return [
     { key: 'home', label: 'Home', to: '/tennis', end: true, tab: 'Home' },
     { key: 'games', label: 'Matches', to: '/tennis/matches', tab: 'Matches' },
     { key: 'today', label: 'Today', to: '/tennis/today' },
-    { key: 'upsets', label: 'Upset watch', to: '/tennis/upset-watch', tab: 'Upsets' }
+    { key: 'rankings', label: 'Rankings', to: '/tennis/rankings', tab: 'Rankings' },
+    { key: 'favorites', label: 'Favorites', to: '/tennis/favorites', tab: 'Favorites' },
+    { key: 'upsets', label: 'Upset watch', to: '/tennis/upset-watch' }
   ]
   if (sport === 'american-football') return [
     // fix185: one home / games / today for NFL and college; the standings follow the league last shown

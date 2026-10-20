@@ -1,6 +1,6 @@
 # SportLikely — backlog and decisions (updated 20 Oct 2026)
 
-Next free fix number: **fix193** (fix193a pushed; b and c follow) (fix152 done in four stages, a–d) (fix147 = pricing + pick packs, merged 18 Oct).
+Next free fix number: **fix193** (fix193a, fix193b pushed; c follows) (fix152 done in four stages, a–d) (fix147 = pricing + pick packs, merged 18 Oct).
 
 **Accuracy pages hidden from public on 14 Oct, Yarin's decision, until redesigned** (`/accuracy`, `/basketball/accuracy`: admins only, non-admins go to the sport's home; no nav tabs or record links for visitors; noindex, out of the sitemap; `/api/accuracy*` and `/api/public/record` still work). Keep this file current: when you ship something, move it to "Done" with its fix number.
 
@@ -41,6 +41,7 @@ Next free fix number: **fix193** (fix193a pushed; b and c follow) (fix152 done i
 - Model ideas: relegated clubs overrated (squad value ranked within the division) → absolute scale; add League Two / SC2 history; goals model from shots/xG; "Best bet" per match.
 
 ## Done (newest first)
+- fix193b (20 Oct): tennis player page (PlayerHeader + team-page columns: model tiles, 1–10 tour scores and strengths / weaknesses by fixed rules (paid, locked preview), recent results, next match, ranking over 12 months, stoppages, our record on the player), tournament page (LeaguePage: draw, past champions, our record), ATP / WTA rankings (top 200, moves), favorites (players + tournaments), search (players, tournaments, matches). Shared: LeaguePage name wraps on phones, GameRow pick name truncates on phones.
 - fix193a (20 Oct): tennis site, admin only until `TENNIS_PUBLIC=1` (`/api/tennis/config` { public, open, tours }; record starts on `TENNIS_PUBLIC_SINCE` or the deploy day). `services/tennisSite.ts` = pages data (singles only, ITF / archive out of public lists, no market prices); routes /tennis home · matches · today · match/:id (Prediction, Stats, Form & surface, Schedule & rest, H2H, Draw) on football's shared components with tennis adapters; live win chance from the Markov chain + swing chart (`tennis_live_samples`); tennis news feeds; upset watch (Pro).
 - fix192 (20 Oct): no internal model names, no game without a prediction, Israel treated like every league.
   (1) Model names: every id the backend can return is in SL_MODELS (frontend + backend twins): football v3-mix, grid-v3, feat-v1, v3-weights, elo-intl, elo-euro, dc-history-v2, poisson-dc-v1, v1–v3; basketball bb-v1–v3; American football nfl-v1, nfl-v2 (live since fix146, was shown raw: "see what nfl-v2 thinks"), ncaa-v1, ncaa-v2; tennis-v1. Unknown ids are matched by prefix (nfl-/ncaa-/bb-/tennis-/grid|feat|elo|dc|poisson|v<n>), and `slModelOf(id, sport)` never returns a raw id: unknown → the page's sport (football last) + one console.warn; backend `slModelOf` the same (string, never null) + one log warning. WinnerPrediction takes `sport`; football MODEL_INFO fallback and the v1/v2 tags show "SL Football 3.0". The AI assistant is told the public name. Built bundle grepped: ids remain only in admin pages and lookup keys.

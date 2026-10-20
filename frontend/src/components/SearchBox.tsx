@@ -26,8 +26,9 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
   const [players, setPlayers] = useState<PlayerHit[]>([])
   const [bb, setBb] = useState<BbHits | null>(null)
   const [af, setAf] = useState<BbHits | null>(null)
+  const [tn, setTn] = useState<BbHits | null>(null)
   const openSport = sportOfPath(useLocation().pathname).id
-  const onBasketball = openSport === 'basketball', onNfl = openSport === 'american-football'
+  const onBasketball = openSport === 'basketball', onNfl = openSport === 'american-football', onTennis = openSport === 'tennis'
   const [loading, setLoading] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -60,12 +61,12 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
 
   useEffect(() => {
     const term = q.trim()
-    if (term.length < 2) { setTeams([]); setMatches([]); setComps([]); setPlayers([]); setBb(null); setAf(null); return }
+    if (term.length < 2) { setTeams([]); setMatches([]); setComps([]); setPlayers([]); setBb(null); setAf(null); setTn(null); return }
     setLoading(true)
     const t = setTimeout(() => {
       axios.get(`${API_URL}/search`, { params: { q: term } })
-        .then(r => { setTeams(r.data.data.teams || []); setMatches(r.data.data.matches || []); setComps(r.data.data.competitions || []); setPlayers(r.data.data.players || []); setBb(r.data.data.basketball || null); setAf(r.data.data.americanFootball || null) })
-        .catch(() => { setTeams([]); setMatches([]); setComps([]); setPlayers([]); setBb(null); setAf(null) })
+        .then(r => { setTeams(r.data.data.teams || []); setMatches(r.data.data.matches || []); setComps(r.data.data.competitions || []); setPlayers(r.data.data.players || []); setBb(r.data.data.basketball || null); setAf(r.data.data.americanFootball || null); setTn(r.data.data.tennis || null) })
+        .catch(() => { setTeams([]); setMatches([]); setComps([]); setPlayers([]); setBb(null); setAf(null); setTn(null) })
         .finally(() => setLoading(false))
     }, 250)
     return () => clearTimeout(t)
@@ -74,18 +75,22 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
   const done = () => { setOpen(false); setQ(''); onDone?.() }
   const show = open && q.trim().length >= 2
   const has = (h: BbHits | null) => !!h && (h.teams.length + h.players.length + h.leagues.length + h.games.length) > 0
-  const bbAny = has(bb), afAny = has(af)
+  const bbAny = has(bb), afAny = has(af), tnAny = has(tn)
   const fbAny = teams.length + matches.length + comps.length + players.length > 0
-  const any = fbAny || bbAny || afAny
+  const any = fbAny || bbAny || afAny || tnAny
   // basketball / American football results: their own block (same look), first on that sport's pages, after football elsewhere
+  // fix193b: tennis = players, tournaments (its "leagues") and matches, at its own paths
+  const leagueTo = (base: string, code: string) => (base === '/american-football' ? (code === 'NCAA' ? '/american-football/college/league' : '/american-football/league') : base === '/tennis' ? `/tennis/tournament/${code}` : `${base}/league/${code}`)
+  const gameTo = (base: string, id: number) => (base === '/tennis' ? `/tennis/match/${id}` : `${base}/game/${id}`)
   const sportBlock = (hits: BbHits | null, label: string, base: string) => has(hits) && hits ? (
     <div className="py-1">
       <div className="flex items-center gap-2 px-3 pt-1 pb-1">
         <span className="text-[11px] font-extrabold uppercase tracking-wider text-accent">{label}</span>
         <span className="h-px flex-1 bg-line/60" />
       </div>
+      {hits.leagues.length > 0 && base === '/tennis' && <div className="label px-3 pt-1 pb-1">{tt("Tournaments")}</div>}
       {hits.leagues.map(l => (
-        <Link key={`bl${l.code}`} to={base === '/american-football' ? (l.code === 'NCAA' ? '/american-football/college/league' : '/american-football/league') : `${base}/league/${l.code}`} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
+        <Link key={`bl${l.code}`} to={leagueTo(base, l.code)} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
           {l.logo ? <img src={l.logo} alt="" width={24} height={24} className="w-6 h-6 object-contain" /> : <span className="w-6 h-6 rounded-full bg-surface2" />}
           <span className="text-sm font-semibold text-ink">{l.name}</span>
           <span className="ml-auto text-[11px] text-faint">{l.country}</span>
@@ -112,15 +117,16 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
       ))}
       {hits.games.length > 0 && <div className="label px-3 pt-2 pb-1">{tt("Games")}</div>}
       {hits.games.map(g => (
-        <Link key={`bg${g.id}`} to={`${base}/game/${g.id}`} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
+        <Link key={`bg${g.id}`} to={gameTo(base, g.id)} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
           <span className="text-sm text-ink font-medium truncate">{g.home} – {g.away}</span>
-          <span className="ml-auto text-[11px] text-faint whitespace-nowrap">{['Q1', 'Q2', 'Q3', 'Q4', 'OT', 'BT', 'HT'].includes(g.status || '') ? tt("Live") : new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
+          <span className="ml-auto text-[11px] text-faint whitespace-nowrap">{['Q1', 'Q2', 'Q3', 'Q4', 'OT', 'BT', 'HT', 'LIVE'].includes(g.status || '') ? tt("Live") : new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
         </Link>
       ))}
     </div>
   ) : null
   const bbBlock = sportBlock(bb, tt("Basketball"), '/basketball')
   const afBlock = sportBlock(af, tt("American football"), '/american-football')
+  const tnBlock = sportBlock(tn, tt("Tennis"), '/tennis')
 
   return (
     <div ref={box} className="relative w-full">
@@ -140,7 +146,7 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
             if (e.key === 'Escape') setOpen(false)
             if (e.key === 'Enter') {
               // fix144: the open sport's first team / player
-              const own = onNfl ? af : onBasketball ? bb : null, base = onNfl ? '/american-football' : '/basketball'
+              const own = onTennis ? tn : onNfl ? af : onBasketball ? bb : null, base = onTennis ? '/tennis' : onNfl ? '/american-football' : '/basketball'
               if (own?.teams[0]) { nav(`${base}/team/${own.teams[0].id}`); done(); return }
               if (own?.players[0]) { nav(`${base}/player/${own.players[0].id}`); done(); return }
               const bbFirst = onBasketball || (!teams.length && !players.length && !comps.length)
@@ -164,7 +170,8 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
           {!loading && !any && <div className="px-3 py-3 text-sm text-faint">{tt("Nothing found for \"")}{q.trim()}".</div>}
           {onBasketball && bbBlock}
           {onNfl && afBlock}
-          {(onBasketball && bbAny || onNfl && afAny) && fbAny && (
+          {onTennis && tnBlock}
+          {(onBasketball && bbAny || onNfl && afAny || onTennis && tnAny) && fbAny && (
             <div className="flex items-center gap-2 px-3 pt-3 pb-1"><span className="text-[11px] font-extrabold uppercase tracking-wider text-accent">{tt("Football")}</span><span className="h-px flex-1 bg-line/60" /></div>
           )}
           {comps.length > 0 && (
@@ -231,6 +238,7 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
           )}
           {!onBasketball && bbBlock && <div className={teams.length + matches.length + comps.length + players.length > 0 ? 'border-t border-line/60 mt-1 pt-1' : ''}>{bbBlock}</div>}
           {!onNfl && afBlock && <div className={fbAny || bbAny ? 'border-t border-line/60 mt-1 pt-1' : ''}>{afBlock}</div>}
+          {!onTennis && tnBlock && <div className={fbAny || bbAny || afAny ? 'border-t border-line/60 mt-1 pt-1' : ''}>{tnBlock}</div>}
         </div>
       )}
     </div>
