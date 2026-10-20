@@ -39,6 +39,8 @@ export interface WinnerOpts {
   /** footnote under the waiting list */
   waitingNote: string
   footnote: string
+  /** fix193c: tennis — the two extra columns and the score card say "set score right" / "games off" instead of points */
+  scoreWords?: { cols: [string, string]; title: string; text: (n: number) => string; a: string; aUnit: string; b: string; bUnit: string; aFmt?: (v: number) => string; bFmt?: (v: number) => string }
 }
 
 export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
@@ -65,7 +67,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
     url: o.url,
     calibrationText: t("Every chance we gave, for both teams of every game, grouped by the number we said. If our numbers are honest, the dots sit on the dashed line."),
     confidenceLabel: t("Winner picks, by how sure we were"),
-    leagueCols: { main: t("Our pick"), cols: [t("Strong picks"), t("Margin off"), t("Total off")] },
+    leagueCols: { main: t("Our pick"), cols: [t("Strong picks"), ...(o.scoreWords ? o.scoreWords.cols : [t("Margin off"), t("Total off")])] },
     leagueNote: t("Under 20 games is too few to judge a league: pick a longer period for a fairer picture."),
     recentCols: [t("Our pick")],
     footnote: o.footnote,
@@ -80,11 +82,11 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
       // fix174: football's extra cards, for a points sport: how far our score numbers were off
       extra: d.scores && d.scores.scoreN ? (
         <Card>
-          <h2 className="font-display text-xl font-bold text-ink">{t('Score predictions')}</h2>
-          <p className="text-sm text-muted mt-1 mb-4">{t('How far our expected margin and total points were from the final score, on average, over {0} games.', { 0: d.scores.scoreN })}</p>
+          <h2 className="font-display text-xl font-bold text-ink">{o.scoreWords ? o.scoreWords.title : t('Score predictions')}</h2>
+          <p className="text-sm text-muted mt-1 mb-4">{o.scoreWords ? o.scoreWords.text(d.scores.scoreN) : t('How far our expected margin and total points were from the final score, on average, over {0} games.', { 0: d.scores.scoreN })}</p>
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-surface2/60 p-4"><div className="text-[11px] text-faint">{t('Margin off by')}</div><div className="num text-3xl font-extrabold text-ink mt-1">{d.scores.marginOff ?? '–'}</div><div className="text-[11px] text-muted">{t('points a game')}</div></div>
-            <div className="rounded-2xl bg-surface2/60 p-4"><div className="text-[11px] text-faint">{t('Total off by')}</div><div className="num text-3xl font-extrabold text-ink mt-1">{d.scores.totalOff ?? '–'}</div><div className="text-[11px] text-muted">{t('points a game')}</div></div>
+            <div className="rounded-2xl bg-surface2/60 p-4"><div className="text-[11px] text-faint">{o.scoreWords ? o.scoreWords.a : t('Margin off by')}</div><div className="num text-3xl font-extrabold text-ink mt-1">{d.scores.marginOff == null ? '–' : o.scoreWords?.aFmt ? o.scoreWords.aFmt(d.scores.marginOff) : d.scores.marginOff}</div><div className="text-[11px] text-muted">{o.scoreWords ? o.scoreWords.aUnit : t('points a game')}</div></div>
+            <div className="rounded-2xl bg-surface2/60 p-4"><div className="text-[11px] text-faint">{o.scoreWords ? o.scoreWords.b : t('Total off by')}</div><div className="num text-3xl font-extrabold text-ink mt-1">{d.scores.totalOff == null ? '–' : o.scoreWords?.bFmt ? o.scoreWords.bFmt(d.scores.totalOff) : d.scores.totalOff}</div><div className="text-[11px] text-muted">{o.scoreWords ? o.scoreWords.bUnit : t('points a game')}</div></div>
           </div>
         </Card>
       ) : undefined,
@@ -92,7 +94,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
       byConfidence: d.byConfidence,
       leagues: d.leagues.map(l => ({
         key: l.code, name: o.leagueName(l.code), href: o.leagueHref?.(l.code) || null, n: l.n, main: l.hitRate,
-        cols: [l.strongHitRate ?? null, l.marginOff != null ? `±${l.marginOff}` : null, l.totalOff != null ? `±${l.totalOff}` : null],
+        cols: [l.strongHitRate ?? null, l.marginOff != null ? (o.scoreWords?.aFmt ? o.scoreWords.aFmt(l.marginOff) : `±${l.marginOff}`) : null, l.totalOff != null ? (o.scoreWords?.bFmt ? o.scoreWords.bFmt(l.totalOff) : `±${l.totalOff}`) : null],
         note: l.trial ? <span className="shrink-0 text-[10px] font-bold uppercase text-accent" title={t("We added this league recently. Its predictions are being tested and don’t count in our public record yet.")}>{t('in testing')}</span> : null
       })),
       recent: d.recent.map(r => ({

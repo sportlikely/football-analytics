@@ -10,6 +10,22 @@
 | League list on the games page (games.leagueList, fix183b) | NFL + college | Only two leagues; the NFL / College switch at the top chooses between them. The page has no left league panel (Live box stays, above the games); favourite teams stay reachable from the Favorites tab in the header. Yarin asked for this (19 Oct). |
 | League logo | NFL + college | The provider's NFL and college league images are its 'image not available' placeholder (the same 29 KB file for both); we have no licensed mark. The pages show no logo rather than the placeholder. |
 
+## Tennis (fix193c, 20 Oct 2026) — 'na' for Yarin to approve
+
+Tennis is the fourth parity sport (`PARITY_SPORTS`). Football's blocks map like this: Team page → Player page,
+League page → Tournament page, Standings → the Draw (match-page tab + tournament page) and the Rankings page,
+mini table → the ranking around the player, career → titles in our data, injuries → stoppages (medical timeouts,
+retirements). Six blocks don't exist in tennis:
+
+| Block | Why |
+|---|---|
+| `game.lineups` | Individual sport, no line-ups. |
+| `game.beforeAfter` | No line-up or injury news moves a tennis prediction; it only updates from new results until the first serve. |
+| `team.squad` | Individual sport, no squad (the player page is the team page). |
+| `league.leaders` | No player leaders inside a tournament; the Rankings page lists the top players. |
+| `league.logo` | The provider has no tournament logos (the pages show the trophy, like the NFL's). |
+| `search.teams` | Individual sport; search finds players, tournaments and matches. |
+
 ## Built in the closest way the data allows (provider gaps)
 
 - **Line-ups:** no provider has basketball or American-football line-ups. Basketball: probable starting five = the last game's starters (box-score flag) who play 12+ min, minus players out, on a court. NFL / college: likely starters = season leaders by position from our box scores (no depth chart).

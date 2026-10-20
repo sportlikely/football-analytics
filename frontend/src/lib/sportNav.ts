@@ -33,7 +33,8 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
     { key: 'today', label: 'Today', to: '/tennis/today' },
     { key: 'rankings', label: 'Rankings', to: '/tennis/rankings', tab: 'Rankings' },
     { key: 'favorites', label: 'Favorites', to: '/tennis/favorites', tab: 'Favorites' },
-    { key: 'upsets', label: 'Upset watch', to: '/tennis/upset-watch' }
+    { key: 'upsets', label: 'Upset watch', to: '/tennis/upset-watch' },
+    { key: 'accuracy', label: 'Accuracy', to: '/tennis/accuracy', admin: true, tab: 'Accuracy' }
   ]
   if (sport === 'american-football') return [
     // fix185: one home / games / today for NFL and college; the standings follow the league last shown

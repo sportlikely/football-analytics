@@ -56,6 +56,8 @@ export default function TennisTournament() {
       name={d.name}
       sub={[first ? tierLabel(first) : null, surfaceName(d.surface, d.indoor) || null, dates].filter(Boolean).join(' · ')}
       fav={tennisTournamentFav(d)}
+      // fix193c: the weekly hub ("ATP Vienna predictions") while the tournament is on
+      hub={next.length || live.length ? { to: `/tennis/predictions/${d.key}`, label: t("This week's predictions →") } : null}
       record={d.record.n > 0 && d.record.pct !== null ? { hitRate: d.record.pct, n: d.record.n } : null}
       left={<>
         <DrawTab m={null} rounds={d.draw} />

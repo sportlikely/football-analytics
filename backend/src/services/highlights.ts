@@ -38,14 +38,18 @@ const LEAGUES = [
   'uefa europa league', 'uefa conference league', 'fifa', 'concacaf', 'caf tv', 'the afc channel', 'afc asian cup', 'conmebol',
   // fix174: American football and basketball (the league's own channel)
   'nfl', 'nba', 'euroleague basketball', 'eurocup basketball', 'fiba', 'basketball champions league', 'liga endesa', 'lnb pro a', 'easycredit bbl',
-  'lega basket serie a', 'nbl', 'ncaa'
+  'lega basket serie a', 'nbl', 'ncaa',
+  // fix193c: tennis (the tours, their video service and the four Grand Slams)
+  'atp tour', 'wta', 'tennis tv', 'australian open tv', 'australian open', 'roland garros', 'wimbledon', 'us open tennis championships'
 ];
 const BROADCASTERS = [
   'sky sports premier league', 'sky sports football', 'sky sports football league', 'nbc sports', 'cbs sports golazo', 'tnt sports football',
   'dazn football', 'dazn', 'canal+ sport', 'bein sports', 'bein sports usa', 'bein sports france', 'espn fc', 'espn nl', 'espn deportes',
   'espn brasil', 'fox soccer', 'tudn usa', 'viaplay football',
   // fix174: college football's licensed broadcasters
-  'espn college football', 'sec network', 'big ten network', 'acc digital network', 'big 12 conference', 'cbs sports', 'fox college football'
+  'espn college football', 'sec network', 'big ten network', 'acc digital network', 'big 12 conference', 'cbs sports', 'fox college football',
+  // fix193c: tennis broadcaster
+  'tennis channel'
 ];
 
 // apostrophes of any kind are dropped, so "Ligue 1 McDonald’s" = "ligue 1 mcdonalds"

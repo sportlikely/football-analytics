@@ -530,7 +530,7 @@ function SportParityCard() {
   const r = PARITY_REPORT
   const green = r.ok && !r.todo.length
   const [open, setOpen] = useState(false)
-  const SPORT: Record<string, string> = { football: 'Football', basketball: 'Basketball', nfl: 'NFL' }
+  const SPORT: Record<string, string> = { football: 'Football', basketball: 'Basketball', nfl: 'NFL', tennis: 'Tennis' }
   return (
     <section className={`card p-5 sm:p-6 mb-8 border ${green ? 'border-win/40' : 'border-loss/40'}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">

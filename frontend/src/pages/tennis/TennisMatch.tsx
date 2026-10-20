@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
-import { t, LOCALE } from '../../lib/i18n'
+import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
 import { useReveal } from '../../lib/reveal'
 import { slModelOf } from '../../lib/modelNames'
@@ -13,6 +13,8 @@ import GamePage, { useGameTab, GameNews, Section, fmtGameDate, fmtGameTime, type
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
 import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts'
+import GamePreview from '../../components/sport/game/GamePreview'
+import Highlights from '../../components/sport/game/Highlights'
 import { PlayerName, SurfaceTag, FormList, DrawTab, type Played, type DrawRound } from './parts'
 
 interface SR { matches: number; servicePointsWon: number | null; returnPointsWon: number | null; holdPct: number | null; breakPct: number | null; bpSaved: number | null; bpConverted: number | null; tiebreaksWon: number | null; tiebreaks: number }
@@ -29,8 +31,10 @@ interface Data {
   schedule: { home: Rest | null; away: Rest | null }
   h2h: { list: TMatch[]; won: [number, number]; bySurface: { surface: string; won: [number, number] }[] }
   draw: DrawRound[]
+  /** fix193c: the written preview (English pages; the same text search engines get) */
+  writeup?: string | null
 }
-const TABS = ['prediction', 'stats', 'form', 'rest', 'h2h', 'draw']
+const TABS = ['prediction', 'stats', 'form', 'rest', 'h2h', 'draw', 'highlights']
 
 /**
  * Tennis match page (fix193): the shared game page (football's match page) — Prediction · Stats · Form & surface ·
@@ -87,6 +91,7 @@ export default function TennisMatch() {
             noPrediction={m.state === 'upcoming' ? t('Our prediction for this match is saved in the 48 hours before the first serve.') : t('No prediction for this match.')}
           />
           {p && !p.locked && sets.length > 0 && <SetsCard m={m} p={p} />}
+          {lang === 'en' && d.writeup && <GamePreview text={d.writeup} title="Match preview" />}
           <GameNews home={{ sport: 'tennis', playerId: m.home.id ?? undefined }} away={{ sport: 'tennis', playerId: m.away.id ?? undefined }} title={t('News about both players')} />
         </>
       )
@@ -95,7 +100,9 @@ export default function TennisMatch() {
     { id: 'form', label: t('Form & surface'), short: t('Form'), hint: t('Last 10 matches and the surface ratings'), render: () => <FormSurface m={m} d={d} /> },
     { id: 'rest', label: t('Schedule & rest'), short: t('Rest'), hint: t('Matches, sets and hours played lately'), render: () => <RestTab m={m} d={d} /> },
     { id: 'h2h', label: t('H2H'), hint: t('Every meeting, by surface'), render: () => <H2H m={m} d={d} /> },
-    ...(d.draw.length ? [{ id: 'draw', label: t('Draw'), hint: t('{0} draw', { 0: m.tournament.name }), render: () => <DrawTab m={m} rounds={d.draw} /> }] : [])
+    ...(d.draw.length ? [{ id: 'draw', label: t('Draw'), hint: t('{0} draw', { 0: m.tournament.name }), render: () => <DrawTab m={m} rounds={d.draw} /> }] : []),
+    // fix193c: official highlights (ATP / WTA / Tennis TV / the Slams' channels) once the match is over
+    ...(done ? [{ id: 'highlights', label: t('Highlights'), short: t('Video'), hint: t('Official video'), render: () => <Highlights url={`${API_URL}/tennis/match/${m.id}/highlights`} /> }] : [])
   ]
   const statusText = live ? `${t('Set {0}', { 0: Math.min(m.bestOf, (m.score?.won[0] || 0) + (m.score?.won[1] || 0) + 1) })}${m.score?.points ? ` · ${m.score.points[0]}-${m.score.points[1]}` : ''}`
     : done ? (/retired/.test(m.outcome || '') ? t('Retired') : t('Final')) : m.state === 'off' ? (/walkover/.test(m.outcome || '') ? t('Walkover') : /postpon/i.test(m.status) ? t('Postponed') : t('Cancelled')) : t('FIRST SERVE')

@@ -27,6 +27,9 @@ interface Data {
   recent: Played[]; upcoming: TMatch[]
   stoppages: { kind: 'medical' | 'retired' | 'other'; at: string; matchId: number; tournament: string | null }[]
   record: { games: number; right: number; strong: number; strongRight: number }
+  /** fix193c: the ranking around the player (the team page's mini table) and the titles in our data (career) */
+  around: { tour: 'atp' | 'wta'; date: string; rows: { rank: number; id: number | null; name: string; country: string | null; points: number | null; me: boolean }[] } | null
+  titles: { matchId: number; year: number; tournament: string; key: string; tier: string; surface: string | null }[]
 }
 
 /** Strength / weakness sentences (fixed rules): what the number says, the value and the rank on the tour (52 weeks). */
@@ -96,12 +99,38 @@ export default function TennisPlayer() {
           <ModelCard d={d} />
           {d.analysis && <AnalysisCard a={d.analysis} />}
           <Card title={t('Recent results')}><FormList list={d.recent} empty={t('No finished matches yet.')} /></Card>
+          {d.titles.length > 0 && (
+            <Card title={t('Titles')} action={<span className="text-xs text-faint">{t('in our data')}</span>}>
+              <ul className="divide-y divide-line/50">
+                {d.titles.map(x => (
+                  <li key={x.matchId} className="flex items-center gap-3 py-1.5 text-sm min-w-0">
+                    <span className="w-10 num text-faint shrink-0">{x.year}</span>
+                    <Link to={tennisHref.tournament(x.key)} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{x.tournament}</Link>
+                    <span className="ml-auto shrink-0 text-xs text-muted">{[x.tier, surfaceName(x.surface)].filter(Boolean).join(' · ')}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
         </div>
         <div className="space-y-6 min-w-0">
           <RecordCard d={d} />
           {d.upcoming.length > 0 && (
             <Card title={t('Next match')}>
               <div className="-mx-5 sm:-mx-6 divide-y divide-line/50">{d.upcoming.map(m => <GameRow key={m.id} g={tennisSGame(m)} showComp showDay />)}</div>
+            </Card>
+          )}
+          {d.around && d.around.rows.length > 1 && (
+            <Card title={t('{0} ranking', { 0: d.around.tour.toUpperCase() })} action={<Link to={`/tennis/rankings${d.around.tour === 'wta' ? '?tour=wta' : ''}`} className="text-xs font-bold text-accent">{t('Full rankings →')}</Link>}>
+              <ul className="divide-y divide-line/50">
+                {d.around.rows.map(r => (
+                  <li key={r.rank} className={`flex items-center gap-2 py-1.5 text-sm min-w-0 ${r.me ? 'bg-accent/10 -mx-2 px-2 rounded-lg' : ''}`}>
+                    <span className="w-8 num text-faint shrink-0">{r.rank}</span>
+                    {r.id && !r.me ? <Link to={tennisHref.player(r.id)!} className="min-w-0 truncate text-ink hover:text-accent">{flagOf(r.country)} {r.name}</Link> : <span className={`min-w-0 truncate ${r.me ? 'font-bold text-ink' : 'text-ink'}`}>{flagOf(r.country)} {r.name}</span>}
+                    <span className="ml-auto num text-xs text-muted shrink-0">{r.points !== null ? r.points.toLocaleString(LOCALE) : ''}</span>
+                  </li>
+                ))}
+              </ul>
             </Card>
           )}
           {d.rankTrend.length > 1 && <RankCard d={d} />}

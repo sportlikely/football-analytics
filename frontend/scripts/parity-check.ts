@@ -105,10 +105,11 @@ const sportOfFile = (f: string): ParitySport | null => {
   const r = path.relative(SRC, f).replace(/\\/g, '/')
   if (r.startsWith('components/sport/') || r.startsWith('components/SportHome/')) {
     const base = path.basename(r).replace(/\.(parity\.)?tsx?$/, '')
-    return base === 'football' ? 'football' : base === 'basketball' ? 'basketball' : base === 'nfl' ? 'nfl' : null
+    return base === 'football' ? 'football' : base === 'basketball' ? 'basketball' : base === 'nfl' ? 'nfl' : base === 'tennis' ? 'tennis' : null
   }
   if (r.startsWith('pages/bb/')) return 'basketball'
   if (r.startsWith('pages/nfl/')) return 'nfl'
+  if (r.startsWith('pages/tennis/')) return 'tennis'
   if (/^pages\/[^/]+\.tsx$/.test(r)) return 'football'
   return null
 }
@@ -209,7 +210,7 @@ if (gaps.length) {
   for (const g of gaps) console.error(pad(g.key, 26) + pad(g.missing.join(', ') || '-', 28) + (g.note || g.label))
 }
 if (propGaps.length) {
-  console.error('\nshared component props passed by football only (add them to basketball / NFL, or to FOOTBALL_ONLY_PROPS with a reason):')
+  console.error('\nshared component props passed by football only (add them to basketball / NFL / tennis, or to FOOTBALL_ONLY_PROPS with a reason):')
   for (const p of propGaps) console.error(`  ${p.comp}.${p.prop}`)
 }
 if (problems.length) { console.error('\nproblems:'); for (const p of problems) console.error('  ' + p) }

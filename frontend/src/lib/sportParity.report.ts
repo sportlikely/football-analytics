@@ -21,9 +21,39 @@ export const PARITY_REPORT: ParityReport = {
    "reason": "only two leagues; the NFL / College switch replaces it"
   },
   {
+   "key": "game.beforeAfter",
+   "sport": "tennis",
+   "reason": "no line-up or injury news moves a tennis prediction (it only updates from new results until the first serve)"
+  },
+  {
+   "key": "game.lineups",
+   "sport": "tennis",
+   "reason": "individual sport, no line-ups"
+  },
+  {
+   "key": "team.squad",
+   "sport": "tennis",
+   "reason": "individual sport, no squad (the player page is the team page)"
+  },
+  {
+   "key": "league.leaders",
+   "sport": "tennis",
+   "reason": "individual sport, no player leaders inside a tournament (the Rankings page lists the top players)"
+  },
+  {
    "key": "league.logo",
    "sport": "nfl",
    "reason": "the provider's NFL / college league images are its 'image not available' placeholder"
+  },
+  {
+   "key": "league.logo",
+   "sport": "tennis",
+   "reason": "the provider has no tournament logos"
+  },
+  {
+   "key": "search.teams",
+   "sport": "tennis",
+   "reason": "individual sport, search finds players and tournaments"
   }
  ]
 }

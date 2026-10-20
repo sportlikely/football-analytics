@@ -11,6 +11,8 @@ import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame as nflGameR
 import { nflPreview } from './nflGameExtras';
 import { listGuides, getGuide } from './guides';
 import { tennisMatchesBetween, levelRank, tierLabel, playedBefore, headToHead } from './tennisSite';
+import { tennisSeoPage, tennisSitemapUrls, tennisPlayerUrls } from './seoTennis';
+import { tennisPublic } from './tennisSite';
 import { HUBS, hubBySlug, hubByOld, hubForCode, hubOpen, buildHub, hubDescription, hubRange } from './hubs';
 import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, ui, longDate } from './seoText';
 import { fbLast as fbLastRaw, fbNext as fbNextRaw, fbH2h as fbH2hRaw, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById as bbGameByIdRaw, bbLast as bbLastRaw, bbNext as bbNextRaw, bbH2h as bbH2hRaw, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName as bbTeamNameRaw, BbGameRow } from './seoFacts';
@@ -268,7 +270,9 @@ function buildToday(sport: TodaySport, lang: Lang, dayIso: string, leagues: 1 | 
 
 /* ---------- pages ---------- */
 
-const NAV = (lang: Lang) => `<nav><a href="${link(lang, '/')}">${BRAND}</a> · <a href="${link(lang, '/matches')}">${ui(lang, 'matches')}</a> · <a href="${link(lang, '/predictions/today')}">${ui(lang, 'today')}</a> · <a href="${link(lang, '/premium')}">Premium</a>${bbPublic() ? ` · <a href="${link(lang, '/basketball')}">${ui(lang, 'basketball')}</a>` : ''}${nflPublic() ? ` · <a href="/american-football">American football</a>` : ''}</nav>`;
+const NAV = (lang: Lang) => `<nav><a href="${link(lang, '/')}">${BRAND}</a> · <a href="${link(lang, '/matches')}">${ui(lang, 'matches')}</a> · <a href="${link(lang, '/predictions/today')}">${ui(lang, 'today')}</a> · <a href="${link(lang, '/premium')}">Premium</a>${bbPublic() ? ` · <a href="${link(lang, '/basketball')}">${ui(lang, 'basketball')}</a>` : ''}${nflPublic() ? ` · <a href="/american-football">American football</a>` : ''}${tennisPublic() ? ` · <a href="${link(lang, '/tennis')}">${TENNIS_WORD[lang]}</a>` : ''}</nav>`;
+/** fix193c: "Tennis" in the nav of the crawler pages */
+const TENNIS_WORD: Record<Lang, string> = { en: 'Tennis', es: 'Tenis', pt: 'Ténis', de: 'Tennis', fr: 'Tennis', it: 'Tennis', tr: 'Tenis' };
 const PRIVATE = /^\/(admin|account|verify|forgot|login|signup|favorites|my-picks|join|crm)(\/|$)|^\/basketball\/(favorites|past)(\/|$)|^\/past(\/|$)/;
 
 export function seoPage(rawPath: string): SeoInfo {
@@ -285,6 +289,9 @@ export function seoPage(rawPath: string): SeoInfo {
 
   let m: RegExpMatchArray | null;
   try {
+    // fix193c: tennis (services/seoTennis.ts) — "coming soon" + noindex until TENNIS_PUBLIC=1
+    const tn = tennisSeoPage(path, lang);
+    if (tn) return page(tn.title, tn.description, tn.body, { noindex: tn.noindex, canonicalEn: tn.canonicalEn, jsonld: tn.jsonld });
     if (path === '/') {
       return page(`${BRAND} · Sports predictions, tested in public`, S('home'),
         `<h1>Sports predictions, tested in public</h1><p>Football predictions for the top leagues, cups and national teams, and basketball (NBA, EuroLeague and more): form, head-to-head, goals and the reasons behind every pick. Every prediction is saved before kick-off and scored after the game.</p><p><a href="${link(lang, '/predictions/today')}">Football predictions today</a>${bbPublic() ? ` · <a href="${link(lang, '/basketball/predictions/today')}">Basketball predictions today</a>` : ''}${nflPublic() ? ` · <a href="/american-football">American football (NFL)</a>` : ''}</p><h2>Next football matches</h2>${fbList(lang, fbUpcoming(30))}`,
@@ -757,12 +764,14 @@ function sitemapPlayers(): string {
       }
     } catch { /* table missing */ }
   }
+  // fix193c: tennis players (ranked top 300 of each tour + everyone with a recent match), once TENNIS_PUBLIC=1
+  try { urls.push(...tennisPlayerUrls()); } catch { /* tables missing */ }
   playersMap = { at: Date.now(), xml: urlset(urls) };
   return playersMap.xml;
 }
 
 export const SITEMAPS: Record<string, () => string> = {
-  'sitemap-football.xml': sitemapFootball, 'sitemap-basketball.xml': sitemapBasketball, 'sitemap-nfl.xml': sitemapNfl,
+  'sitemap-football.xml': sitemapFootball, 'sitemap-basketball.xml': sitemapBasketball, 'sitemap-nfl.xml': sitemapNfl, 'sitemap-tennis.xml': () => urlset(tennisSitemapUrls()),
   'sitemap-teams.xml': sitemapTeams, 'sitemap-leagues.xml': sitemapLeagues, 'sitemap-players.xml': sitemapPlayers
 };
 /** sitemap.xml: the index of the four sitemaps. */

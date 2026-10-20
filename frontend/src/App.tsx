@@ -104,6 +104,8 @@ const TennisPlayer = page(() => import('./pages/tennis/TennisPlayer'))
 const TennisTournament = page(() => import('./pages/tennis/TennisTournament'))
 const TennisRankings = page(() => import('./pages/tennis/TennisRankings'))
 const TennisFavorites = page(() => import('./pages/tennis/TennisFavorites'))
+const TennisAccuracy = page(() => import('./pages/tennis/TennisAccuracy'))
+const TennisPast = page(() => import('./pages/tennis/TennisPast'))
 const Terms = page(() => import('./pages/Legal').then(m => ({ default: m.Terms })))
 const Privacy = page(() => import('./pages/Legal').then(m => ({ default: m.Privacy })))
 const NotFound = page(() => import('./pages/Legal').then(m => ({ default: m.NotFound })))
@@ -825,8 +827,11 @@ function TennisRoutes() {
       <Route path="match/:id" element={<TennisMatch />} />
       <Route path="player/:id" element={<TennisPlayer />} />
       <Route path="tournament/:key" element={<TennisTournament />} />
+      <Route path="predictions/:key" element={<TennisTournament />} />
       <Route path="rankings" element={<TennisRankings />} />
       <Route path="favorites" element={<TennisFavorites />} />
+      <Route path="accuracy" element={<RecordGate home="/tennis"><TennisAccuracy /></RecordGate>} />
+      <Route path="past" element={<ModelOnly><TennisPast /></ModelOnly>} />
       <Route path="upset-watch" element={<PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming matches where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}><UpsetWatch sport="tennis" /></PremiumGate>} />
       <Route path="*" element={<NotFound />} />
     </Routes>

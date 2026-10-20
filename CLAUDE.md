@@ -92,6 +92,11 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   fix190: `tennisModel.ts` = **tennis-v1** (admin only: surface Elo + serve/return Markov chain + context, blend only if it
   wins the monthly walk-forward test; `tennis_predictions`; `/api/admin/tennis-model`, `/api/admin/tennis/predictions`).
   Notes: `docs/notes/tennis-model.md`.
+- Tennis (fix190, fix193): `tennis.ts` (Live Tennis API: tables tennis_*), `tennisModel.ts` (tennis-v1, public name SL Tennis 1.0:
+  surface Elo + serve/return points → Markov chain; live chance), `tennisSite.ts` (pages: matches, match, player, tournament,
+  rankings, search, accuracy), `seoTennis.ts` (crawler pages + sitemaps), `/api/tennis/*`. **`TENNIS_PUBLIC=1`** opens /tennis
+  to everyone (admins see it before); singles only; ATP, WTA, Challenger, Slams (ITF admin-only); market prices admin-only.
+  Frontend `pages/tennis/*`, `lib/tennis.ts`, adapters `SportHome/tennis.ts`, `sport/games/tennis.tsx`.
 - Accounts & admin: `auth.ts`, `twoFactor.ts`, `roles.ts`, `staffConsole.ts`, `securityLog.ts`, `crm.ts`, `billing.ts`
   (plans since fix147: Premium $8.99 / 6 months $48.49 / year $86.29 (60 unlocks a month), Pro $14.99 / $80.99 / $143.99
   (unlimited); pick packs $0.79 per pick ($0.59 with Premium); 3-day money-back guarantee built; the 3-day free trial is

@@ -80,7 +80,7 @@ import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { startAsn } from './services/asn';
 import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample } from './services/tennis';
 import { startTennisModelScheduler, tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
-import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch, tennisRecord, levelRank, tennisTournament, tennisPlayer, tennisRankings, tennisSearch } from './services/tennisSite';
+import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch, tennisRecord, levelRank, tennisTournament, tennisPlayer, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
@@ -2699,7 +2699,8 @@ app.get('/api/tennis/match/:id(-?\\d+)', (req, res) => {
     const id = parseInt(req.params.id, 10);
     const d = tennisMatch(id, fullOne(req, tennisRid(id)), tnAdmin(req));
     if (!d) return res.status(404).json({ error: 'Match not found' });
-    res.json({ data: d });
+    // fix193c: the written preview (English; the same text search engines get, no pick, no %)
+    res.json({ data: { ...d, writeup: tennisWriteup(d) } });
   } catch (e) { sendError(res, e, 'Failed to load the match'); }
 });
 // home "Our record": the last 30 days, predictions saved before the start, from the public start day
@@ -2727,6 +2728,28 @@ app.get('/api/tennis/player/:id(\\d+)', (req, res) => {
 });
 app.get('/api/tennis/rankings', (req, res) => {
   try { res.json({ data: tennisRankings(req.query.tour === 'wta' ? 'wta' : 'atp') }); } catch (e) { sendError(res, e, 'Failed to load the rankings'); }
+});
+// fix193c: tennis past seasons (admins and the model permission; not under the open /api/tennis/): the walk-forward report
+app.get('/api/tennis-past', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const r = tennisModelReport();
+  res.json({ data: { model: r.model, ready: r.ready, running: r.running, report: r.report || null } });
+});
+// fix193c: the full record (admins until TENNIS_PUBLIC=1, like the other sports' Accuracy pages: admins only for now)
+app.get('/api/tennis/accuracy', (req, res) => {
+  if (req.access !== 'admin') return res.status(404).json({ error: 'Not found' });
+  try { res.json({ data: tennisAccuracy(Math.min(3650, Math.max(1, parseInt(String(req.query.days || '3650'), 10) || 3650))) }); } catch (e) { sendError(res, e, 'Failed to load the record'); }
+});
+// fix193c: official highlights (YouTube: ATP / WTA / Tennis TV / the Slams) of a finished match — the shared service,
+// searched by the two surnames
+app.get('/api/tennis/match/:id(\\d+)/highlights', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = db.prepare(`SELECT scheduled_at, p1_name, p2_name, status, winner FROM tennis_matches WHERE id = ?`).get(id) as any;
+    if (!r || r.status !== 'completed' || !(r.winner === 1 || r.winner === 2)) return res.json({ data: null });
+    const sur = (n: string) => { const p = String(n || '').trim().split(/\s+/); return p.length > 1 ? p.slice(1).join(' ') : n; };
+    res.json({ data: await highlightsFor({ id: 6_000_000_000 + id, status: 'FINISHED', utcDate: r.scheduled_at, homeTeam: { name: r.p1_name, shortName: sur(r.p1_name) }, awayTeam: { name: r.p2_name, shortName: sur(r.p2_name) } }) });
+  } catch (e) { sendError(res, e, 'Failed to fetch highlights'); }
 });
 app.get('/api/tennis/upset-watch', (req, res) => {
   if (!proGate(req, res)) return;
