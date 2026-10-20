@@ -5,6 +5,7 @@
  */
 import { db } from '../db';
 import logger from '../utils/logger';
+import { yieldLoop } from './perf';
 import { bbPreview } from './bbPreview';
 import { bbTeamAnalysis, bbTeamAnalysisTeaser } from './bbTeamAnalysis';
 import { BB_LEAGUES, bbGet } from './basketball';
@@ -311,17 +312,19 @@ export async function bbStandings(code: string) {
   return data;
 }
 
+const squadCache = new Map<string, { at: number; v: any[] }>();
 export async function bbGame(id: number, full: boolean) {
   // fix169: each part is timed; a page over 300 ms logs its slow parts by name ("bb game page 123: preview 640 ms …")
+  // fix196: the thread is given back after each part (await mark(…)), so a slow part never adds up with the next ones
   const parts: [string, number][] = [];
   let tp = performance.now(), t0 = tp;
-  const mark = (name: string) => { const t = performance.now(); parts.push([name, t - tp]); tp = t; };
+  const mark = async (name: string) => { const t = performance.now(); parts.push([name, t - tp]); await yieldLoop(); tp = performance.now(); };
   const g: Row = db.prepare(`${SELECT} WHERE game_id = ?`).get(id);
   if (!g) return null;
   const game = shape(g, full);
-  mark('game');
+  await mark('game');
   const pr = game.state === 'upcoming' ? predictGameCached(g) : null;
-  mark('prediction');
+  await mark('prediction');
   const h2h = db.prepare(`${SELECT} WHERE ((home_id = ? AND away_id = ?) OR (home_id = ? AND away_id = ?)) AND status IN ('FT','AOT') AND kickoff < ? ORDER BY kickoff DESC LIMIT 10`)
     .all(g.home_id, g.away_id, g.away_id, g.home_id, g.kickoff) as Row[];
   // box score (finished or live games)
@@ -343,7 +346,7 @@ export async function bbGame(id: number, full: boolean) {
       box = { home: side(g.home_id), away: side(g.away_id) };
     }
   }
-  mark('h2h + box');
+  await mark('h2h + box');
   let standings: any = null;
   try { standings = await bbStandings(g.code); } catch { /* table not available */ }
   tp = performance.now(); // (awaits are not counted)
@@ -354,28 +357,39 @@ export async function bbGame(id: number, full: boolean) {
   const info = open ? leagueModelInfo(g.code) : null;
   const mk = open && gp.score ? markets(g.code, gp.pHome / 100, gp.spread, gp.total, gp.score.home, gp.score.away) : null;
   // players to watch: each team's top players this season (or last season before the first games)
+  // fix196: kept an hour per team and season (each squad reads every player's career box scores)
   const top = async (teamId: number, name: string) => {
-    try { return (await bbSquad(teamId, name, g.code, g.season)).filter(p => p.gp > 0).sort((a, b) => (b.pts || 0) - (a.pts || 0)).slice(0, 8); } catch { return []; }
+    const key = `${teamId}|${g.code}|${g.season}`;
+    const hit = squadCache.get(key);
+    if (hit && Date.now() - hit.at < HOUR) return hit.v;
+    try {
+      const v = (await bbSquad(teamId, name, g.code, g.season)).filter(p => p.gp > 0).sort((a, b) => (b.pts || 0) - (a.pts || 0)).slice(0, 8);
+      squadCache.set(key, { at: Date.now(), v });
+      if (squadCache.size > 600) squadCache.delete(squadCache.keys().next().value as string);
+      return v;
+    } catch { return []; }
   };
-  mark('ratings + markets');
+  await mark('ratings + markets');
   const players = { home: await top(g.home_id, g.home_name), away: await top(g.away_id, g.away_name) };
+  await yieldLoop();
   tp = performance.now();
   const why = reasons(g, pr || (game.prediction && (game.prediction as any).spread != null ? { margin: (game.prediction as any).spread, b2bHome: (game.prediction as any).b2bHome, b2bAway: (game.prediction as any).b2bAway } : null), full || game.state === 'done');
-  mark('why');
+  await mark('why');
   const stats = { home: averages(g.home_id, g.kickoff), away: averages(g.away_id, g.kickoff) };
-  mark('averages');
+  await mark('averages');
   const sched = { home: schedule(g.home_id, g.kickoff), away: schedule(g.away_id, g.kickoff) };
-  mark('schedule');
-  const pv = preview(g);
-  mark('preview');
+  await mark('schedule');
+  const pv = preview(g, h2h);
+  await mark('preview');
   const writeup = bbPreview(id);
-  mark('writeup');
-  const injuries = g.code === 'NBA' ? { home: nbaInjuries(g.home_id, g.home_name, g.kickoff), away: nbaInjuries(g.away_id, g.away_name, g.kickoff) } : null;
-  mark('injuries');
+  await mark('writeup');
+  // fix196: today's injury list, so only for games still to come or on (a finished game showed today's list: 715 ms)
+  const injuries = g.code === 'NBA' && game.state !== 'done' ? { home: nbaInjuries(g.home_id, g.home_name, g.kickoff), away: nbaInjuries(g.away_id, g.away_name, g.kickoff) } : null;
+  await mark('injuries');
   // fix174: probable starting five + bench + players out (football's line-ups, basketball's way); NBA: numbers changed
   const lineups = game.state === 'done' ? null : { home: bbProbableLineup(g.home_id, g.home_name, g.code, g.kickoff), away: bbProbableLineup(g.away_id, g.away_name, g.code, g.kickoff) };
   const beforeAfter = open && game.state === 'upcoming' ? bbBeforeAfter(g, gp.pHome) : null;
-  mark('lineups');
+  await mark('lineups');
   const syncMs = parts.reduce((x, [, ms]) => x + ms, 0);
   if (syncMs > 300) logger.warn(`bb game page ${id}: ${Math.round(syncMs)} ms (${parts.filter(([, ms]) => ms >= 30).sort((a, b) => b[1] - a[1]).map(([n, ms]) => `${n} ${Math.round(ms)} ms`).join(', ')}; total with waits ${Math.round(performance.now() - t0)} ms)`);
   return {
@@ -402,18 +416,44 @@ export async function bbGame(id: number, full: boolean) {
 
 /* ---------- analysis (game preview and team page) ---------- */
 
+/*
+ * fix196: a league season's finished games, its box-score lines and a league's seasons are read once an hour and
+ * filtered in memory. The game page asked SQLite for them on every open (two SUMs over the whole league season, the
+ * team's season games twice, the previous season): with search engines reading old games (cold pages on the disk)
+ * that was 0.6–1.3 s of blocked server per page on 20 Oct.
+ */
+const HOUR = 3600 * 1000;
+function hourly<T>(cache: Map<string, { at: number; v: T }>, key: string, max: number, build: () => T): T {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < HOUR) { cache.delete(key); cache.set(key, hit); return hit.v; } // most recently used last
+  const v = build();
+  cache.set(key, { at: Date.now(), v });
+  if (cache.size > max) cache.delete(cache.keys().next().value as string);
+  return v;
+}
+const seasonGamesCache = new Map<string, { at: number; v: Row[] }>();
+const leagueSeasonGames = (code: string, season: string) => hourly(seasonGamesCache, `${code}|${season}`, 60, () =>
+  (db.prepare(`${SELECT} WHERE code = ? AND season = ? AND status IN ('FT','AOT') ORDER BY kickoff`).all(code, season) as Row[])
+    .filter(g => !isPreseason({ code: g.code, kickoff: g.kickoff })));
+const seasonLinesCache = new Map<string, { at: number; v: any[] }>();
+const leagueSeasonLines = (code: string, season: string) => hourly(seasonLinesCache, `${code}|${season}`, 60, () =>
+  db.prepare(`SELECT g.kickoff, t.team_id, t.fgm, t.fga, t.tpm, t.tpa, t.ftm, t.fta, t.reb, t.ast, t.tov, t.stl, t.blk
+    FROM bb_games g JOIN bb_team_stats t ON t.game_id = g.game_id WHERE g.code = ? AND g.season = ? AND t.fga > 0`).all(code, season) as any[]);
+const seasonsCache = new Map<string, { at: number; v: string[] }>();
+const leagueSeasons = (code: string) => hourly(seasonsCache, code, 100, () =>
+  (db.prepare(`SELECT DISTINCT season FROM bb_games WHERE code = ? ORDER BY season`).all(code) as any[]).map(r => String(r.season)));
+
 /** A team's finished games of one season in its league (pre-season left out), oldest first. */
 function seasonGames(teamId: number, code: string, season: string, before: string) {
-  return (db.prepare(`${SELECT} WHERE code = ? AND season = ? AND (home_id = ? OR away_id = ?) AND status IN ('FT','AOT') AND kickoff < ? ORDER BY kickoff`)
-    .all(code, season, teamId, teamId, before) as Row[]).filter(g => !isPreseason({ code: g.code, kickoff: g.kickoff }))
+  return leagueSeasonGames(code, season).filter(g => (g.home_id === teamId || g.away_id === teamId) && g.kickoff < before)
 }
 /** The season to describe: the game's season, or last season when this one has barely started (fewer than 5 games). */
 function seasonFor(teamId: number, code: string, season: string, before: string) {
   const now = seasonGames(teamId, code, season, before)
   if (now.length >= 5) return { season, games: now, previous: false }
-  const prev: any = db.prepare(`SELECT MAX(season) AS s FROM bb_games WHERE code = ? AND season < ?`).get(code, season)
-  if (!prev?.s) return { season, games: now, previous: false }
-  return { season: prev.s as string, games: seasonGames(teamId, code, prev.s, before), previous: true }
+  const prev = leagueSeasons(code).filter(s => s < season).pop()
+  if (!prev) return { season, games: now, previous: false }
+  return { season: prev, games: seasonGames(teamId, code, prev, before), previous: true }
 }
 
 function splits(teamId: number, games: Row[]) {
@@ -449,11 +489,20 @@ function streakOf(teamId: number, games: Row[]) {
 
 /** Season box-score averages of a team and of its league, for "better / worse than average". */
 function profile(teamId: number, code: string, season: string, before: string) {
-  const one = (where: string, args: any[]) => db.prepare(`
-    SELECT COUNT(*) AS n, SUM(t.fgm) fgm, SUM(t.fga) fga, SUM(t.tpm) tpm, SUM(t.tpa) tpa, SUM(t.ftm) ftm, SUM(t.fta) fta,
-      AVG(t.reb) reb, AVG(t.ast) ast, AVG(t.tov) tov, AVG(t.stl) stl, AVG(t.blk) blk
-    FROM bb_team_stats t JOIN bb_games g ON g.game_id = t.game_id
-    WHERE g.code = ? AND g.season = ? AND g.kickoff < ? AND t.fga > 0 ${where}`).get(code, season, before, ...args) as any
+  // fix196: from the league season's lines in memory (the same sums and averages the SQL gave: averages skip empty values)
+  const lines = leagueSeasonLines(code, season)
+  const one = (team: number | null) => {
+    const x: any = { n: 0, fgm: 0, fga: 0, tpm: 0, tpa: 0, ftm: 0, fta: 0 }
+    const avg: Record<string, [number, number]> = { reb: [0, 0], ast: [0, 0], tov: [0, 0], stl: [0, 0], blk: [0, 0] }
+    for (const r of lines) {
+      if (r.kickoff >= before || (team !== null && r.team_id !== team)) continue
+      x.n++
+      for (const k of ['fgm', 'fga', 'tpm', 'tpa', 'ftm', 'fta']) x[k] += r[k] || 0
+      for (const k in avg) if (r[k] != null) { avg[k][0] += r[k]; avg[k][1]++ }
+    }
+    for (const k in avg) x[k] = avg[k][1] ? avg[k][0] / avg[k][1] : null
+    return x
+  }
   const shape = (x: any) => !x || !x.n ? null : {
     games: x.n,
     fgPct: x.fga ? Math.round((x.fgm / x.fga) * 1000) / 10 : null,
@@ -466,11 +515,11 @@ function profile(teamId: number, code: string, season: string, before: string) {
     steals: x.stl != null ? Math.round(x.stl * 10) / 10 : null,
     blocks: x.blk != null ? Math.round(x.blk * 10) / 10 : null
   }
-  return { team: shape(one('AND t.team_id = ?', [teamId])), league: shape(one('', [])) }
+  return { team: shape(one(teamId)), league: shape(one(null)) }
 }
 
 /** Everything the written preview of a game is built from (the site turns it into sentences). */
-function preview(g: Row) {
+function preview(g: Row, h2hRows?: Row[]) {
   const ranks = new Map(leagueRatings(g.code).map(x => [x.id, x]))
   const side = (teamId: number) => {
     const s = seasonFor(teamId, g.code, g.season, g.kickoff)
@@ -487,7 +536,7 @@ function preview(g: Row) {
       profile: profile(teamId, g.code, s.season, g.kickoff)
     }
   }
-  const h2h = db.prepare(`${SELECT} WHERE ((home_id = ? AND away_id = ?) OR (home_id = ? AND away_id = ?)) AND status IN ('FT','AOT') AND kickoff < ? ORDER BY kickoff DESC LIMIT 10`)
+  const h2h = h2hRows || db.prepare(`${SELECT} WHERE ((home_id = ? AND away_id = ?) OR (home_id = ? AND away_id = ?)) AND status IN ('FT','AOT') AND kickoff < ? ORDER BY kickoff DESC LIMIT 10`)
     .all(g.home_id, g.away_id, g.away_id, g.home_id, g.kickoff) as Row[]
   const homeWins = h2h.filter(x => (x.home_id === g.home_id ? x.hs > x.as_ : x.as_ > x.hs)).length
   return { home: side(g.home_id), away: side(g.away_id), h2h: { games: h2h.length, homeWins, awayWins: h2h.length - homeWins } }

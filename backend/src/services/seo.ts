@@ -275,6 +275,19 @@ const NAV = (lang: Lang) => `<nav><a href="${link(lang, '/')}">${BRAND}</a> · <
 const TENNIS_WORD: Record<Lang, string> = { en: 'Tennis', es: 'Tenis', pt: 'Ténis', de: 'Tennis', fr: 'Tennis', it: 'Tennis', tr: 'Tenis' };
 const PRIVATE = /^\/(admin|account|verify|forgot|login|signup|favorites|my-picks|join|crm)(\/|$)|^\/basketball\/(favorites|past)(\/|$)|^\/past(\/|$)/;
 
+/*
+ * fix196: basketball game pages for search engines (Googlebot reads old games, many an hour: 0.4–1 s each on 20 Oct)
+ * are kept: finished games 24 h (10 min in the first 2 days, while box scores and checks come in), games to come 5 min
+ * (never past tip-off), live games not at all; the 3,000 most recently read.
+ */
+const bbCrawlCache = new Map<string, { until: number; v: SeoInfo }>();
+function bbCrawlTtl(status: string | null, date: string): number {
+  const toTip = Date.parse(date) - Date.now();
+  if (status === 'FT' || status === 'AOT' || ['POST', 'CANC', 'SUSP', 'AWD', 'ABD'].includes(String(status))) return toTip > -2 * 86400000 ? 10 * 60 * 1000 : 24 * 3600 * 1000;
+  if (['Q1', 'Q2', 'Q3', 'Q4', 'OT', 'BT', 'HT'].includes(String(status))) return 0;
+  return Number.isFinite(toTip) ? Math.max(0, Math.min(5 * 60 * 1000, toTip)) : 0;
+}
+
 export function seoPage(rawPath: string): SeoInfo {
   let path = rawPath.split('?')[0].replace(/\/+$/, '') || '/';
   let lang: Lang = 'en';
@@ -541,6 +554,9 @@ export function seoPage(rawPath: string): SeoInfo {
           + `<h2>${esc(String(p.season))} season</h2><p>${cur.length} games · ${avg('pts')} points · ${avg('reb')} rebounds · ${avg('ast')} assists a game</p>`);
       }
       if ((m = path.match(/^\/basketball\/game\/(\d+)$/))) {
+        const ck = `${lang}|${m[1]}`;
+        const hit = bbCrawlCache.get(ck);
+        if (hit && Date.now() < hit.until) { bbCrawlCache.delete(ck); bbCrawlCache.set(ck, hit); return hit.v; }
         const g = bbGameById(Number(m[1]));
         if (g) {
           const name = `${g.home} vs ${g.away}`, lg = bbLeagueName(g.code);
@@ -553,13 +569,16 @@ export function seoPage(rawPath: string): SeoInfo {
               ...(h2.length ? [`${pk.lastMeeting} ${h2[0].hs}-${h2[0].as_}`] : [])
             ], pk.bbFill, pk.bbTails);
           const pv = lang === 'en' ? bbPreview(g.id) : null;
-          return page(`${name} ${lang === 'en' ? 'prediction & preview' : pk.previewTitle} · ${lg} · ${titleDate(g.date, lang)} | ${BRAND}`, desc,
+          const v = page(`${name} ${lang === 'en' ? 'prediction & preview' : pk.previewTitle} · ${lg} · ${titleDate(g.date, lang)} | ${BRAND}`, desc,
             `<h1>${esc(name)} ${esc(pk.prediction)}</h1><p>${esc(lg)} · ${esc(longDate(g.date, lang))} · ${slModel('basketball')}</p>${pv ? `<section><h2>${ui(lang, 'gamePreview')}</h2><p>${esc(pv)}</p></section>` : ''}`
             + (rh.n && ra.n ? `<p>${ui(lang, 'season')}: ${esc(g.home)} ${rh.w}-${rh.l} · ${esc(g.away)} ${ra.w}-${ra.l}</p>` : '')
             + (fh.length || fa.length ? `<h2>${ui(lang, 'recentForm')}</h2>${bbFormList(lang, g.home, g.homeId, fh)}${bbFormList(lang, g.away, g.awayId, fa)}` : '')
             + (h2.length ? `<h2>${ui(lang, 'lastMeetings')}</h2><ul>${h2.map(x => bbScoreLine(lang, x)).join('')}</ul>` : '')
             + `<ul><li><a href="${link(lang, `/basketball/league/${g.code}`)}">${esc(lg)}</a></li><li><a href="${link(lang, `/basketball/team/${g.homeId}`)}">${esc(g.home)}</a></li><li><a href="${link(lang, `/basketball/team/${g.awayId}`)}">${esc(g.away)}</a></li></ul>`,
             { jsonld: [sportsEvent(name, g.date, g.home, g.away, SITE + link(lang, path), lg, 'Basketball', pv ? firstSentence(pv) : undefined)] });
+          const ttl = bbCrawlTtl(g.status, g.date);
+          if (ttl > 0) { bbCrawlCache.set(ck, { until: Date.now() + ttl, v }); while (bbCrawlCache.size > 3000) bbCrawlCache.delete(bbCrawlCache.keys().next().value as string); }
+          return v;
         }
       }
       if ((m = path.match(/^\/basketball\/team\/(\d+)$/))) {

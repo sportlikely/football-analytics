@@ -11,6 +11,7 @@ import { isPreseason } from './bbModel';
 import { nbaKey } from './bbInjuries';
 import { bdlPlayerOf, bdlTeamOf, bdlSeasonNow, bdlContract, personKey } from './bdl';
 import { isCrawlerRequest } from './afUsage';
+import { yieldLoop } from './perf';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_roster (
@@ -227,8 +228,16 @@ export async function bbSquad(teamId: number, teamName: string, code: string, se
     ids = (db.prepare(`SELECT DISTINCT player_id FROM bb_player_stats WHERE team_id = ? AND game_id IN (${games.map(() => '?').join(',')})`).all(teamId, ...games.map(g => g.game_id)) as any[]).map(r => r.player_id);
   }
   if (!ids.length) return [];
-  const rows = db.prepare(`SELECT ps.*, g.season, g.code, g.kickoff FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id
-    WHERE ps.player_id IN (${ids.map(() => '?').join(',')}) AND g.status IN ('FT','AOT') ORDER BY g.kickoff DESC`).all(...ids) as any[];
+  // fix196: a few players per read, the thread given back between reads (a whole squad's careers, ~4,000 box-score
+  // lines, was one 30–60 ms read on a copy of the database and several times that on the server)
+  const rows: any[] = [];
+  for (let i = 0; i < ids.length; i += 4) {
+    const part = ids.slice(i, i + 4);
+    rows.push(...(db.prepare(`SELECT ps.*, g.season, g.code, g.kickoff FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id
+      WHERE ps.player_id IN (${part.map(() => '?').join(',')}) AND g.status IN ('FT','AOT')`).all(...part) as any[]));
+    await yieldLoop();
+  }
+  rows.sort((a, b) => (a.kickoff < b.kickoff ? 1 : a.kickoff > b.kickoff ? -1 : 0));
   const by = new Map<number, any[]>();
   for (const r of rows) { if (isPreseason({ code: r.code, kickoff: r.kickoff })) continue; if (!by.has(r.player_id)) by.set(r.player_id, []); by.get(r.player_id)!.push(r); }
   const bdlSeason = bdlSeasonNow();

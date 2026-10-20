@@ -93,10 +93,25 @@ export function slicer(ms = 30) {
   let t = Date.now();
   return async () => { if (Date.now() - t >= ms) { await yieldLoop(); t = Date.now(); } };
 }
+/*
+ * fix196: background jobs step aside for the live ticks (live poll and the live jobs, every 20–60 s): a heavy job's
+ * slices wait while one runs (at most 3 s, so a stuck live poll never stops them).
+ */
+const LIVE_TICKS = new Set([...LIVE_JOBS, 'live poll']);
+export const liveRunning = () => { for (const l of active.keys()) if (LIVE_TICKS.has(l)) return true; return false; };
+export async function afterLive(maxMs = 3000) {
+  const t = Date.now();
+  while (liveRunning() && Date.now() - t < maxMs) await new Promise(r => setTimeout(r, 25));
+}
+/** fix196: slicer() for heavy background jobs: gives the thread back every ~30 ms and waits while a live tick runs. */
+export function heavySlicer(ms = 30) {
+  let t = Date.now();
+  return async () => { if (Date.now() - t >= ms) { await yieldLoop(); await afterLive(); t = Date.now(); } };
+}
 /** fix169: `fn` over the items in batches of `size`, yielding whenever ~30 ms have passed (fix159 style). */
-export async function inBatches<T, R>(items: T[], size: number, fn: (batch: T[]) => R[]): Promise<R[]> {
+export async function inBatches<T, R>(items: T[], size: number, fn: (batch: T[]) => R[], opts: { live?: boolean } = {}): Promise<R[]> {
   const out: R[] = [];
-  const slice = slicer();
+  const slice = opts.live ? heavySlicer() : slicer();
   for (let i = 0; i < items.length; i += size) { out.push(...fn(items.slice(i, i + size))); await slice(); }
   return out;
 }
@@ -114,11 +129,11 @@ export function runSteps<T>(g: Generator<unknown, T>): T {
   while (!r.done) r = g.next();
   return r.value;
 }
-export async function runStepsAsync<T>(g: Generator<unknown, T>, budgetMs = 40): Promise<T> {
+export async function runStepsAsync<T>(g: Generator<unknown, T>, budgetMs = 40, opts: { live?: boolean } = {}): Promise<T> {
   let t = Date.now();
   let r = g.next();
   while (!r.done) {
-    if (Date.now() - t >= budgetMs) { await yieldLoop(); t = Date.now(); }
+    if (Date.now() - t >= budgetMs) { await yieldLoop(); if (opts.live) await afterLive(); t = Date.now(); }
     r = g.next();
   }
   return r.value;
@@ -231,7 +246,8 @@ export function heavy<T>(label: string, fn: () => T | Promise<T>): Promise<T | u
         heavyNow = label;
         heavySince = Date.now();
         const turn = ++heavyTurn;
-        Promise.resolve().then(fn).then(resolve, reject).finally(() => {
+        // fix196: never starts during a live tick
+        afterLive().then(fn).then(resolve, reject).finally(() => {
           if (turn !== heavyTurn) return; // released by the 45-min watchdog: the queue already moved on
           heavyNow = null;
           setImmediate(heavyNext);

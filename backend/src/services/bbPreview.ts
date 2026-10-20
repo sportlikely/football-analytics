@@ -98,15 +98,18 @@ export function bbPreviewText(g: BbGameRow): string {
   return all();
 }
 
-const cache = new Map<number, { at: number; text: string }>();
+const cache = new Map<number, { at: number; text: string; ttl?: number }>();
 /** Preview of a basketball game by id (cached 30 min), or null when the game is unknown. */
 export function bbPreview(id: number): string | null {
   const c = cache.get(id);
-  if (c && Date.now() - c.at < 30 * 60 * 1000) return c.text;
+  if (c && Date.now() - c.at < (c.ttl ?? 30 * 60 * 1000)) return c.text;
   const g = bbGameById(id);
   if (!g) return null;
   const text = bbPreviewText(g);
-  cache.set(id, { at: Date.now(), text });
-  if (cache.size > 3000) for (const [k, v] of cache) if (Date.now() - v.at > 30 * 60 * 1000) cache.delete(k);
+  // fix196: a game finished more than 2 days ago never changes: 24 h (search engines read old games again and again)
+  const old = (g.status === 'FT' || g.status === 'AOT') && Date.parse(g.date) < Date.now() - 2 * 86400000;
+  cache.set(id, { at: Date.now(), text, ttl: old ? 24 * 3600 * 1000 : 30 * 60 * 1000 });
+  if (cache.size > 3000) for (const [k, v] of cache) if (Date.now() - v.at > (v.ttl ?? 30 * 60 * 1000)) cache.delete(k);
+  if (cache.size > 6000) cache.delete(cache.keys().next().value as number);
   return text;
 }

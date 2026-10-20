@@ -1012,9 +1012,9 @@ app.get('/api/admin/tennis/status', (_req, res) => {
   try { res.json({ data: tennisStatus() }); } catch (e) { sendError(res, e, 'Tennis status failed'); }
 });
 // fix195: duplicates, fixture ids, matches without a prediction (48 h), stale matches, names to check — target zero
-app.get('/api/admin/tennis/check', (_req, res) => {
+app.get('/api/admin/tennis/check', async (_req, res) => {
   res.set('Cache-Control', 'no-store');
-  try { res.json({ data: tennisDataCheck() }); } catch (e) { sendError(res, e, 'Tennis check failed'); }
+  try { res.json({ data: await tennisDataCheck() }); } catch (e) { sendError(res, e, 'Tennis check failed'); }
 });
 // fix187: ?tour=atp|wta|challenger&status=upcoming|live|completed&limit=30 — to compare with the real ATP / WTA schedule
 app.get('/api/admin/tennis/sample', (req, res) => {
@@ -1464,19 +1464,46 @@ app.get('/api/health', (_req, res) => {
 });
 
 // Upcoming + live matches. ?days=30 (1-30). Served from memory.
+/*
+ * fix196: stale-while-revalidate. The list (the same for every visitor) is built in the background in slices of a few
+ * matches; a request gets the last copy at once and, when it is over 30 s old, starts the next build (one at a time
+ * per range). Only the very first request after a start waits for a build (in slices too). Before: every request
+ * rebuilt it, ~1 s of blocked server every 10 min (after each fixture-window refresh). The copy still goes through
+ * res.json (the market strip and the free / signed-out trim above); signed-out visitors get that same trimmed copy as
+ * a ready string, made once per build.
+ */
+const UPCOMING_FRESH_MS = 30 * 1000;
+const upcomingCache = new Map<number, { at: number; body: any; anon?: string; building: Promise<void> | null }>();
+async function buildUpcoming(days: number): Promise<any> {
+  const raw = (await footballDataAPI.getUpcomingMatches(days)).map(withLiveScore);
+  const fd = await inBatches(raw, 5, b => footballDataAPI.withPredictions(b));
+  // + extra competitions from API-Football (national teams, cups, more leagues)
+  const af = await inBatches(afUpcoming(days), 5, b => afWithPredictions(b));
+  await yieldLoop();
+  const matches = [...fd, ...af].sort((a: any, b: any) => a.utcDate.localeCompare(b.utcDate));
+  const data = await inBatches(matches, 50, b => b.map(slimForList));
+  await yieldLoop();
+  return { data, count: matches.length, days, cacheAgeMs: footballDataAPI.windowAge, timestamp: new Date().toISOString() };
+}
+function refreshUpcoming(days: number): Promise<void> {
+  const c = upcomingCache.get(days);
+  if (c?.building) return c.building;
+  const building = timed('matches upcoming build', () => buildUpcoming(days))
+    .then(body => { upcomingCache.set(days, { at: Date.now(), body, building: null }); })
+    .catch(e => { logger.warn(`matches upcoming build: ${e?.message || e}`); const x = upcomingCache.get(days); if (x) x.building = null; else upcomingCache.delete(days); });
+  if (c) c.building = building; else upcomingCache.set(days, { at: 0, body: null, building });
+  return building;
+}
 app.get('/api/matches/upcoming', async (req, res) => {
   try {
-    const days = parseInt(String(req.query.days || '30'), 10) || 30;
-    const fd = footballDataAPI.withPredictions((await footballDataAPI.getUpcomingMatches(days)).map(withLiveScore));
-    // + extra competitions from API-Football (national teams, cups, more leagues)
-    const matches = [...fd, ...afWithPredictions(afUpcoming(days))].sort((a: any, b: any) => a.utcDate.localeCompare(b.utcDate));
-    res.json({
-      data: matches.map(slimForList),
-      count: matches.length,
-      days,
-      cacheAgeMs: footballDataAPI.windowAge,
-      timestamp: new Date().toISOString()
-    });
+    const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
+    let c = upcomingCache.get(days);
+    if (!c?.body) { await refreshUpcoming(days); c = upcomingCache.get(days); }
+    else if (Date.now() - c.at > UPCOMING_FRESH_MS) void refreshUpcoming(days);
+    if (!c?.body) return res.status(503).set('Retry-After', '5').json({ error: 'Failed to fetch upcoming matches' });
+    const access = req.access || 'anon';
+    if (access === 'anon' && !req.user) return res.type('application/json').send(c.anon ??= JSON.stringify(stripMarket(teaseDeep(c.body))));
+    res.json(c.body);
   } catch (error: any) {
     sendError(res, error, 'Failed to fetch upcoming matches');
   }
@@ -2805,20 +2832,30 @@ app.get('/api/basketball/games', (req, res) => {
     sendError(res, error, 'Failed to load games');
   }
 });
-// fix169: the game page is kept 20 s while the game is live and 2 min otherwise (it was rebuilt on every open, up to
-// 1.25 s); one copy per access level (full numbers or not)
+// fix169: the game page is kept, one copy per access level (full numbers or not)
+// fix196: finished games 24 h, games to come 5 min (never past tip-off), live games not at all; the 1,500 most recently
+// opened pages (search engines read old games: 0.6–1.3 s each when rebuilt on every open)
 const bbGameCache = new Map<string, { at: number; until: number; data: any }>();
+const bbGameTtl = (data: any) => {
+  const st = data?.game?.state;
+  if (st === 'live') return 0;
+  const toTip = Date.parse(data?.game?.kickoff || '') - Date.now();
+  // a game finished in the last 2 days still gets its box score, result check and swing chart: 10 min until then
+  if (st === 'done' || st === 'off') return toTip > -2 * 86400000 ? 10 * 60 * 1000 : 24 * 3600 * 1000;
+  return Math.max(0, Math.min(5 * 60 * 1000, Number.isFinite(toTip) ? toTip : 0));
+};
 app.get('/api/basketball/game/:id(\\d+)', async (req, res) => {
   try {
     const gid = parseInt(req.params.id, 10);
     const full = fullOne(req, -gid);
     const key = `${gid}|${full ? 1 : 0}`;
     const hit = bbGameCache.get(key);
-    if (hit && Date.now() < hit.until) return res.json({ data: hit.data, timestamp: new Date(hit.at).toISOString(), cached: true });
+    if (hit && Date.now() < hit.until) { bbGameCache.delete(key); bbGameCache.set(key, hit); return res.json({ data: hit.data, timestamp: new Date(hit.at).toISOString(), cached: true }); }
     const data = await bbGame(gid, full);
     if (!data) return res.status(404).json({ error: 'Game not found' });
-    bbGameCache.set(key, { at: Date.now(), until: Date.now() + ((data as any).game?.state === 'live' ? 20 : 120) * 1000, data });
-    if (bbGameCache.size > 1000) bbGameCache.delete(bbGameCache.keys().next().value!);
+    const ttl = bbGameTtl(data);
+    if (ttl > 0) bbGameCache.set(key, { at: Date.now(), until: Date.now() + ttl, data }); else bbGameCache.delete(key);
+    while (bbGameCache.size > 1500) bbGameCache.delete(bbGameCache.keys().next().value!);
     res.json({ data, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to load game');
@@ -2838,6 +2875,7 @@ app.post('/api/admin/bb/game/:id(\\d+)/result', jsonOnly, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const r = adminResult(id, String(req.body?.action || ''), req.body, req.user?.email || 'admin');
+    for (const k of [`${id}|0`, `${id}|1`]) bbGameCache.delete(k); // fix196: the corrected page at once
     securityLog(req, 'bb_result_corrected', req.user, `game ${id}: ${req.body?.action}${req.body?.hs != null ? ` ${req.body.hs}-${req.body.as_}` : ''}`);
     res.json({ data: r });
   } catch (e: any) {
@@ -3499,16 +3537,18 @@ server.listen(PORT, () => {
   // fix169: recorded in batches of 25 with yields (fix159 style)
   footballDataAPI.onWindowRefreshed = matches => { void timed('record predictions (main leagues)', () => inBatches(matches, 25, b => { recordPredictions(b); return []; })).catch(e => logger.warn(`record predictions: ${e.message}`)); };
   // Same for API-Football competitions (national teams, UEFA cups, extra leagues)
-  onAfWindow(matches => { void (async () => {
-    // ~700 matches: predict 40 at a time with a pause between, so visitors are not kept waiting
-    // fix169: 25 at a time, a yield whenever ~30 ms have passed (the window blocked 0.3 s and the recording 1.4 s)
-    const withP: any[] = await timed('predict more-leagues window', () => inBatches(matches, 25, b => afWithPredictions(b)));
-    await timed('record predictions (more leagues)', () => inBatches(withP, 25, b => { recordPredictions(b); return []; }));
+  // fix196: in the heavy() queue (one heavy job at a time, never during a live tick), always on the latest window;
+  // 5 matches a batch (25 right after the prediction cache was cleared blocked up to ~1 s)
+  let afWindowLatest: any[] = [];
+  onAfWindow(matches => { afWindowLatest = matches; void heavy('predict more-leagues window', async () => {
+    const matches = afWindowLatest;
+    const withP: any[] = await timed('predict more-leagues window', () => inBatches(matches, 5, b => afWithPredictions(b), { live: true }));
+    await timed('record predictions (more leagues)', () => inBatches(withP, 10, b => { recordPredictions(b); return []; }, { live: true }));
     // then the bookmaker odds for matches starting soon, so every tracked game can be compared with the market
     // fix169: awaited and batched under a label (the continuation used to run after the label had ended)
     const ms = await withAfOdds(matches).catch(err => { logger.warn('AF odds for tracking failed', { message: err.message }); return [] as any[]; });
-    if (ms.length) await timed('record predictions (odds)', () => inBatches(ms, 25, b => { recordPredictions(afWithPredictions(b)); return []; }));
-  })().catch(err => logger.warn('AF window predictions failed', { message: err.message })); });
+    if (ms.length) await timed('record predictions (odds)', () => inBatches(ms, 5, b => { recordPredictions(afWithPredictions(b)); return []; }, { live: true }));
+  }).catch(err => logger.warn('AF window predictions failed', { message: err.message })); });
   // fix167: the schedulers start one after another over the first 2 minutes (each under its own name in /api/perf),
   // not all at once inside the listen callback ("boot (scheduler start)" blocked 11 s on every deploy). The site is
   // served from the stored data meanwhile; the fixture window comes first.

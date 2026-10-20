@@ -22,7 +22,7 @@ import { afConfigured } from './apiFootball';
 import { feedState, bootedAt } from './freshness';
 import { emailEnabled, sendEmail, layout, section, esc, C, SITE } from './email';
 import { lastDataAudit } from './dataAudit';
-import { every, after, slicer, inBatches } from './perf';
+import { everyHeavy, afterHeavy, heavySlicer, inBatches } from './perf';
 import { missingPredictions } from './missingPredictions';
 import { tennisDataCheck } from './tennis';
 
@@ -46,16 +46,17 @@ const ago = (ms: number) => (ms < 90 * 1000 ? `${Math.round(ms / 1000)} s` : ms 
 const gameName = (m: any) => `${m.homeTeam?.name ?? m.home_team ?? '?'} – ${m.awayTeam?.name ?? m.away_team ?? '?'} (${m.competition?.name ?? m.competition_name ?? ''}, ${String(m.utcDate ?? m.utc_date ?? '').slice(0, 16).replace('T', ' ')} UTC)`;
 
 async function allMatches(): Promise<any[]> {
-  // fix169: predictions in batches of 25 with yields (the hourly check blocked 0.5–0.9 s)
-  const fd = await inBatches(await footballDataAPI.getUpcomingMatches(30), 25, b => footballDataAPI.withPredictions(b));
-  return [...fd, ...(await inBatches(afUpcoming(30), 25, b => afWithPredictions(b)))];
+  // fix169: predictions in batches with yields (the hourly check blocked 0.5–0.9 s)
+  // fix196: batches of 5 (25 right after the prediction cache was cleared took up to ~1 s), waiting for live ticks
+  const fd = await inBatches(await footballDataAPI.getUpcomingMatches(30), 5, b => footballDataAPI.withPredictions(b), { live: true });
+  return [...fd, ...(await inBatches(afUpcoming(30), 5, b => afWithPredictions(b), { live: true }))];
 }
 
 const loggedFallback = new Set<string>();
 export async function dataHealth(): Promise<{ level: Level; at: string; checks: Check[] }> {
   const now = Date.now();
   const checks: Check[] = [];
-  const slice = slicer(); // fix169: a yield between checks once ~30 ms have passed
+  const slice = heavySlicer(); // fix169: a yield between checks once ~30 ms have passed (fix196: and after a live tick)
   const starting = now - bootedAt() < 10 * MIN;
   let matches: any[] = [];
   try { matches = await allMatches(); } catch (e: any) { checks.push({ id: 'matches', label: 'Match list', level: 'fail', detail: `Could not load: ${e.message}` }); }
@@ -143,7 +144,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // fix195: tennis — the same match twice, fixture ids, ATP / WTA / Challenger matches of the next 48 h without a
   // prediction, matches still upcoming / live 6 h after the start (target zero); odd names listed, not counted
   try {
-    const tc = tennisDataCheck();
+    const tc = await tennisDataCheck(); // fix196: in slices
     checks.push({
       id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: tc.total ? 'warn' : 'ok',
       detail: tc.total
@@ -155,6 +156,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   } catch (e: any) {
     checks.push({ id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: 'warn', detail: `Check failed: ${e.message}` });
   }
+  await slice();
   // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason
   const OLD = new Set(['poisson-dc-v1', 'dc-history-v2']);
   const fallback = matches.filter(m => !FINAL.includes(m.status) && m.prediction && OLD.has(m.prediction.model) && new Date(m.utcDate).getTime() < now + 30 * 86400000);
@@ -179,6 +181,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   await slice();
   checks.push({ id: 'probabilities', label: 'Probabilities add up to 100%', level: badProb.length ? 'fail' : 'ok', detail: badProb.length ? `${badProb.length} prediction(s) with invalid percentages` : 'All predictions add up', items: badProb.slice(0, 15).map(m => `${gameName(m)} · ${m.prediction.home}/${m.prediction.draw}/${m.prediction.away}`) });
 
+  await slice();
   // predictions never settled
   try {
     const cutoff = new Date(now - 4 * 3600 * 1000).toISOString();
@@ -193,6 +196,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     checks.push({ id: 'unsettled', label: 'Finished games are scored in our record', level: 'warn', detail: `Check failed: ${e.message}` });
   }
 
+  await slice();
   // stored results: outcome matches the score
   try {
     const bad = db.prepare(`SELECT match_id, home_goals, away_goals, outcome FROM results WHERE outcome IN ('H','D','A') AND home_goals IS NOT NULL AND away_goals IS NOT NULL AND outcome != CASE WHEN home_goals > away_goals THEN 'H' WHEN home_goals < away_goals THEN 'A' ELSE 'D' END`).all() as any[];
@@ -213,6 +217,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   await slice();
   checks.push({ id: 'tables', label: 'League tables add up', level: tableIssues.length ? 'fail' : 'ok', detail: tableIssues.length ? `${tableIssues.length} table row(s) don't add up` : `${footballDataAPI.standings.size} tables checked`, items: tableIssues.slice(0, 15) });
 
+  await slice();
   // model history (results used for ratings) not falling behind: a division is behind only when games were
   // actually played after its last stored result (international breaks are not a problem)
   try {
@@ -227,6 +232,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
         missed = (db.prepare(`SELECT COUNT(*) AS n FROM af_fixtures WHERE division = ? AND status IN ('FT','AET','PEN') AND date > ? AND kickoff < ?`)
           .get(r.division, after, new Date(now - 86400000).toISOString()) as any).n;
       } catch { /* no fixture store */ }
+      await slice();
       if (missed > 0) behind.push(`${r.division}: last result ${r.last}, ${missed} game(s) played since are not in yet`);
     }
     checks.push({
@@ -236,6 +242,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     });
   } catch { /* table missing */ }
 
+  await slice();
   // daily player check: top scorers of 13 leagues, their pages vs the official lists + sanity checks
   try {
     const a = lastDataAudit();
@@ -325,6 +332,7 @@ async function run() {
 }
 
 export function startDataHealthScheduler() {
-  after('data health', run, 5 * MIN);
-  every('data health', run, 10 * MIN);
+  // fix196: in the heavy() queue (one heavy job at a time, never during a live tick)
+  afterHeavy('data health', run, 5 * MIN);
+  everyHeavy('data health', run, 10 * MIN);
 }

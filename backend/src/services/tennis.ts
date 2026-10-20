@@ -1035,13 +1035,15 @@ async function refreshStale(max = 60): Promise<string> {
  * twice, rows of the fixture id space, ATP / WTA / Challenger matches of the next 48 h without a prediction (with the
  * reason), matches still upcoming / live 6 h after the start, names that are only initials or look surname-first.
  */
-export function tennisDataCheck() {
+export async function tennisDataCheck() {
   const now = Date.now();
+  const slice = slicer(); // fix196: in slices (part of the data health job)
   const iso = (ms: number) => new Date(ms).toISOString();
   const name = (r: any) => `${r.p1_name || '?'} v ${r.p2_name || '?'} · ${r.tournament || '?'} · ${String(r.scheduled_at || '').slice(0, 16).replace('T', ' ')} UTC · id ${r.id}`;
   const win = db.prepare(`SELECT id, tournament, tour, tier, p1_id, p1_name, p2_id, p2_name, scheduled_at, status, source FROM tennis_matches INDEXED BY idx_tennis_matches_time
     WHERE scheduled_at >= ? AND scheduled_at < ? AND id > 0 AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(iso(now - 3 * 86400000), iso(now + 10 * 86400000)) as any[];
   const pairs = new Map<string, any[]>();
+  await slice();
   for (const r of win) if (r.p1_id && r.p2_id) { const k = `${Math.min(r.p1_id, r.p2_id)}-${Math.max(r.p1_id, r.p2_id)}`; pairs.set(k, [...(pairs.get(k) || []), r]); }
   const duplicates: string[] = [];
   for (const l of pairs.values()) {
@@ -1053,7 +1055,9 @@ export function tennisDataCheck() {
   try { classify = require('./tennisModel').tennisModelInternals.classify; } catch { /* model not loaded */ }
   const pred = db.prepare(`SELECT 1 FROM tennis_predictions WHERE match_id = ?`);
   const noPrediction: string[] = [];
+  await slice();
   for (const r of win) {
+    await slice();
     const t = Date.parse(r.scheduled_at);
     if (r.status !== 'upcoming' || t < now || t > now + 48 * 3600000) continue;
     const cls = classify ? classify(r.tour, r.tier, r.tournament, r.source) : { cat: 1 };
@@ -1070,6 +1074,7 @@ export function tennisDataCheck() {
   const pq = db.prepare(`SELECT p.id, p.name, p.first_name, p.last_name, (SELECT r.player_name FROM tennis_rankings r WHERE r.player_id = p.id ORDER BY r.date DESC LIMIT 1) AS rname FROM tennis_players p WHERE p.id = ?`);
   const words = (s: string) => s.toLowerCase().split(/\s+/).filter(Boolean);
   for (const id of ids) {
+    await slice();
     const p = pq.get(id) as any;
     if (!p?.name) continue;
     if (isAbbreviated(p.name)) { names.push(`${p.name} (id ${p.id}) · initials only`); continue; }
@@ -1110,8 +1115,8 @@ export function startTennisScheduler() {
   // fix195: matches still upcoming / live 6 h after the start → asked again, else 'unknown'
   everyHeavy('tennis stale', () => job('stale', () => refreshStale()), 30 * 60 * 1000).unref();
   // fix195: the data check once a day in the log (the full list: /api/admin/tennis/check, Admin → Data health)
-  every('tennis check', () => {
-    const c = tennisDataCheck();
+  every('tennis check', async () => {
+    const c = await tennisDataCheck();
     if (c.total) logger.warn(`tennis data check: ${c.duplicates.length} duplicates, ${c.fixtureIds.length} fixture ids, ${c.noPrediction.length} without a prediction (48 h), ${c.stale.length} stale`);
   }, 24 * 3600 * 1000).unref();
   every('tennis usage', runUsage, 30 * 60 * 1000).unref();

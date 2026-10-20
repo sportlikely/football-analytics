@@ -14,7 +14,10 @@ const INDEXES: { name: string; sql: string }[] = [
   // fix193: tennis pages — a player's matches (form, schedule & rest, head-to-head) and a tournament's matches (draw)
   { name: 'idx_tennis_matches_p1', sql: 'CREATE INDEX IF NOT EXISTS idx_tennis_matches_p1 ON tennis_matches(p1_id, scheduled_at)' },
   { name: 'idx_tennis_matches_p2', sql: 'CREATE INDEX IF NOT EXISTS idx_tennis_matches_p2 ON tennis_matches(p2_id, scheduled_at)' },
-  { name: 'idx_tennis_stats_player', sql: 'CREATE INDEX IF NOT EXISTS idx_tennis_stats_player ON tennis_match_stats(player_id)' }
+  { name: 'idx_tennis_stats_player', sql: 'CREATE INDEX IF NOT EXISTS idx_tennis_stats_player ON tennis_match_stats(player_id)' },
+  // fix196: basketball game pages and crawler pages — a league season's games (season record, preview); with only
+  // (code, kickoff) SQLite walked every game of the league before the date
+  { name: 'idx_bb_games_code_season', sql: 'CREATE INDEX IF NOT EXISTS idx_bb_games_code_season ON bb_games(code, season, kickoff)' }
 ];
 
 export function ensureIndexes(): Promise<void> {

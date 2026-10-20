@@ -16,7 +16,7 @@
  * history in, most recent first, always leaving a reserve.
  */
 import { clearPredictionCache } from './predCache';
-import { yieldLoop, timed, every, after } from './perf';
+import { yieldLoop, timed, afterHeavy, everyHeavy, afterLive } from './perf';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { markFresh, markFailed } from './freshness';
@@ -413,7 +413,7 @@ async function buildFeatures(group: string, force = false): Promise<number> {
   const sig = groupSig(group);
   if (!force && featureSig.get(group) === sig) return 0;
   let sliceAt = Date.now();
-  const pause = async () => { if (Date.now() - sliceAt > 30) { await yieldLoop(); sliceAt = Date.now(); } };
+  const pause = async () => { if (Date.now() - sliceAt > 30) { await yieldLoop(); await afterLive(); sliceAt = Date.now(); } }; // fix196: and wait for a live tick
   const fixtures = db.prepare(`
     SELECT f.fixture_id, f.kickoff, f.date, f.home_id, f.away_id, th.fd_name AS fd_home, ta.fd_name AS fd_away, f.lineups
     FROM af_fixtures f
@@ -426,7 +426,7 @@ async function buildFeatures(group: string, force = false): Promise<number> {
   const ids = fixtures.map(f => f.fixture_id);
   const starters = new Map<number, Map<number, { ids: Set<number>; names: Map<number, string> }>>(); // fixture → team → XI
   const inj = new Map<number, Map<number, { id: number; name: string; type: string }[]>>(); // fixture → team → list
-  const chunk = 500;
+  const chunk = 150; // fix196: ~3,000 line-up rows a read (500 fixtures took up to 56 ms on a copy, several times that on the server)
   for (let i = 0; i < ids.length; i += chunk) {
     const part = ids.slice(i, i + chunk);
     const ph = part.map(() => '?').join(',');
@@ -697,10 +697,11 @@ export function startApiFootballScheduler(onUpdated?: () => void) {
     return;
   }
   // fix167: one league group per turn (the all-at-once rebuild blocked 2.3 s when the scheduler started)
-  after('AF features', () => rebuildAfFeaturesAsync().catch(() => undefined /* tables may be empty */), 0);
+  // fix196: the rebuild and the tick in the heavy() queue (one heavy job at a time, never during a live tick)
+  afterHeavy('AF features', () => rebuildAfFeaturesAsync().catch(() => undefined /* tables may be empty */), 0);
   const tick = () => afTick().then(() => onUpdated?.()).catch(() => undefined);
-  after('AF lineups/injuries', tick, 2 * 60 * 1000);
-  every('AF lineups/injuries', tick, TICK_MS);
+  afterHeavy('AF lineups/injuries', tick, 2 * 60 * 1000);
+  everyHeavy('AF lineups/injuries', tick, TICK_MS);
 }
 
 /* ------------------------------------------------------------------ */

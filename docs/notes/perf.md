@@ -47,3 +47,44 @@ logged; `/api/perf` lists the rest) mentioning tennis, model daily or player pag
 04:00 UTC daily job runs without a stall, and `/api/perf` → `heavy` shows the queue moving.
 
 Result: _to fill in after the check._
+
+## fix196 (20 Oct 2026): the last freezes (basketball game pages, match list, feature state, data health)
+
+Railway logs 20 Oct 16:10–17:00 UTC, after fix194 — what still blocked (all of these are "Event loop blocked" lines,
+over 500 ms; the breakdown from the "bb game page" log lines and a copy of the database, 10 Oct):
+
+| Where | Before | Cause | Fix |
+| --- | --- | --- | --- |
+| `/api/basketball/game/:id` and `/<lang>/basketball/game/*` (crawler pages) | 0.6–1.3 s each, many an hour (Googlebot reading old games) | the squads ("players to watch") read every player's career box scores (~4,000 lines a team) and ran after an await that never gave the thread back, so both teams + the rest of the page were one block; two SUMs over the whole league season (profile), the team's season games and the previous season asked of SQLite on every open, through an index that walked every league game before the date; today's NBA injury list built for finished games (715 ms on one page); the page kept only 2 min | page kept per game: finished 24 h (10 min in the first 2 days while box scores and checks come in), to come 5 min (never past tip-off), live not at all; the 1,500 most recent API pages and 3,000 crawler pages; a league season's games, box-score lines and seasons read once an hour and filtered in memory (same numbers: 40 game pages compared old vs new on the copy, identical); squads kept an hour per team and season and read 4 players at a time with a yield between; the thread given back after each part of the page; no injury list on finished games (it was today's list anyway); written preview kept 24 h for games finished 2+ days ago; new index `bb_games(code, season, kickoff)` (built in the index worker) for the crawler page's season records |
+| `/api/matches/upcoming` | 0.9–1.1 s every 10 min | the whole list (predictions for ~750 matches) rebuilt inside the request after every fixture-window refresh | stale-while-revalidate: the last copy is served at once; over 30 s old, the next build starts in the background (5 matches a batch, yields); only the first request after a start waits (for a sliced build). Still sent through res.json (market strip + free / signed-out trim); signed-out visitors get the same trimmed copy as a string made once per build |
+| feature state | 2.8 s (once 5.6 s) | the line-up lookup pages (40,000 rows) went into the maps in one loop (~400k rows); every fixture read in one sorted query; COUNT(*) over ~900k line-up rows for the change check; an admin backtest rebuilt the state with the synchronous builder | pages of 5,000 rows with a step every 2,000; fixtures in primary-key pages, sorted in memory; 64 player-season ranges instead of 12; MAX(rowid) instead of COUNT(*); the backtest uses the sliced build; the refresh runs in the heavy() queue and its slices wait for live ticks |
+| data health | 2.0 s (with the live poll) | predictions in batches of 25 (one batch right after the prediction cache was cleared ≈ 1 s); the tennis check in one block; a few checks without a yield between them | batches of 5, a yield (and a wait for a live tick) between every check and inside the history loop; tennis check in slices; the 10-min job in the heavy() queue |
+| AF lineups/injuries, lineup/injury features, predict more-leagues window | 0.6–1.4 s bursts, together | three jobs overlapping; line-up reads of 500 fixtures (~11,000 rows); predictions in batches of 25 | the AF tick, the AF features rebuild and the more-leagues predictions (always the latest window) in the heavy() queue; line-up reads of 150 fixtures; predictions 5 a batch, recording 10 |
+
+New in perf.ts: `liveRunning()`, `afterLive()` (wait while the live poll or a live job runs, at most 3 s),
+`heavySlicer()` (slicer that also waits for live ticks), `inBatches(…, { live: true })`, `runStepsAsync(…, { live: true })`,
+and heavy() never starts a job during a live tick. Heavy queue now: model daily, player pages warm, tennis jobs, feature
+state, data health, AF lineups/injuries, AF features, predict more-leagues window.
+
+Longest single block on the copy of the database (this laptop; the server is roughly 3–5× slower and its disk is
+colder), before → after:
+
+| Job | Before | After |
+| --- | --- | --- |
+| 30 NBA / EuroLeague game pages in a row | one 3.4 s block | 24 ms |
+| crawler basketball game page (20 old games, then the same again) | — | 65 ms first, 10 ms cached |
+| feature state build | 183–197 ms | 31 ms per step |
+| AF features rebuild (forced) | 56 ms | 41 ms |
+| data health (steady state; the first run after start loads modules) | 106–197 ms | 30 ms |
+
+Not tested locally: `/api/matches/upcoming` against a live fixture window (the local key gets 403 from
+Football-Data.org) and anything with tennis data (the copy has none).
+
+### Check after deploy (pending)
+
+Two hours of Railway logs after the fix196 deploy: no "Event loop blocked" at all (any label; only those over 500 ms are
+logged, `/api/perf` → recentStalls lists those over 300 ms — target: none over 300 ms). `/api/perf` → `heavy` shows the
+queue (feature state, data health, AF lineups/injuries … one at a time); "matches upcoming build" appears as a job and
+no request to /api/matches/upcoming is named in a stall. Also re-check the fix194 item (04:00 UTC daily job).
+
+Result: _to fill in after the check._
