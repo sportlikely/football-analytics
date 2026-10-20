@@ -7,7 +7,8 @@ import { t } from '../../../lib/i18n'
  */
 export interface LiveNow { pHome: number; pAway: number; score: { home: number; away: number }; total: number }
 
-export function LiveChancePanel({ home, away, now, before, status }: { home: string; away: string; now: LiveNow; before: { pHome: number; pAway: number }; status: string }) {
+/** fix193: `words` = the projection line's labels (tennis: the sets so far and the games played) */
+export function LiveChancePanel({ home, away, now, before, status, words }: { home: string; away: string; now: LiveNow; before: { pHome: number; pAway: number }; status: string; words?: { score: string; total: string } }) {
   const cap = (v: number) => Math.min(99, Math.max(1, Math.round(v)))
   const rows = [
     { k: 'H' as const, label: home, now: now.pHome, before: before.pHome, bar: 'bg-home' },
@@ -41,10 +42,10 @@ export function LiveChancePanel({ home, away, now, before, status }: { home: str
         {rows.map(r => <div key={r.k} className={`rounded-full ${r.bar} transition-all duration-700`} style={{ width: `calc(${Math.max(1, r.now)}% - 3px)` }} />)}
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-surface/70 border border-line/60 px-3 py-2">
-        <span className="text-xs text-muted">{t('Projected final score')}</span>
+        <span className="text-xs text-muted">{words?.score ?? t('Projected final score')}</span>
         <span className="text-right leading-tight">
           <span className="block num text-sm font-extrabold text-ink whitespace-nowrap">{now.score.home} – {now.score.away}</span>
-          <span className="block num text-[11px] text-faint whitespace-nowrap">{t('{0} points in total', { 0: now.total })}</span>
+          <span className="block num text-[11px] text-faint whitespace-nowrap">{words?.total ?? t('{0} points in total', { 0: now.total })}</span>
         </span>
       </div>
     </div>

@@ -12,7 +12,7 @@ import { t as tt } from './i18n'
 
 /** bb-league / bb-team: basketball (Oct 2026); ref = league code / API-Basketball team id.
  *  bb-player / nfl-player (fix153): ref = the provider's player id, teamName / teamIds = their team (games are matched per sport) */
-export type FavKind = 'league' | 'team' | 'player' | 'bb-league' | 'bb-team' | 'bb-player' | 'nfl-team' | 'nfl-league' | 'nfl-player'
+export type FavKind = 'league' | 'team' | 'player' | 'bb-league' | 'bb-team' | 'bb-player' | 'nfl-team' | 'nfl-league' | 'nfl-player' | 'tennis-player' | 'tennis-tournament'
 export interface Favorite {
   kind: FavKind
   /** league: competition code · team: name key (same club across data sources) · player: player id */

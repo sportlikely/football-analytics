@@ -204,6 +204,19 @@ const seePlayer = db.prepare(`INSERT INTO tennis_players (id, name, country, tou
   ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, name), country = COALESCE(excluded.country, country), tour = COALESCE(excluded.tour, tour),
     ranking = COALESCE(excluded.ranking, ranking), ranking_points = COALESCE(excluded.ranking_points, ranking_points), seen_at = excluded.seen_at`);
 
+/**
+ * fix193: a live match's current game (points) and server, when the provider gives them (field names vary by feed: the
+ * score's points / game, the match's server / serving) — for the live win chance; null when neither is there.
+ */
+function liveExtra(m: any): string | null {
+  const sc = m?.score || {};
+  const pts = sc.points ?? sc.game ?? sc.current_game ?? null;
+  const pair = Array.isArray(pts) && pts.length === 2 ? pts.map((x: any) => String(x)) : pts && typeof pts === 'object' && ('p1' in pts || 'player1' in pts) ? [String(pts.p1 ?? pts.player1), String(pts.p2 ?? pts.player2)] : null;
+  const srv = num(m?.server ?? m?.serving ?? sc.server ?? sc.serving);
+  if (!pair && srv === null) return null;
+  return JSON.stringify({ livePoints: pair, server: srv === 1 || srv === 2 ? srv : null, at: nowIso() });
+}
+
 /** A Match object (/matches, /history/matches, a tape's `match`) → tennis_matches. Doubles are skipped. */
 export function storeMatch(m: any, source: 'fixture' | 'live' | 'history'): boolean {
   if (!m || num(m.id) === null || isDoubles(m)) return false;
@@ -214,7 +227,7 @@ export function storeMatch(m: any, source: 'fixture' | 'live' | 'history'): bool
     str(m.draw) || 'singles', str(m.round), str(m.round_code), m.is_qualifying == null ? null : m.is_qualifying ? 1 : 0, bestOf(m.format),
     str(m.scheduled_time) || str(m.live_at), str(m.status), str(m.event_status), num(p1.id), str(p1.name), num(p2.id), str(p2.name),
     sc?.sets ? JSON.stringify(sc.sets) : null, sc?.games ? JSON.stringify(sc.games) : null, num(m.winner), outcome,
-    outcome && /retired|walkover|default/.test(outcome) ? 1 : 0, null, source, nowIso());
+    outcome && /retired|walkover|default/.test(outcome) ? 1 : 0, source === 'live' ? liveExtra(m) : null, source, nowIso());
   for (const p of [p1, p2]) if (num(p.id) !== null) seePlayer.run(num(p.id), str(p.name), str(p.country), str(p.tour), num(p.ranking), num(p.ranking_points), nowIso());
   return true;
 }
@@ -466,11 +479,16 @@ function fillTiersFromHistory(): number {
 }
 
 let liveCount = 0, lastLiveRun = 0;
+/** fix193: called after every live poll with the ids seen live (the public site samples the live win chance) */
+let liveHook: ((ids: number[]) => void) | null = null;
+export const setTennisLiveHook = (f: (ids: number[]) => void) => { liveHook = f; };
 async function syncLive() {
   let n = 0;
-  await pages('/matches', { status: 'live', draw: 'singles' }, 10, 'core', rows => { tx(() => { for (const m of rows) if (storeMatch(m, 'live')) n++; }); });
+  const ids: number[] = [];
+  await pages('/matches', { status: 'live', draw: 'singles' }, 10, 'core', rows => { tx(() => { for (const m of rows) if (storeMatch(m, 'live')) { n++; ids.push(Number(m.id)); } }); });
   liveCount = n;
   lastLiveRun = Date.now();
+  if (liveHook && ids.length) { try { liveHook(ids); } catch (e: any) { logger.warn(`tennis live hook: ${e.message}`); } }
   return `${n} live`;
 }
 

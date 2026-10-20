@@ -4,7 +4,11 @@
  */
 
 /** A team (or player) as the home page shows it. */
-export interface HTeam { id: number | string; name: string; short: string; logo: string | null; tla?: string | null; href: string }
+export interface HTeam {
+  id: number | string; name: string; short: string; logo: string | null; tla?: string | null; href: string
+  /** fix193: individual sports (tennis) — the player's flag (emoji) instead of a crest, and the world ranking */
+  flag?: string | null; rank?: number | null
+}
 
 /** One result cell of a prediction: "1 · 54%" (football 1 / X / 2, basketball and NFL 1 / 2, tennis the two players). */
 export interface HCell { key: string; head: string; label: string; pct: number; on: boolean }
@@ -87,7 +91,7 @@ export interface SportHomeData {
 
 export interface SportAdapter {
   /** the playing surface drawn under the hero */
-  field: 'pitch' | 'court' | 'gridiron'
+  field: 'pitch' | 'court' | 'gridiron' | 'tennis'
   /** an admin preview line on top while the sport is not public */
   banner?: string | null
   /** fix142: a league toggle on top (American football: NFL | College) */

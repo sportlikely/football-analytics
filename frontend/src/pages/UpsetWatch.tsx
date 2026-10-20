@@ -12,9 +12,9 @@ import { OurPickBadge } from '../components/DcPick'
  * fix144: the same page for basketball and American football (/basketball/upset-watch, /american-football/upset-watch):
  * winner sports have no draw, so the draw bar and the draw numbers are left out.
  */
-export type UpsetSport = 'football' | 'basketball' | 'american-football'
-const API_OF: Record<UpsetSport, string> = { football: '/upset-watch', basketball: '/basketball/upset-watch', 'american-football': '/nfl/upset-watch' }
-const GAME_OF: Record<UpsetSport, (id: number) => string> = { football: id => `/match/${id}`, basketball: id => `/basketball/game/${id}`, 'american-football': id => `/american-football/game/${id}` }
+export type UpsetSport = 'football' | 'basketball' | 'american-football' | 'tennis'
+const API_OF: Record<UpsetSport, string> = { football: '/upset-watch', basketball: '/basketball/upset-watch', 'american-football': '/nfl/upset-watch', tennis: '/tennis/upset-watch' }
+const GAME_OF: Record<UpsetSport, (id: number) => string> = { football: id => `/match/${id}`, basketball: id => `/basketball/game/${id}`, 'american-football': id => `/american-football/game/${id}`, tennis: id => `/tennis/match/${id}` }
 
 interface Watch {
   matchId: number; league: string; date: string; home: string; away: string

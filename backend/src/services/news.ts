@@ -17,7 +17,9 @@ import { every, after } from './perf';
 import { isBlockedSource, JUNK_TITLE, YOUTH_WOMEN, SPAM, BUSINESS, mostlyNonLatin, otherSport, isBlockedDomain, blockDomain } from './newsBlocklist';
 import { isTrustedSource, domainOf } from './newsSources';
 
-type Sport = 'football' | 'basketball' | 'american-football';
+type Sport = 'football' | 'basketball' | 'american-football' | 'tennis';
+/** fix193: sports whose stories are filed by feed (one league per feed), not by matching league names in the text */
+const BY_FEED = (sport: Sport) => sport === 'american-football' || sport === 'tennis';
 type Feed = { source: string; url: string; league?: string; sport?: Sport; search?: boolean };
 
 const UA = { 'User-Agent': 'SportLikely/1.0 (+https://sportlikely.com)' };
@@ -72,7 +74,13 @@ const FEEDS: Feed[] = [
   { source: 'ESPN', url: 'https://www.espn.com/espn/rss/ncf/news', league: 'NCAA', sport: 'american-football' },
   { source: 'CBS Sports', url: 'https://www.cbssports.com/rss/headlines/college-football/', league: 'NCAA', sport: 'american-football' },
   { source: 'Yahoo Sports', url: 'https://sports.yahoo.com/college-football/rss.xml', league: 'NCAA', sport: 'american-football' },
-  { source: 'The Guardian', url: 'https://www.theguardian.com/sport/college-football/rss', league: 'NCAA', sport: 'american-football' }
+  { source: 'The Guardian', url: 'https://www.theguardian.com/sport/college-football/rss', league: 'NCAA', sport: 'american-football' },
+  // Tennis (fix193): the outlets' tennis sections, filed under one 'TENNIS' league (men and women together)
+  { source: 'ESPN', url: 'https://www.espn.com/espn/rss/tennis/news', league: 'TENNIS', sport: 'tennis' },
+  { source: 'The Guardian', url: 'https://www.theguardian.com/sport/tennis/rss', league: 'TENNIS', sport: 'tennis' },
+  { source: 'BBC Sport', url: 'https://feeds.bbci.co.uk/sport/tennis/rss.xml', league: 'TENNIS', sport: 'tennis' },
+  { source: 'Yahoo Sports', url: 'https://sports.yahoo.com/tennis/rss.xml', league: 'TENNIS', sport: 'tennis' },
+  { source: 'CBS Sports', url: 'https://www.cbssports.com/rss/headlines/tennis/', league: 'TENNIS', sport: 'tennis' }
 ];
 
 /** Basketball leagues for filing stories (team names come from bb_games). */
@@ -215,7 +223,8 @@ try { db.exec(`ALTER TABLE news_items ADD COLUMN domain TEXT`); } catch { /* col
 const TOP_LEAGUES: Record<string, Set<string>> = {
   football: new Set(['PL', 'PD', 'SA', 'BL1', 'FL1', 'DED', 'PPL', 'CL', 'EC', 'WC', 'AF39', 'AF140', 'AF135', 'AF78', 'AF61', 'AF88', 'AF94', 'AF2', 'AF4', 'AF1']),
   basketball: new Set(['NBA', 'EL']),
-  'american-football': new Set(['NFL'])
+  'american-football': new Set(['NFL']),
+  tennis: new Set(['TENNIS'])
 };
 const isTop = (code: string, sport: Sport) => TOP_LEAGUES[sport]?.has(code.toUpperCase()) ?? false;
 const isSearchLink = (link: string) => /^https:\/\/news\.google\.com\//.test(link);
@@ -371,7 +380,7 @@ function queuePictures(links: string[]) {
 const nameCache = new Map<string, { at: number; name: string | null }>();
 db.exec(`CREATE TABLE IF NOT EXISTS news_league_names (key TEXT PRIMARY KEY, name TEXT NOT NULL)`);
 export function leagueNameOf(code: string, sport: Sport = 'football'): string {
-  const fixed = sport === 'basketball' ? BB_LEAGUE_NAME.get(code) : sport === 'american-football' ? (code === 'NCAA' ? 'College football' : code === 'NFL' ? 'NFL' : undefined) : LEAGUE_NAME.get(code);
+  const fixed = sport === 'basketball' ? BB_LEAGUE_NAME.get(code) : sport === 'american-football' ? (code === 'NCAA' ? 'College football' : code === 'NFL' ? 'NFL' : undefined) : sport === 'tennis' ? 'Tennis' : LEAGUE_NAME.get(code);
   if (fixed) return fixed;
   const k = `${sport}|${code}`, c = nameCache.get(k);
   if (c && Date.now() - c.at < (c.name ? 3600 : 300) * 1000) return c.name || code;
@@ -506,7 +515,7 @@ export function mentionsLeague(code: string, sport: Sport, title: string, summar
 }
 /** Codes a Google News search story is filed under: leagues it names (never the search alone). */
 function searchCodes(it: { title: string; summary: string; feedLeague?: string; sport: Sport }): string[] {
-  const cand = new Set([...(it.sport === 'american-football' ? [] : leaguesFor(it.title, it.summary, undefined, it.sport)), ...(it.feedLeague ? [it.feedLeague] : [])]);
+  const cand = new Set([...(BY_FEED(it.sport) ? [] : leaguesFor(it.title, it.summary, undefined, it.sport)), ...(it.feedLeague ? [it.feedLeague] : [])]);
   return [...cand].filter(c => mentionsLeague(c, it.sport, it.title, it.summary));
 }
 
@@ -640,6 +649,7 @@ export function collegeTeamNames(full: string, all: string[]): string[] {
 export function leaguesFor(title: string, summary: string, feedLeague?: string, sport: Sport = 'football'): string[] {
   // NFL / college feeds belong to their league only; the team pages find their stories by team name (newsFor team)
   if (sport === 'american-football') return [feedLeague || 'NFL'];
+  if (sport === 'tennis') return [feedLeague || 'TENNIS'];
   if (!matcher || Date.now() - matcherAt > 6 * 3600 * 1000) buildMatcher();
   if (sport === 'basketball' && !bbMatcher) buildBbMatcher();
   const M = sport === 'basketball' ? bbMatcher! : matcher!;
@@ -886,7 +896,7 @@ export function purgeNews(): { checked: number; deleted: number; retagged: numbe
         if (isSpam(r.title)) { blockDomain(domain, r.title); del.run(r.link); deleted++; continue; }
         if (isBlockedDomain(domain) || !isTrustedSource(domain, r.source)) { del.run(r.link); deleted++; continue; }
         // re-filed: the leagues the text names, from the stored tags (the searched league among them)
-        const keep = new Set([...(sport === 'american-football' ? [] : leaguesFor(r.title, r.summary, undefined, sport)), ...codes].filter(c => mentionsLeague(c, sport, r.title, r.summary)));
+        const keep = new Set([...(BY_FEED(sport) ? [] : leaguesFor(r.title, r.summary, undefined, sport)), ...codes].filter(c => mentionsLeague(c, sport, r.title, r.summary)));
         if (!keep.size || isJunk(r.title, r.source, [...keep], sport, r.summary || '')) { del.run(r.link); deleted++; continue; }
         const v = `,${[...keep].join(',')},`;
         if (v !== r.leagues || (!r.domain && domain)) { tag.run(v, domain, r.link); retagged++; }

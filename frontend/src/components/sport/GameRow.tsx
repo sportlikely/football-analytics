@@ -125,6 +125,7 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
               <Crest team={t} size={15} />
               <span className={`text-[13px] truncate ${onSide(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>
                 <span className="sm:hidden">{t.short}</span><span className="hidden sm:inline">{t.name}</span>
+                {t.rank ? <span className="ml-1 text-[10px] font-semibold text-faint num">{t.rank}</span> : null}
               </span>
               {score !== null && <span className="ml-auto pl-2 num text-[13px] font-extrabold tabular-nums text-live">{score}</span>}
             </div>

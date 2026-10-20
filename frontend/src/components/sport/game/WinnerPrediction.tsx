@@ -39,6 +39,8 @@ export interface WinnerPredictionProps {
   noPrediction: string
   /** a locked pick shows the team (basketball) */
   showLockedPick?: boolean
+  /** fix193: the middle tile's label and value (tennis: total games); default total points */
+  middle?: { label: string; value: string }
 }
 
 function Tile({ k, label, v, active, roll, delay = 0, text }: { k: 'H' | 'A' | 'T'; label: string; v?: number; active: boolean; roll: boolean; delay?: number; text?: string }) {
@@ -112,7 +114,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
             <div className="text-[11px] font-semibold uppercase tracking-wide text-faint mb-2">{t('Who wins')}</div>
             <div className="grid grid-cols-3 gap-3">
               <Tile k="H" label={x.home.name} v={p.pHome} active={pick === 'H'} roll={roll} />
-              <Tile k="T" label={t('Total points')} text={total} active={false} roll={roll} />
+              <Tile k="T" label={x.middle?.label ?? t('Total points')} text={x.middle?.value ?? total} active={false} roll={roll} />
               <Tile k="A" label={x.away.name} v={p.pAway} active={pick === 'A'} roll={roll} delay={240} />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">

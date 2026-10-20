@@ -7,7 +7,7 @@ import type { SportId } from './sports'
  * `label` is the English text (shown through t()); `tab` = also a phone tab (the icon / short label key in App.tsx).
  */
 export interface NavItem {
-  key: 'home' | 'games' | 'today' | 'standings' | 'favorites' | 'myPicks' | 'upsets' | 'draws' | 'accuracy'
+  key: 'home' | 'games' | 'today' | 'standings' | 'rankings' | 'favorites' | 'myPicks' | 'upsets' | 'draws' | 'accuracy'
   label: string
   to: string
   end?: boolean
@@ -24,6 +24,13 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
     { key: 'myPicks', label: 'My picks', to: '/basketball/my-picks' },
     { key: 'upsets', label: 'Upset watch', to: '/basketball/upset-watch', tab: 'Upsets' },
     { key: 'accuracy', label: 'Accuracy', to: '/basketball/accuracy', admin: true, tab: 'Accuracy' }
+  ]
+  // fix193: tennis — Home · Matches · Today · Rankings · Favorites · Upset watch (Pro) · Accuracy (admins)
+  if (sport === 'tennis') return [
+    { key: 'home', label: 'Home', to: '/tennis', end: true, tab: 'Home' },
+    { key: 'games', label: 'Matches', to: '/tennis/matches', tab: 'Matches' },
+    { key: 'today', label: 'Today', to: '/tennis/today' },
+    { key: 'upsets', label: 'Upset watch', to: '/tennis/upset-watch', tab: 'Upsets' }
   ]
   if (sport === 'american-football') return [
     // fix185: one home / games / today for NFL and college; the standings follow the league last shown
@@ -49,4 +56,4 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
 }
 
 /** Staff "Past seasons" page of each sport (account menu). */
-export const PAST_OF: Record<SportId, string> = { football: '/past', basketball: '/basketball/past', 'american-football': '/american-football/past', tennis: '/past', baseball: '/past' }
+export const PAST_OF: Record<SportId, string> = { football: '/past', basketball: '/basketball/past', 'american-football': '/american-football/past', tennis: '/tennis/past', baseball: '/past' }

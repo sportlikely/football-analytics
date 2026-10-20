@@ -10,6 +10,7 @@ import { nflCurrentSeason, schoolName, HIDE_OTHER } from './nfl';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame as nflGameRaw, nflStandings, nflTeam as nflTeamRaw, nflPlayer as nflPlayerRaw, leagueOfTeamId, type NflGame } from './nflSite';
 import { nflPreview } from './nflGameExtras';
 import { listGuides, getGuide } from './guides';
+import { tennisMatchesBetween, levelRank, tierLabel, playedBefore, headToHead } from './tennisSite';
 import { HUBS, hubBySlug, hubByOld, hubForCode, hubOpen, buildHub, hubDescription, hubRange } from './hubs';
 import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, ui, longDate } from './seoText';
 import { fbLast as fbLastRaw, fbNext as fbNextRaw, fbH2h as fbH2hRaw, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById as bbGameByIdRaw, bbLast as bbLastRaw, bbNext as bbNextRaw, bbH2h as bbH2hRaw, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName as bbTeamNameRaw, BbGameRow } from './seoFacts';
@@ -189,11 +190,11 @@ export function bbLine(g: BbGameRow, lang: Lang): string {
 }
 /** Today's games grouped by league, with their one-line facts (the /predictions/today pages and their API). */
 const todayCache = new Map<string, { at: number; v: ReturnType<typeof buildToday> }>();
-export type TodaySport = 'football' | 'basketball' | 'american-football';
-export function todayGroups(sport: TodaySport, lang: Lang, dayIso = new Date().toISOString().slice(0, 10), league: 1 | 2 | (1 | 2)[] = [1, 2]) {
-  const k = `${sport}:${league}:${lang}:${dayIso}`, c = todayCache.get(k);
+export type TodaySport = 'football' | 'basketball' | 'american-football' | 'tennis';
+export function todayGroups(sport: TodaySport, lang: Lang, dayIso = new Date().toISOString().slice(0, 10), league: 1 | 2 | (1 | 2)[] = [1, 2], tour: string | null = null) {
+  const k = `${sport}:${league}:${tour}:${lang}:${dayIso}`, c = todayCache.get(k);
   if (c && Date.now() - c.at < 10 * 60 * 1000) return c.v;
-  const v = buildToday(sport, lang, dayIso, league);
+  const v = sport === 'tennis' ? tennisToday(lang, dayIso, tour) : buildToday(sport, lang, dayIso, league);
   if (todayCache.size > 200) todayCache.clear();
   todayCache.set(k, { at: Date.now(), v });
   return v;
@@ -211,6 +212,29 @@ function nflLine(g: any, lang: Lang): string {
   const h2 = db.prepare(`SELECT home_id, home_pts, away_pts FROM nfl_games WHERE ((home_id = ? AND away_id = ?) OR (home_id = ? AND away_id = ?)) AND kickoff < ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL ORDER BY kickoff DESC LIMIT 1`).get(g.home_id, g.away_id, g.away_id, g.home_id, g.kickoff) as any;
   if (h2) bits.push(`${pk.lastMeeting} ${h2.home_id === g.home_id ? `${h2.home_pts}-${h2.away_pts}` : `${h2.away_pts}-${h2.home_pts}`}`);
   return bits.join(' · ');
+}
+
+/** fix193: today's tennis matches by tournament, one line each: ranks, form (last 10), the last meeting */
+function tennisToday(lang: Lang, dayIso: string, tour: string | null) {
+  const pk = pack(lang);
+  const groups = new Map<string, { league: string; code: string | null; games: any[] }>();
+  const list = tennisMatchesBetween(`${dayIso}T00:00:00.000Z`, `${dayIso}T23:59:59.999Z`, tour, false)
+    .sort((a, b) => levelRank(a.tournament.tier, a.tour, a.tournament.name) - levelRank(b.tournament.tier, b.tour, b.tournament.name) || a.start.localeCompare(b.start));
+  for (const m of list) {
+    if (m.state === 'off') continue;
+    const k = m.tournament.key;
+    if (!groups.has(k)) groups.set(k, { league: `${m.tournament.name} · ${tierLabel(m.tournament.tier, m.tour)}`, code: k, games: [] });
+    const bits: string[] = [];
+    if (m.home.rank && m.away.rank) bits.push(`#${m.home.rank} vs #${m.away.rank}`);
+    const f = (id: number | null) => { const xs = playedBefore(id, m.start, 10); return xs.length >= 5 ? `${xs.filter(x => x.won).length}-${xs.filter(x => !x.won).length}` : null; };
+    const fh = f(m.home.id), fa = f(m.away.id);
+    if (fh && fa) bits.push(`${pk.form} ${fh} vs ${fa}`);
+    const h = headToHead(m.home.id, m.away.id, m.start).list[0];
+    if (h) bits.push(`${pk.lastMeeting} ${(h.winner === 1 ? h.home : h.away).name} ${(h.score?.sets || []).map((x: [number, number]) => (h.winner === 1 ? `${x[0]}-${x[1]}` : `${x[1]}-${x[0]}`)).join(' ')}`);
+    groups.get(k)!.games.push({ id: m.id, kickoff: m.start, home: m.home.name, away: m.away.name, homeId: m.home.id, awayId: m.away.id,
+      score: m.state === 'done' && m.score ? m.score.won : null, line: bits.join(' · ') });
+  }
+  return { day: dayIso, groups: [...groups.values()] };
 }
 
 function buildToday(sport: TodaySport, lang: Lang, dayIso: string, leagues: 1 | 2 | (1 | 2)[] = [1, 2]) {

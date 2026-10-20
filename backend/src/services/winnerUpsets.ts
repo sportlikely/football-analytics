@@ -7,8 +7,9 @@
 import { db } from '../db';
 import { WATCH, watchOf, watchBands, bandOf } from './upsetAlerts';
 import { BB_TRIAL, isPreseason } from './bbModel';
+import { MATCH_COLS, MATCH_FROM, MATCH_PUBLIC, shapeMatch, tierLabel } from './tennisSite';
 
-export type WinnerSport = 'basketball' | 'american-football';
+export type WinnerSport = 'basketball' | 'american-football' | 'tennis';
 const r1 = (x: number) => Math.round(x * 10) / 10;
 
 interface Row { id: number; league: string; date: string; home: string; away: string; homeLogo: string | null; awayLogo: string | null; pHome: number; hs: number | null; as_: number | null; done: boolean }
@@ -45,8 +46,28 @@ function nflRows(upcoming: boolean): Row[] {
   }));
 }
 
+/** fix193: tennis — player 1 = "home"; ITF and walkovers / unfinished matches left out; the record from saved predictions */
+function tennisRows(upcoming: boolean): Row[] {
+  const now = new Date().toISOString(), soon = new Date(Date.now() + 7 * 86400000).toISOString();
+  const rows = (upcoming
+    ? db.prepare(`SELECT p.p1, p.made_at, p.scheduled_at AS pat, ${MATCH_COLS} FROM tennis_predictions p JOIN tennis_matches m ON m.id = p.match_id
+        LEFT JOIN tennis_players p1 ON p1.id = m.p1_id LEFT JOIN tennis_players p2 ON p2.id = m.p2_id LEFT JOIN tennis_tournaments t ON t.id = m.tournament_id
+        WHERE p.scheduled_at > ? AND p.scheduled_at < ? AND m.status = 'upcoming' AND ${MATCH_PUBLIC}`).all(now, soon)
+    : db.prepare(`SELECT p.p1, p.made_at, p.scheduled_at AS pat, ${MATCH_COLS} FROM tennis_predictions p JOIN tennis_matches m ON m.id = p.match_id
+        LEFT JOIN tennis_players p1 ON p1.id = m.p1_id LEFT JOIN tennis_players p2 ON p2.id = m.p2_id LEFT JOIN tennis_tournaments t ON t.id = m.tournament_id
+        WHERE m.status = 'completed' AND m.winner IN (1, 2) AND p.made_at <= p.scheduled_at AND ${MATCH_PUBLIC}`).all()) as any[];
+  const out: Row[] = [];
+  for (const r of rows) {
+    const m = shapeMatch(r);
+    if (!m || m.tour === 'itf' || (!upcoming && m.state !== 'done')) continue;
+    out.push({ id: m.id, league: `${m.tournament.name} · ${tierLabel(m.tournament.tier, m.tour)}`, date: m.start, home: m.home.name, away: m.away.name, homeLogo: null, awayLogo: null,
+      pHome: r.p1, hs: upcoming ? null : m.winner === 1 ? 1 : 0, as_: upcoming ? null : m.winner === 2 ? 1 : 0, done: m.state === 'done' });
+  }
+  return out;
+}
+
 export function winnerUpsetReport(sport: WinnerSport) {
-  const get = sport === 'basketball' ? bbRows : nflRows;
+  const get = sport === 'basketball' ? bbRows : sport === 'tennis' ? tennisRows : nflRows;
   const cut = (r: Row) => watchOf(100 * r.pHome, 0, 100 * (1 - r.pHome));
   const upcoming = get(true).map(r => {
     const w = cut(r);

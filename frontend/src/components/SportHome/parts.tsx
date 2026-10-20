@@ -25,8 +25,10 @@ const initials = (raw: string | null | undefined) => {
   return (w.length >= 2 ? w.slice(0, 2).map(x => x[0]).join('') : (w[0] || s).slice(0, 3)).toUpperCase()
 }
 
-export function Crest({ team, size = 28 }: { team: { name: string; logo: string | null; tla?: string | null }; size?: number }) {
+export function Crest({ team, size = 28 }: { team: { name: string; logo: string | null; tla?: string | null; flag?: string | null }; size?: number }) {
   const [broken, setBroken] = useState(false)
+  // fix193: an individual sport (tennis) shows the player's flag where a team shows its crest
+  if (!team.logo && team.flag) return <span className="grid place-items-center flex-shrink-0 leading-none" style={{ width: size, height: size, fontSize: Math.round(size * 0.8) }} aria-hidden>{team.flag}</span>
   return team.logo && !broken ? (
     <img src={team.logo} alt="" width={size} height={size} onError={() => setBroken(true)} className="object-contain flex-shrink-0" style={{ width: size, height: size }} />
   ) : (
@@ -119,6 +121,19 @@ function Field({ kind }: { kind: SportAdapter['field'] }) {
             <circle cx="500" cy="200" r="70" />
             <rect x="20" y="110" width="140" height="180" />
             <rect x="840" y="110" width="140" height="180" />
+          </>
+        ) : kind === 'tennis' ? (
+          <>
+            {/* fix193: a tennis court — doubles and singles lines, the net, service boxes */}
+            <rect x="20" y="10" width="960" height="380" />
+            <line x1="20" y1="58" x2="980" y2="58" />
+            <line x1="20" y1="342" x2="980" y2="342" />
+            <line x1="500" y1="0" x2="500" y2="400" strokeWidth="4" />
+            <line x1="276" y1="58" x2="276" y2="342" />
+            <line x1="724" y1="58" x2="724" y2="342" />
+            <line x1="276" y1="200" x2="724" y2="200" />
+            <line x1="20" y1="200" x2="34" y2="200" />
+            <line x1="966" y1="200" x2="980" y2="200" />
           </>
         ) : kind === 'court' ? (
           <>

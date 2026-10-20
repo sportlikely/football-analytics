@@ -12,6 +12,7 @@ import ConsoleGate from './components/ConsoleGate'
 import SportSwitch from './components/SportSwitch'
 import { useBbConfig } from './lib/bb'
 import { useNflConfig, useNflLeague } from './lib/nfl'
+import { useTennisConfig } from './lib/tennis'
 import { sportNav, PAST_OF } from './lib/sportNav'
 import { sportOfPath } from './lib/sports'
 import { socket } from './lib/socket'
@@ -95,6 +96,10 @@ const NflLeague = page(() => import('./pages/nfl/NflLeague'))
 const NflTeam = page(() => import('./pages/nfl/NflTeam'))
 const NflPlayer = page(() => import('./pages/nfl/NflPlayer'))
 const NflFavorites = page(() => import('./pages/nfl/NflFavorites'))
+// fix193: tennis (admin only until TENNIS_PUBLIC=1)
+const TennisHome = page(() => import('./pages/tennis/TennisHome'))
+const TennisMatches = page(() => import('./pages/tennis/TennisMatches'))
+const TennisMatch = page(() => import('./pages/tennis/TennisMatch'))
 const Terms = page(() => import('./pages/Legal').then(m => ({ default: m.Terms })))
 const Privacy = page(() => import('./pages/Legal').then(m => ({ default: m.Privacy })))
 const NotFound = page(() => import('./pages/Legal').then(m => ({ default: m.NotFound })))
@@ -405,6 +410,13 @@ function FooterSocial() {
 
 
 /** The NFL section is live for this visitor (admins before launch, everyone once NFL_PUBLIC=1). */
+/** fix193: the tennis section is live for this visitor (admins before launch, everyone once TENNIS_PUBLIC=1). */
+function useTennisOpen() {
+  const loc = useLocation()
+  const cfg = useTennisConfig()
+  return sportOfPath(loc.pathname).id === 'tennis' && (cfg === null ? true : !!cfg.open)
+}
+
 function useNflOpen() {
   const loc = useLocation()
   const cfg = useNflConfig()
@@ -422,6 +434,7 @@ function FooterNfl() {
 function DataLine() {
   const sport = sportOfPath(useLocation().pathname).id
   if (sport === 'american-football') return <p>{tt("Data: API-American-Football.")}</p>
+  if (sport === 'tennis') return <p>{tt("Data: Live Tennis API.")}</p>
   const bb = sport === 'basketball'
   return <p>{bb ? tt("Data: API-Basketball, balldontlie (NBA players and injuries).") : tt("Data: Football-Data.org, API-Football, football-data.co.uk, Transfermarkt (squad values).")}</p>
 }
@@ -435,9 +448,10 @@ function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
   const { access } = useAuth()
   const bb = useBbOpen()
   const nfl = useNflOpen()
+  const tennis = useTennisOpen()
   const { base } = useNflLeague()
   const loc = useLocation()
-  const items: { key: string; to: string; end: boolean; label: string; admin: boolean }[] = sportNav(nfl ? 'american-football' : bb ? 'basketball' : 'football', base)
+  const items: { key: string; to: string; end: boolean; label: string; admin: boolean }[] = sportNav(tennis ? 'tennis' : nfl ? 'american-football' : bb ? 'basketball' : 'football', base)
     .filter(i => !i.admin || access === 'admin').map(i => ({ key: i.key, to: i.to, end: !!i.end, label: tt(i.label), admin: !!i.admin }))
   // Oct 2026: Past seasons, Users and CRM live in the account menu (top right), staff only
   if (access !== 'pro' && access !== 'admin') items.push({ key: 'premium', to: '/premium', end: false, label: access === 'premium' ? tt("Go Pro") : tt("Premium"), admin: false })
@@ -542,18 +556,20 @@ const TAB_ICONS: Record<string, string> = {
   Today: 'M7 3v3M17 3v3M4 8h16M5 5h14v15H5zM9 13h2v2H9z',
   Football: 'M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18M12 7l3.5 2.5-1.3 4h-4.4l-1.3-4z',
   Premium: 'M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z',
-  Upsets: 'M12 3l9 16H3zM12 10v4M12 17h.01'
+  Upsets: 'M12 3l9 16H3zM12 10v4M12 17h.01',
+  Rankings: 'M4 20h4v-8H4zM10 20h4V4h-4zM16 20h4v-12h-4z'
 }
 
 /** Phone: app-style tab bar at the bottom, with a search sheet. */
 function BottomTabs() {
   const bb = useBbOpen()
   const nfl = useNflOpen()
+  const tennis = useTennisOpen()
   const nflBaseNow = useNflLeague().base
   const { access } = useAuth()
   const admin = access === 'admin' // the Accuracy tab is admin-only for now (fix118)
   // fix144: the phone tabs of the sport on screen come from the same config as the desktop menu
-  const tabs = sportNav(nfl ? 'american-football' : bb ? 'basketball' : 'football', nflBaseNow).filter(i => i.tab && (!i.admin || admin))
+  const tabs = sportNav(tennis ? 'tennis' : nfl ? 'american-football' : bb ? 'basketball' : 'football', nflBaseNow).filter(i => i.tab && (!i.admin || admin))
   const [searching, setSearching] = useState(false)
   const loc = useLocation()
   useEffect(() => setSearching(false), [loc.pathname])
@@ -753,7 +769,7 @@ function Shell() {
             <Route path="/join/:code" element={<Join />} />
             <Route path="/crm" element={<ConsoleGate><Crm /></ConsoleGate>} />
             <Route path="/basketball/*" element={<BbRoutes />} />
-            <Route path="/tennis/*" element={<SportSoon sport="tennis" />} />
+            <Route path="/tennis/*" element={<TennisRoutes />} />
             <Route path="/baseball/*" element={<SportSoon sport="baseball" />} />
             <Route path="/american-football/*" element={<NflRoutes />} />
             <Route path="*" element={<NotFound />} />
@@ -791,6 +807,23 @@ function Shell() {
 }
 
 export default App
+
+/** Tennis section (fix193): the full site for admins before launch, everyone once TENNIS_PUBLIC=1; else "coming soon". */
+function TennisRoutes() {
+  const cfg = useTennisConfig()
+  if (!cfg) return <div className="min-h-[80vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={tt('Loading…')} /></div>
+  if (!cfg.open) return <SportSoon sport="tennis" />
+  return (
+    <Routes>
+      <Route index element={<TennisHome />} />
+      <Route path="matches" element={<TennisMatches />} />
+      <Route path="today" element={<TennisMatches today />} />
+      <Route path="match/:id" element={<TennisMatch />} />
+      <Route path="upset-watch" element={<PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming matches where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}><UpsetWatch sport="tennis" /></PremiumGate>} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  )
+}
 
 /** NFL section (fix137): the full site for admins before launch, everyone once NFL_PUBLIC=1; else "coming soon". */
 function NflRoutes() {

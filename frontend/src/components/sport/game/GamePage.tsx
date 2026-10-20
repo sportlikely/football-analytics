@@ -92,13 +92,13 @@ export function HeroLogo({ src }: { src: string | null | undefined }) {
 }
 
 /** Stories about either team, newest first (every sport's prediction tab). */
-export function GameNews({ home, away }: { home: Record<string, string | number | undefined>; away: Record<string, string | number | undefined> }) {
+export function GameNews({ home, away, title }: { home: Record<string, string | number | undefined>; away: Record<string, string | number | undefined>; title?: string }) {
   const hn = useNews({ ...home, limit: 6 })
   const an = useNews({ ...away, limit: 6 })
   const news: NewsItem[] | null = hn && an ? [...new Map([...hn, ...an].map(n => [n.link, n])).values()].sort((a, b) => (b.published || '').localeCompare(a.published || '')).slice(0, 8) : null
   if (!news || !news.length) return null
   return (
-    <Section title={t('News about both teams')}>
+    <Section title={title || t('News about both teams')}>
       <div className="-mx-2"><NewsRows items={news} /></div>
     </Section>
   )

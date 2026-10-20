@@ -4,6 +4,7 @@ import { SPORTS, sportOfPath } from '../lib/sports'
 import { t } from '../lib/i18n'
 import { useBbConfig } from '../lib/bb'
 import { useNflConfig } from '../lib/nfl'
+import { useTennisConfig } from '../lib/tennis'
 
 /** Sport picker next to the logo: Football now, the other sports as "soon". */
 export default function SportSwitch() {
@@ -11,8 +12,9 @@ export default function SportSwitch() {
   const current = sportOfPath(loc.pathname)
   const bb = useBbConfig()
   const nfl = useNflConfig()
-  // basketball / American football are open for admins before launch, for everyone after
-  const isLive = (id: string, live: boolean) => live || (id === 'basketball' && !!bb?.open) || (id === 'american-football' && !!nfl?.open)
+  const tennis = useTennisConfig()
+  // basketball / American football / tennis are open for admins before launch, for everyone after
+  const isLive = (id: string, live: boolean) => live || (id === 'basketball' && !!bb?.open) || (id === 'american-football' && !!nfl?.open) || (id === 'tennis' && !!tennis?.open)
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement | null>(null)
 

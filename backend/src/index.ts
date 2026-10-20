@@ -79,7 +79,8 @@ import { db } from './db';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { startAsn } from './services/asn';
 import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample } from './services/tennis';
-import { startTennisModelScheduler, tennisModelReport, tennisModelTick, tennisPredictions } from './services/tennisModel';
+import { startTennisModelScheduler, tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
+import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch, tennisRecord, levelRank, tennisTournament } from './services/tennisSite';
 import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
@@ -390,7 +391,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|hub(\/|$)|basketball\/|nfl\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|hub(\/|$)|basketball\/|nfl\/|tennis\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -2097,12 +2098,14 @@ app.get('/api/guides/:slug', (req, res) => {
 app.get('/api/today', (req, res) => {
   try {
     // fix152b: American football too (?sport=american-football&league=1|2|college), gated like the NFL pages
-    const sport = req.query.sport === 'basketball' ? 'basketball' : req.query.sport === 'american-football' ? 'american-football' : 'football';
+    const sport = req.query.sport === 'basketball' ? 'basketball' : req.query.sport === 'american-football' ? 'american-football' : req.query.sport === 'tennis' ? 'tennis' : 'football';
     if (sport === 'basketball' && !(bbPublic() || req.access === 'admin')) return res.status(404).json({ error: 'Not found' });
+    if (sport === 'tennis' && !(tennisPublic() || req.access === 'admin')) return res.status(404).json({ error: 'Not found' });
     if (sport === 'american-football' && !(nflPublic() || req.access === 'admin')) return res.status(404).json({ error: 'Not found' });
     const lang = (['es', 'pt', 'de', 'fr', 'it', 'tr'].includes(String(req.query.lang)) ? String(req.query.lang) : 'en') as any;
     const dayIso = typeof req.query.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.day) ? req.query.day : undefined;
-    res.set('Cache-Control', sport === 'american-football' ? 'private, max-age=300' : 'public, max-age=300').json({ data: todayGroups(sport, lang, dayIso, asLeagues(req.query.league)) });
+    const tour = typeof req.query.tour === 'string' && /^(atp|wta|challenger|all)$/.test(req.query.tour) ? req.query.tour : null;
+    res.set('Cache-Control', sport === 'american-football' || sport === 'tennis' ? 'private, max-age=300' : 'public, max-age=300').json({ data: todayGroups(sport, lang, dayIso, asLeagues(req.query.league), tour) });
   } catch (e: any) { sendError(res, e, 'Today failed'); }
 });
 
@@ -2110,9 +2113,10 @@ app.get('/api/news', async (req, res) => {
   try {
     // ?league=PL → that league's news; no league → every league combined (home page)
     // ?sport=basketball → basketball news; ?team=<name>&short=<short name> (football) or ?teamId=<id> (basketball) → one team's news
-    const sport = req.query.sport === 'basketball' ? 'basketball' : req.query.sport === 'american-football' ? 'american-football' : 'football';
-    // NFL news (fix138) only once the NFL site is open for this visitor
+    const sport = req.query.sport === 'basketball' ? 'basketball' : req.query.sport === 'american-football' ? 'american-football' : req.query.sport === 'tennis' ? 'tennis' : 'football';
+    // NFL news (fix138) only once the NFL site is open for this visitor; tennis (fix193) likewise
     if (sport === 'american-football' && !(nflPublic() || req.access === 'admin')) return res.json({ data: [], timestamp: new Date().toISOString() });
+    if (sport === 'tennis' && !(tennisPublic() || req.access === 'admin')) return res.json({ data: [], timestamp: new Date().toISOString() });
     let league = typeof req.query.league === 'string' && /^[A-Z0-9]{2,8}$/i.test(req.query.league) ? req.query.league : undefined;
     const limit = Math.min(30, parseInt(String(req.query.limit || '12'), 10) || 12);
     let team: string[] | undefined;
@@ -2120,6 +2124,11 @@ app.get('/api/news', async (req, res) => {
       const tid = parseInt(String(req.query.teamId), 10);
       team = nflTeamNamesById(tid);
       league = leagueOfTeamId(tid) === 2 ? 'NCAA' : 'NFL'; // fix142: that league's feeds only
+    } else if (sport === 'tennis' && /^\d+$/.test(String(req.query.playerId || ''))) {
+      // a player's stories: their full name and surname (5+ letters, so "Li" or "Ruud" alone never match other news)
+      const pr: any = db.prepare(`SELECT name FROM tennis_players WHERE id = ?`).get(parseInt(String(req.query.playerId), 10));
+      const full = String(pr?.name || '').trim(), last = full.split(/\s+/).pop() || '';
+      team = full ? [full, ...(last.length >= 5 ? [last] : [])] : [];
     } else if (sport === 'basketball' && /^\d+$/.test(String(req.query.teamId || ''))) {
       const id = parseInt(String(req.query.teamId), 10);
       const r: any = db.prepare(`SELECT code, CASE WHEN home_id = ? THEN home_name ELSE away_name END AS name FROM bb_games WHERE home_id = ? OR away_id = ? ORDER BY kickoff DESC LIMIT 1`).get(id, id, id);
@@ -2640,6 +2649,74 @@ app.get('/api/nfl/record', (req, res) => {
   try { res.json({ data: nflRecord(Math.min(365, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30)), nflLgs(req)) }); }
   catch (e) { sendError(res, e, 'Failed to load the record'); }
 });
+// ---------- Tennis site (fix193) ----------
+// Open API, but until TENNIS_PUBLIC=1 only admins get data (everyone else sees the "coming soon" page). Predictions:
+// tennis-v1 (shown as SL Tennis 1.0): paid plans before the start, everyone once the match is over — the same rules,
+// free picks and pick packs as basketball / NFL (reveal id -(4e9 + id)). ITF stays admin-only. No market prices here.
+app.use('/api/tennis', (req, res, next) => {
+  if (req.path === '/config' || tennisPublic() || req.access === 'admin') return next();
+  res.status(404).json({ error: 'Not found' });
+});
+const tnAdmin = (req: express.Request) => req.access === 'admin';
+const tnTour = (req: express.Request) => (typeof req.query.tour === 'string' && /^(atp|wta|challenger|itf|all)$/.test(req.query.tour) ? req.query.tour : 'all');
+const tnWith = (req: express.Request, list: any[]) => {
+  const f = fullFor(req, tennisRid);
+  // fullFor's function form takes the match id (it maps it to the reveal id itself)
+  return withTennisPredictions(list, typeof f === 'function' ? (rid: number) => f(-rid - 4e9) : f);
+};
+app.get('/api/tennis/config', (req, res) => {
+  res.json({ data: { public: tennisPublic(), open: tennisPublic() || tnAdmin(req), tours: ['atp', 'wta', 'challenger', ...(tnAdmin(req) ? ['itf'] : [])] } });
+});
+app.get('/api/tennis/home', (req, res) => {
+  try {
+    const tour = tnTour(req), admin = tnAdmin(req), now = Date.now();
+    const upcoming = tnWith(req, tennisMatchesBetween(new Date(now - 3 * 3600e3).toISOString(), new Date(now + 4 * 86400e3).toISOString(), tour, admin, 2500).filter(m => m.state === 'upcoming'));
+    // the featured matches: biggest coming events (Grand Slam / 1000 / 500 first), then the two players' ratings
+    const ratings: Record<number, { elo: number; rank: number }> = {};
+    const soon = upcoming.filter(m => Date.parse(m.start) - now < 48 * 3600e3).sort((a, b) => levelRank(a.tournament.tier, a.tour, a.tournament.name) - levelRank(b.tournament.tier, b.tour, b.tournament.name)).slice(0, 80);
+    for (const m of soon) for (const s of [m.home, m.away]) if (s.id && !ratings[s.id]) { const r = tennisPlayerModel(s.id, m.women); if (r) ratings[s.id] = { elo: r.elo, rank: r.rank }; }
+    res.json({ data: {
+      tour, live: tnWith(req, tennisLive(tour, admin)), upcoming, ratings,
+      results: tnWith(req, tennisRecent(8, tour, admin)),
+      levels: Object.fromEntries(upcoming.map(m => [m.id, levelRank(m.tournament.tier, m.tour, m.tournament.name)]))
+    } });
+  } catch (e) { sendError(res, e, 'Failed to load the tennis home'); }
+});
+app.get('/api/tennis/matches', (req, res) => {
+  try {
+    const now = Date.now();
+    const f = typeof req.query.from === 'string' ? new Date(req.query.from) : new Date(now - 6 * 3600e3);
+    const t = typeof req.query.to === 'string' ? new Date(req.query.to) : new Date(now + 7 * 86400e3);
+    if (isNaN(f.getTime()) || isNaN(t.getTime()) || t <= f || t.getTime() - f.getTime() > 31 * 86400000) return res.status(400).json({ error: 'Bad range' });
+    res.json({ data: { matches: tnWith(req, tennisMatchesBetween(f.toISOString(), t.toISOString(), tnTour(req), tnAdmin(req), 3000)) } });
+  } catch (e) { sendError(res, e, 'Failed to load matches'); }
+});
+app.get('/api/tennis/match/:id(-?\\d+)', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const d = tennisMatch(id, fullOne(req, tennisRid(id)), tnAdmin(req));
+    if (!d) return res.status(404).json({ error: 'Match not found' });
+    res.json({ data: d });
+  } catch (e) { sendError(res, e, 'Failed to load the match'); }
+});
+// home "Our record": the last 30 days, predictions saved before the start, from the public start day
+app.get('/api/tennis/record', (req, res) => {
+  try { res.json({ data: tennisRecord(Math.min(3650, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30)), tnTour(req)) }); }
+  catch (e) { sendError(res, e, 'Failed to load the record'); }
+});
+app.get('/api/tennis/tournament/:key([a-z0-9-]{3,90})', (req, res) => {
+  try {
+    const f = fullFor(req, tennisRid);
+    const d = tennisTournament(req.params.key, typeof f === 'function' ? (rid: number) => f(-rid - 4e9) : f, tnAdmin(req));
+    if (!d) return res.status(404).json({ error: 'Tournament not found' });
+    res.json({ data: d });
+  } catch (e) { sendError(res, e, 'Failed to load the tournament'); }
+});
+app.get('/api/tennis/upset-watch', (req, res) => {
+  if (!proGate(req, res)) return;
+  try { res.json({ data: winnerUpsetReport('tennis'), timestamp: new Date().toISOString() }); } catch (e) { sendError(res, e, 'Upset watch failed'); }
+});
+
 app.get('/api/nfl/leaders', (req, res) => {
   try {
     const league = nflLg(req);

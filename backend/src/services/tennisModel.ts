@@ -1420,5 +1420,125 @@ export function startTennisModelScheduler() {
   every('tennis model', () => tennisModelTick(), 30 * 60 * 1000).unref();
 }
 
+/* ------------------------------------------------------------------ */
+/* fix193: what the public tennis pages read (services/tennisSite.ts)   */
+/* ------------------------------------------------------------------ */
+
+const ratingsRank = new Map<number, { at: number; byGen: [Float64Array, Float64Array] }>();
+/**
+ * "How our model rates them" (player page): overall and per-surface Elo, serve / return points won against an average
+ * opponent, form (last 10), and the overall rank among players with a match in the last 12 months (same tour).
+ * null = the ratings are not built yet or the player has no match.
+ */
+export function tennisPlayerModel(pid: number, women: boolean) {
+  const L = ensureLive();
+  if (!L) return null;
+  const i = L.c.reg.idx.get(`p${pid}`);
+  if (i === undefined || !L.A.init[i]) return null;
+  const t = Date.now(), A = L.A, B = L.B, gen = women ? 1 : 0;
+  // ranks of everyone (by tour), cached 10 minutes: players with a match in the last 365 days
+  let rk = ratingsRank.get(L.builtAt);
+  if (!rk || t - rk.at > 10 * 60 * 1000) {
+    const men: number[] = [], wom: number[] = [];
+    for (let k = 0; k < L.c.reg.size; k++) {
+      if (!A.init[k] || !A.last[k] || t - A.last[k] > 365 * DAY) continue;
+      (L.c.playerTour.get(L.c.reg.pid[k]) === 'wta' ? wom : men).push(A.eO[k]);
+    }
+    rk = { at: t, byGen: [Float64Array.from(men).sort().reverse(), Float64Array.from(wom).sort().reverse()] };
+    ratingsRank.clear(); ratingsRank.set(L.builtAt, rk);
+  }
+  const list = rk.byGen[gen];
+  let rank = 1; for (const e of list) if (e > A.eO[i]) rank++; else break;
+  const pct = (x: number) => Math.round(x * 1000) / 10;
+  const mu = (s: number) => B.mu[gen * 3 + s];
+  const serve = (s: number) => clampP(mu(s) + B.dev(B.s, i, s, t)), ret = (s: number) => clampP(1 - mu(s) + B.dev(B.r, i, s, t));
+  const h = (L.F.hist.get(i) || []).slice(-10);
+  return {
+    elo: Math.round(A.eO[i]), rank, of: list.length,
+    surfaces: SURF_NAME.map((name, s) => ({ surface: name, elo: Math.round(A.eS[i * 3 + s]), matches: Math.round(A.nS[i * 3 + s]) })),
+    serve: pct((serve(0) + serve(1) + serve(2)) / 3), ret: pct((ret(0) + ret(1) + ret(2)) / 3),
+    tourServe: pct((mu(0) + mu(1) + mu(2)) / 3),
+    form: { won: h.filter(x => x.won).length, played: h.length },
+    matches: Math.round(A.nO[i]), lastMatch: A.last[i] ? new Date(A.last[i]).toISOString() : null
+  };
+}
+
+/**
+ * fix193: live win chance of player 1 from the current score, on the model's own chain (point → game → tiebreak → set
+ * → match). pa / pb = the serve-point chances behind the saved pre-match prediction (rescaled to its win chance).
+ * sets = sets won so far; games = games in the current set; points = points in the current game (0–4, null = unknown);
+ * server = 1 / 2 / null (unknown: 50/50).
+ */
+export function tennisLiveChance(o: { pa: number; pb: number; bo: number; rule?: number; sets: [number, number]; games: [number, number]; points?: [number, number] | null; server?: 1 | 2 | null }): number {
+  const need = o.bo === 5 ? 3 : 2;
+  const [sa, sb] = o.sets, [ga, gb] = o.games;
+  if (sa >= need) return 1;
+  if (sb >= need) return 0;
+  const rule = o.rule ?? 0;
+  const gA = gameP(o.pa), gB = gameP(o.pb);
+  // game won by the server from a point score (deuce: two in a row)
+  const gameFrom = (p: number, x: number, y: number): number => {
+    if (x >= 4 && x - y >= 2) return 1;
+    if (y >= 4 && y - x >= 2) return 0;
+    if (x >= 3 && y >= 3) { const d = (p * p) / (p * p + (1 - p) * (1 - p)); return x === y ? d : x > y ? p + (1 - p) * d : p * d; }
+    return p * gameFrom(p, x + 1, y) + (1 - p) * gameFrom(p, x, y + 1);
+  };
+  // set won by A from games (i, j); aServes = A serves the next game; tb = tiebreak length at 6-6 (0 = none: the deciding set's match tiebreak handled by setDist kind 2)
+  const memo = new Map<string, number>();
+  const setFrom = (i: number, j: number, aServes: boolean, kind: number): number => {
+    if (kind === 2) return tbP(o.pa, o.pb, 10, aServes);
+    if ((i >= 6 && i - j >= 2) || i === 7) return 1;
+    if ((j >= 6 && j - i >= 2) || j === 7) return 0;
+    if (i === 6 && j === 6) return tbP(o.pa, o.pb, kind === 1 ? 10 : 7, aServes);
+    const k = `${i}-${j}-${aServes ? 1 : 0}-${kind}`;
+    const c = memo.get(k); if (c !== undefined) return c;
+    const w = aServes ? gA : 1 - gB;
+    const v = w * setFrom(i + 1, j, !aServes, kind) + (1 - w) * setFrom(i, j + 1, !aServes, kind);
+    memo.set(k, v);
+    return v;
+  };
+  const kindOf = (x: number, y: number) => (x === need - 1 && y === need - 1 ? rule : 0);
+  // the match from sets (x, y) with a fresh set; server of its first game unknown → 50/50
+  const mmemo = new Map<string, number>();
+  const matchFrom = (x: number, y: number): number => {
+    if (x >= need) return 1;
+    if (y >= need) return 0;
+    const k = `${x}-${y}`; const c = mmemo.get(k); if (c !== undefined) return c;
+    const s = (setFrom(0, 0, true, kindOf(x, y)) + setFrom(0, 0, false, kindOf(x, y))) / 2;
+    const v = s * matchFrom(x + 1, y) + (1 - s) * matchFrom(x, y + 1);
+    mmemo.set(k, v);
+    return v;
+  };
+  const kind = kindOf(sa, sb);
+  // the current set, from its games (and the current game's points when known)
+  const setNow = (aServes: boolean): number => {
+    if (kind !== 2 && o.points && !(ga === 6 && gb === 6)) {
+      const [x, y] = o.points;
+      const hold = gameFrom(aServes ? o.pa : o.pb, aServes ? x : y, aServes ? y : x);
+      const aWinsGame = aServes ? hold : 1 - hold;
+      return aWinsGame * setFrom(ga + 1, gb, !aServes, kind) + (1 - aWinsGame) * setFrom(ga, gb + 1, !aServes, kind);
+    }
+    return setFrom(ga, gb, aServes, kind);
+  };
+  const sNow = o.server === 1 ? setNow(true) : o.server === 2 ? setNow(false) : (setNow(true) + setNow(false)) / 2;
+  return sNow * matchFrom(sa + 1, sb) + (1 - sNow) * matchFrom(sa, sb + 1);
+}
+/** the strong-pick line of a category (tuned per tour, % sure), cached a minute */
+let strongCache: { at: number; v: Record<string, number> } | null = null;
+export function tennisStrongLine(cat: string): number {
+  if (!strongCache || Date.now() - strongCache.at > 60 * 1000) {
+    const st: Settings | null = store.get('settings');
+    strongCache = { at: Date.now(), v: Object.fromEntries(CAT_NAME.map(c => [c, st?.strong?.[c]?.line ?? 75])) };
+  }
+  return strongCache.v[cat] ?? 75;
+}
+/** when the public record starts (TENNIS_PUBLIC day, else the model's deploy day) */
+export const tennisRecordSince = (): string => process.env.TENNIS_PUBLIC_SINCE || store.get('deploy_day') || '2026-10-19';
+/** the serve-point chances behind a saved prediction (rescaled so the chain gives its win chance) */
+export function tennisServeChances(servePoint: [number, number] | null | undefined, p1: number, bo: number, rule = 0): { pa: number; pb: number } {
+  const pa = servePoint ? servePoint[0] / 100 : 0.62, pb = servePoint ? servePoint[1] / 100 : 0.62;
+  return rescale(pa, pb, bo === 5 ? 5 : 3, rule, Math.min(0.995, Math.max(0.005, p1)));
+}
+
 /* for the local test script */
 export const tennisModelInternals = { gameP, tbP, setDist, matchDist, winFast, rescale, gamesSummary, classify, preStartPrice, loadData, replayA, replayB, fitRankMap, A_DEFAULT, B_DEFAULT, RM_DEFAULT, FEng };

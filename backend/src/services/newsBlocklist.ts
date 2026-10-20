@@ -44,6 +44,11 @@ const OTHER_SPORT: Record<string, { words: RegExp; acronyms: RegExp }> = {
   'american-football': {
     words: /basketball|\bsoccer\b|premier league|champions league|\btennis\b|futsal|rugby|cricket|handball|volleyball|ice hockey|baseball|hoops|footballer/i,
     acronyms: /\b(NBA|WNBA|NHL|MLB|ATP|WTA|UEFA|FIFA)\b/
+  },
+  // fix193: tennis feeds carry only tennis; stories about other sports there are rare (padel / pickleball sometimes)
+  tennis: {
+    words: /basketball|\bsoccer\b|premier league|champions league|touchdown|quarterback|futsal|rugby|cricket|handball|volleyball|ice hockey|baseball|footballer|\bpadel\b|pickleball/i,
+    acronyms: /\b(NBA|WNBA|NFL|NHL|MLB|UEFA|FIFA)\b/
   }
 };
 export function otherSport(title: string, summary: string, sport: string): boolean {
