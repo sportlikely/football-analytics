@@ -9,6 +9,7 @@
 import { db } from '../db';
 import { tennisModelInternals, tennisStrongLine, tennisPlayerModel, tennisLiveChance, tennisServeChances, tennisRecordSince, TENNIS_MODEL } from './tennisModel';
 import { tournamentKey, setTennisLiveHook } from './tennis';
+import { yieldLoop } from './perf';
 import { winnerBands, winnerByConfidence, winnerCalibration } from '../utils/winnerBands';
 import { shortName, fullName, isAbbreviated } from '../utils/tennisNames';
 import { tournamentPlace, countryName } from '../utils/tennisPlaces';
@@ -264,20 +265,39 @@ function liveNow(m: TMatch, s: Saved) {
   return { pHome: r1(p), pAway: r1(1 - p), score: { home: sc.won[0], away: sc.won[1] }, total: sc.sets.reduce((a, x) => a + x[0] + x[1], 0) };
 }
 /** one sample per live poll: t = sets finished + share of the current set (games / 12) */
-function sampleLive(ids: number[]) {
+/**
+ * fix194: in slices — the live chance (Markov chain) of every live match was computed in one block and each sample
+ * written as its own commit ("tennis live" stalls of 0.6–1 s on 20 Oct); now ~25 ms of matches per slice, the
+ * samples of a slice written in one transaction (never open across an await).
+ */
+async function sampleLive(ids: number[]) {
   if (!ids.length) return;
-  const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as any[];
-  const saved = savedFor(ids);
   const put = db.prepare(`INSERT OR REPLACE INTO tennis_live_samples (match_id, t, p, s1, s2) VALUES (?, ?, ?, ?, ?)`);
-  for (const r of rows) {
-    const m = shapeMatch(r), s = saved.get(r.id);
-    if (!m || !s || m.state !== 'live' || !m.score) continue;
-    const now = liveNow(m, s);
-    if (!now) continue;
-    const last = m.score.sets[m.score.sets.length - 1];
-    const done = m.score.won[0] + m.score.won[1];
-    const t = done + (setOver(last[0], last[1]) ? 0 : Math.min(0.99, (last[0] + last[1]) / 12));
-    put.run(r.id, Math.round(t * 1000) / 1000, now.pHome, m.score.won[0], m.score.won[1]);
+  for (let k = 0; k < ids.length; k += 50) {
+    const part = ids.slice(k, k + 50);
+    const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.id IN (${part.map(() => '?').join(',')})`).all(...part) as any[];
+    const saved = savedFor(part);
+    let i = 0;
+    while (i < rows.length) {
+      const t0 = Date.now();
+      const out: [number, number, number, number, number][] = [];
+      while (i < rows.length && Date.now() - t0 < 25) {
+        const r = rows[i++];
+        const m = shapeMatch(r), s = saved.get(r.id);
+        if (!m || !s || m.state !== 'live' || !m.score) continue;
+        const now = liveNow(m, s);
+        if (!now) continue;
+        const last = m.score.sets[m.score.sets.length - 1];
+        const done = m.score.won[0] + m.score.won[1];
+        const t = done + (setOver(last[0], last[1]) ? 0 : Math.min(0.99, (last[0] + last[1]) / 12));
+        out.push([r.id, Math.round(t * 1000) / 1000, now.pHome, m.score.won[0], m.score.won[1]]);
+      }
+      if (out.length) {
+        db.exec('BEGIN');
+        try { for (const o of out) put.run(...o); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+      }
+      await yieldLoop();
+    }
   }
 }
 setTennisLiveHook(ids => sampleLive(ids));

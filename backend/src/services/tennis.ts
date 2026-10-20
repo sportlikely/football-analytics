@@ -599,15 +599,15 @@ async function fillTiersFromHistory(): Promise<number> {
 
 let liveCount = 0, lastLiveRun = 0;
 /** fix193: called after every live poll with the ids seen live (the public site samples the live win chance) */
-let liveHook: ((ids: number[]) => void) | null = null;
-export const setTennisLiveHook = (f: (ids: number[]) => void) => { liveHook = f; };
+let liveHook: ((ids: number[]) => void | Promise<void>) | null = null;
+export const setTennisLiveHook = (f: (ids: number[]) => void | Promise<void>) => { liveHook = f; };
 async function syncLive() {
   let n = 0;
   const ids: number[] = [];
   await pages('/matches', { status: 'live', draw: 'singles' }, 10, 'core', rows => { tx(() => { for (const m of rows) if (storeMatch(m, 'live')) { n++; ids.push(Number(m.id)); } }); });
   liveCount = n;
   lastLiveRun = Date.now();
-  if (liveHook && ids.length) { try { liveHook(ids); } catch (e: any) { logger.warn(`tennis live hook: ${e.message}`); } }
+  if (liveHook && ids.length) { try { await liveHook(ids); } catch (e: any) { logger.warn(`tennis live hook: ${e.message}`); } }
   return `${n} live`;
 }
 

@@ -40,13 +40,23 @@ Not tested locally with real tennis data (the local database copy has no tennis 
 the queue order (one at a time, no duplicates), the query plans of every changed query (time index / primary key, no
 full scans), and the tennis modules loading and running on an empty database.
 
-### Check after deploy (pending)
+### Check after deploy (done 20 Oct, 18:10 UTC)
 
 Two hours of Railway logs after the fix194 deploy: no "Event loop blocked" over 300 ms (only those over 500 ms are
 logged; `/api/perf` lists the rest) mentioning tennis, model daily or player pages warm. Also check that the next
 04:00 UTC daily job runs without a stall, and `/api/perf` → `heavy` shows the queue moving.
 
-Result: _to fill in after the check._
+Result (logs 16:04–18:10 UTC; fix194 live from 16:03, fix195 from ~17:04): **no stall over 500 ms from the
+tennis fixtures / tournaments / history / players / rankings / stoppages / backfill / model / ratings jobs** (before:
+0.5–2.2 s every few minutes, e.g. `tennis players` 1.5–2.3 s at 15:16 and 15:36). Still listed:
+- `tennis live` (not in the queue): 589 ms alone at 16:13, and named with other jobs at 16:34 and 17:04 (the 17:04 one was
+  the fix195 boot). Cause: the live hook (`sampleLive` in tennisSite.ts) computed the live chance of every live
+  match in one block and wrote each sample as its own commit. Fixed in the follow-up commit (fix194b): ~25 ms
+  slices, one transaction per slice. To check: the next live hours.
+- `player pages warm` at 16:23–16:24 (552–1409 ms), always together with page requests and `AF lineups/injuries` +
+  `lineup/injury features` (fix196 covers those); the warm-up itself is mostly waiting for API-Football. Watch it.
+- `model daily` did not run in this window (04:00 UTC): check the 21 Oct 04:00–04:10 logs.
+Other stalls in the window (basketball game pages, /api/matches/upcoming, feature state, data health) are fix196's.
 
 ## fix196 (20 Oct 2026): the last freezes (basketball game pages, match list, feature state, data health)
 
