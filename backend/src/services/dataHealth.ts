@@ -148,10 +148,11 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     checks.push({
       id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: tc.total ? 'warn' : 'ok',
       detail: tc.total
-        ? `${tc.duplicates.length} duplicate(s) · ${tc.fixtureIds.length} fixture id(s) · ${tc.noPrediction.length} without a prediction (48 h) · ${tc.stale.length} stale${tc.names.length ? ` · ${tc.names.length} name(s) to check` : ''}`
-        : `No duplicates, every ATP / WTA / Challenger match of the next 48 h predicted, nothing stale${tc.names.length ? ` · ${tc.names.length} name(s) to check` : ''}`,
+        ? `${tc.duplicates.length} duplicate(s) · ${tc.fixtureIds.length} fixture id(s) · ${tc.noPrediction.length} without a prediction (48 h) · ${tc.stale.length} stale · ${tc.genderMismatch.length} gender mismatch · ${tc.missingRound.length} missing round${tc.names.length ? ` · ${tc.names.length} name(s) to check` : ''}`
+        : `No duplicates, every ATP / WTA / Challenger match of the next 48 h predicted, nothing stale, every match in an event of its players' gender and with a round${tc.names.length ? ` · ${tc.names.length} name(s) to check` : ''}`,
       items: [...tc.duplicates.map(x => `duplicate: ${x}`), ...tc.fixtureIds.map(x => `fixture id: ${x}`), ...tc.noPrediction.map(x => `no prediction: ${x}`),
-        ...tc.stale.map(x => `stale: ${x}`), ...tc.names.map(x => `name: ${x}`)].slice(0, 60)
+        ...tc.stale.map(x => `stale: ${x}`), ...tc.genderMismatch.map(x => `gender mismatch: ${x}`), ...tc.missingRound.map(x => `missing round: ${x}`),
+        ...tc.names.map(x => `name: ${x}`)].slice(0, 60)
     });
   } catch (e: any) {
     checks.push({ id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: 'warn', detail: `Check failed: ${e.message}` });

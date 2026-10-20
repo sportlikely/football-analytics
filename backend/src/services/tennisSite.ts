@@ -8,11 +8,13 @@
  */
 import { db } from '../db';
 import { tennisModelInternals, tennisStrongLine, tennisPlayerModel, tennisLiveChance, tennisServeChances, tennisRecordSince, TENNIS_MODEL } from './tennisModel';
-import { tournamentKey, setTennisLiveHook } from './tennis';
+import { tournamentKey, setTennisLiveHook, eventGender } from './tennis';
 import { yieldLoop } from './perf';
 import { winnerBands, winnerByConfidence, winnerCalibration } from '../utils/winnerBands';
 import { shortName, fullName, isAbbreviated } from '../utils/tennisNames';
 import { tournamentPlace, countryName } from '../utils/tennisPlaces';
+import { ROUND_ORDER, normRound, roundEn } from '../utils/tennisRounds';
+export { ROUND_ORDER, normRound, roundEn };
 
 export const tennisPublic = () => process.env.TENNIS_PUBLIC === '1';
 /** Reveal / unlock ids of tennis matches (their own negative range: football > 0, basketball -id, NFL -(2e9 + id)) */
@@ -89,47 +91,8 @@ function scoreOf(r: any, state: TMatch['state']): TScore | null {
   const pts = state === 'live' && Array.isArray(ex?.livePoints) ? ex.livePoints.map((x: string) => PT[x] ?? x) as [string, string] : null;
   return { sets, won, points: pts, server: state === 'live' && (ex?.server === 1 || ex?.server === 2) ? ex.server : null };
 }
-/* ---------- rounds (fix195): one code per round, from the provider's code or its text ---------- */
+/* ---------- rounds (fix195; the mapping lives in utils/tennisRounds.ts since fix197: the data jobs store it too) ---------- */
 
-/** Q1–Q3 qualifying, R128 … R16, QF, SF, F, RR (round robin), R1 … (a numbered round of unknown size) */
-export const ROUND_ORDER: Record<string, number> = { Q1: 0, Q2: 1, Q3: 2, Q4: 3, Q: 3, R1: 4.1, R2: 4.2, R3: 4.3, R4: 4.4, R128: 5, R64: 6, R32: 7, R16: 8, RR: 8.5, QF: 9, SF: 10, F: 12 };
-const FRACTION: Record<string, string> = { '1': 'F', '2': 'SF', '4': 'QF', '8': 'R16', '16': 'R32', '32': 'R64', '64': 'R128' };
-/**
- * The round code of a match: the provider's round_code when it is one we know, else read from its text ("ATP Brussels
- * - 1/16-finals" → R32, "Quarterfinals" → QF, "Qualification round 2" → Q2, "2nd round" → R2). Qualifying rounds are Q…
- */
-export function normRound(code: string | null | undefined, round: string | null | undefined, qualifying: boolean): string | null {
-  const c = String(code || '').toUpperCase().replace(/\s+/g, '');
-  const r = String(round || '').toLowerCase();
-  const q = qualifying || /qualif/.test(r) || /^Q\d?$/.test(c);
-  if (/^Q\d$/.test(c)) return c;
-  if (q) {
-    const n = r.match(/(?:round|r)\s*(\d)|(\d)(?:st|nd|rd|th)\s+round/) || c.match(/^R(\d)$/);
-    return n ? `Q${n[1] || n[2]}` : /final/.test(r) ? 'Q3' : 'Q';
-  }
-  if (c in ROUND_ORDER && c !== 'Q') return c;
-  if (/^(F|FINAL)$/.test(c)) return 'F';
-  const frac = r.match(/1\s*\/\s*(\d+)/);
-  if (frac && FRACTION[frac[1]]) return FRACTION[frac[1]];
-  if (/semi/.test(r)) return 'SF';
-  if (/quarter/.test(r)) return 'QF';
-  if (/round robin|group/.test(r)) return 'RR';
-  if (/(^|[^a-z])(the )?finals?$/.test(r.trim()) || /(^|\s-\s)final$/.test(r.trim())) return 'F';
-  const of = r.match(/(?:round of|last)\s*(\d+)/) || r.match(/\br\s*(\d{2,3})\b/);
-  if (of && ['16', '32', '64', '128'].includes(of[1])) return `R${of[1]}`;
-  const k = r.match(/(\d)(?:st|nd|rd|th)\s+round/) || r.match(/round\s*(\d)\b/);
-  if (k) return `R${k[1]}`;
-  return null;
-}
-/** English names of the codes (the pages translate the code themselves; this is for the preview text and SEO) */
-export function roundEn(code: string | null): string | null {
-  if (!code) return null;
-  if (/^Q\d$/.test(code)) return `Qualifying R${code.slice(1)}`;
-  if (code === 'Q') return 'Qualifying';
-  if (/^R(16|32|64|128)$/.test(code)) return `Round of ${code.slice(1)}`;
-  if (/^R\d$/.test(code)) return `Round ${code.slice(1)}`;
-  return ({ QF: 'Quarter-final', SF: 'Semi-final', F: 'Final', RR: 'Round robin' } as Record<string, string>)[code] || null;
-}
 const roundRank = (code: string | null) => (code && code in ROUND_ORDER ? ROUND_ORDER[code] : 4);
 
 /** the tour of a row for its pages and keys (the classified tour, never the row's raw 'atp' default) */
@@ -512,10 +475,16 @@ export function tennisTournament(key: string, full: boolean | ((rid: number) => 
   const first = all[0] || null;
   if (!first || (first.tour === 'itf' && !admin)) return null;
   // the catalogue row: this edition's own tournament id first, else the same name on the same tour
+  // fix197: only a catalogue row of the same gender (a men's row that carried the WTA event's id never takes its dates)
+  const sameGen = (t: any) => !!t && eventGender(t.tour, t.tier, t.name) !== (first.women ? 'm' : 'w');
   const tid = all.find(m => m.tournament.id)?.tournament.id || null;
-  const meta = (tid ? db.prepare(`SELECT * FROM tennis_tournaments WHERE id = ?`).get(tid) : null) as any
+  const byId = (tid ? db.prepare(`SELECT * FROM tennis_tournaments WHERE id = ?`).get(tid) : null) as any;
+  const meta = (sameGen(byId) ? byId : null)
     || db.prepare(`SELECT * FROM tennis_tournaments WHERE name IN (${q}) ORDER BY start_date DESC LIMIT 20`).all(...names).find((t: any) => slugOf(t.tour, t.tier, t.name) === key) as any;
   const starts = all.map(m => m.start).sort();
+  // fix197: the dates cover every match we hold (the catalogue said 18–20 Oct for Cali while matches went on on the 21st)
+  const firstDay = starts[0]?.slice(0, 10) || null, lastDay = starts[starts.length - 1]?.slice(0, 10) || null;
+  const metaStart = meta?.start_date ? String(meta.start_date).slice(0, 10) : null, metaEnd = meta?.end_date ? String(meta.end_date).slice(0, 10) : null;
   // past champions: the final of each year (our feed and the 2015–2022 archive, matched by name)
   // fix195: only the finals of the same tour, gender and level family (the Cali Challenger never shows the WTA champion)
   const finals = db.prepare(`SELECT tournament, tour, tier, scheduled_at, round, round_code, p1_name, p2_name, p1_id, p2_id, winner, games, source, is_qualifying FROM tennis_matches
@@ -540,7 +509,7 @@ export function tennisTournament(key: string, full: boolean | ((rid: number) => 
     surface: first.tournament.surface, indoor: first.tournament.indoor,
     // fix195: the country from the catalogue unless it is empty / "World", else from the city or the name (Cali → Colombia)
     ...(() => { const pl = tournamentPlace(meta?.country, meta?.city || first.tournament.city, first.tournament.name); return { city: pl.city, country: pl.country || first.tournament.country || null }; })(),
-    start: meta?.start_date || starts[0] || null, end: meta?.end_date || starts[starts.length - 1] || null,
+    start: metaStart && (!firstDay || metaStart <= firstDay) ? metaStart : firstDay, end: metaEnd && (!lastDay || metaEnd >= lastDay) ? metaEnd : lastDay,
     draw, champions: [...champions.values()].slice(0, 12),
     record: { n: recRows.length, right: hits, pct: recRows.length ? Math.round((1000 * hits) / recRows.length) / 10 : null }
   };
