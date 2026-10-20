@@ -4,7 +4,7 @@ import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { Section } from '../../components/sport/game/GamePage'
 import { t, LOCALE } from '../../lib/i18n'
-import { useTennisTour, tennisHref, flagOf, surname, setsText, tierLabel, surfaceName, SURFACE_DOT, type TourFilter, type TMatch } from '../../lib/tennis'
+import { useTennisTour, tennisHref, flagOf, surname, roundName, qualifyingWord, countryName, setsText, tierLabel, surfaceName, SURFACE_DOT, type TourFilter, type TMatch } from '../../lib/tennis'
 
 /** Shared pieces of the tennis pages (fix193): the tour chips, the tournament panel, a player's name with flag and rank. */
 
@@ -23,7 +23,7 @@ export function TennisTourChips({ className = '' }: { className?: string }) {
 /** "🇪🇸 Carlos Alcaraz 2" — flag, the name (a link when we know the player), the ranking */
 export function PlayerName({ p, short = false, bold = false, className = '' }: { p: TMatch['home']; short?: boolean; bold?: boolean; className?: string }) {
   const href = tennisHref.player(p.id)
-  const name = short ? surname(p.name) : p.name
+  const name = short ? surname(p) : p.name
   const flag = flagOf(p.country)
   const body = <>{flag && <span aria-hidden className="mr-1">{flag}</span>}<span className={bold ? 'font-bold text-ink' : ''}>{name}</span>{p.rank ? <span className="ml-1 text-[10px] font-semibold text-faint num">{p.rank}</span> : null}</>
   return href ? <Link to={href} className={`hover:text-accent ${className}`}>{body}</Link> : <span className={className}>{body}</span>
@@ -59,7 +59,7 @@ export function TennisTournamentPanel({ tkey }: { tkey: string }) {
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted mt-1">
                   {first && <span>{tierLabel(first)}</span>}
                   <SurfaceTag surface={d.surface} indoor={d.indoor} />
-                  {(d.city || d.country) && <span>{[d.city, d.country].filter(Boolean).join(', ')}</span>}
+                  {(d.city || d.country) && <span>{[d.city, d.country ? countryName(d.country) : null].filter(Boolean).join(', ')}</span>}
                 </div>
               </div>
               {done.length > 0 && (
@@ -69,7 +69,7 @@ export function TennisTournamentPanel({ tkey }: { tkey: string }) {
                     {done.map(m => (
                       <li key={m.id}>
                         <Link to={tennisHref.match(m.id)} className="flex items-center justify-between gap-2 hover:text-accent">
-                          <span className="min-w-0 truncate"><span className="font-semibold text-ink">{surname((m.winner === 2 ? m.away : m.home).name)}</span> <span className="text-faint">{t('beat')}</span> {surname((m.winner === 2 ? m.home : m.away).name)}</span>
+                          <span className="min-w-0 truncate"><span className="font-semibold text-ink">{surname(m.winner === 2 ? m.away : m.home)}</span> <span className="text-faint">{t('beat')}</span> {surname(m.winner === 2 ? m.home : m.away)}</span>
                           <span className="num text-muted shrink-0">{setsText(m.score, m.winner === 2)}</span>
                         </Link>
                       </li>
@@ -89,7 +89,7 @@ export function TennisTournamentPanel({ tkey }: { tkey: string }) {
 export const dayTime = (iso: string) => new Date(iso).toLocaleString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 /** a player's finished match as the match and player pages list it */
-export interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; opponent: { id: number | null; name: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
+export interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; roundCode?: string | null; opponent: { id: number | null; name: string; short?: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
 
 /** W / L, the opponent (their page), the tournament (its page), the score (the match page) */
 export function FormList({ list, title, empty }: { list: Played[]; title?: ReactNode; empty?: string }) {
@@ -103,7 +103,7 @@ export function FormList({ list, title, empty }: { list: Played[]; title?: React
               <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold flex-shrink-0 ${x.won ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{x.won ? t('W') : t('L')}</span>
               <span className="min-w-0 flex-1">
                 <PlayerName p={{ ...x.opponent, rank: null, logo: null }} className="block truncate" />
-                <span className="block text-[11px] text-faint truncate"><Link to={tennisHref.tournament(x.tkey)} className="hover:text-accent">{x.tournament}</Link>{x.round ? ` · ${x.round}` : ''}</span>
+                <span className="block text-[11px] text-faint truncate"><Link to={tennisHref.tournament(x.tkey)} className="hover:text-accent">{x.tournament}</Link>{roundName(x) ? ` · ${roundName(x)}` : ''}</span>
               </span>
               <Link to={tennisHref.match(x.id)} className="num text-xs text-muted shrink-0 hover:text-accent inline-flex gap-1.5">{x.score.split(' ').filter(Boolean).map((v, i) => <span key={i}>{v.replace('-', '–')}</span>)}{x.retired ? <span>{t('ret.')}</span> : null}</Link>
             </li>
@@ -117,12 +117,15 @@ export function FormList({ list, title, empty }: { list: Played[]; title?: React
 /** one round of a tournament's draw (from our matches) */
 export interface DrawRound { code: string; name: string; qualifying: boolean; matches: TMatch[] }
 
-/** The draw: rounds from our matches, the latest round first; `m` = the match to highlight (the match page) */
+/**
+ * The draw: rounds from our matches (one row per match), the main draw in order — first round to the final — and
+ * qualifying in its own section below it (fix195); `m` = the match to highlight (the match page)
+ */
 export function DrawTab({ m, rounds }: { m: TMatch | null; rounds: DrawRound[] }) {
   const main = rounds.filter(r => !r.qualifying), quali = rounds.filter(r => r.qualifying)
   const block = (r: DrawRound) => (
     <div key={(r.qualifying ? 'q' : '') + r.code} className="min-w-0">
-      <div className="label pb-1">{r.qualifying ? `${t('Qualifying')} · ${r.name}` : r.name}</div>
+      <div className="label pb-1">{roundName(r.code) || (r.qualifying ? qualifyingWord() : t('Matches'))}</div>
       <ul className="space-y-1.5">
         {r.matches.map(x => {
           const on = m && x.id === m.id
@@ -152,8 +155,13 @@ export function DrawTab({ m, rounds }: { m: TMatch | null; rounds: DrawRound[] }
     <Section title={t('Draw')} note={m ? m.tournament.name : undefined}>
       {!main.length && !quali.length ? <p className="text-sm text-faint">{t('The draw appears once the matches are scheduled.')}</p> : (
         <div className="space-y-6">
-          {main.length > 0 && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{[...main].reverse().map(block)}</div>}
-          {quali.length > 0 && <details><summary className="cursor-pointer text-sm font-semibold text-muted">{t('Qualifying')}</summary><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 mt-3">{[...quali].reverse().map(block)}</div></details>}
+          {main.length > 0 && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{main.map(block)}</div>}
+          {quali.length > 0 && (
+            <div className="border-t border-line/60 pt-4">
+              <h3 className="font-display font-bold text-sm text-ink pb-2">{qualifyingWord()}</h3>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{quali.map(block)}</div>
+            </div>
+          )}
         </div>
       )}
     </Section>

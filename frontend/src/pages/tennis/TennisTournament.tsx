@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
-import { tennisTournamentFav, tennisHref, tierLabel, surfaceName, isoOfCountry, type TMatch } from '../../lib/tennis'
+import { tennisTournamentFav, tennisHref, tierLabel, surfaceName, isoOfCountry, countryName, type TMatch } from '../../lib/tennis'
 import { Skeleton } from '../bb/parts'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import GameRow from '../../components/sport/GameRow'
@@ -47,12 +47,12 @@ export default function TennisTournament() {
   const results = all.filter(m => m.state === 'done').sort((a, b) => b.start.localeCompare(a.start)).slice(0, 16)
   const rows = (list: TMatch[]) => <div className="divide-y divide-line/50">{list.map(m => <GameRow key={m.id} g={tennisSGame(m)} showDay />)}</div>
   const iso = isoOfCountry(d.country)
-  const place = [d.city, d.country].filter(Boolean).join(', ')
   const dates = d.start ? (d.end && d.end.slice(0, 10) !== d.start.slice(0, 10) ? `${day(d.start)} – ${day(d.end)}` : day(d.start)) : null
   return (
     <LeaguePage
       logo={null}
-      country={{ name: `${flagEmoji(iso)} ${place || t('World')}`.trim() }}
+      // fix195: the place from the catalogue, else the city (Cali → Colombia); never "World"
+      country={{ name: `${flagEmoji(iso)} ${[d.city, d.country ? countryName(d.country) : null].filter(Boolean).join(', ')}`.trim() }}
       name={d.name}
       sub={[first ? tierLabel(first) : null, surfaceName(d.surface, d.indoor) || null, dates].filter(Boolean).join(' · ')}
       fav={tennisTournamentFav(d)}

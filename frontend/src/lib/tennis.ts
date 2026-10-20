@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from './socket'
-import { t, LOCALE } from './i18n'
+import { t, LOCALE, lang } from './i18n'
 import { useAuth } from './auth'
 import { useFavorites, type Favorite } from './favorites'
 
@@ -14,7 +14,8 @@ import { useFavorites, type Favorite } from './favorites'
 
 export type TennisTour = 'atp' | 'wta' | 'challenger' | 'itf'
 export interface TennisConfig { public: boolean; open: boolean; tours: TennisTour[] }
-export interface TSide { id: number | null; name: string; country: string | null; rank: number | null; logo: null }
+/** fix195: `name` = the full name, `short` = the real surname (from the server) */
+export interface TSide { id: number | null; name: string; short?: string; country: string | null; rank: number | null; logo: null }
 export interface TScore { sets: [number, number][]; won: [number, number]; points: [string, string] | null; server: 1 | 2 | null }
 export interface TPred {
   locked: boolean
@@ -80,14 +81,85 @@ export const surfaceName = (s: string | null | undefined, indoor?: boolean | nul
 /** colour dot of a surface (hard blue, clay orange, grass green) */
 export const SURFACE_DOT: Record<string, string> = { hard: 'bg-sky-400', clay: 'bg-orange-400', grass: 'bg-emerald-500', carpet: 'bg-violet-400' }
 
-/** "Carlos Alcaraz" → "Alcaraz" (tight rows); two-part surnames stay whole when the name has a particle */
-export function surname(name: string | null | undefined): string {
-  const n = String(name || '').trim()
+const PARTICLE = /^(de|del|della|dalla|delle|dello|di|da|das|dos|do|du|van|von|der|den|ter|ten|le|la|lo|mc|st\.?|al|el|ben|bin|y)$/i
+/** two-word surnames that stay together (twin of COMPOUND_SURNAMES in backend/src/utils/tennisNames.ts) */
+const COMPOUND = new Set([
+  'bautista agut', 'carreno busta', 'davidovich fokina', 'ramos vinolas', 'haddad maia', 'sorribes tormo', 'carballes baena',
+  'zapata miralles', 'martinez portero', 'diaz acosta', 'seyboth wild', 'mpetshi perricard', 'barrios vera', 'ugo carabelli',
+  'pacheco mendez', 'bouzas maneiro', 'riera sanchez', 'garcia lopez', 'munar clar', 'mena garcia', 'bolelli tabilo', 'galan riveros',
+  'varillas patino', 'nava torres', 'gomez lopez', 'blanch serrano', 'romero gormaz', 'sanchez izquierdo', 'llamas ruiz', 'moro canas',
+  'vallejo ferreira', 'ramirez gonzalez', 'hernandez vazquez', 'lopez montagud', 'alvarez varona', 'castro vallejo', 'rodriguez taverna',
+  'tirante baena', 'cid subervi', 'gonzalez caceres', 'olivieri menendez', 'rincon lopez', 'perez sanchez', 'herrero gonzalez',
+  'bueno gonzalez', 'pellegrino martinez', 'meligeni rodrigues', 'ribeiro monteiro', 'trungelliti marchesi', 'garcia perez',
+  'osorio serrano', 'vidal azorin', 'parrizas diaz', 'bassols ribera', 'sierra mendoza', 'gonzalez vaquero'
+])
+/**
+ * fix195: the real surname for tight rows — "Carlos Alcaraz" → "Alcaraz", "Alex de Minaur" → "de Minaur", "Federico Dalla
+ * Valle" → "Dalla Valle", "Roberto Bautista Agut" → "Bautista Agut", "Felix Auger-Aliassime" stays one word. A side from
+ * the server carries `short` (the API's own last name when it has one): that wins. Twin of shortName() on the server.
+ */
+export function surname(x: string | { name: string; short?: string | null } | null | undefined): string {
+  if (x && typeof x === 'object') { if (x.short) return x.short; x = x.name }
+  const n = String(x || '').trim()
   if (!n) return 'TBD'
   const w = n.split(/\s+/)
   if (w.length === 1) return n
-  const i = w.findIndex((x, k) => k > 0 && /^(de|del|van|von|da|di|le|la|du|dos|der)$/i.test(x))
-  return i > 0 ? w.slice(i).join(' ') : w[w.length - 1]
+  const i = w.findIndex((s, k) => k > 0 && k < w.length - 1 && PARTICLE.test(s))
+  if (i > 0) return w.slice(i).join(' ')
+  const two = w.slice(-2).join(' ')
+  if (w.length >= 3 && COMPOUND.has(two.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase())) return two
+  return w[w.length - 1]
+}
+
+/** fix195: "Round of 32", "Quarter-final", "Qualifying R2" from the round code (never the provider's text) */
+export function roundName(x: { roundCode?: string | null; code?: string | null } | string | null | undefined): string {
+  const c = String((x && typeof x === 'object' ? x.roundCode ?? x.code : x) || '').toUpperCase()
+  if (!c) return ''
+  let q: RegExpExecArray | null
+  if ((q = /^Q(\d)$/.exec(c))) return t('Qualifying R{0}', { 0: q[1] })
+  if (c === 'Q') return qualifyingWord()
+  if (c === 'R16') return t('Round of 16')
+  if ((q = /^R(32|64|128)$/.exec(c))) return t('Round of {0}', { 0: q[1] })
+  if ((q = /^R(\d)$/.exec(c))) return t('Round {0}', { 0: q[1] })
+  if (c === 'QF') return t('Quarter-final')
+  if (c === 'SF') return t('Semi-final')
+  // "Final" / "Qualifying" are other words elsewhere on the site (a finished game, a football preview): own keys here
+  if (c === 'F') return lang === 'en' ? 'Final' : t('Final (round)')
+  if (c === 'RR') return t('Round robin')
+  return ''
+}
+/** "Qualifying" (the tennis qualifying draw) */
+export const qualifyingWord = () => (lang === 'en' ? 'Qualifying' : t('Qualifying (round)'))
+
+/** fix195: a country code ("PER", "pe") or English name → the country's name in the page language ("Peru", "Perú") */
+export function countryName(code: string | null | undefined): string {
+  const c = String(code || '').trim()
+  if (!c) return ''
+  const iso = /^[a-z]{2}$/i.test(c) ? c.toLowerCase() : /^[a-z]{3}$/i.test(c) ? IOC_ISO[c.toLowerCase()] : isoOfCountry(c)
+  if (!iso) return /^[a-z]{3}$/i.test(c) ? c.toUpperCase() : c
+  try { return new Intl.DisplayNames([LOCALE], { type: 'region' }).of(iso.toUpperCase()) || c } catch { return c }
+}
+
+/**
+ * fix195: a short list of the biggest matches without one event filling it — at most `perEvent` from one tournament,
+ * and men's and women's matches both in it when both play (the order of `sorted` is kept otherwise).
+ */
+export function spreadPicks(sorted: TMatch[], n: number, perEvent = 2): TMatch[] {
+  const out: TMatch[] = []
+  const per = new Map<string, number>()
+  const room = (m: TMatch) => (per.get(m.tournament.key) || 0) < perEvent
+  const take = (m: TMatch) => { out.push(m); per.set(m.tournament.key, (per.get(m.tournament.key) || 0) + 1) }
+  for (const m of sorted) { if (out.length >= n) break; if (room(m)) take(m) }
+  // both tours: when every pick is men's (or women's) and the other side has a match, its best one takes the last place
+  for (const women of [true, false]) {
+    if (out.length < 2 || out.some(m => m.women === women)) continue
+    const other = sorted.find(m => m.women === women && !out.includes(m))
+    if (!other) continue
+    const drop = out.length >= n ? out.pop()! : null
+    if (drop) per.set(drop.tournament.key, (per.get(drop.tournament.key) || 1) - 1)
+    if (room(other)) take(other); else if (drop) take(drop)
+  }
+  return out
 }
 
 /** a set score from player 1's side: "6-4 3-6 7-6"; the current set of a live match is included */

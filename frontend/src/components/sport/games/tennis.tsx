@@ -4,7 +4,7 @@ import { API_URL } from '../../../lib/socket'
 import { t as tt } from '../../../lib/i18n'
 import { useAuth } from '../../../lib/auth'
 import { useFavorites } from '../../../lib/favorites'
-import { useTennisFavorites, useTennisTour, tennisTournamentFav, tennisHref, tierLabel, surfaceName, isoOfCountry, type TMatch } from '../../../lib/tennis'
+import { useTennisFavorites, useTennisTour, tennisTournamentFav, tennisHref, tierLabel, surfaceName, isoOfCountry, surname, type TMatch } from '../../../lib/tennis'
 import { toGame, toResult } from '../../SportHome/tennis'
 import { TennisTourChips, TennisTournamentPanel } from '../../../pages/tennis/parts'
 import type { GamesAdapter, GamesData, SGame, SLeague, SChip } from '../types'
@@ -37,7 +37,7 @@ export function tennisSGame(m: TMatch, lg: SLeague = tournamentOf(m, levelOf(m))
   const weight = open ? (6 - Math.min(6, Math.floor(levelOf(m) / 10))) / 3 + (1 - Math.abs(p!.pHome! - 50) / 50) : 0
   return {
     ...toGame(m), state: m.state as SGame['state'], league: lg, favWhy, weight, chips: tennisChips(p),
-    note: m.state === 'live' && open && p!.live ? { text: tt("Now: {0} {1}%", { 0: (p!.live.pHome >= p!.live.pAway ? m.home : m.away).name.split(' ').pop(), 1: Math.round(Math.max(p!.live.pHome, p!.live.pAway)) }), tone: 'live' as const } : null,
+    note: m.state === 'live' && open && p!.live ? { text: tt("Now: {0} {1}%", { 0: surname(p!.live.pHome >= p!.live.pAway ? m.home : m.away), 1: Math.round(Math.max(p!.live.pHome, p!.live.pAway)) }), tone: 'live' as const } : null,
     hit: m.state === 'done' ? p?.hit ?? null : undefined
   }
 }
@@ -85,7 +85,7 @@ function useData(): GamesData {
 export function useTennisGames(): GamesAdapter {
   return {
     title: tt("Tennis matches"),
-    countLine: (n, days) => tt("{0} matches in the next {1} days", { 0: n, 1: days }),
+    countLine: (n, days) => tt("{n, plural, one {# match} other {# matches}} in the next {1} days", { n, 1: days }),
     noLive: tt("No matches in play right now."),
     defaultPinned: [],
     favoritesHref: '/tennis/favorites',

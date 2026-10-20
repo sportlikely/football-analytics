@@ -2195,5 +2195,20 @@
  "in our data": "in unseren Daten",
  "of matches": "der Matches",
  "picks saved before the first serve": "vor dem ersten Aufschlag gespeicherte Tipps",
- "{0} ranking": "{0}-Rangliste"
+ "{0} ranking": "{0}-Rangliste",
+ "Qualifying R{0}": "Qualifikation R{0}",
+ "Qualifying (round)": "Qualifikation",
+ "Round of 16": "Achtelfinale",
+ "Round of {0}": "Runde der letzten {0}",
+ "Round {0}": "Runde {0}",
+ "Quarter-final": "Viertelfinale",
+ "Semi-final": "Halbfinale",
+ "Final (round)": "Finale",
+ "Round robin": "Gruppenphase",
+ "Result to follow": "Ergebnis folgt",
+ "{n, plural, one {# match} other {# matches}}": "{n, plural, one {# Match} other {# Matches}}",
+ "From {n, plural, one {# match} other {# matches}} with full stats.": "Aus {n, plural, one {# Match} other {# Matches}} mit vollständigen Statistiken.",
+ "Winner, {n, plural, one {# match} other {# matches}}": "Sieger, {n, plural, one {# Match} other {# Matches}}",
+ "{n, plural, one {# match} other {# matches}} in the next {1} days": "{n, plural, one {# Match} other {# Matches}} in den nächsten {1} Tagen",
+ "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "Wie oft unser wahrscheinlichstes Satzergebnis genau stimmte und wie weit unsere Gesamtspiele von der echten Zahl entfernt waren, über {n, plural, one {# Match} other {# Matches}} (Aufgaben ausgenommen)."
 }

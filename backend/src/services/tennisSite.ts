@@ -10,6 +10,8 @@ import { db } from '../db';
 import { tennisModelInternals, tennisStrongLine, tennisPlayerModel, tennisLiveChance, tennisServeChances, tennisRecordSince, TENNIS_MODEL } from './tennisModel';
 import { tournamentKey, setTennisLiveHook } from './tennis';
 import { winnerBands, winnerByConfidence, winnerCalibration } from '../utils/winnerBands';
+import { shortName, fullName, isAbbreviated } from '../utils/tennisNames';
+import { tournamentPlace, countryName } from '../utils/tennisPlaces';
 
 export const tennisPublic = () => process.env.TENNIS_PUBLIC === '1';
 /** Reveal / unlock ids of tennis matches (their own negative range: football > 0, basketball -id, NFL -(2e9 + id)) */
@@ -20,11 +22,12 @@ const { classify } = tennisModelInternals;
 /* ---------- shapes ---------- */
 
 export type TennisTour = 'atp' | 'wta' | 'challenger' | 'itf';
-export interface TSide { id: number | null; name: string; country: string | null; rank: number | null; logo: null }
+/** fix195: `name` = the full name (tennis_players), `short` = the real surname for tight rows */
+export interface TSide { id: number | null; name: string; short: string; country: string | null; rank: number | null; logo: null }
 export interface TScore { sets: [number, number][]; won: [number, number]; points: [string, string] | null; server: 1 | 2 | null }
 export interface TMatch {
   id: number; tour: TennisTour; cat: string; women: boolean
-  tournament: { key: string; name: string; tier: string | null; level: string; surface: string | null; indoor: boolean | null; city: string | null; country: string | null }
+  tournament: { key: string; id: string | null; name: string; tier: string | null; level: string; surface: string | null; indoor: boolean | null; city: string | null; country: string | null }
   round: string | null; roundCode: string | null; qualifying: boolean; bestOf: number
   start: string; status: string; state: 'upcoming' | 'live' | 'done' | 'off'
   home: TSide; away: TSide; score: TScore | null; winner: 1 | 2 | null; outcome: string | null
@@ -36,7 +39,8 @@ export interface TMatch {
 const rankSql = (p: string) => `(SELECT r.rank FROM tennis_rankings r WHERE r.player_id = ${p}.id
   AND r.date = (SELECT MAX(r2.date) FROM tennis_rankings r2 WHERE r2.tour = r.tour) LIMIT 1)`;
 export const MATCH_COLS = `m.id, m.tournament_id, m.tournament, m.tour, m.tier, m.surface, m.indoor, m.round, m.round_code, m.is_qualifying, m.best_of,
-  m.scheduled_at, m.status, m.event_status, m.p1_id, m.p1_name, m.p2_id, m.p2_name, m.sets, m.games, m.winner, m.outcome, m.extra, m.source,
+  m.scheduled_at, m.status, m.event_status, m.p1_id, m.p1_name, m.p2_id, m.p2_name, m.sets, m.games, m.winner, m.outcome, m.extra, m.source, m.updated_at,
+  p1.name AS n1, p1.first_name AS f1, p1.last_name AS l1, p2.name AS n2, p2.first_name AS f2, p2.last_name AS l2,
   p1.country AS c1, p2.country AS c2, COALESCE(${rankSql('p1')}, p1.ranking) AS r1, COALESCE(${rankSql('p2')}, p2.ranking) AS r2, p1.tour AS t1, p2.tour AS t2,
   t.city AS tcity, t.country AS tcountry, t.indoor AS tindoor`;
 export const MATCH_FROM = `FROM tennis_matches m LEFT JOIN tennis_players p1 ON p1.id = m.p1_id LEFT JOIN tennis_players p2 ON p2.id = m.p2_id
@@ -44,6 +48,8 @@ export const MATCH_FROM = `FROM tennis_matches m LEFT JOIN tennis_players p1 ON 
 /** public rows: singles, our own feed (the archive has other player ids), with both players */
 export const MATCH_PUBLIC = `COALESCE(m.draw, 'singles') = 'singles' AND m.source <> 'archive' AND m.p1_name IS NOT NULL AND m.p2_name IS NOT NULL
   AND m.p1_name NOT IN ('TBD', 'TBA', 'Qualifier') AND m.p2_name NOT IN ('TBD', 'TBA', 'Qualifier')`;
+/** fix195: the lists (home, matches, draw, search): no match the provider lost track of ('unknown', fix195 stale check) */
+export const MATCH_LISTED = `${MATCH_PUBLIC} AND COALESCE(m.status, '') <> 'unknown'`;
 
 const LEVEL: Record<number, string> = { 0: 'Grand Slam', 1: '1000', 2: '500', 3: '250', 4: 'Challenger', 5: 'ITF' };
 /** "atp_500" → "ATP 500", "grand_slam" → "Grand Slam", "challenger_125" → "Challenger 125" */
@@ -82,24 +88,89 @@ function scoreOf(r: any, state: TMatch['state']): TScore | null {
   const pts = state === 'live' && Array.isArray(ex?.livePoints) ? ex.livePoints.map((x: string) => PT[x] ?? x) as [string, string] : null;
   return { sets, won, points: pts, server: state === 'live' && (ex?.server === 1 || ex?.server === 2) ? ex.server : null };
 }
+/* ---------- rounds (fix195): one code per round, from the provider's code or its text ---------- */
+
+/** Q1–Q3 qualifying, R128 … R16, QF, SF, F, RR (round robin), R1 … (a numbered round of unknown size) */
+export const ROUND_ORDER: Record<string, number> = { Q1: 0, Q2: 1, Q3: 2, Q4: 3, Q: 3, R1: 4.1, R2: 4.2, R3: 4.3, R4: 4.4, R128: 5, R64: 6, R32: 7, R16: 8, RR: 8.5, QF: 9, SF: 10, F: 12 };
+const FRACTION: Record<string, string> = { '1': 'F', '2': 'SF', '4': 'QF', '8': 'R16', '16': 'R32', '32': 'R64', '64': 'R128' };
+/**
+ * The round code of a match: the provider's round_code when it is one we know, else read from its text ("ATP Brussels
+ * - 1/16-finals" → R32, "Quarterfinals" → QF, "Qualification round 2" → Q2, "2nd round" → R2). Qualifying rounds are Q…
+ */
+export function normRound(code: string | null | undefined, round: string | null | undefined, qualifying: boolean): string | null {
+  const c = String(code || '').toUpperCase().replace(/\s+/g, '');
+  const r = String(round || '').toLowerCase();
+  const q = qualifying || /qualif/.test(r) || /^Q\d?$/.test(c);
+  if (/^Q\d$/.test(c)) return c;
+  if (q) {
+    const n = r.match(/(?:round|r)\s*(\d)|(\d)(?:st|nd|rd|th)\s+round/) || c.match(/^R(\d)$/);
+    return n ? `Q${n[1] || n[2]}` : /final/.test(r) ? 'Q3' : 'Q';
+  }
+  if (c in ROUND_ORDER && c !== 'Q') return c;
+  if (/^(F|FINAL)$/.test(c)) return 'F';
+  const frac = r.match(/1\s*\/\s*(\d+)/);
+  if (frac && FRACTION[frac[1]]) return FRACTION[frac[1]];
+  if (/semi/.test(r)) return 'SF';
+  if (/quarter/.test(r)) return 'QF';
+  if (/round robin|group/.test(r)) return 'RR';
+  if (/(^|[^a-z])(the )?finals?$/.test(r.trim()) || /(^|\s-\s)final$/.test(r.trim())) return 'F';
+  const of = r.match(/(?:round of|last)\s*(\d+)/) || r.match(/\br\s*(\d{2,3})\b/);
+  if (of && ['16', '32', '64', '128'].includes(of[1])) return `R${of[1]}`;
+  const k = r.match(/(\d)(?:st|nd|rd|th)\s+round/) || r.match(/round\s*(\d)\b/);
+  if (k) return `R${k[1]}`;
+  return null;
+}
+/** English names of the codes (the pages translate the code themselves; this is for the preview text and SEO) */
+export function roundEn(code: string | null): string | null {
+  if (!code) return null;
+  if (/^Q\d$/.test(code)) return `Qualifying R${code.slice(1)}`;
+  if (code === 'Q') return 'Qualifying';
+  if (/^R(16|32|64|128)$/.test(code)) return `Round of ${code.slice(1)}`;
+  if (/^R\d$/.test(code)) return `Round ${code.slice(1)}`;
+  return ({ QF: 'Quarter-final', SF: 'Semi-final', F: 'Final', RR: 'Round robin' } as Record<string, string>)[code] || null;
+}
+const roundRank = (code: string | null) => (code && code in ROUND_ORDER ? ROUND_ORDER[code] : 4);
+
+/** the tour of a row for its pages and keys (the classified tour, never the row's raw 'atp' default) */
+const tourOf = (cls: { cat: number; gen: number }): TennisTour => (cls.cat === 3 ? 'challenger' : cls.cat === 4 ? 'itf' : cls.gen === 1 ? 'wta' : 'atp');
+/** a row's tournament page key from its classified tour */
+export function slugOf(tour: string | null, tier: string | null, name: string | null, source = 'live'): string {
+  const cls = classify(tour, tier, name, source);
+  return tournamentSlug(cls ? tourOf(cls) : tour, String(name || ''));
+}
+/** a side's display name: first + last from the profile, else the profile name, else the match row's (initials last) */
+const sideName = (row: string | null, prof: string | null, first: string | null, last: string | null) => {
+  const p = fullName(prof, first, last);
+  return p && (!isAbbreviated(p) || !row) ? p : row || p;
+};
+
 /** a row of MATCH_COLS → TMatch (null = left out: doubles, juniors, team events, exhibitions) */
 export function shapeMatch(r: any): TMatch | null {
   const cls = classify(r.tour, r.tier, r.tournament, r.source || 'live');
   if (!cls) return null;
-  const tour: TennisTour = cls.cat === 3 ? 'challenger' : cls.cat === 4 ? 'itf' : cls.gen === 1 ? 'wta' : 'atp';
-  const state = stateOf(r.status, r.outcome);
+  const tour = tourOf(cls);
+  let state = stateOf(r.status, r.outcome);
+  // fix195: still "upcoming" 6 h after the start, or "live" with no update for 30 min 6 h after the start: not on the
+  // lists until the provider says what happened (services/tennis.ts asks again)
+  const t0 = Date.parse(r.scheduled_at), now = Date.now();
+  if (state === 'upcoming' && t0 < now - 6 * 3600e3) state = 'off';
+  if (state === 'live' && t0 < now - 6 * 3600e3 && !(Date.parse(r.updated_at || '') > now - 30 * 60e3)) state = 'off';
   const name = String(r.tournament || '').trim() || 'Tournament';
+  const place = tournamentPlace(r.tcountry, r.tcity, name);
+  const n1 = sideName(r.p1_name, r.n1 ?? null, r.f1 ?? null, r.l1 ?? null), n2 = sideName(r.p2_name, r.n2 ?? null, r.f2 ?? null, r.l2 ?? null);
+  const quali = !!r.is_qualifying || /\b(qualification|qualifying)\b/i.test(name);
+  const code = normRound(r.round_code, r.round, quali);
   return {
     id: r.id, tour, cat: (['slam', 'atp', 'wta', 'challenger', 'itf'] as const)[cls.cat], women: cls.gen === 1,
     tournament: {
-      key: tournamentSlug(r.tour, name), name: name.replace(/\s*[-–]\s*(qualification|qualifying).*$/i, '').replace(/\s+\(\w[^)]*\)\s*$/, '').trim() || name,
+      key: tournamentSlug(tour, name), id: r.tournament_id || null, name: name.replace(/\s*[-–]\s*(qualification|qualifying).*$/i, '').replace(/\s+\(\w[^)]*\)\s*$/, '').trim() || name,
       tier: r.tier || null, level: LEVEL[cls.lvl] || '', surface: r.surface ? String(r.surface).toLowerCase() : null,
-      indoor: r.indoor == null ? (r.tindoor == null ? null : !!r.tindoor) : !!r.indoor, city: r.tcity || null, country: r.tcountry || null
+      indoor: r.indoor == null ? (r.tindoor == null ? null : !!r.tindoor) : !!r.indoor, city: place.city, country: place.country
     },
-    round: r.round || r.round_code || null, roundCode: r.round_code || null, qualifying: !!r.is_qualifying, bestOf: r.best_of === 5 ? 5 : 3,
+    round: roundEn(code), roundCode: code, qualifying: quali || (!!code && code.startsWith('Q')), bestOf: r.best_of === 5 ? 5 : 3,
     start: r.scheduled_at, status: r.status || 'upcoming', state,
-    home: { id: r.p1_id ?? null, name: r.p1_name, country: r.c1 || null, rank: r.r1 ?? null, logo: null },
-    away: { id: r.p2_id ?? null, name: r.p2_name, country: r.c2 || null, rank: r.r2 ?? null, logo: null },
+    home: { id: r.p1_id ?? null, name: n1, short: shortName(n1, r.f1 && r.l1 ? r.l1 : null), country: r.c1 || null, rank: r.r1 ?? null, logo: null },
+    away: { id: r.p2_id ?? null, name: n2, short: shortName(n2, r.f2 && r.l2 ? r.l2 : null), country: r.c2 || null, rank: r.r2 ?? null, logo: null },
     score: scoreOf(r, state), winner: r.winner === 1 || r.winner === 2 ? r.winner : null, outcome: r.outcome || null, rid: tennisRid(r.id)
   };
 }
@@ -160,11 +231,11 @@ export function withTennisPredictions(list: TMatch[], full: boolean | ((rid: num
 
 const ORDER_START = 'ORDER BY m.scheduled_at, m.id';
 export function tennisMatchesBetween(from: string, to: string, tour: string | null, admin: boolean, limit = 1500): TMatch[] {
-  const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.scheduled_at >= ? AND m.scheduled_at < ? AND ${MATCH_PUBLIC} ${ORDER_START} LIMIT ?`).all(from, to, limit) as any[];
+  const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.scheduled_at >= ? AND m.scheduled_at < ? AND ${MATCH_LISTED} ${ORDER_START} LIMIT ?`).all(from, to, limit) as any[];
   return rows.map(shapeMatch).filter((m): m is TMatch => !!m && tourOk(m, tour, admin));
 }
 export function tennisLive(tour: string | null, admin: boolean): TMatch[] {
-  const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.status IN ('live', 'in_progress', 'interrupted', 'suspended') AND m.scheduled_at >= ? AND ${MATCH_PUBLIC} ${ORDER_START} LIMIT 400`)
+  const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.status IN ('live', 'in_progress', 'interrupted', 'suspended') AND m.scheduled_at >= ? AND ${MATCH_LISTED} ${ORDER_START} LIMIT 400`)
     .all(new Date(Date.now() - 2 * DAY).toISOString()) as any[];
   return rows.map(shapeMatch).filter((m): m is TMatch => !!m && m.state === 'live' && tourOk(m, tour, admin));
 }
@@ -257,12 +328,12 @@ export function serveReturn(pid: number | null, before: string, surface: string 
   const v = (a: Agg, games: number) => ({ ...aggView(a), breakPct: pctOf(a.bp_conv, games) });
   return { last52: v(all, rg), surface: surface ? v(surf, rgS) : null };
 }
-interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; opponent: { id: number | null; name: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
+interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; roundCode: string | null; opponent: { id: number | null; name: string; short: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
 /** a player's finished matches before `before`, newest first */
 export function playedBefore(pid: number | null, before: string, limit = 10, since?: string): Played[] {
   if (!pid) return [];
-  const rows = db.prepare(`SELECT m.id, m.scheduled_at, m.tournament, m.tour, m.surface, m.round, m.p1_id, m.p1_name, m.p2_id, m.p2_name, m.winner, m.games, m.outcome, m.extra,
-      p1.country AS c1, p2.country AS c2, (SELECT MAX(s.duration_s) FROM tennis_match_stats s WHERE s.match_id = m.id) AS dur
+  const rows = db.prepare(`SELECT m.id, m.scheduled_at, m.tournament, m.tour, m.tier, m.source, m.surface, m.round, m.round_code, m.is_qualifying, m.p1_id, m.p1_name, m.p2_id, m.p2_name, m.winner, m.games, m.outcome, m.extra,
+      p1.country AS c1, p2.country AS c2, p1.name AS n1, p1.first_name AS f1, p1.last_name AS l1, p2.name AS n2, p2.first_name AS f2, p2.last_name AS l2, (SELECT MAX(s.duration_s) FROM tennis_match_stats s WHERE s.match_id = m.id) AS dur
     FROM tennis_matches m LEFT JOIN tennis_players p1 ON p1.id = m.p1_id LEFT JOIN tennis_players p2 ON p2.id = m.p2_id
     WHERE m.id IN (SELECT id FROM tennis_matches WHERE p1_id = ? AND scheduled_at < ? AND scheduled_at >= ? UNION SELECT id FROM tennis_matches WHERE p2_id = ? AND scheduled_at < ? AND scheduled_at >= ?)
       AND m.status = 'completed' AND m.winner IN (1, 2) AND m.source <> 'archive' AND COALESCE(m.draw, 'singles') = 'singles'
@@ -272,9 +343,13 @@ export function playedBefore(pid: number | null, before: string, limit = 10, sin
     let g: any = null; try { g = r.games ? JSON.parse(r.games) : null; } catch { g = null; }
     const sets = Array.isArray(g?.[0]) ? g[0].map((x: any, i: number) => (me === 1 ? `${x}-${g[1][i]}` : `${g[1][i]}-${x}`)) : [];
     const ex = parse(r.extra);
+    const code = normRound(r.round_code, r.round, !!r.is_qualifying || /\b(qualification|qualifying)\b/i.test(String(r.tournament || '')));
+    const opp = me === 1 ? { id: r.p2_id, name: sideName(r.p2_name, r.n2, r.f2, r.l2), last: r.f2 && r.l2 ? r.l2 : null, country: r.c2 || null }
+      : { id: r.p1_id, name: sideName(r.p1_name, r.n1, r.f1, r.l1), last: r.f1 && r.l1 ? r.l1 : null, country: r.c1 || null };
     return {
-      id: r.id, start: r.scheduled_at, tournament: r.tournament, tkey: tournamentSlug(r.tour, r.tournament || ''), surface: r.surface ? String(r.surface).toLowerCase() : null, round: r.round,
-      opponent: me === 1 ? { id: r.p2_id, name: r.p2_name, country: r.c2 || null } : { id: r.p1_id, name: r.p1_name, country: r.c1 || null },
+      id: r.id, start: r.scheduled_at, tournament: r.tournament, tkey: slugOf(r.tour, r.tier, r.tournament || '', r.source || 'live'), surface: r.surface ? String(r.surface).toLowerCase() : null,
+      round: roundEn(code), roundCode: code,
+      opponent: { id: opp.id, name: opp.name, short: shortName(opp.name, opp.last), country: opp.country },
       won: r.winner === me, score: sets.join(' '), sets: sets.length, minutes: r.dur ? Math.round(r.dur / 60) : ex?.minutes ? Math.round(ex.minutes) : null,
       retired: /retired/.test(String(r.outcome || ''))
     };
@@ -318,32 +393,32 @@ export function headToHead(a: number | null, b: number | null, before?: string) 
   for (const m of list) { const k = m.tournament.surface || 'other'; const x = surf.get(k) || [0, 0]; if (winnerId(m) === a) x[0]++; else x[1]++; surf.set(k, x); }
   return { list, won, bySurface: [...surf.entries()].map(([surface, w]) => ({ surface, won: w })) };
 }
-const ROUND_ORDER: Record<string, number> = { Q1: 0, Q2: 1, Q3: 2, Q4: 3, Q: 3, R128: 5, R64: 6, R32: 7, R16: 8, RR: 8, QF: 9, SF: 10, F: 12 };
-const roundCodeOf = (m: TMatch) => {
-  const c = String(m.roundCode || '').toUpperCase();
-  if (c && c in ROUND_ORDER) return c;
-  const r = String(m.round || '').toLowerCase();
-  if (/qualif/.test(r)) return (r.match(/\d/) ? `Q${r.match(/\d/)![0]}` : 'Q');
-  if (/^final$|^the final$/.test(r)) return 'F';
-  if (/semi/.test(r)) return 'SF';
-  if (/quarter/.test(r)) return 'QF';
-  if (/round robin|group/.test(r)) return 'RR';
-  const n = r.match(/(?:round of|r)\s*(\d+)/); if (n) return `R${n[1]}`;
-  const k = r.match(/(\d)(?:st|nd|rd|th)\s+round/); if (k) return `ROUND${k[1]}`;
-  return c || 'R';
-};
-const roundRank = (code: string) => (code in ROUND_ORDER ? ROUND_ORDER[code] : /^ROUND(\d)/.test(code) ? 4 + Number(code.slice(5)) : 4);
-/** the draw of a tournament edition: its matches grouped by round (main draw last rounds last), from our matches */
+/**
+ * The draw of a tournament edition: its matches grouped by round, from our matches. fix195: one row per match (the same
+ * two players in one round once: the further / richer row stays), main draw rounds in order (first round → final),
+ * qualifying after the main draw; matches the provider lost track of are left out.
+ */
 export function tournamentDraw(key: string, around: string) {
   const T = Date.parse(around);
-  const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.scheduled_at >= ? AND m.scheduled_at < ? AND ${MATCH_PUBLIC} ORDER BY m.scheduled_at LIMIT 3000`)
+  const rows = db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE m.scheduled_at >= ? AND m.scheduled_at < ? AND ${MATCH_LISTED} ORDER BY m.scheduled_at LIMIT 3000`)
     .all(new Date(T - 16 * DAY).toISOString(), new Date(T + 16 * DAY).toISOString()) as any[];
-  const list = rows.map(shapeMatch).filter((m): m is TMatch => !!m && m.tournament.key === key);
+  const list = rows.map(shapeMatch).filter((m): m is TMatch => !!m && m.tournament.key === key && !(m.state === 'off' && m.status !== 'completed'));
+  const STATE_RANK: Record<string, number> = { done: 3, live: 2, upcoming: 1, off: 0 };
+  const seen = new Map<string, TMatch>();
+  for (const m of list) {
+    const k = `${m.qualifying ? 'Q' : 'M'}|${[m.home.id ?? m.home.name, m.away.id ?? m.away.name].sort().join('-')}`;
+    const o = seen.get(k);
+    if (!o || STATE_RANK[m.state] > STATE_RANK[o.state] || (STATE_RANK[m.state] === STATE_RANK[o.state] && m.id > o.id)) seen.set(k, m);
+  }
   const rounds = new Map<string, TMatch[]>();
-  for (const m of list) { const c = (m.qualifying ? 'Q:' : '') + roundCodeOf(m); rounds.set(c, [...(rounds.get(c) || []), m]); }
+  for (const m of [...seen.values()].sort((a, b) => a.start.localeCompare(b.start) || a.id - b.id)) {
+    const code = m.roundCode || (m.qualifying ? 'Q' : 'R');
+    const c = (m.qualifying ? 'Q:' : '') + code;
+    rounds.set(c, [...(rounds.get(c) || []), m]);
+  }
   return [...rounds.entries()]
-    .map(([code, ms]) => ({ code: code.replace(/^Q:/, ''), qualifying: code.startsWith('Q:') || /^Q/.test(code.replace(/^Q:/, '')), name: ms[0].round || code, matches: ms }))
-    .sort((a, b) => Number(a.qualifying) - Number(b.qualifying) === 0 ? roundRank(a.code) - roundRank(b.code) : Number(b.qualifying) - Number(a.qualifying));
+    .map(([c, ms]) => { const code = c.replace(/^Q:/, ''); return { code, qualifying: c.startsWith('Q:'), name: roundEn(code) || 'Matches', matches: ms }; })
+    .sort((a, b) => Number(a.qualifying) - Number(b.qualifying) || roundRank(a.code) - roundRank(b.code));
 }
 const isWomen = (m: TMatch) => m.women;
 
@@ -391,8 +466,9 @@ let namesCache: { at: number; byKey: Map<string, Set<string>> } | null = null;
 function namesOfKey(key: string): string[] {
   if (!namesCache || Date.now() - namesCache.at > 3600e3) {
     const byKey = new Map<string, Set<string>>();
-    for (const r of db.prepare(`SELECT DISTINCT tournament, tour FROM tennis_matches WHERE tournament IS NOT NULL AND scheduled_at >= ?`).all(new Date(Date.now() - 12 * 365 * DAY).toISOString()) as any[]) {
-      const k = tournamentSlug(r.tour, r.tournament);
+    // fix195: keyed by the classified tour (an ITF event a fixture called 'atp' is not the ATP event's)
+    for (const r of db.prepare(`SELECT DISTINCT tournament, tour, tier, CASE WHEN source = 'archive' THEN 'archive' ELSE 'live' END AS src FROM tennis_matches WHERE tournament IS NOT NULL AND scheduled_at >= ?`).all(new Date(Date.now() - 12 * 365 * DAY).toISOString()) as any[]) {
+      const k = slugOf(r.tour, r.tier, r.tournament, r.src);
       if (!byKey.has(k)) byKey.set(k, new Set());
       byKey.get(k)!.add(r.tournament);
     }
@@ -415,14 +491,19 @@ export function tennisTournament(key: string, full: boolean | ((rid: number) => 
   const all = draw.flatMap(r => r.matches);
   const first = all[0] || null;
   if (!first || (first.tour === 'itf' && !admin)) return null;
-  const meta = db.prepare(`SELECT * FROM tennis_tournaments WHERE name IN (${q}) ORDER BY start_date DESC LIMIT 1`).get(...names) as any;
+  // the catalogue row: this edition's own tournament id first, else the same name on the same tour
+  const tid = all.find(m => m.tournament.id)?.tournament.id || null;
+  const meta = (tid ? db.prepare(`SELECT * FROM tennis_tournaments WHERE id = ?`).get(tid) : null) as any
+    || db.prepare(`SELECT * FROM tennis_tournaments WHERE name IN (${q}) ORDER BY start_date DESC LIMIT 20`).all(...names).find((t: any) => slugOf(t.tour, t.tier, t.name) === key) as any;
   const starts = all.map(m => m.start).sort();
   // past champions: the final of each year (our feed and the 2015–2022 archive, matched by name)
-  const finals = db.prepare(`SELECT scheduled_at, round, round_code, p1_name, p2_name, p1_id, p2_id, winner, games, source, is_qualifying FROM tennis_matches
+  // fix195: only the finals of the same tour, gender and level family (the Cali Challenger never shows the WTA champion)
+  const finals = db.prepare(`SELECT tournament, tour, tier, scheduled_at, round, round_code, p1_name, p2_name, p1_id, p2_id, winner, games, source, is_qualifying FROM tennis_matches
     WHERE tournament IN (${q}) AND status = 'completed' AND winner IN (1, 2) AND COALESCE(is_qualifying, 0) = 0 ORDER BY scheduled_at DESC LIMIT 4000`).all(...names) as any[];
   const champions = new Map<string, any>();
   for (const f of finals) {
-    if (!/^(f|final|the final)$/i.test(String(f.round_code || f.round || '').trim())) continue;
+    if (normRound(f.round_code, f.round, false) !== 'F' && !/^(f|final|the final)$/i.test(String(f.round_code || f.round || '').trim())) continue;
+    if (slugOf(f.tour, f.tier, f.tournament, f.source === 'archive' ? 'archive' : 'live') !== key) continue;
     const year = String(f.scheduled_at).slice(0, 4);
     if (champions.has(year)) continue;
     let g: any = null; try { g = f.games ? JSON.parse(f.games) : null; } catch { g = null; }
@@ -436,7 +517,9 @@ export function tennisTournament(key: string, full: boolean | ((rid: number) => 
   const hits = recRows.filter(x => (x.r.p1 >= 0.5) === (x.m.winner === 1)).length;
   return {
     key, name: first.tournament.name, tour: first.tour, tier: first.tournament.tier, level: first.tournament.level, women: first.women,
-    surface: first.tournament.surface, indoor: first.tournament.indoor, city: meta?.city || first.tournament.city || null, country: meta?.country || first.tournament.country || null,
+    surface: first.tournament.surface, indoor: first.tournament.indoor,
+    // fix195: the country from the catalogue unless it is empty / "World", else from the city or the name (Cali → Colombia)
+    ...(() => { const pl = tournamentPlace(meta?.country, meta?.city || first.tournament.city, first.tournament.name); return { city: pl.city, country: pl.country || first.tournament.country || null }; })(),
     start: meta?.start_date || starts[0] || null, end: meta?.end_date || starts[starts.length - 1] || null,
     draw, champions: [...champions.values()].slice(0, 12),
     record: { n: recRows.length, right: hits, pct: recRows.length ? Math.round((1000 * hits) / recRows.length) / 10 : null }
@@ -551,7 +634,7 @@ function playerRecord(pid: number) {
 }
 /** Everything the player page shows. `full` = paid viewer (model tiles, the 1–10 scores, strengths / weaknesses). */
 export function tennisPlayer(pid: number, full: boolean | ((rid: number) => boolean), paid: boolean, admin: boolean) {
-  const p = db.prepare(`SELECT id, name, country, tour, hand, dob, height, ranking, ranking_points FROM tennis_players WHERE id = ?`).get(pid) as any;
+  const p = db.prepare(`SELECT id, name, first_name, last_name, country, tour, hand, dob, height, ranking, ranking_points FROM tennis_players WHERE id = ?`).get(pid) as any;
   if (!p || !p.name) return null;
   const women = womenOf(pid);
   const now = new Date().toISOString();
@@ -580,7 +663,7 @@ export function tennisPlayer(pid: number, full: boolean | ((rid: number) => bool
   const age = p.dob ? Math.floor((Date.now() - Date.parse(p.dob)) / (365.2425 * DAY)) : null;
   const analysis = playerAnalysis(pid, women);
   return {
-    player: { id: p.id, name: p.name, country: p.country || null, hand: p.hand || null, dob: p.dob || null, age: age && age > 10 && age < 60 ? age : null, height: p.height || null, tour: women ? 'wta' : 'atp', women, rank, points },
+    player: { id: p.id, name: fullName(p.name, p.first_name, p.last_name), country: p.country || null, countryName: countryName(p.country), hand: p.hand || null, dob: p.dob || null, age: age && age > 10 && age < 60 ? age : null, height: p.height || null, tour: women ? 'wta' : 'atp', women, rank, points },
     rankTrend: trend.map(r => ({ date: r.date, rank: r.rank })),
     season: { year, won: thisYear.filter(x => x.won).length, lost: thisYear.filter(x => !x.won).length },
     form: recent.slice(0, 10).reverse().map(x => (x.won ? 'W' : 'L')),
@@ -623,13 +706,13 @@ export function tennisSearch(q: string, admin: boolean) {
       GROUP BY tournament, tour ORDER BY at DESC LIMIT 40`).all(like, new Date(Date.now() - 400 * DAY).toISOString()) as any[]) {
     const cls = classify(r.tour, r.tier, r.tournament, 'live');
     if (!cls || (cls.cat === 4 && !admin)) continue;
-    const key = tournamentSlug(r.tour, r.tournament);
+    const key = slugOf(r.tour, r.tier, r.tournament);
     if (seen.has(key)) continue;
     seen.add(key);
     leagues.push({ code: key, name: String(r.tournament).replace(/\s*[-–]\s*(qualification|qualifying).*$/i, '').trim(), country: tierLabel(r.tier, r.tour), logo: null });
     if (leagues.length >= 5) break;
   }
-  const games = (db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE (m.p1_name LIKE ? OR m.p2_name LIKE ?) AND m.scheduled_at >= ? AND m.scheduled_at < ? AND ${MATCH_PUBLIC} ORDER BY m.scheduled_at LIMIT 30`)
+  const games = (db.prepare(`SELECT ${MATCH_COLS} ${MATCH_FROM} WHERE (m.p1_name LIKE ? OR m.p2_name LIKE ?) AND m.scheduled_at >= ? AND m.scheduled_at < ? AND ${MATCH_LISTED} ORDER BY m.scheduled_at LIMIT 30`)
     .all(like, like, new Date(Date.now() - 5 * 3600e3).toISOString(), new Date(Date.now() + 7 * DAY).toISOString()) as any[])
     .map(shapeMatch).filter((m): m is TMatch => !!m && (m.tour !== 'itf' || admin) && m.state !== 'off').slice(0, 6)
     .map(m => ({ id: m.id, kickoff: m.start, status: m.state === 'live' ? 'LIVE' : 'NS', league: m.tournament.name, home: m.home.name, away: m.away.name }));
@@ -703,14 +786,23 @@ export function tennisAccuracy(days = 3650) {
 /* ---------- match preview text (fix193c): plain English, no pick, no %, the same text search engines get ---------- */
 
 const SURF_WORD: Record<string, string> = { hard: 'hard court', clay: 'clay', grass: 'grass', carpet: 'carpet' };
+/** "the round of 32", "the quarter-final", "qualifying round 2", "round 2" */
+const ROUND_PHRASE = (code: string) => {
+  const q = /^Q(\d)$/.exec(code), n = /^R(\d)$/.exec(code);
+  return q ? `qualifying round ${q[1]}` : code === 'Q' ? 'qualifying' : n ? `round ${n[1]}` : `the ${String(roundEn(code)).toLowerCase()}`;
+};
+/** "the Brussels Open" (a name that already starts with "The" keeps one) */
+const theName = (n: string) => (/^the\s/i.test(n) ? n : `the ${n}`);
 export function tennisWriteup(d: NonNullable<ReturnType<typeof tennisMatch>>): string | null {
   const m = d.match;
   if (!m.home.name || !m.away.name) return null;
-  const A = m.home.name, B = m.away.name, sa = surnameOf(A), sb = surnameOf(B);
+  const A = m.home.name, B = m.away.name, sa = m.home.short, sb = m.away.short;
   const out: string[] = [];
   const surf = m.tournament.surface ? SURF_WORD[m.tournament.surface] || m.tournament.surface : null;
-  const where = [m.tournament.name, m.round].filter(Boolean).join(', ');
-  out.push(`${A}${m.home.rank ? ` (No. ${m.home.rank})` : ''} and ${B}${m.away.rank ? ` (No. ${m.away.rank})` : ''} meet at the ${where}${surf ? ` on ${m.tournament.indoor ? 'indoor ' : ''}${surf}` : ''}, best of ${m.bestOf} sets.`);
+  // fix195: "… meet in the round of 32 at the Brussels Open (ATP 250, indoor hard)." — the round from its code, never the provider's text
+  const inRound = m.roundCode ? ` in ${ROUND_PHRASE(m.roundCode)}` : '';
+  const detail = [tierLabel(m.tournament.tier, m.tour), surf ? `${m.tournament.indoor ? 'indoor ' : ''}${surf === 'hard court' ? 'hard' : surf}` : null].filter(Boolean).join(', ');
+  out.push(`${A}${m.home.rank ? ` (No. ${m.home.rank})` : ''} and ${B}${m.away.rank ? ` (No. ${m.away.rank})` : ''} meet${inRound} at ${theName(m.tournament.name)}${detail ? ` (${detail})` : ''}, best of ${m.bestOf} sets.`);
   const form = (list: Played[], who: string) => {
     if (list.length < 3) return null;
     const w = list.filter(x => x.won).length;
@@ -731,14 +823,12 @@ export function tennisWriteup(d: NonNullable<ReturnType<typeof tennisMatch>>): s
   const h = d.h2h;
   if (h.list.length) {
     const last = h.list[0];
-    const lw = last.winner === 1 ? last.home.name : last.away.name;
-    out.push(`They have met ${h.list.length === 1 ? 'once' : `${h.list.length} times`} in our data (${sa} ${h.won[0]}, ${sb} ${h.won[1]}); the last meeting went to ${surnameOf(lw)} at the ${last.tournament.name}.`);
+    out.push(`They have met ${h.list.length === 1 ? 'once' : `${h.list.length} times`} in our data (${sa} ${h.won[0]}, ${sb} ${h.won[1]}); the last meeting went to ${last.winner === 1 ? last.home.short : last.away.short} at ${theName(last.tournament.name)}.`);
   } else out.push('It is their first meeting in our data.');
   const rest = (r: any, who: string) => (r?.yesterday && (r.yesterday.sets >= 3 || (r.yesterday.minutes || 0) >= 150) ? `${who} played a long match ${r.yesterday.hoursAgo <= 20 ? 'earlier today' : 'yesterday'}${r.yesterday.minutes ? ` (${r.yesterday.minutes} minutes)` : ''}.` : null);
   for (const x of [rest(d.schedule.home, sa), rest(d.schedule.away, sb)]) if (x) out.push(x);
   return out.join(' ');
 }
-const surnameOf = (n: string) => { const p = n.trim().split(/\s+/); return p.length > 1 ? p.slice(1).join(' ') : n; };
 
 /* ---------- player page extras (fix193c): the ranking around them, titles in our data ---------- */
 
@@ -757,7 +847,7 @@ export function titlesOf(pid: number) {
     WHERE m.id IN (SELECT id FROM tennis_matches WHERE p1_id = ? UNION SELECT id FROM tennis_matches WHERE p2_id = ?)
       AND m.status = 'completed' AND m.winner IN (1, 2) AND COALESCE(m.is_qualifying, 0) = 0 AND COALESCE(m.draw, 'singles') = 'singles' AND m.source <> 'archive'
     ORDER BY m.scheduled_at DESC LIMIT 2000`).all(pid, pid) as any[];
-  return rows.filter(r => /^(f|final|the final)$/i.test(String(r.round_code || r.round || '').trim()) && (r.winner === 1) === (r.p1_id === pid))
-    .map(r => ({ matchId: r.id, year: Number(String(r.scheduled_at).slice(0, 4)), tournament: r.tournament, key: tournamentSlug(r.tour, r.tournament || ''), tier: tierLabel(r.tier, r.tour), surface: r.surface ? String(r.surface).toLowerCase() : null }))
+  return rows.filter(r => normRound(r.round_code, r.round, false) === 'F' && (r.winner === 1) === (r.p1_id === pid))
+    .map(r => ({ matchId: r.id, year: Number(String(r.scheduled_at).slice(0, 4)), tournament: r.tournament, key: slugOf(r.tour, r.tier, r.tournament || ''), tier: tierLabel(r.tier, r.tour), surface: r.surface ? String(r.surface).toLowerCase() : null }))
     .slice(0, 30);
 }

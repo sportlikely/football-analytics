@@ -92,6 +92,10 @@ function classify(tour: string | null, tier: string | null, name: string | null,
     if (/^\d+$/.test(ti) || ti === 's' || ti === 'itf') return { cat: 4, lvl: 5, gen: g };
     return { cat: 1 + g, lvl: 3, gen: g };
   }
+  // fix195: an ITF event by its name ("M25 Sarreguemines", "W35 Santa Margherita di Pula") is ITF whatever the row's
+  // tour says (fixture rows called them 'atp'); the letter is the gender
+  const itfName = /^(?:ITF\s+)?([MW])(15|25|35|40|50|60|75|80|100)\b/i.exec(String(name || '').trim());
+  if (itfName) return { cat: 4, lvl: 5, gen: itfName[1].toUpperCase() === 'W' ? 1 : 0 };
   const g = tr === 'wta' || /^wta_|^itf_w|^bjk/.test(ti) ? 1 : 0;
   if (ti === 'grand_slam') return { cat: 0, lvl: 0, gen: g };
   if (ti === 'wta_125') return { cat: 2, lvl: 4, gen: 1 };

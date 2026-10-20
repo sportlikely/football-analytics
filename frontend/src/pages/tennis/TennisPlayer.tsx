@@ -4,7 +4,7 @@ import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
-import { tennisPlayerFav, tennisHref, flagOf, surfaceName, type TMatch } from '../../lib/tennis'
+import { tennisPlayerFav, tennisHref, flagOf, surfaceName, countryName, type TMatch } from '../../lib/tennis'
 import { Skeleton, LockIcon } from '../bb/parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
 import { TCard as Card } from '../../components/sport/page/TeamPage'
@@ -82,7 +82,8 @@ export default function TennisPlayer() {
         ].filter(Boolean)}
         facts={([
           p.age ? [t('Age'), <span className="num">{p.age}</span>] : null,
-          p.country ? [t('Country'), <span>{flag} {p.country}</span>] : null,
+          // fix195: the country's name ("Peru"), never the code
+          p.country ? [t('Country'), <span>{flag} {countryName(p.country)}</span>] : null,
           p.points ? [t('Ranking points'), <span className="num">{p.points.toLocaleString(LOCALE)}</span>] : null,
           [t('{0} season', { 0: d.season.year }), <span className="num">{t('{0} won · {1} lost', { 0: d.season.won, 1: d.season.lost })}</span>],
           p.height ? [t('Height'), <span className="num">{p.height} cm</span>] : null
@@ -177,7 +178,7 @@ function ModelCard({ d }: { d: Data }) {
   const nextPct = np && !np.locked && typeof np.pHome === 'number' && me ? (me === 'home' ? np.pHome : np.pAway!) : null
   const tiles: { label: string; value: ReactNode; sub: ReactNode }[] = [
     { label: t('Overall rating'), value: String(m.elo), sub: t('#{0} of {1} on the tour', { 0: m.rank, 1: m.of }) },
-    ...m.surfaces.map(s => ({ label: surfaceName(s.surface), value: s.matches > 0 ? String(s.elo) : '–', sub: t('{0} matches', { 0: s.matches }) })),
+    ...m.surfaces.map(s => ({ label: surfaceName(s.surface), value: s.matches > 0 ? String(s.elo) : '–', sub: t('{n, plural, one {# match} other {# matches}}', { n: s.matches }) })),
     { label: t('Serve'), value: `${m.serve}%`, sub: t('service points won · tour {0}%', { 0: m.tourServe }) },
     { label: t('Return'), value: `${m.ret}%`, sub: t('return points won · tour {0}%', { 0: Math.round((100 - m.tourServe) * 10) / 10 }) },
     { label: t('Form'), value: t('{0} of {1}', { 0: m.form.won, 1: m.form.played }), sub: t('won, last 10') }
@@ -237,7 +238,7 @@ function AnalysisCard({ a }: { a: Analysis }) {
             <div className="label pb-1 text-loss">{t('Weaknesses')}</div>
             {a.weaknesses.length ? <ul className="space-y-1 text-sm text-ink">{a.weaknesses.map(m => <li key={m.id} className="flex gap-2"><span className="text-loss">−</span>{line(m, false)}</li>)}</ul> : <p className="text-sm text-faint">{t('Nothing stands out yet.')}</p>}
           </div>
-          <p className="text-[11px] text-faint">{t('From {0} matches with full stats.', { 0: a.matches })}</p>
+          <p className="text-[11px] text-faint">{t('From {n, plural, one {# match} other {# matches}} with full stats.', { n: a.matches })}</p>
         </div>
       </div>
     </Card>
@@ -275,7 +276,7 @@ function RecordCard({ d }: { d: Data }) {
       {!r.games ? <p className="text-sm text-faint">{t('No finished matches with a saved prediction yet.')}</p> : (
         <div className="grid grid-cols-2 gap-2.5">
           <div className="rounded-2xl bg-surface2/60 p-3.5">
-            <div className="text-[11px] text-faint">{t('Winner, {0} matches', { 0: r.games })}</div>
+            <div className="text-[11px] text-faint">{t('Winner, {n, plural, one {# match} other {# matches}}', { n: r.games })}</div>
             <div className="font-display font-extrabold text-xl mt-1">{Math.round((r.right / r.games) * 100)}%</div>
             <div className="text-[11px] text-muted">{t('{0} right', { 0: r.right })}</div>
           </div>
@@ -283,7 +284,7 @@ function RecordCard({ d }: { d: Data }) {
             <div className="rounded-2xl bg-surface2/60 p-3.5">
               <div className="text-[11px] text-faint">{t('Strong picks')}</div>
               <div className="font-display font-extrabold text-xl mt-1">{Math.round((r.strongRight / r.strong) * 100)}%</div>
-              <div className="text-[11px] text-muted">{t('{0} matches', { 0: r.strong })}</div>
+              <div className="text-[11px] text-muted">{t('{n, plural, one {# match} other {# matches}}', { n: r.strong })}</div>
             </div>
           )}
         </div>

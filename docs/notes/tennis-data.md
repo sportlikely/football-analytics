@@ -56,3 +56,16 @@ probability and analysis, per-player as-of rankings and the Elo tape, rally / ch
 - Reserve `TENNIS_RESERVE` (default 1,500) for live play and fixtures: every other job stops when a call would go under it.
 - 429 → 60 s pause. 401 / `upgrade_required` → logged once, that endpoint is not called again until restart.
 - Backfill is cheap: one call per monthly tape package and one per archive year (if the archive packages are on the plan).
+
+## One row per match (fix195)
+
+- /fixtures has its own id space (ids < 100,000 on 20 Oct 2026; match ids ~205,000). A fixture is stored under its `match_id`; one
+  without a match_id is skipped (the job info counts them). A fixture only fills what the match row is missing and moves the
+  start while the match has not started; initials ("D. E. Galan") never replace a full name.
+- Same two players within 24 h = the same match: `mergeDuplicates()` after every fixtures sync keeps the row in the match id space
+  with the furthest status / richest source and moves the prediction (only when the keeper has none and the players are in the
+  same order), unlocks, live samples, price and stoppages; `tennis_id_moves` redirects old ids. An old id that also has a tape
+  (a fixture id landed on an old match) is refreshed from the provider instead of deleted.
+- Stale: still upcoming / live 6 h after the start → `/matches/{id}`, then `/history/matches/{id}`; nothing → status `unknown`
+  (out of the lists, every 30 min, `stale` job).
+- ITF from the name (M15 … W100), never the fixture's `atp`. Admin check: `/api/admin/tennis/check` and Admin → Data health.

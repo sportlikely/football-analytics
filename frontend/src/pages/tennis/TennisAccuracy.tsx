@@ -20,7 +20,7 @@ const a = winnerAccuracy({
   scoreWords: {
     cols: [t('Set score right'), t('Games off')],
     title: t('Set scores and total games'),
-    text: n => t('How often our most likely set score was exactly right, and how far our total games were from the real number, over {0} matches (retirements left out).', { 0: n }),
+    text: n => t('How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).', { n }),
     a: t('Set score right'), aUnit: t('of matches'), aFmt: v => `${v}%`,
     b: t('Total games off by'), bUnit: t('games a match'), bFmt: v => `±${v}`
   }

@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
 import { useReveal } from '../../lib/reveal'
 import { slModelOf } from '../../lib/modelNames'
-import { tennisRid, tennisRstatus, tennisHref, tennisPlayerFav, tennisTournamentFav, surname, flagOf, tierLabel, surfaceName, setsText, TENNIS_STRONG, type TMatch, type TPred } from '../../lib/tennis'
+import { tennisRid, tennisRstatus, tennisHref, tennisPlayerFav, tennisTournamentFav, surname, roundName, flagOf, tierLabel, surfaceName, setsText, TENNIS_STRONG, type TMatch, type TPred } from '../../lib/tennis'
 import { Skeleton } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import GamePage, { useGameTab, GameNews, Section, fmtGameDate, fmtGameTime, type GameTab } from '../../components/sport/game/GamePage'
@@ -43,19 +43,25 @@ const TABS = ['prediction', 'stats', 'form', 'rest', 'h2h', 'draw', 'highlights'
  */
 export default function TennisMatch() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
   const [tab, pickTab] = useGameTab(TABS, { standings: 'draw', table: 'draw', players: 'stats' })
   useEffect(() => {
     setD(null); setMissing(false)
-    const load = () => axios.get(`${API_URL}/tennis/match/${id}`).then(r => setD(r.data.data)).catch(e => { if (e?.response?.status === 404) setMissing(true) })
+    // fix195: an old fixture id merged into its match → that match's page
+    const load = () => axios.get(`${API_URL}/tennis/match/${id}`).then(r => setD(r.data.data)).catch(e => {
+      const to = e?.response?.data?.movedTo
+      if (to) navigate(tennisHref.match(to), { replace: true })
+      else if (e?.response?.status === 404) setMissing(true)
+    })
     load()
     const iv = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30 * 1000)
     window.addEventListener(GAME_RELOAD, load) // a free pick opened this match
     return () => { clearInterval(iv); window.removeEventListener(GAME_RELOAD, load) }
-  }, [id])
+  }, [id, navigate])
   useEffect(() => {
-    if (d) document.title = `${surname(d.match.home.name)} vs ${surname(d.match.away.name)} · ${d.match.tournament.name} | SportLikely`
+    if (d) document.title = `${surname(d.match.home)} vs ${surname(d.match.away)} · ${d.match.tournament.name} | SportLikely`
   }, [d?.match.id])
 
   if (missing) return <div className="max-w-2xl mx-auto px-4 py-16 text-center text-muted">{t('Match not found.')}</div>
@@ -63,7 +69,7 @@ export default function TennisMatch() {
   const m = d.match
   const p = d.prediction
   const live = m.state === 'live', done = m.state === 'done'
-  const hs = surname(m.home.name), as = surname(m.away.name)
+  const hs = surname(m.home), as = surname(m.away)
   const side = (s: TMatch['home']) => ({
     name: s.name, logo: <span className="text-5xl sm:text-6xl leading-none" aria-hidden>{flagOf(s.country) || '🎾'}</span>, href: tennisHref.player(s.id) || '/tennis',
     title: t('{0}: player page', { 0: s.name }), linkLabel: t('Player page →'), star: s.id ? <FavStar fav={tennisPlayerFav(s)} size="sm" /> : undefined,
@@ -105,13 +111,13 @@ export default function TennisMatch() {
     ...(done ? [{ id: 'highlights', label: t('Highlights'), short: t('Video'), hint: t('Official video'), render: () => <Highlights url={`${API_URL}/tennis/match/${m.id}/highlights`} /> }] : [])
   ]
   const statusText = live ? `${t('Set {0}', { 0: Math.min(m.bestOf, (m.score?.won[0] || 0) + (m.score?.won[1] || 0) + 1) })}${m.score?.points ? ` · ${m.score.points[0]}-${m.score.points[1]}` : ''}`
-    : done ? (/retired/.test(m.outcome || '') ? t('Retired') : t('Final')) : m.state === 'off' ? (/walkover/.test(m.outcome || '') ? t('Walkover') : /postpon/i.test(m.status) ? t('Postponed') : t('Cancelled')) : t('FIRST SERVE')
+    : done ? (/retired/.test(m.outcome || '') ? t('Retired') : t('Final')) : m.state === 'off' ? (/walkover/.test(m.outcome || '') ? t('Walkover') : /postpon/i.test(m.status) ? t('Postponed') : /^(upcoming|live|unknown|in_progress|interrupted|suspended)$/.test(m.status) ? t('Result to follow') : t('Cancelled')) : t('FIRST SERVE')
   return (
     <GamePage
       back={{ to: '/tennis/matches', label: t('All matches') }}
       srTitle={`${m.home.name} vs ${m.away.name} · ${m.tournament.name} ${t('prediction')}`}
       league={{ name: m.tournament.name, href: tennisHref.tournament(m.tournament.key), star: <FavStar size="sm" fav={tennisTournamentFav(m.tournament)} />,
-        bits: [tierLabel(m), surfaceName(m.tournament.surface, m.tournament.indoor), m.round || '', m.bestOf === 5 ? t('Best of 5') : ''].filter(Boolean) }}
+        bits: [tierLabel(m), surfaceName(m.tournament.surface, m.tournament.indoor), roundName(m), m.bestOf === 5 ? t('Best of 5') : ''].filter(Boolean) }}
       date={fmtGameDate(m.start)}
       home={side(m.home)}
       away={side(m.away)}
@@ -172,11 +178,11 @@ function LiveBlock({ d }: { d: Data }) {
   if (!now && curve.length < 2) return null
   return (
     <>
-      {now && <LiveChancePanel home={surname(m.home.name)} away={surname(m.away.name)} now={now} before={{ pHome: p.pHome, pAway: p.pAway ?? 100 - p.pHome }} status={`${setsText(m.score)}${m.score?.points ? ` · ${m.score.points[0]}-${m.score.points[1]}` : ''}`}
+      {now && <LiveChancePanel home={surname(m.home)} away={surname(m.away)} now={now} before={{ pHome: p.pHome, pAway: p.pAway ?? 100 - p.pHome }} status={`${setsText(m.score)}${m.score?.points ? ` · ${m.score.points[0]}-${m.score.points[1]}` : ''}`}
         words={{ score: t('Sets so far'), total: t('{0} games played', { 0: now.total }) }} />}
       {curve.length >= 2 && (
         <div className="mt-3 rounded-2xl border border-line/60 bg-surface/60 p-3 sm:p-4">
-          <SwingChart points={curve} home={surname(m.home.name)} away={surname(m.away.name)} periods={m.bestOf} live={live} />
+          <SwingChart points={curve} home={surname(m.home)} away={surname(m.away)} periods={m.bestOf} live={live} />
         </div>
       )}
     </>
@@ -207,7 +213,7 @@ function SetsCard({ m, p }: { m: TMatch; p: TPred }) {
         <div className="space-y-1.5">
           {(p.sets || []).map(s => {
             const [a, b] = s.score.split('-').map(Number)
-            const who = a > b ? surname(m.home.name) : surname(m.away.name)
+            const who = a > b ? surname(m.home) : surname(m.away)
             return (
               <div key={s.score} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm">
                 <div className="min-w-0">
@@ -328,7 +334,7 @@ function RestTab({ m, d }: { m: TMatch; d: Data }) {
     if (r.stoppages.medical || r.stoppages.retirements) out.push(t('{0}: {1} medical stoppages and {2} retirements in the last 30 days.', { 0: name, 1: r.stoppages.medical, 2: r.stoppages.retirements }))
     return out
   }
-  const notes = [...lines(h, surname(m.home.name)), ...lines(a, surname(m.away.name))]
+  const notes = [...lines(h, surname(m.home)), ...lines(a, surname(m.away))]
   return (
     <Section title={t('Schedule & rest')}>
       <Compare m={m} rows={[
@@ -346,7 +352,7 @@ function RestTab({ m, d }: { m: TMatch; d: Data }) {
 function H2H({ m, d }: { m: TMatch; d: Data }) {
   const x = d.h2h
   return (
-    <Section title={t('Head-to-head')} note={x.list.length ? `${surname(m.home.name)} ${x.won[0]} – ${x.won[1]} ${surname(m.away.name)}` : undefined}>
+    <Section title={t('Head-to-head')} note={x.list.length ? `${surname(m.home)} ${x.won[0]} – ${x.won[1]} ${surname(m.away)}` : undefined}>
       {!x.list.length ? <p className="text-sm text-faint">{t('These players have not met in our records.')}</p> : (
         <>
           <div className="flex flex-wrap gap-2 mb-3">
@@ -359,8 +365,8 @@ function H2H({ m, d }: { m: TMatch; d: Data }) {
                 <li key={g.id}>
                   <Link to={tennisHref.match(g.id)} className="flex items-center gap-3 py-2 text-sm hover:bg-surface2/50 rounded-lg px-1">
                     <span className="w-20 text-xs text-faint shrink-0">{new Date(g.start).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</span>
-                    <span className="min-w-0 flex-1 truncate">{g.tournament.name}{g.round ? ` · ${g.round}` : ''}<span className="block text-[11px] text-faint"><SurfaceTag surface={g.tournament.surface} /></span></span>
-                    <span className="text-xs text-right shrink-0"><span className="font-bold text-ink">{surname((homeWon ? m.home : m.away).name)}</span><span className="block num text-muted">{setsText(g.score, g.winner === 2)}</span></span>
+                    <span className="min-w-0 flex-1 truncate">{g.tournament.name}{roundName(g) ? ` · ${roundName(g)}` : ''}<span className="block text-[11px] text-faint"><SurfaceTag surface={g.tournament.surface} /></span></span>
+                    <span className="text-xs text-right shrink-0"><span className="font-bold text-ink">{surname(homeWon ? m.home : m.away)}</span><span className="block num text-muted">{setsText(g.score, g.winner === 2)}</span></span>
                   </Link>
                 </li>
               )

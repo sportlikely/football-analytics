@@ -78,7 +78,8 @@ import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuali
 import { db } from './db';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { startAsn } from './services/asn';
-import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample } from './services/tennis';
+import { shortName } from './utils/tennisNames';
+import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample, tennisDataCheck, tennisMovedId } from './services/tennis';
 import { startTennisModelScheduler, tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
 import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch, tennisRecord, levelRank, tennisTournament, tennisPlayer, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { startGeo, geoCredit, countryOf } from './services/geo';
@@ -1009,6 +1010,11 @@ app.get('/api/admin/tennis-probe', async (_req, res) => {
 app.get('/api/admin/tennis/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: tennisStatus() }); } catch (e) { sendError(res, e, 'Tennis status failed'); }
+});
+// fix195: duplicates, fixture ids, matches without a prediction (48 h), stale matches, names to check — target zero
+app.get('/api/admin/tennis/check', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: tennisDataCheck() }); } catch (e) { sendError(res, e, 'Tennis check failed'); }
 });
 // fix187: ?tour=atp|wta|challenger&status=upcoming|live|completed&limit=30 — to compare with the real ATP / WTA schedule
 app.get('/api/admin/tennis/sample', (req, res) => {
@@ -2699,7 +2705,12 @@ app.get('/api/tennis/match/:id(-?\\d+)', (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const d = tennisMatch(id, fullOne(req, tennisRid(id)), tnAdmin(req));
-    if (!d) return res.status(404).json({ error: 'Match not found' });
+    if (!d) {
+      // fix195: an old fixture id merged into its match: the page goes to the match id
+      const moved = tennisMovedId(id);
+      if (moved) return res.status(404).json({ error: 'Match moved', movedTo: moved });
+      return res.status(404).json({ error: 'Match not found' });
+    }
     // fix193c: the written preview (English; the same text search engines get, no pick, no %)
     res.json({ data: { ...d, writeup: tennisWriteup(d) } });
   } catch (e) { sendError(res, e, 'Failed to load the match'); }
@@ -2748,7 +2759,7 @@ app.get('/api/tennis/match/:id(\\d+)/highlights', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const r = db.prepare(`SELECT scheduled_at, p1_name, p2_name, status, winner FROM tennis_matches WHERE id = ?`).get(id) as any;
     if (!r || r.status !== 'completed' || !(r.winner === 1 || r.winner === 2)) return res.json({ data: null });
-    const sur = (n: string) => { const p = String(n || '').trim().split(/\s+/); return p.length > 1 ? p.slice(1).join(' ') : n; };
+    const sur = (n: string) => shortName(n); // fix195: the real surname ("de Minaur", "Bautista Agut")
     res.json({ data: await highlightsFor({ id: 6_000_000_000 + id, status: 'FINISHED', utcDate: r.scheduled_at, homeTeam: { name: r.p1_name, shortName: sur(r.p1_name) }, awayTeam: { name: r.p2_name, shortName: sur(r.p2_name) } }) });
   } catch (e) { sendError(res, e, 'Failed to fetch highlights'); }
 });
@@ -3454,6 +3465,9 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     // fix185: American football is one sport — the old college list pages are the same pages filtered to college
     const college = /^\/american-football\/college(\/games|\/today)?\/?$/.exec(req.path);
     if (college) return res.redirect(301, `/american-football${college[1] || ''}?league=college`);
+    // fix195: an old tennis fixture id merged into its match → the match's page (any language prefix kept)
+    const tnOld = /^(\/[a-z]{2})?\/tennis\/match\/(\d+)\/?$/.exec(req.path);
+    if (tnOld) { const to = tennisMovedId(Number(tnOld[2])); if (to) return res.redirect(301, `${tnOld[1] || ''}/tennis/match/${to}`); }
     res.set('Cache-Control', 'no-cache');
     try {
       res.type('html').send(renderIndex(indexHtml, seoPage(req.path)));

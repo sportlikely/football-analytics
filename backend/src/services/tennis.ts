@@ -23,6 +23,7 @@ import readline from 'readline';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { every, after, slicer, stalledWithin, yieldLoop, everyHeavy, afterHeavy, heavy } from './perf';
+import { isAbbreviated, fullName } from '../utils/tennisNames';
 
 const BASE = 'https://api.livetennisapi.com/api/public/v1';
 const KEY = () => process.env.TENNIS_API_KEY || '';
@@ -84,6 +85,16 @@ try { db.exec(`ALTER TABLE tennis_players ADD COLUMN ranking_movement INTEGER`);
 // fix194: a player the provider removed (HTTP 410) is marked gone and not asked for again; the refresh list reads an index
 try { db.exec(`ALTER TABLE tennis_players ADD COLUMN gone INTEGER`); } catch { /* column exists */ }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tennis_players_updated ON tennis_players(updated_at)`);
+// fix195: the profile's first / last name (surname-first provider names, the short name in tight rows); old fixture ids
+// merged into their match (/tennis/match/<old id> redirects there)
+try { db.exec(`ALTER TABLE tennis_players ADD COLUMN first_name TEXT`); } catch { /* column exists */ }
+try { db.exec(`ALTER TABLE tennis_players ADD COLUMN last_name TEXT`); } catch { /* column exists */ }
+db.exec(`CREATE TABLE IF NOT EXISTS tennis_id_moves (old_id INTEGER PRIMARY KEY, new_id INTEGER NOT NULL, at TEXT NOT NULL)`);
+/** fix195: the match id a merged (old fixture) id now lives under, or null */
+export function tennisMovedId(id: number): number | null {
+  const r = db.prepare(`SELECT new_id FROM tennis_id_moves WHERE old_id = ?`).get(id) as any;
+  return r ? Number(r.new_id) : null;
+}
 const meta = {
   get: (k: string): string | null => (db.prepare(`SELECT v FROM tennis_meta WHERE k = ?`).get(k) as any)?.v ?? null,
   set: (k: string, v: string) => db.prepare(`INSERT OR REPLACE INTO tennis_meta (k, v) VALUES (?, ?)`).run(k, v)
@@ -205,9 +216,44 @@ const upMatch = db.prepare(`
     sets = COALESCE(excluded.sets, sets), games = COALESCE(excluded.games, games), winner = COALESCE(excluded.winner, winner), outcome = COALESCE(excluded.outcome, outcome),
     retired = MAX(retired, excluded.retired), extra = COALESCE(excluded.extra, extra),
     source = CASE WHEN source = 'history' AND excluded.source IN ('live', 'fixture') THEN source ELSE excluded.source END, updated_at = excluded.updated_at`);
-const seePlayer = db.prepare(`INSERT INTO tennis_players (id, name, country, tour, ranking, ranking_points, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+const seeFull = db.prepare(`INSERT INTO tennis_players (id, name, country, tour, ranking, ranking_points, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, name), country = COALESCE(excluded.country, country), tour = COALESCE(excluded.tour, tour),
     ranking = COALESCE(excluded.ranking, ranking), ranking_points = COALESCE(excluded.ranking_points, ranking_points), seen_at = excluded.seen_at`);
+// fix195: a short name ("D. E. Galan", from /fixtures) never replaces a full one
+const seeShort = db.prepare(`INSERT INTO tennis_players (id, name, country, tour, ranking, ranking_points, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET name = COALESCE(name, excluded.name), country = COALESCE(excluded.country, country), tour = COALESCE(tour, excluded.tour),
+    ranking = COALESCE(excluded.ranking, ranking), ranking_points = COALESCE(excluded.ranking_points, ranking_points), seen_at = excluded.seen_at`);
+const seePlayer = { run: (id: number | null, name: string | null, country: string | null, tour: string | null, rank: number | null, pts: number | null, at: string) =>
+  (isAbbreviated(name) ? seeShort : seeFull).run(id, name, country, tour, rank, pts, at) };
+/** fix195: the full name we hold for a player (null when we only have initials) */
+const fullNameOf = db.prepare(`SELECT name, first_name, last_name FROM tennis_players WHERE id = ?`);
+const knownName = (id: number | null, fallback: string | null): string | null => {
+  if (id === null) return fallback;
+  const r = fullNameOf.get(id) as any;
+  const n = r ? fullName(r.name, r.first_name, r.last_name) : '';
+  return n && !isAbbreviated(n) ? n : fallback;
+};
+
+/**
+ * fix195: the tour of a fixture from its tournament, never 'atp' by default: ITF names (M15 … W100) → itf, "Challenger"
+ * → challenger, else the fixture's tour, women's events (gender / a "W" ITF name) → wta. The ITF tier carries the
+ * gender (itf_m25 / itf_w35) so the model and the pages read it.
+ */
+export const ITF_NAME = /^(?:ITF\s+)?([MW])(15|25|35|40|50|60|75|80|100)\b/i;
+export function tourOfFixture(f: any): { tour: string | null; tier: string | null; women: boolean | null } {
+  const name = String(f?.tournament || f?.tournament_name || '').trim();
+  const g = String(f?.gender ?? f?.sex ?? f?.category ?? '').toLowerCase();
+  const women = /^(f|w|women|female|ladies|wta)/.test(g) ? true : /^(m|men|male|atp)/.test(g) ? false : null;
+  const itf = name.match(ITF_NAME);
+  if (itf) return { tour: 'itf', tier: `itf_${itf[1].toLowerCase()}${itf[2]}`, women: itf[1].toUpperCase() === 'W' };
+  if (/\bITF\b/i.test(name)) return { tour: 'itf', tier: null, women };
+  if (/challenger/i.test(name)) return { tour: 'challenger', tier: null, women: false };
+  const t = str(f?.tour)?.toLowerCase() ?? null;
+  if (t === 'atp' && women) return { tour: 'wta', tier: null, women };
+  if (t === 'wta' && women === false) return { tour: 'atp', tier: null, women };
+  if (t) return { tour: t, tier: null, women };
+  return { tour: women === true ? 'wta' : women === false ? 'atp' : null, tier: null, women };
+}
 
 /**
  * fix193: a live match's current game (points) and server, when the provider gives them (field names vary by feed: the
@@ -228,21 +274,49 @@ export function storeMatch(m: any, source: 'fixture' | 'live' | 'history'): bool
   const p1 = m.players?.p1 || {}, p2 = m.players?.p2 || {};
   const outcome = str(m.outcome);
   const sc = m.score || null;
-  upMatch.run(num(m.id), str(m.tournament_id), str(m.tournament), str(m.tour), str(m.tier), str(m.surface), m.indoor == null ? null : m.indoor ? 1 : 0,
+  // fix195: an ITF event by its name (M25 …, W35 …) is ITF whatever the row says; initials never replace a full name
+  const itf = ITF_NAME.test(String(m.tournament || '')) ? tourOfFixture(m) : null;
+  const nm = (p: any) => (isAbbreviated(p.name) ? knownName(num(p.id), str(p.name)) : str(p.name));
+  upMatch.run(num(m.id), str(m.tournament_id), str(m.tournament), itf ? 'itf' : str(m.tour), str(m.tier) ?? itf?.tier ?? null, str(m.surface), m.indoor == null ? null : m.indoor ? 1 : 0,
     str(m.draw) || 'singles', str(m.round), str(m.round_code), m.is_qualifying == null ? null : m.is_qualifying ? 1 : 0, bestOf(m.format),
-    str(m.scheduled_time) || str(m.live_at), str(m.status), str(m.event_status), num(p1.id), str(p1.name), num(p2.id), str(p2.name),
+    str(m.scheduled_time) || str(m.live_at), str(m.status), str(m.event_status), num(p1.id), nm(p1), num(p2.id), nm(p2),
     sc?.sets ? JSON.stringify(sc.sets) : null, sc?.games ? JSON.stringify(sc.games) : null, num(m.winner), outcome,
     outcome && /retired|walkover|default/.test(outcome) ? 1 : 0, source === 'live' ? liveExtra(m) : null, source, nowIso());
   for (const p of [p1, p2]) if (num(p.id) !== null) seePlayer.run(num(p.id), str(p.name), str(p.country), str(p.tour), num(p.ranking), num(p.ranking_points), nowIso());
   return true;
 }
-/** A /fixtures row (its own flat shape) → tennis_matches as 'fixture' (a known match keeps its richer data). */
+/**
+ * A /fixtures row (its own flat shape) → tennis_matches as 'fixture'.
+ * fix195: stored under its match_id, so it IS the match row (fixture ids are their own id space: they made a second
+ * row next to the match, and could land on an old match with the same number); a fixture without a match_id is not
+ * stored. A row we already hold keeps its own data: the fixture only fills what is missing (and the start time while
+ * the match has not started). Names: the full name we hold for the player, the fixture's short name only as fallback.
+ */
+const upFixture = db.prepare(`
+  INSERT INTO tennis_matches (id, tournament_id, tournament, tour, tier, surface, indoor, draw, round, round_code, is_qualifying, best_of,
+    scheduled_at, status, event_status, p1_id, p1_name, p2_id, p2_name, sets, games, winner, outcome, retired, extra, source, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, NULL, 'singles', ?, ?, ?, NULL, ?, 'upcoming', NULL, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, NULL, 'fixture', ?)
+  ON CONFLICT(id) DO UPDATE SET tournament_id = COALESCE(tournament_id, excluded.tournament_id), tournament = COALESCE(tournament, excluded.tournament),
+    tour = COALESCE(tour, excluded.tour), tier = COALESCE(NULLIF(tier, 'unknown'), excluded.tier, tier), surface = COALESCE(surface, excluded.surface),
+    round = COALESCE(round, excluded.round), round_code = COALESCE(round_code, excluded.round_code), is_qualifying = COALESCE(is_qualifying, excluded.is_qualifying),
+    scheduled_at = CASE WHEN status = 'upcoming' THEN COALESCE(excluded.scheduled_at, scheduled_at) ELSE scheduled_at END,
+    p1_id = COALESCE(p1_id, excluded.p1_id), p1_name = COALESCE(p1_name, excluded.p1_name), p2_id = COALESCE(p2_id, excluded.p2_id), p2_name = COALESCE(p2_name, excluded.p2_name),
+    updated_at = CASE WHEN status = 'upcoming' THEN excluded.updated_at ELSE updated_at END`);
+let fixturesWithoutMatch = 0;
 function storeFixture(f: any): boolean {
-  if (!f || num(f.id) === null) return false;
-  const at = str(f.start_time) || (f.event_date ? `${f.event_date}T00:00:00Z` : null);
-  upMatch.run(num(f.id), null, str(f.tournament), str(f.tour), null, str(f.surface), null, 'singles', str(f.round), str(f.round_code), null, null,
-    at, str(f.status) || 'upcoming', null, num(f.player1_id), str(f.player1_name), num(f.player2_id), str(f.player2_name), null, null, null, null, 0, null, 'fixture', nowIso());
-  for (const [id, name] of [[f.player1_id, f.player1_name], [f.player2_id, f.player2_name]]) if (num(id) !== null) seePlayer.run(num(id), str(name), null, str(f.tour), null, null, nowIso());
+  if (!f) return false;
+  const mid = num(f.match_id ?? f.match?.id);
+  if (mid === null || mid <= 0) { fixturesWithoutMatch++; return false; }
+  if (isDoubles(f) || /doubles/i.test(String(f.draw || ''))) return false;
+  const at = str(f.start_time) || str(f.scheduled_time) || (f.event_date ? `${f.event_date}T00:00:00Z` : null);
+  const tt = tourOfFixture(f);
+  const id1 = num(f.player1_id ?? f.players?.p1?.id), id2 = num(f.player2_id ?? f.players?.p2?.id);
+  const n1 = str(f.player1_name ?? f.players?.p1?.name), n2 = str(f.player2_name ?? f.players?.p2?.name);
+  const quali = QUALI_RE.test(String(f.tournament || '')) || /^Q\d?$/i.test(String(f.round_code || '')) ? 1 : null;
+  upFixture.run(mid, str(f.tournament_id), str(f.tournament), tt.tour, tt.tier, str(f.surface)?.toLowerCase() ?? null, str(f.round), str(f.round_code), quali,
+    at, id1, knownName(id1, n1), id2, knownName(id2, n2), nowIso());
+  const ptour = tt.women === true || tt.tour === 'wta' ? 'wta' : tt.women === false || tt.tour === 'atp' || tt.tour === 'challenger' ? 'atp' : null;
+  for (const [id, name] of [[id1, n1], [id2, n2]] as [number | null, string | null][]) if (id !== null) seePlayer.run(id, name, null, ptour, null, null, nowIso());
   return true;
 }
 
@@ -408,10 +482,14 @@ async function syncFixtures() {
   } catch (e: any) {
     if (n) throw e;
     via = `fixtures (matches?status=upcoming failed: ${e.message})`;
+    fixturesWithoutMatch = 0;
     await pages('/fixtures', { draw: 'singles' }, 25, 'core', rows => { tx(() => { for (const f of rows) if (storeFixture(f)) n++; }); });
+    if (fixturesWithoutMatch) via += `, ${fixturesWithoutMatch} fixtures without a match_id skipped`;
   }
   const filled = await fillTiers();
-  return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled (catalogue + history)` : ''}`;
+  // fix195: the same match never twice (same two players within a day → one row)
+  const merged = await mergeDuplicates(new Date(Date.now() - 3 * 86400000).toISOString(), new Date(Date.now() + 10 * 86400000).toISOString());
+  return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled (catalogue + history)` : ''}${merged.merged ? `, ${merged.merged} duplicates merged` : ''}`;
 }
 
 /**
@@ -575,6 +653,8 @@ async function fetchTapes(max: number): Promise<number> {
 /** Players on first sight (no bio yet) and weekly; at most `max` per run. */
 const upPlayer = db.prepare(`UPDATE tennis_players SET name = COALESCE(?, name), country = COALESCE(?, country), tour = COALESCE(?, tour), hand = ?, dob = ?, height = ?,
   ranking = ?, ranking_points = ?, stats = ?, updated_at = ? WHERE id = ?`);
+// fix195: the profile's first / last name when the API has them (the display name is "first last")
+const setNames = db.prepare(`UPDATE tennis_players SET first_name = ?, last_name = ? WHERE id = ?`);
 const setGone = db.prepare(`UPDATE tennis_players SET gone = 1, updated_at = ? WHERE id = ?`);
 const setMovement = db.prepare(`UPDATE tennis_players SET ranking_movement = ? WHERE id = ?`);
 const dropPlayer = db.prepare(`DELETE FROM tennis_players WHERE id = ?`);
@@ -597,8 +677,11 @@ async function syncPlayers(max = 120) {
     }
     if (!p) { upPlayer.run(null, null, null, null, null, null, null, null, null, nowIso(), r.id); continue; }
     if (p.is_doubles_team) { dropPlayer.run(r.id); continue; }
-    upPlayer.run(str(p.name), str(p.country), str(p.tour), str(p.hand), str(p.birthday), num(p.height_cm ?? p.height), num(p.ranking), num(p.ranking_points),
+    const first = str(p.first_name ?? p.firstname ?? p.given_name), last = str(p.last_name ?? p.lastname ?? p.surname ?? p.family_name);
+    const pname = first && last ? `${first} ${last}` : isAbbreviated(p.name) ? null : str(p.name);
+    upPlayer.run(pname, str(p.country), str(p.tour), str(p.hand), str(p.birthday), num(p.height_cm ?? p.height), num(p.ranking), num(p.ranking_points),
       p.stats ? JSON.stringify(p.stats) : null, nowIso(), r.id);
+    if (first && last) setNames.run(first, last, r.id);
     if (num(p.ranking_movement) !== null) setMovement.run(num(p.ranking_movement), r.id);
     n++;
     await slice();
@@ -797,6 +880,215 @@ async function backfillArchive() {
 }
 
 /* ------------------------------------------------------------------ */
+/* fix195: one row per match, no stale matches                          */
+/* ------------------------------------------------------------------ */
+
+/** match ids below this are the /fixtures id space (match ids were ~205,000 on 20 Oct 2026) */
+export const FIXTURE_ID_MAX = 100_000;
+const ridOf = (id: number) => -(4e9 + id); // tennisSite's reveal / unlock id
+const STATUS_RANK: Record<string, number> = { completed: 4, finished: 4, live: 3, in_progress: 3, interrupted: 3, suspended: 3, upcoming: 1 };
+const SOURCE_RANK: Record<string, number> = { history: 3, live: 2, fixture: 1 };
+/** which of two rows of one match stays: the match id space, then the further status, the richer source, a prediction */
+function keeperScore(r: any, hasPred: boolean): number {
+  return (r.id >= FIXTURE_ID_MAX ? 1000 : 0) + (STATUS_RANK[String(r.status || '').toLowerCase()] || 0) * 50 + (SOURCE_RANK[r.source] || 0) * 10 + (hasPred ? 5 : 0) + r.id / 1e9;
+}
+// prepared on first use: tennis_predictions is made by tennisModel.ts, which loads after this file
+const hasPredQ = { get: (id: number) => db.prepare(`SELECT 1 FROM tennis_predictions WHERE match_id = ?`).get(id) };
+const hasStatsQ = db.prepare(`SELECT 1 FROM tennis_match_stats WHERE match_id = ? LIMIT 1`);
+/**
+ * Moves everything that points at `old` to `keep` (prediction, unlocks, live samples, price, stoppages) and removes the old
+ * row; /tennis/match/<old> then redirects. The prediction moves only when the keeper has none and the two rows list the
+ * players in the same order (else it is dropped; the keeper is predicted on its own). An old id that is also an old
+ * match of ours (it has a tape: a fixture id landed on it) is not deleted but refreshed from the provider.
+ */
+function moveMatch(old: any, keep: any): 'deleted' | 'refetch' {
+  const swapped = old.p1_id !== keep.p1_id;
+  const at = nowIso();
+  tx(() => {
+    if (!swapped && !hasPredQ.get(keep.id)) db.prepare(`UPDATE tennis_predictions SET match_id = ? WHERE match_id = ?`).run(keep.id, old.id);
+    db.prepare(`DELETE FROM tennis_predictions WHERE match_id = ?`).run(old.id);
+    db.prepare(`UPDATE OR IGNORE match_unlocks SET match_id = ? WHERE match_id = ?`).run(ridOf(keep.id), ridOf(old.id));
+    db.prepare(`DELETE FROM match_unlocks WHERE match_id = ?`).run(ridOf(old.id));
+    try {
+      if (!swapped) db.prepare(`UPDATE OR IGNORE tennis_live_samples SET match_id = ? WHERE match_id = ?`).run(keep.id, old.id);
+      db.prepare(`DELETE FROM tennis_live_samples WHERE match_id = ?`).run(old.id);
+    } catch { /* table made by tennisSite: not there yet */ }
+    if (!swapped) db.prepare(`UPDATE OR IGNORE tennis_prices SET match_id = ? WHERE match_id = ?`).run(keep.id, old.id);
+    db.prepare(`DELETE FROM tennis_prices WHERE match_id = ?`).run(old.id);
+    db.prepare(`UPDATE OR IGNORE tennis_stoppages SET match_id = ? WHERE match_id = ?`).run(keep.id, old.id);
+    db.prepare(`INSERT OR REPLACE INTO tennis_id_moves (old_id, new_id, at) VALUES (?, ?, ?)`).run(old.id, keep.id, at);
+    db.prepare(`UPDATE tennis_id_moves SET new_id = ? WHERE new_id = ?`).run(keep.id, old.id);
+  });
+  if (old.id > 0 && hasStatsQ.get(old.id)) {
+    db.prepare(`UPDATE tennis_matches SET status = 'unknown', updated_at = ? WHERE id = ?`).run(at, old.id);
+    meta.set(`refetch${old.id}`, at);
+    db.prepare(`DELETE FROM tennis_id_moves WHERE old_id = ?`).run(old.id);
+    return 'refetch';
+  }
+  db.prepare(`DELETE FROM tennis_matches WHERE id = ?`).run(old.id);
+  return 'deleted';
+}
+
+/** Same two players within a day = the same match: one row stays (keeperScore), the others are moved into it. */
+export async function mergeDuplicates(from: string, to: string): Promise<{ groups: number; merged: number; refetch: number }> {
+  const rows = db.prepare(`SELECT id, p1_id, p2_id, scheduled_at, status, source FROM tennis_matches INDEXED BY idx_tennis_matches_time
+    WHERE scheduled_at >= ? AND scheduled_at < ? AND p1_id IS NOT NULL AND p2_id IS NOT NULL AND id > 0 AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(from, to) as any[];
+  const byPair = new Map<string, any[]>();
+  for (const r of rows) {
+    const k = `${Math.min(r.p1_id, r.p2_id)}-${Math.max(r.p1_id, r.p2_id)}`;
+    const l = byPair.get(k); if (l) l.push(r); else byPair.set(k, [r]);
+  }
+  let groups = 0, merged = 0, refetch = 0;
+  const slice = slicer();
+  for (const list of byPair.values()) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
+    // clusters of rows within 24 h of the cluster's first row
+    for (let i = 0; i < list.length;) {
+      let j = i + 1;
+      while (j < list.length && Date.parse(list[j].scheduled_at) - Date.parse(list[i].scheduled_at) <= 86400000) j++;
+      const cl = list.slice(i, j);
+      i = j;
+      if (cl.length < 2) continue;
+      groups++;
+      const scored = cl.map(r => ({ r, s: keeperScore(r, !!hasPredQ.get(r.id)) })).sort((a, b) => b.s - a.s);
+      const keep = scored[0].r;
+      for (const { r } of scored.slice(1)) { if (moveMatch(r, keep) === 'refetch') refetch++; merged++; }
+      await slice();
+    }
+  }
+  return { groups, merged, refetch };
+}
+
+/**
+ * One-time clean-up (20 Oct 2026): rows of the /fixtures id space merged into their match rows, the leftovers removed
+ * (the next fixture sync stores them again under their match id); players whose name is only initials are asked
+ * for again first.
+ */
+async function fix195Cleanup(): Promise<string> {
+  if (meta.get('fix195_cleanup')) return 'done before';
+  const since = new Date(Date.now() - 120 * 86400000).toISOString();
+  const m = await mergeDuplicates(since, new Date(Date.now() + 30 * 86400000).toISOString());
+  // the leftovers: fixture-id rows of recent months with no match row next to them
+  const left = db.prepare(`SELECT id, p1_id, status FROM tennis_matches WHERE id > 0 AND id < ? AND (source = 'fixture' OR scheduled_at >= ?)`).all(FIXTURE_ID_MAX, since) as any[];
+  let removed = 0, refetch = 0;
+  for (const r of left) {
+    if (hasStatsQ.get(r.id)) {
+      // an old match of ours a fixture landed on: refreshed from the provider (its stats prove it was a real match)
+      if (!['completed', 'finished'].includes(String(r.status))) { db.prepare(`UPDATE tennis_matches SET status = 'unknown' WHERE id = ?`).run(r.id); meta.set(`refetch${r.id}`, nowIso()); refetch++; }
+      continue;
+    }
+    tx(() => {
+      db.prepare(`DELETE FROM tennis_predictions WHERE match_id = ?`).run(r.id);
+      db.prepare(`DELETE FROM tennis_matches WHERE id = ?`).run(r.id);
+    });
+    removed++;
+    if (removed % 200 === 0) await yieldLoop();
+  }
+  const reask = db.prepare(`UPDATE tennis_players SET updated_at = NULL WHERE gone IS NULL AND (name GLOB '[A-Z]. *' OR name GLOB '[A-Z].[A-Z]. *' OR name GLOB '[A-Z]. [A-Z]. *')`).run();
+  const info = `${m.merged} merged in ${m.groups} groups, ${removed} fixture rows removed, ${m.refetch + refetch} old matches to refresh, ${reask.changes} short names asked again`;
+  meta.set('fix195_cleanup', JSON.stringify({ at: nowIso(), info }));
+  return info;
+}
+
+/**
+ * A match still "upcoming" / "live" 6 h after its start with no update is asked for again (/matches/{id}, then the
+ * history tape); if the provider has nothing (or still the old start), it becomes 'unknown' and leaves the lists. The
+ * rows the fix195 clean-up flagged (refetch<id>) are refreshed the same way.
+ */
+async function refreshStale(max = 60): Promise<string> {
+  const now = Date.now();
+  const stale = db.prepare(`SELECT id, status, scheduled_at, updated_at FROM tennis_matches INDEXED BY idx_tennis_matches_time
+    WHERE scheduled_at >= ? AND scheduled_at < ? AND status IN ('upcoming', 'live', 'in_progress', 'interrupted', 'suspended') AND id > 0 AND source <> 'archive'
+    ORDER BY scheduled_at DESC LIMIT ?`).all(new Date(now - 10 * 86400000).toISOString(), new Date(now - 6 * 3600000).toISOString(), max * 2) as any[];
+  // a live match polled in the last 20 minutes is still on (rain, a long fifth set)
+  const todo = stale.filter(r => !(r.status !== 'upcoming' && Date.parse(r.updated_at || '') > now - 20 * 60000)).slice(0, max);
+  const flagged = (db.prepare(`SELECT k FROM tennis_meta WHERE k LIKE 'refetch%' LIMIT ?`).all(max) as any[]).map(r => ({ id: Number(r.k.slice(7)), flag: r.k }));
+  const ids = [...new Map([...todo.map(r => [r.id, null as string | null] as const), ...flagged.map(f => [f.id, f.flag] as const)]).entries()];
+  const reread = db.prepare(`SELECT status, scheduled_at FROM tennis_matches WHERE id = ?`);
+  const slice = slicer();
+  let fixed = 0, unknown = 0;
+  for (const [id, flag] of ids) {
+    if (!Number.isFinite(id) || !canSpend('bulk')) break;
+    let got = false;
+    try {
+      const j = await tn(`/matches/${id}`, {}, { kind: 'bulk' });
+      const m = j?.data && !Array.isArray(j.data) ? j.data : j?.match || j;
+      if (m && num(m.id) === id) got = storeMatch(m, /completed|finished/.test(String(m.status)) ? 'history' : 'live');
+    } catch (e: any) { if (!(e instanceof TennisError && (e.status === 410 || e.status === 400))) throw e; }
+    if (!got || flag) {
+      try { const h = await tn(`/history/matches/${id}`, {}, { kind: 'bulk' }); if (h?.match && num(h.match.id) === id) got = storeTape(h) || got; }
+      catch (e: any) { if (!(e instanceof TennisError && (e.status === 410 || e.status === 400))) throw e; }
+    }
+    const r = reread.get(id) as any;
+    const stillStale = r && ['upcoming', 'live', 'in_progress', 'interrupted', 'suspended', 'unknown'].includes(String(r.status)) && Date.parse(r.scheduled_at) < now - 6 * 3600000;
+    if (r && stillStale) { db.prepare(`UPDATE tennis_matches SET status = 'unknown', updated_at = ? WHERE id = ?`).run(nowIso(), id); unknown++; }
+    else if (r && got) fixed++;
+    if (flag) db.prepare(`DELETE FROM tennis_meta WHERE k = ?`).run(flag);
+    await slice();
+  }
+  return `${ids.length} checked, ${fixed} refreshed, ${unknown} unknown`;
+}
+
+/**
+ * fix195: the admin data check (Admin → Data health, /api/admin/tennis/check), target zero everywhere: the same match
+ * twice, rows of the fixture id space, ATP / WTA / Challenger matches of the next 48 h without a prediction (with the
+ * reason), matches still upcoming / live 6 h after the start, names that are only initials or look surname-first.
+ */
+export function tennisDataCheck() {
+  const now = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const name = (r: any) => `${r.p1_name || '?'} v ${r.p2_name || '?'} · ${r.tournament || '?'} · ${String(r.scheduled_at || '').slice(0, 16).replace('T', ' ')} UTC · id ${r.id}`;
+  const win = db.prepare(`SELECT id, tournament, tour, tier, p1_id, p1_name, p2_id, p2_name, scheduled_at, status, source FROM tennis_matches INDEXED BY idx_tennis_matches_time
+    WHERE scheduled_at >= ? AND scheduled_at < ? AND id > 0 AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(iso(now - 3 * 86400000), iso(now + 10 * 86400000)) as any[];
+  const pairs = new Map<string, any[]>();
+  for (const r of win) if (r.p1_id && r.p2_id) { const k = `${Math.min(r.p1_id, r.p2_id)}-${Math.max(r.p1_id, r.p2_id)}`; pairs.set(k, [...(pairs.get(k) || []), r]); }
+  const duplicates: string[] = [];
+  for (const l of pairs.values()) {
+    l.sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
+    for (let i = 1; i < l.length; i++) if (Date.parse(l[i].scheduled_at) - Date.parse(l[i - 1].scheduled_at) <= 86400000) duplicates.push(`${name(l[i])} = id ${l[i - 1].id}`);
+  }
+  const fixtureIds = win.filter(r => r.id < FIXTURE_ID_MAX).map(r => `${name(r)} (fixture id)`);
+  let classify: ((tour: string | null, tier: string | null, nm: string | null, src: string) => { cat: number } | null) | null = null;
+  try { classify = require('./tennisModel').tennisModelInternals.classify; } catch { /* model not loaded */ }
+  const pred = db.prepare(`SELECT 1 FROM tennis_predictions WHERE match_id = ?`);
+  const noPrediction: string[] = [];
+  for (const r of win) {
+    const t = Date.parse(r.scheduled_at);
+    if (r.status !== 'upcoming' || t < now || t > now + 48 * 3600000) continue;
+    const cls = classify ? classify(r.tour, r.tier, r.tournament, r.source) : { cat: 1 };
+    if (!cls || cls.cat > 3 || pred.get(r.id)) continue;
+    const why = !r.p1_id || !r.p2_id ? 'a player id is missing' : /^(tbd|tba|qualifier)$/i.test(String(r.p1_name)) || /^(tbd|tba|qualifier)$/i.test(String(r.p2_name)) ? 'a player is not known yet'
+      : r.id < FIXTURE_ID_MAX ? 'fixture id (not merged yet)' : 'not predicted yet (the model saves the next 48 h every 30 min)';
+    noPrediction.push(`${name(r)} · ${why}`);
+  }
+  const stale = win.filter(r => ['upcoming', 'live', 'in_progress', 'interrupted', 'suspended'].includes(String(r.status)) && Date.parse(r.scheduled_at) < now - 6 * 3600000)
+    .map(r => `${name(r)} · still ${r.status} ${Math.round((now - Date.parse(r.scheduled_at)) / 3600000)} h after the start`);
+  // names: initials only, or the rankings list the same words in another order (surname first in one of them)
+  const ids = [...new Set(win.filter(r => Date.parse(r.scheduled_at) >= now - 86400000).flatMap(r => [r.p1_id, r.p2_id]).filter(Boolean))];
+  const names: string[] = [];
+  const pq = db.prepare(`SELECT p.id, p.name, p.first_name, p.last_name, (SELECT r.player_name FROM tennis_rankings r WHERE r.player_id = p.id ORDER BY r.date DESC LIMIT 1) AS rname FROM tennis_players p WHERE p.id = ?`);
+  const words = (s: string) => s.toLowerCase().split(/\s+/).filter(Boolean);
+  for (const id of ids) {
+    const p = pq.get(id) as any;
+    if (!p?.name) continue;
+    if (isAbbreviated(p.name)) { names.push(`${p.name} (id ${p.id}) · initials only`); continue; }
+    if (p.first_name && p.last_name) continue;
+    if (p.rname && p.rname !== p.name) {
+      const a = words(p.name), b = words(p.rname);
+      if (a.length === b.length && [...a].sort().join(' ') === [...b].sort().join(' ')) names.push(`${p.name} (id ${p.id}) · rankings say "${p.rname}": surname first?`);
+    }
+  }
+  return {
+    at: iso(now),
+    total: duplicates.length + fixtureIds.length + noPrediction.length + stale.length,
+    duplicates, fixtureIds, noPrediction, stale, names,
+    cleanup: (() => { try { return JSON.parse(meta.get('fix195_cleanup') || 'null'); } catch { return null; } })(),
+    moved: (db.prepare(`SELECT COUNT(*) AS n FROM tennis_id_moves`).get() as any).n
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Scheduler                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -811,8 +1103,17 @@ export function startTennisScheduler() {
   after('tennis start', async () => {
     await runUsage();
     await job('live', syncLive);
-    void heavy('tennis fixtures', () => job('fixtures', syncFixtures)).then(() => heavy('tennis tournaments', () => job('tournaments', syncTournaments)));
+    // fix195: the one-time clean-up of the fixture id rows runs before the first fixture sync
+    void heavy('tennis fix195 clean-up', () => job('fix195 clean-up', fix195Cleanup))
+      .then(() => heavy('tennis fixtures', () => job('fixtures', syncFixtures))).then(() => heavy('tennis tournaments', () => job('tournaments', syncTournaments)));
   }, 60 * 1000).unref();
+  // fix195: matches still upcoming / live 6 h after the start → asked again, else 'unknown'
+  everyHeavy('tennis stale', () => job('stale', () => refreshStale()), 30 * 60 * 1000).unref();
+  // fix195: the data check once a day in the log (the full list: /api/admin/tennis/check, Admin → Data health)
+  every('tennis check', () => {
+    const c = tennisDataCheck();
+    if (c.total) logger.warn(`tennis data check: ${c.duplicates.length} duplicates, ${c.fixtureIds.length} fixture ids, ${c.noPrediction.length} without a prediction (48 h), ${c.stale.length} stale`);
+  }, 24 * 3600 * 1000).unref();
   every('tennis usage', runUsage, 30 * 60 * 1000).unref();
   everyHeavy('tennis fixtures', () => job('fixtures', syncFixtures), 15 * 60 * 1000).unref();
   // live: every minute while something is live, else every 10 minutes

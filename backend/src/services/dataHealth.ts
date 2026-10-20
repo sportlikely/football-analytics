@@ -24,6 +24,7 @@ import { emailEnabled, sendEmail, layout, section, esc, C, SITE } from './email'
 import { lastDataAudit } from './dataAudit';
 import { every, after, slicer, inBatches } from './perf';
 import { missingPredictions } from './missingPredictions';
+import { tennisDataCheck } from './tennis';
 
 type Level = 'ok' | 'warn' | 'fail';
 export interface Check { id: string; label: string; level: Level; detail: string; items?: string[] }
@@ -139,6 +140,21 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     checks.push({ id: 'no-prediction-7d', label: 'Every game of the next 7 days has a prediction (all sports)', level: 'warn', detail: `Check failed: ${e.message}` });
   }
   await slice();
+  // fix195: tennis — the same match twice, fixture ids, ATP / WTA / Challenger matches of the next 48 h without a
+  // prediction, matches still upcoming / live 6 h after the start (target zero); odd names listed, not counted
+  try {
+    const tc = tennisDataCheck();
+    checks.push({
+      id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: tc.total ? 'warn' : 'ok',
+      detail: tc.total
+        ? `${tc.duplicates.length} duplicate(s) · ${tc.fixtureIds.length} fixture id(s) · ${tc.noPrediction.length} without a prediction (48 h) · ${tc.stale.length} stale${tc.names.length ? ` · ${tc.names.length} name(s) to check` : ''}`
+        : `No duplicates, every ATP / WTA / Challenger match of the next 48 h predicted, nothing stale${tc.names.length ? ` · ${tc.names.length} name(s) to check` : ''}`,
+      items: [...tc.duplicates.map(x => `duplicate: ${x}`), ...tc.fixtureIds.map(x => `fixture id: ${x}`), ...tc.noPrediction.map(x => `no prediction: ${x}`),
+        ...tc.stale.map(x => `stale: ${x}`), ...tc.names.map(x => `name: ${x}`)].slice(0, 60)
+    });
+  } catch (e: any) {
+    checks.push({ id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
   // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason
   const OLD = new Set(['poisson-dc-v1', 'dc-history-v2']);
   const fallback = matches.filter(m => !FINAL.includes(m.status) && m.prediction && OLD.has(m.prediction.model) && new Date(m.utcDate).getTime() < now + 30 * 86400000);

@@ -4,15 +4,15 @@ import { API_URL } from '../../lib/socket'
 import { t as tt } from '../../lib/i18n'
 import { slModel } from '../../lib/modelNames'
 import { useAuth } from '../../lib/auth'
-import { useTennisConfig, useTennisFavorites, useTennisTour, tennisRid, tennisRstatus, tennisHref, surname, flagOf, TENNIS_STRONG, type TMatch } from '../../lib/tennis'
+import { useTennisConfig, useTennisFavorites, useTennisTour, tennisRid, tennisRstatus, tennisHref, surname, roundName, spreadPicks, flagOf, TENNIS_STRONG, type TMatch } from '../../lib/tennis'
 import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult, HTeam } from './types'
 
 /** Tennis's adapter for components/SportHome (fix193): data + labels only — the layout is football's. */
 
 /** "Vienna · R16" / "Australian Open · Final" */
-export const compOf = (m: TMatch) => [m.tournament.name, m.round].filter(Boolean).join(' · ')
-const side = (s: TMatch['home']): HTeam => ({ id: s.id ?? s.name, name: s.name, short: surname(s.name), logo: null, flag: flagOf(s.country) || null, rank: s.rank, href: tennisHref.player(s.id) || '/tennis' })
+export const compOf = (m: TMatch) => [m.tournament.name, roundName(m)].filter(Boolean).join(' · ')
+const side = (s: TMatch['home']): HTeam => ({ id: s.id ?? s.name, name: s.name, short: surname(s), logo: null, flag: flagOf(s.country) || null, rank: s.rank, href: tennisHref.player(s.id) || '/tennis' })
 /** "Set 2" while a set is on, the sets won as the score */
 const liveLabel = (m: TMatch) => (m.score ? tt('Set {0}', { 0: Math.min(m.bestOf, m.score.won[0] + m.score.won[1] + 1) }) : tt('LIVE'))
 
@@ -21,7 +21,7 @@ export function toGame(m: TMatch): HGame {
     id: m.id, href: tennisHref.match(m.id), reveal: { id: tennisRid(m), status: tennisRstatus(m) }, kickoff: m.start,
     competition: { name: compOf(m) }, home: side(m.home), away: side(m.away),
     live: m.state === 'live' ? { label: liveLabel(m), score: m.score ? m.score.won : [0, 0] } : null,
-    pred: winnerPred(m.prediction, surname(m.home.name), surname(m.away.name), m.prediction?.strongAt ?? TENNIS_STRONG)
+    pred: winnerPred(m.prediction, surname(m.home), surname(m.away), m.prediction?.strongAt ?? TENNIS_STRONG)
   }
 }
 
@@ -33,7 +33,7 @@ export function toResult(m: TMatch): HResult {
     id: m.id, href: tennisHref.match(m.id), competition: compOf(m), date: m.start,
     home: { name: m.home.name, logo: null, score: m.score ? m.score.won[0] : '', won: m.winner === 1 },
     away: { name: m.away.name, logo: null, score: m.score ? m.score.won[1] : '', won: m.winner === 2 },
-    pick: pick ? { words: surname(pick === 'H' ? m.home.name : m.away.name), pct: null, strong: false } : null,
+    pick: pick ? { words: surname(pick === 'H' ? m.home : m.away), pct: null, strong: false } : null,
     hit: p?.hit ?? null
   }
 }
@@ -60,24 +60,27 @@ function useTennisData(): SportHomeData {
 
   const notStarted = useMemo(() => (d?.upcoming || []).filter(m => new Date(m.start).getTime() > Date.now()), [d])
   // featured: the biggest coming matches — Grand Slam / 1000 / 500 first, then by the two players' ratings — in the
-  // next 48 hours; up to 4, in start order
+  // next 48 hours; up to 4, in start order. fix195: at most 2 from one tournament, men's and women's both when both play
   const featured = useMemo(() => {
     const lv = d?.levels || {}, rt = d?.ratings || {}
     const now = Date.now()
     const strength = (m: TMatch) => (m.home.id ? rt[m.home.id]?.elo ?? 1400 : 1400) + (m.away.id ? rt[m.away.id]?.elo ?? 1400 : 1400)
-    return notStarted.filter(m => new Date(m.start).getTime() - now < 48 * 3600e3 && !m.qualifying)
+    const list = notStarted.filter(m => new Date(m.start).getTime() - now < 48 * 3600e3 && !m.qualifying)
       .sort((a, b) => (lv[a.id] ?? 9) - (lv[b.id] ?? 9) || strength(b) - strength(a))
-      .slice(0, 4).sort((a, b) => a.start.localeCompare(b.start))
+    return spreadPicks(list, 4).sort((a, b) => a.start.localeCompare(b.start))
   }, [notStarted, d?.levels, d?.ratings])
   const featuredIds = useMemo(() => new Set(featured.map(m => m.id)), [featured])
   const favs = useTennisFavorites()
   const favNext = useMemo(() => notStarted.filter(m => favs.reasons(m).length > 0).slice(0, 10), [notStarted, favs.all.length])
   const soonest = useMemo(() => notStarted.filter(m => !featuredIds.has(m.id)).slice(0, 5), [notStarted, featuredIds])
-  // next matches: the next day, biggest events first (the full list is on Matches)
+  // next matches: the next day, biggest events first (the full list is on Matches); fix195: the top of the list follows the
+  // featured rule (at most 2 from one tournament, both tours), the rest in the same order
   const next = useMemo(() => {
     const lv = d?.levels || {}
-    return notStarted.filter(m => !featuredIds.has(m.id) && !favNext.includes(m) && new Date(m.start).getTime() - Date.now() < 24 * 3600e3)
-      .sort((a, b) => (lv[a.id] ?? 9) - (lv[b.id] ?? 9) || a.start.localeCompare(b.start)).slice(0, 12)
+    const list = notStarted.filter(m => !featuredIds.has(m.id) && !favNext.includes(m) && new Date(m.start).getTime() - Date.now() < 24 * 3600e3)
+      .sort((a, b) => (lv[a.id] ?? 9) - (lv[b.id] ?? 9) || a.start.localeCompare(b.start))
+    const top = spreadPicks(list, 4)
+    return [...top, ...list.filter(m => !top.includes(m))].slice(0, 12)
   }, [notStarted, featuredIds, favNext, d?.levels])
   const players = useMemo(() => new Set(notStarted.flatMap(m => [m.home.id, m.away.id]).filter(Boolean)).size, [notStarted])
 
@@ -92,7 +95,7 @@ function useTennisData(): SportHomeData {
     },
     special: {
       title: tt("Upset watch"), tone: 'loss', open: full,
-      items: upsetItems(notStarted, m => m.prediction ? { id: m.id, href: tennisHref.match(m.id), league: compOf(m), date: m.start, home: surname(m.home.name), away: surname(m.away.name), pHome: m.prediction.pHome, pAway: m.prediction.pAway, locked: m.prediction.locked } : null),
+      items: upsetItems(notStarted, m => m.prediction ? { id: m.id, href: tennisHref.match(m.id), league: compOf(m), date: m.start, home: surname(m.home), away: surname(m.away), pHome: m.prediction.pHome, pAway: m.prediction.pAway, locked: m.prediction.locked } : null),
       empty: tt("No upsets on the radar this week."),
       locked: { title: tt("Upset watch"), text: tt("The 2 matches where our model gives the underdog the best chance. Part of Pro.") },
       link: full ? { to: '/tennis/upset-watch', label: tt("All upsets →") } : { to: '/premium', label: tt("Unlock upset watch →") }

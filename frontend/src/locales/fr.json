@@ -2195,5 +2195,20 @@
  "in our data": "dans nos données",
  "of matches": "des matchs",
  "picks saved before the first serve": "pronostics enregistrés avant le premier service",
- "{0} ranking": "Classement {0}"
+ "{0} ranking": "Classement {0}",
+ "Qualifying R{0}": "Qualifications T{0}",
+ "Qualifying (round)": "Qualifications",
+ "Round of 16": "Huitièmes de finale",
+ "Round of {0}": "Tour des {0} derniers",
+ "Round {0}": "Tour {0}",
+ "Quarter-final": "Quart de finale",
+ "Semi-final": "Demi-finale",
+ "Final (round)": "Finale",
+ "Round robin": "Phase de groupes",
+ "Result to follow": "Résultat à venir",
+ "{n, plural, one {# match} other {# matches}}": "{n, plural, one {# match} other {# matchs}}",
+ "From {n, plural, one {# match} other {# matches}} with full stats.": "Sur {n, plural, one {# match} other {# matchs}} avec statistiques complètes.",
+ "Winner, {n, plural, one {# match} other {# matches}}": "Vainqueur, {n, plural, one {# match} other {# matchs}}",
+ "{n, plural, one {# match} other {# matches}} in the next {1} days": "{n, plural, one {# match} other {# matchs}} dans les {1} prochains jours",
+ "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "À quelle fréquence notre score en sets le plus probable était exact, et l'écart entre notre total de jeux et le vrai, sur {n, plural, one {# match} other {# matchs}} (abandons exclus)."
 }
