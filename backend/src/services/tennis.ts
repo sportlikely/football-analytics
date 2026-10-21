@@ -270,6 +270,29 @@ export function eventGender(tour: string | null, tier: string | null, name: stri
   if (tr === 'atp' || tr === 'challenger' || /^(atp|challenger|itf_m)/.test(ti)) return 'm';
   return null;
 }
+/**
+ * fix197b: the gender of each part of an event (ITF name, tour, tier): 'x' when they disagree (a "challenger" row with
+ * the WTA 125 tier, a "wta" row with a Challenger tier — eventGender reads those by the first part only), else the
+ * gender or null. A row counts as right only when no part is of the other gender.
+ */
+export function eventGenderStrict(tour: string | null, tier: string | null, name: string | null): Gen | 'x' | null {
+  const tr = String(tour || '').toLowerCase(), ti = String(tier || '').toLowerCase();
+  const itf = String(name || '').trim().match(ITF_NAME);
+  const parts = [
+    itf ? (itf[1].toUpperCase() === 'W' ? 'w' : 'm') : null,
+    tr === 'wta' ? 'w' : tr === 'atp' || tr === 'challenger' ? 'm' : null,
+    /^(wta|itf_w|bjk)/.test(ti) ? 'w' : /^(atp|challenger|itf_m)/.test(ti) ? 'm' : null
+  ].filter((g): g is Gen => !!g);
+  if (!parts.length) return null;
+  return parts.every(g => g === parts[0]) ? parts[0] : 'x';
+}
+/** fix197b: what is wrong with a row's event, in words ("men stored under a WTA event: tour wta, tier wta_125, id wta-cali") */
+function mismatchText(r: any, pg: Gen): string {
+  const ev = eventGenderStrict(r.tour, r.tier, r.tournament);
+  const label = (g: Gen) => (g === 'w' ? 'WTA / women\'s' : 'ATP / Challenger / men\'s');
+  const what = ev === 'x' ? `a mixed event (tour and tier of different genders)` : `a ${label(ev === 'w' ? 'w' : 'm')} event`;
+  return `${pg === 'm' ? 'men' : 'women'} stored under ${what}: tour ${r.tour ?? '—'}, tier ${r.tier ?? '—'}, id ${r.tournament_id ?? '—'}`;
+}
 /** SQL twin of eventGender (tour / tier only) for a table alias */
 const genSql = (a: string) => `(CASE WHEN lower(COALESCE(${a}.tour, '')) = 'wta' OR lower(COALESCE(${a}.tier, '')) LIKE 'wta%' OR lower(COALESCE(${a}.tier, '')) LIKE 'itf_w%' THEN 'w'
   WHEN lower(COALESCE(${a}.tour, '')) IN ('atp', 'challenger') OR lower(COALESCE(${a}.tier, '')) LIKE 'atp%' OR lower(COALESCE(${a}.tier, '')) LIKE 'challenger%' OR lower(COALESCE(${a}.tier, '')) LIKE 'itf_m%' THEN 'm' END)`;
@@ -287,7 +310,8 @@ function playerGen(id: number | null, how: 'rank' | 'profile'): Gen | null {
   if (genCache.has(k)) return genCache.get(k)!;
   const g = tourGen(((how === 'rank' ? rankTourQ : profTourQ).get(id) as any)?.tour);
   if (genCache.size > 100_000) genCache.clear();
-  genCache.set(k, g);
+  // fix197b: "not known" is not kept (a new player's profile / ranking arrives later in the same sync)
+  if (g) genCache.set(k, g);
   return g;
 }
 /**
@@ -320,14 +344,14 @@ function eventFor(name: string, at: string, g: Gen): Ev | null {
   if (c && Date.now() - c.at < 3600e3) return c.ev;
   const other: Gen = g === 'm' ? 'w' : 'm';
   const cands = (siblingQ.all(new Date(T - 12 * DAY_MS).toISOString(), new Date(T + 12 * DAY_MS).toISOString(), pk.split(' ')[0]) as any[])
-    .filter(r => placeKey(r.tournament) === pk && eventGender(r.tour, r.tier, r.tournament) === g && playersGender(r.p1_id, r.p2_id) !== other);
+    .filter(r => placeKey(r.tournament) === pk && eventGenderStrict(r.tour, r.tier, r.tournament) === g && playersGender(r.p1_id, r.p2_id) !== other);
   const mains = cands.filter(r => !r.is_qualifying && !QUALI_RE.test(r.tournament));
   const from = mains.length ? mains : cands;
   const votes = new Map<string, { r: any; n: number }>();
   for (const r of from) { const k = `${r.tournament_id}|${r.tournament}|${r.tour}|${r.tier}`; const v = votes.get(k); if (v) v.n++; else votes.set(k, { r, n: 1 }); }
   const best = [...votes.values()].sort((a, b) => b.n - a.n)[0]?.r;
   const cat = (catalogueQ.all(new Date(T - 21 * DAY_MS).toISOString().slice(0, 10), new Date(T + DAY_MS).toISOString().slice(0, 10)) as any[])
-    .filter(t => (placeKey(t.name) === pk || placeKey(t.city) === pk) && eventGender(t.tour, t.tier, t.name) === g)
+    .filter(t => (placeKey(t.name) === pk || placeKey(t.city) === pk) && eventGenderStrict(t.tour, t.tier, t.name) === g)
     .sort((a, b) => String(b.start_date || '').localeCompare(String(a.start_date || '')))[0];
   let ev: Ev | null = null;
   if (best) ev = { id: mains.length ? best.tournament_id : cat?.id ?? null, name: stripQuali(best.tournament), tour: best.tour, tier: best.tier ?? cat?.tier ?? null };
@@ -349,17 +373,30 @@ function crossEvent(r: any, g: Gen): Ev {
 }
 const rowQ = db.prepare(`SELECT id, tournament_id, tournament, tour, tier, p1_id, p2_id, scheduled_at, source FROM tennis_matches WHERE id = ?`);
 const setEvent = db.prepare(`UPDATE tennis_matches SET tournament_id = ?, tournament = ?, tour = ?, tier = ? WHERE id = ?`);
-/** A row whose event is of the other gender than its players → moved to the players' event. Returns "from → to" or null. */
-function fixGender(r: any): string | null {
-  if (!r || r.source === 'archive' || r.id <= 0 || !r.tournament || !r.scheduled_at) return null;
-  const eg = eventGender(r.tour, r.tier, r.tournament);
+/** fix197b: the players' gender when the row's event (any of its parts) is of another one, else null */
+function wrongGender(r: any): Gen | null {
+  if (!r || r.source === 'archive' || r.id <= 0 || !r.tournament) return null;
+  const eg = eventGenderStrict(r.tour, r.tier, r.tournament);
   const pg = eg ? playersGender(r.p1_id, r.p2_id) : null;
-  if (!eg || !pg || eg === pg) return null;
+  return eg && pg && eg !== pg ? pg : null;
+}
+/**
+ * fix197 / fix197b: THE place a row's event (tournament_id, tournament, tour, tier) is settled — every write path calls
+ * it after its own write (upcoming sync, /fixtures, live, history, tapes, refetch, the tier fills, the duplicate merge),
+ * so the provider's tour / tournament never stay on a row of the other gender. A row whose event (tour, tier or ITF
+ * name; a "challenger" row with the WTA 125 tier counts as wrong) is of another gender than its players → moved to the
+ * players' event. Returns "from → to" or null.
+ */
+function fixGender(r: any): string | null {
+  const pg = r?.scheduled_at ? wrongGender(r) : null;
+  if (!pg) return null;
   const ev = eventFor(r.tournament, r.scheduled_at, pg) || crossEvent(r, pg);
-  if (eventGender(ev.tour, ev.tier, ev.name) !== pg) return null;
+  if (eventGenderStrict(ev.tour, ev.tier, ev.name) !== pg) return null;
   setEvent.run(ev.id, ev.name, ev.tour, ev.tier, r.id);
   return `${r.tournament} (${r.tour}${r.tier ? ` ${r.tier}` : ''}) → ${ev.name} (${ev.tour}${ev.tier ? ` ${ev.tier}` : ''})`;
 }
+/** fix197b: one stored row's event settled by its id (see fixGender) */
+const settleEvent = (id: number | null): string | null => (id === null ? null : fixGender(rowQ.get(id)));
 
 /**
  * fix193: a live match's current game (points) and server, when the provider gives them (field names vary by feed: the
@@ -392,10 +429,10 @@ export function storeMatch(m: any, source: 'fixture' | 'live' | 'history'): bool
     sc?.sets ? JSON.stringify(sc.sets) : null, sc?.games ? JSON.stringify(sc.games) : null, num(m.winner), outcome,
     outcome && /retired|walkover|default/.test(outcome) ? 1 : 0, source === 'live' ? liveExtra(m) : null, source, nowIso());
   for (const p of [p1, p2]) if (num(p.id) !== null) seePlayer.run(num(p.id), str(p.name), str(p.country), str(p.tour), num(p.ranking), num(p.ranking_points), nowIso());
-  // fix197: never under an event of the other gender (the provider put the men's Cali Challenger under the WTA 125 "Cali")
-  const eg = eventGender(itf ? 'itf' : str(m.tour), str(m.tier) ?? itf?.tier ?? null, str(m.tournament));
-  const pg = eg ? playersGender(num(p1.id), num(p2.id)) : null;
-  if (pg && pg !== eg) fixGender(rowQ.get(num(m.id)));
+  // fix197: never under an event of the other gender (the provider put the men's Cali Challenger under the WTA 125 "Cali");
+  // fix197b: always the stored row (what the upsert kept + what the provider sent), never the provider's fields alone
+  settleEvent(num(m.id));
+  touched?.add(num(m.id)!);
   return true;
 }
 /**
@@ -429,9 +466,10 @@ function storeFixture(f: any): boolean {
   const rc = normRound(f.round_code, f.round, !!quali) ?? roundFromName(f.tournament, !!quali) ?? str(f.round_code) ?? (quali ? 'Q' : null);
   upFixture.run(mid, str(f.tournament_id), str(f.tournament), tt.tour, tt.tier, str(f.surface)?.toLowerCase() ?? null, str(f.round), rc, quali,
     at, id1, knownName(id1, n1), id2, knownName(id2, n2), nowIso());
-  fixGender(rowQ.get(mid)); // fix197
   const ptour = tt.women === true || tt.tour === 'wta' ? 'wta' : tt.women === false || tt.tour === 'atp' || tt.tour === 'challenger' ? 'atp' : null;
   for (const [id, name] of [[id1, n1], [id2, n2]] as [number | null, string | null][]) if (id !== null) seePlayer.run(id, name, null, ptour, null, null, nowIso());
+  settleEvent(mid); // fix197 (fix197b: after the players are stored)
+  touched?.add(mid);
   return true;
 }
 
@@ -588,7 +626,13 @@ function note(name: string, info: string) {
 }
 const tx = <T>(fn: () => T): T => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
 
+/** fix197b: the ids the running upcoming / fixtures sync stored (settled again after the tier fills and the merge) */
+let touched: Set<number> | null = null;
 async function syncFixtures() {
+  touched = new Set();
+  try { return await syncFixturesInner(touched); } finally { touched = null; }
+}
+async function syncFixturesInner(seen: Set<number>) {
   // fix187: /matches?status=upcoming carries tier, format, tournament_id and the players; /fixtures (no tier) only when
   // that listing fails
   let n = 0, via = 'matches?status=upcoming';
@@ -604,7 +648,9 @@ async function syncFixtures() {
   const filled = await fillTiers();
   // fix195: the same match never twice (same two players within a day → one row)
   const merged = await mergeDuplicates(new Date(Date.now() - 3 * 86400000).toISOString(), new Date(Date.now() + 10 * 86400000).toISOString());
-  return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled (catalogue + history)` : ''}${merged.merged ? `, ${merged.merged} duplicates merged` : ''}`;
+  // fix197b: the gender clean-up once more over the rows this sync touched (the tier fills and the merge write after storeMatch)
+  const settled = await settleRows(seen);
+  return `${n} upcoming via ${via}${filled ? `, ${filled} tiers filled (catalogue + history)` : ''}${merged.merged ? `, ${merged.merged} duplicates merged` : ''}${settled ? `, ${settled} moved to their players' gender` : ''}`;
 }
 
 /**
@@ -613,6 +659,20 @@ async function syncFixtures() {
  * fix194: only rows from 14 days back on (the time index; the two UPDATEs scanned the whole table every 15 minutes,
  * ~2 s on 20 Oct). Older rows got their tier when they were stored, or from the finished-match sync.
  */
+/** fix197b: fixGender over the given row ids (in slices), moves logged per event; returns how many moved */
+async function settleRows(ids: Iterable<number>): Promise<number> {
+  const slice = slicer();
+  const byEvent: Record<string, number> = {};
+  let moved = 0;
+  for (const id of ids) {
+    const mv = settleEvent(id);
+    if (mv) { moved++; byEvent[mv] = (byEvent[mv] || 0) + 1; }
+    await slice();
+  }
+  if (moved) logger.info(`tennis fix197b: ${moved} match(es) moved after the sync: ${movesText(byEvent)}`);
+  return moved;
+}
+
 async function fillTiers(): Promise<number> {
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
   // fix197: first every row to an event of its players' gender, every match a round code (logged per event)
@@ -631,7 +691,9 @@ async function fillTiers(): Promise<number> {
       tier = (SELECT t.tier FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1),
       surface = COALESCE(surface, (SELECT t.surface FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1)),
       indoor = COALESCE(indoor, (SELECT t.indoor FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour LIMIT 1))
-    WHERE scheduled_at >= ? AND (tier IS NULL OR tier = 'unknown') AND tournament IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL)`).run(since);
+    WHERE scheduled_at >= ? AND (tier IS NULL OR tier = 'unknown') AND tournament IS NOT NULL AND EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM tennis_tournaments t WHERE lower(t.name) = lower(tennis_matches.tournament) AND t.tour = tennis_matches.tour AND t.tier IS NOT NULL
+        AND ${genSql('t')} IS NOT NULL AND ${genSql('tennis_matches')} IS NOT NULL AND ${genSql('t')} <> ${genSql('tennis_matches')})`).run(since);
   await yieldLoop();
   return Number(a.changes) + Number(b.changes) + await fillTiersFromHistory();
 }
@@ -708,7 +770,10 @@ async function fillTiersFromHistory(): Promise<number> {
     tx(() => {
       for (const r of todo.slice(i, i + 300)) {
         const quali = QUALI_RE.test(r.tournament) ? 1 : 0;
-        const hit = known.get(`${r.tour}|${tournamentKey(r.tournament)}`);
+        let hit = known.get(`${r.tour}|${tournamentKey(r.tournament)}`);
+        // fix197b: never a tier of the other gender (a WTA 125 tier on a "challenger" row made it a WTA match)
+        const rg = eventGenderStrict(r.tour, null, r.tournament), hg = hit ? eventGenderStrict(null, hit.tier, null) : null;
+        if (hit && rg && hg && rg !== hg) hit = undefined;
         if (hit) { set.run(hit.tier, hit.surface, hit.indoor, quali, r.id); n++; } else none.run(quali, r.id);
       }
     });
@@ -1178,9 +1243,10 @@ const movesText = (byEvent: Record<string, number>) => Object.entries(byEvent).s
 /**
  * One-time (21 Oct 2026): every row of our feed (not the archive) checked for the gender of its event, in pages of the
  * primary key; round codes filled for the last 120 days (older rows keep what they had: the model was tested on them).
+ * fix197b: run once more under its own key (the first pass read a "challenger" row with the WTA 125 tier as men's).
  */
-async function fix197Cleanup(): Promise<string> {
-  if (meta.get('fix197_cleanup')) return 'done before';
+async function fix197Cleanup(key = 'fix197b_cleanup'): Promise<string> {
+  if (meta.get(key)) return 'done before';
   genCache.clear();
   const page = db.prepare(`SELECT id, tournament_id, tournament, tour, tier, p1_id, p2_id, scheduled_at, source FROM tennis_matches WHERE id > ? AND source <> 'archive' ORDER BY id LIMIT 2000`);
   const byEvent: Record<string, number> = {};
@@ -1195,7 +1261,7 @@ async function fix197Cleanup(): Promise<string> {
   const recent = await repairTennisRows(new Date(Date.now() - 120 * DAY_MS).toISOString(), new Date(Date.now() + 30 * DAY_MS).toISOString());
   for (const [k, n] of Object.entries({ ...byEvent, ...recent.byEvent })) logger.info(`tennis fix197: ${n} match(es) moved: ${k}`);
   const info = `${moved + recent.moved} matches moved to their players' gender (${Object.keys(byEvent).length} events), ${recent.rounds} round codes filled (120 days)`;
-  meta.set('fix197_cleanup', JSON.stringify({ at: nowIso(), info, moves: byEvent }));
+  meta.set(key, JSON.stringify({ at: nowIso(), info, moves: byEvent }));
   return info;
 }
 
@@ -1248,7 +1314,7 @@ export async function tennisDataCheck() {
   const slice = slicer(); // fix196: in slices (part of the data health job)
   const iso = (ms: number) => new Date(ms).toISOString();
   const name = (r: any) => `${r.p1_name || '?'} v ${r.p2_name || '?'} · ${r.tournament || '?'} · ${String(r.scheduled_at || '').slice(0, 16).replace('T', ' ')} UTC · id ${r.id}`;
-  const win = db.prepare(`SELECT id, tournament, tour, tier, p1_id, p1_name, p2_id, p2_name, scheduled_at, status, source, round, round_code, is_qualifying FROM tennis_matches INDEXED BY idx_tennis_matches_time
+  const win = db.prepare(`SELECT id, tournament_id, tournament, tour, tier, p1_id, p1_name, p2_id, p2_name, scheduled_at, status, source, round, round_code, is_qualifying FROM tennis_matches INDEXED BY idx_tennis_matches_time
     WHERE scheduled_at >= ? AND scheduled_at < ? AND id > 0 AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(iso(now - 3 * 86400000), iso(now + 10 * 86400000)) as any[];
   const pairs = new Map<string, any[]>();
   await slice();
@@ -1280,8 +1346,9 @@ export async function tennisDataCheck() {
   genCache.clear();
   const genderMismatch: string[] = [];
   for (const r of win) {
-    const eg = eventGender(r.tour, r.tier, r.tournament), pg = eg ? playersGender(r.p1_id, r.p2_id) : null;
-    if (eg && pg && eg !== pg) genderMismatch.push(`${name(r)} · ${r.tour} event, ${pg === 'm' ? 'men' : 'women'} playing`);
+    // fix197b: every part of the event (tour, tier, ITF name), and the message says what is wrong
+    const pg = wrongGender(r);
+    if (pg) genderMismatch.push(`${name(r)} · ${mismatchText(r, pg)}`);
   }
   await slice();
   const missingRound = win.filter(r => r.status !== 'unknown' && !rowRound(r)).map(r => `${name(r)} · round ${JSON.stringify(r.round)} / code ${JSON.stringify(r.round_code)}`);
@@ -1306,7 +1373,7 @@ export async function tennisDataCheck() {
     total: duplicates.length + fixtureIds.length + noPrediction.length + stale.length + genderMismatch.length + missingRound.length,
     duplicates, fixtureIds, noPrediction, stale, genderMismatch, missingRound, names,
     cleanup: (() => { try { return JSON.parse(meta.get('fix195_cleanup') || 'null'); } catch { return null; } })(),
-    cleanup197: (() => { try { return JSON.parse(meta.get('fix197_cleanup') || 'null'); } catch { return null; } })(),
+    cleanup197: (() => { try { return JSON.parse(meta.get('fix197b_cleanup') || meta.get('fix197_cleanup') || 'null'); } catch { return null; } })(),
     moved: (db.prepare(`SELECT COUNT(*) AS n FROM tennis_id_moves`).get() as any).n
   };
 }
@@ -1328,7 +1395,7 @@ export function startTennisScheduler() {
     await job('live', syncLive);
     // fix195: the one-time clean-up of the fixture id rows runs before the first fixture sync
     void heavy('tennis fix195 clean-up', () => job('fix195 clean-up', fix195Cleanup))
-      .then(() => heavy('tennis fix197 clean-up', () => job('fix197 clean-up', fix197Cleanup)))
+      .then(() => heavy('tennis fix197b clean-up', () => job('fix197b clean-up', fix197Cleanup)))
       .then(() => heavy('tennis fixtures', () => job('fixtures', syncFixtures))).then(() => heavy('tennis tournaments', () => job('tournaments', syncTournaments)));
   }, 60 * 1000).unref();
   // fix195: matches still upcoming / live 6 h after the start → asked again, else 'unknown'
