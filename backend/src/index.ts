@@ -77,7 +77,9 @@ import { highlightsFor, highlightsStatus, lastCandidates } from './services/high
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
 import { db } from './db';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
-import { startAsn } from './services/asn';
+import { startAsn, networkOf } from './services/asn';
+import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions } from './services/proxyGuard';
+import { noteNetworkRequest, noteWho, whoToday } from './services/proxyScrapers';
 import { shortName } from './utils/tennisNames';
 import { startTennisScheduler, tennisProbe, tennisStatus, tennisSample, tennisDataCheck, tennisMovedId } from './services/tennis';
 import { startTennisModelScheduler, tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
@@ -306,6 +308,7 @@ const logScraperOnce = (key: string, req: express.Request, detail: string) => {
   securityLog(req, 'scraper', req.user, `${detail}; ${country}`);
   logger.warn(`scraper: ${detail} (${country}; ${uaKey(req.get('user-agent')).slice(0, 120)})`);
 };
+const proxyLimiter = new ProxyLimiter();
 const uaHash = (ua: string) => createHash('sha256').update(RL_SALT + ua).digest('hex').slice(0, 20);
 app.use('/api', (req, _res, next) => {
   const ua = uaKey(req.get('user-agent'));
@@ -317,14 +320,27 @@ app.use('/api', (req, _res, next) => {
   (req as any).verifiedCrawler = crawler;
   (req as any).crawlerClaim = claims ? verdict === true : null; // fix183: the visitor counter's crawler check
   notePageRequest(ua, crawler);
-  if (claims && verdict === false) logScraperOnce(`fake:${ipH}`, req, 'crawler user-agent from an address that is not the search engine (DNS check failed): stored data only');
+  // fix199: a data-centre / proxy address (asn.ts) — stored data only, tight limits, one Security-log line per network
+  const nw = req.ip ? networkOf(req.ip) : null;
+  noteWho(ua, !!nw, crawler);
+  const proxy = !!nw && proxyApplies({ network: true, admin: false, verifiedCrawler: crawler, verifiedAccount: !!req.user?.emailVerified });
+  (req as any).proxyAnon = proxy && !req.user;
+  const fake = claims && verdict === false;
+  if (fake && !nw) logScraperOnce(`fake:${ipH}`, req, 'crawler user-agent from an address that is not the search engine (DNS check failed): stored data only');
   const paid = req.access === 'premium' || req.access === 'pro';
   const keys = { ip: ipH, ua: uaHash(ua), user: paid && req.user ? String(req.user.id) : null };
   const cap = costCapped(keys);
-  if (cap) logScraperOnce(`cap:${cap.key}:${cap.key === 'ip' ? ipH : cap.key === 'ua' ? keys.ua : keys.user}`, req,
+  if (cap && !nw) logScraperOnce(`cap:${cap.key}:${cap.key === 'ip' ? ipH : cap.key === 'ua' ? keys.ua : keys.user}`, req,
     `provider-cost cap: ${cap.calls} provider calls today by this ${cap.key === 'ip' ? 'address' : cap.key === 'ua' ? 'user-agent' : 'account'} (cap ${cap.cap}): stored data only until midnight UTC`);
-  afSource.run({ kind: 'page', ua, crawler, keys, ...(cap || (claims && !crawler) ? { offline: true } : {}) }, next);
+  const refused = proxy && countedRead(req.method, req.originalUrl.split('?')[0]) ? proxyLimiter.hit(ipH, nw!.asn) : null;
+  if (nw) noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, capped: !!cap, fakeCrawler: fake, verified: crawler, exempt: !proxy && !crawler });
+  if (refused) {
+    _res.set('Retry-After', String(refused.retryAfter));
+    return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.' });
+  }
+  afSource.run({ kind: 'page', ua, crawler, keys, ...(cap || (claims && !crawler) || proxy ? { offline: true } : {}) }, next);
 });
+every('proxy limits cleanup', () => proxyLimiter.prune(), 5 * 60000).unref();
 /** fix166: team / player pages of every sport make no provider call for a crawler (stored or database data only). */
 const crawlerSafe = <T>(fn: () => T): T => (isCrawlerRequest() ? noProviderCalls(fn) : fn());
 
@@ -398,6 +414,12 @@ const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|c
 app.use('/api', (req, res, next) => {
   const p = req.originalUrl.split('?')[0];
   const access = req.access || 'anon';
+  // fix199: signed out from a data-centre / proxy network: no prediction at all, finished games too (every sport) —
+  // the game pages show the "Create a free account" prompt
+  if ((req as any).proxyAnon) {
+    const json = res.json.bind(res);
+    res.json = (body: any) => json(lockAllPredictions(body));
+  }
   if (OPEN_API.test(p)) {
     // Trim predictions: anonymous and free users see the pick only; $15 Premium sees unlocked and finished matches in full
     if (!canSeeFull(access) && p.startsWith('/api/matches')) {
@@ -1160,7 +1182,7 @@ app.get('/api/admin/backups/download/:name', needSudo, (req, res) => {
   res.download(file, req.params.name);
 });
 app.get('/api/admin/waitlist', (_req, res) => res.json({ data: waitlistStats() }));
-app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: visitorStats() }); });
+app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...visitorStats(), who: whoToday() } }); }); // fix199: + who is calling today
 app.get('/api/admin/news', (_req, res) => res.json({ data: newsStatus() }));
 
 app.post('/api/auth/login', jsonOnly, async (req, res) => {
@@ -1502,7 +1524,7 @@ app.get('/api/matches/upcoming', async (req, res) => {
     else if (Date.now() - c.at > UPCOMING_FRESH_MS) void refreshUpcoming(days);
     if (!c?.body) return res.status(503).set('Retry-After', '5').json({ error: 'Failed to fetch upcoming matches' });
     const access = req.access || 'anon';
-    if (access === 'anon' && !req.user) return res.type('application/json').send(c.anon ??= JSON.stringify(stripMarket(teaseDeep(c.body))));
+    if (access === 'anon' && !req.user && !(req as any).proxyAnon) return res.type('application/json').send(c.anon ??= JSON.stringify(stripMarket(teaseDeep(c.body))));
     res.json(c.body);
   } catch (error: any) {
     sendError(res, error, 'Failed to fetch upcoming matches');
@@ -3506,6 +3528,16 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     // fix195: an old tennis fixture id merged into its match → the match's page (any language prefix kept)
     const tnOld = /^(\/[a-z]{2})?\/tennis\/match\/(\d+)\/?$/.exec(req.path);
     if (tnOld) { const to = tennisMovedId(Number(tnOld[2])); if (to) return res.redirect(301, `${tnOld[1] || ''}/tennis/match/${to}`); }
+    // fix199: a page read from a data-centre / proxy address counts towards its limits (sign-in / sign-up pages never)
+    const nw = req.access !== 'admin' && !req.user?.emailVerified && req.ip ? networkOf(req.ip) : null;
+    if (nw && !/^(\/[a-z]{2})?\/(login|signup|join|forgot|verify|account|reset|privacy|terms|contact)(\/|$)/.test(req.path)) {
+      const ua = uaKey(req.get('user-agent')), ipH = ipKey(req);
+      const verified = claimsCrawler(ua) && crawlerVerdict(ipH, req.ip) === true;
+      const refused = verified ? null : proxyLimiter.hit(ipH, nw.asn);
+      noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, verified });
+      if (refused) return res.status(429).set('Retry-After', String(refused.retryAfter)).type('html')
+        .send('<!doctype html><meta charset="utf-8"><title>SportLikely</title><p>Too many pages opened from this network. Please try again later, or <a href="/login">sign in</a>.</p>');
+    }
     res.set('Cache-Control', 'no-cache');
     try {
       res.type('html').send(renderIndex(indexHtml, seoPage(req.path)));

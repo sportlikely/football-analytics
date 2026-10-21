@@ -237,13 +237,15 @@ interface Leave {
 }
 
 /** Why people cancel or delete (last 12 months). */
-interface SecRow { id: number; at: string; userId: number | null; email: string | null; event: string; ip: string | null; ua: string | null; detail: string | null }
+// fix199: a scraper line of a data-centre / proxy network is one row per network and day, its addresses inside
+interface SecAddr { ip: string; ua: string | null; requests: number; refused: number; firstAt: string; lastAt: string }
+interface SecRow { id: number; at: string; userId: number | null; email: string | null; event: string; ip: string | null; ua: string | null; detail: string | null; grp?: string; addresses?: SecAddr[] }
 const EVENT_LABEL: Record<string, string> = {
   login_ok: 'Signed in', login_ok_recovery_code: 'Signed in with a recovery code', login_password_ok: 'Password OK, waiting for code',
   login_fail: 'Wrong email or password', '2fa_fail': 'Wrong two-step code', '2fa_on': 'Two-step login turned on', '2fa_off': 'Two-step login turned off',
   '2fa_recovery_new': 'New recovery codes', password_reset: 'Password reset by email', password_change: 'Password changed',
   admin_set_password: 'Admin set a user password', role_changed: 'Staff role changed', role_created: 'Role created', role_updated: 'Role permissions changed', role_deleted: 'Role deleted', staff_plan_change: 'Staff changed a plan', staff_sent_reset: 'Staff sent a password reset', staff_signed_out_user: 'Staff signed a customer out', campaign_sent: 'Email campaign sent', '2fa_device_added': 'Two-step: another device added',
-  email_change_started: 'Email change started', email_changed: 'Email changed'
+  email_change_started: 'Email change started', email_changed: 'Email changed', scraper: 'Scraper'
 }
 const BAD = new Set(['role_changed', 'role_updated', 'role_created', 'role_deleted', 'login_fail', '2fa_fail', '2fa_off', 'login_ok_recovery_code', 'admin_set_password', 'email_changed', '2fa_device_added'])
 function browserOf(ua: string | null) {
@@ -754,11 +756,32 @@ function SecurityCard() {
       {d.rows.length === 0 ? <p className="text-sm text-faint">Nothing logged yet.</p> : (
         <>
           <ul className="divide-y divide-line/50 text-sm">
-            {rows.map(r => (
+            {rows.map(r => r.grp ? (
+              <li key={r.id} className="py-2">
+                <details>
+                  <summary className="cursor-pointer flex flex-wrap items-baseline gap-x-3 gap-y-0.5 list-none">
+                    <span className="w-32 shrink-0 text-[11px] text-faint num">{fmt(r.at)}</span>
+                    <span className="font-semibold text-loss">▸ {EVENT_LABEL[r.event] || r.event}</span>
+                    <span className="text-muted min-w-0 break-words">{r.detail}</span>
+                  </summary>
+                  <ul className="mt-2 ml-2 sm:ml-36 space-y-0.5 text-[11px] text-faint num">
+                    {(r.addresses || []).length === 0 && <li>No address written yet (written every 30 s per address).</li>}
+                    {(r.addresses || []).map(a => (
+                      <li key={a.ip} className="flex flex-wrap gap-x-3">
+                        <span className="text-ink">{a.ip}</span>
+                        <span>{a.requests.toLocaleString('en-US')} requests{a.refused ? ` · ${a.refused} refused` : ''}</span>
+                        <span>{fmt(a.firstAt)} → {fmt(a.lastAt)}</span>
+                        {a.ua && <span className="truncate max-w-full" title={a.ua}>{browserOf(a.ua)}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </li>
+            ) : (
               <li key={r.id} className="py-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 <span className="w-32 shrink-0 text-[11px] text-faint num">{fmt(r.at)}</span>
                 <span className={`font-semibold ${BAD.has(r.event) ? 'text-loss' : 'text-ink'}`}>{EVENT_LABEL[r.event] || r.event}</span>
-                <span className="text-muted truncate">{r.email || '—'}</span>
+                <span className="text-muted truncate">{r.email || (r.event === 'scraper' && r.detail) || '—'}</span>
                 <span className="ml-auto text-[11px] text-faint num">{r.ip || ''}{r.ua ? ` · ${browserOf(r.ua)}` : ''}</span>
               </li>
             ))}

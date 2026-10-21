@@ -11,6 +11,14 @@ interface Visitors {
   daily: { day: string; visitors: number; signedIn: number; hits: number; bots?: number; allCallers?: number }[]
   countingSince: string | null
   countries?: { last7: CountryRow[]; last30: CountryRow[]; since: string | null; geo: { loaded: boolean; status: string; source: string } }
+  who?: Who
+}
+// fix199: who is calling today — the top user-agents and data-centre / proxy networks
+type Mark = 'search-engine' | 'seo-tool' | 'data-centre' | 'script' | 'browser'
+interface Who {
+  day: string; otherRequests: number; limits: { addressHour: number; addressDay: number; networkHour: number }
+  agents: { ua: string; requests: number; mark: Mark }[]
+  networks: { name: string; asn: number; cc: string | null; requests: number; addresses: number; refused: number; logged: boolean; mark: Mark }[]
 }
 interface CountryRow { country: string; visitors: number; signedIn: number; bots?: number }
 const REASON: Record<string, string> = { 'no-signs': 'no signs of a person', ua: 'bot user-agent', crawler: 'search-engine crawlers', 'fake-crawler': 'fake crawlers', datacentre: 'data-centre networks', headless: 'headless browsers' }
@@ -56,6 +64,55 @@ function Countries({ c }: { c: NonNullable<Visitors['countries']> }) {
       {rows.length > 10 && <button type="button" onClick={() => setAll(v => !v)} className="mt-2 text-xs font-semibold text-accent">{all ? 'Show top 10' : `Show all ${rows.length} countries`}</button>}
       <p className="mt-3 text-[10px] text-faint">
         People only (bots / scripts filtered shown apart) · only the country is kept, never the IP{c.since ? ` · countries since ${new Date(c.since).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''} · "Unknown" = visits before countries were counted or unlisted addresses · IP data by <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="underline">DB-IP</a> (CC BY 4.0)
+      </p>
+    </div>
+  )
+}
+
+const MARK: Record<Mark, [string, string]> = {
+  'search-engine': ['verified search engine', 'text-win'], 'seo-tool': ['SEO tool', 'text-draw'], 'data-centre': ['data-centre', 'text-loss'],
+  script: ['unknown script', 'text-loss'], browser: ['browser', 'text-faint']
+}
+const n0 = (x: number) => x.toLocaleString('en-US')
+
+/** fix199: today's top 20 user-agents and networks, each marked (search engines are verified by DNS). */
+function WhoCard({ w }: { w: Who }) {
+  const [tab, setTab] = useState<'agents' | 'networks'>('networks')
+  const mark = (m: Mark) => <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${MARK[m][1]}`}>{MARK[m][0]}</span>
+  return (
+    <div className="mt-6 pt-5 border-t border-line/60">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h3 className="font-display font-bold text-ink">Who is calling today</h3>
+        <div className="seg">
+          <button type="button" onClick={() => setTab('networks')} className={`seg-btn ${tab === 'networks' ? 'seg-btn-active' : ''}`}>Networks</button>
+          <button type="button" onClick={() => setTab('agents')} className={`seg-btn ${tab === 'agents' ? 'seg-btn-active' : ''}`}>User-agents</button>
+        </div>
+      </div>
+      {tab === 'networks' ? (
+        w.networks.length === 0 ? <p className="text-sm text-faint">No data-centre or proxy network today.</p> : (
+          <ul className="space-y-1.5 text-sm">
+            {w.networks.map(n => (
+              <li key={n.asn} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                <span className="min-w-0 flex-1 truncate text-ink">{n.name} <span className="text-faint text-[11px]">AS{n.asn}{n.cc ? `, ${n.cc}` : ''}</span></span>
+                {mark(n.mark)}
+                <span className="text-right num text-[11px] text-faint">{n0(n.addresses)} addr · {n0(n.requests)} req{n.refused ? ` · ${n0(n.refused)} refused` : ''}{n.logged ? ' · in the security log' : ''}</span>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : (
+        <ul className="space-y-1.5 text-sm">
+          {w.agents.map(a => (
+            <li key={a.ua} className="flex items-baseline gap-3">
+              <span className="min-w-0 flex-1 truncate text-ink text-xs" title={a.ua}>{a.ua}</span>
+              {mark(a.mark)}
+              <span className="w-14 text-right num text-[11px] text-faint">{n0(a.requests)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-[10px] text-faint">
+        API requests today (UTC) · other networks (homes, mobiles): {n0(w.otherRequests)} requests · data-centre / proxy addresses get stored data only, {w.limits.addressHour} reads an hour and {w.limits.addressDay} a day per address, {w.limits.networkHour} an hour per network, and no prediction when signed out
       </p>
     </div>
   )
@@ -135,6 +192,7 @@ export default function VisitorsCard() {
         </div>
       </div>
       {v?.countries && <Countries c={v.countries} />}
+      {v?.who && <WhoCard w={v.who} />}
     </section>
   )
 }

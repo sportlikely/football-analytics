@@ -102,7 +102,7 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   (unlimited); pick packs $0.79 per pick ($0.59 with Premium); 3-day money-back guarantee built; the 3-day free trial is
   still decided, not built), `userPicks.ts`
   (users' own picks + personal record), `favorites.ts`, `testers.ts`, `backup.ts`, `clientErrors.ts`, `dataHealth.ts`,
-  `dataAudit.ts`, `seo.ts`.
+  `dataAudit.ts`, `seo.ts`, `proxyGuard.ts` + `proxyScrapers.ts` (fix199: data-centre / proxy scrapers, rules in docs/notes/security.md).
 - `OPEN_API` in `index.ts` lists the public routes; everything else is admin/staff only.
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):
