@@ -17,6 +17,7 @@
  */
 import { db } from '../db';
 import { AuthError, setPlan, verificationRequired, type User, type Plan } from './auth';
+import { signupFlag } from './signupGuard';
 
 export const PREMIUM_UNLOCKS = parseInt(process.env.PREMIUM_UNLOCKS || '60', 10);
 export const FREE_WEEKLY_UNLOCKS = parseInt(process.env.FREE_WEEKLY_UNLOCKS || '2', 10);
@@ -151,6 +152,8 @@ export function unlockMatch(user: User, access: string, matchId: number, status:
   if (access !== 'premium' && access !== 'free') throw Object.assign(new AuthError(401, 'Create a free account to unlock matches.'), { upgrade: false });
   // free picks need a confirmed email, so nobody farms them with throwaway accounts
   if (access === 'free' && verificationRequired && !user.emailVerified) throw new AuthError(403, 'Confirm your email to use your free picks.');
+  // fix198: an account made without the security check confirms its email first, whatever the email setting
+  if (access === 'free' && !user.emailVerified && signupFlag(user.id)) throw new AuthError(403, 'Confirm your email to use your free picks.');
   const have = db.prepare('SELECT 1 FROM match_unlocks WHERE user_id = ? AND match_id = ?').get(user.id, matchId);
   if (have || isFinished(status)) return { unlocked: true, charged: false, ...unlockStatus(user, access) };
   const st = unlockStatus(user, access);

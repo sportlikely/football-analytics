@@ -40,7 +40,8 @@ let emailsToday = { day: '', n: 0 };
 export function reportClientError(body: any) {
   const message = clean(body?.message, 300);
   if (!message || NOISE.test(message) || NOISE.test(clean(body?.stack, 400))) return { ok: true, ignored: true };
-  const kind = body?.kind === 'page' ? 'page' : 'uncaught';
+  // fix198: 'check' = the sign-up security check (Turnstile) failed in the visitor's browser
+  const kind = body?.kind === 'page' ? 'page' : body?.kind === 'check' ? 'check' : 'uncaught';
   const path = clean(body?.page, 200).split('?')[0].split('#')[0] || '/';
   if (!path.startsWith('/')) return { ok: true, ignored: true };
   // first lines of the code location only (no data from the page)

@@ -2210,5 +2210,14 @@
  "From {n, plural, one {# match} other {# matches}} with full stats.": "Con {n, plural, one {# partido} other {# partidos}} con estadísticas completas.",
  "Winner, {n, plural, one {# match} other {# matches}}": "Ganador, {n, plural, one {# partido} other {# partidos}}",
  "{n, plural, one {# match} other {# matches}} in the next {1} days": "{n, plural, one {# partido} other {# partidos}} en los próximos {1} días",
- "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "Con qué frecuencia acertamos exactamente el marcador de sets más probable y cuánto se alejaron nuestros juegos totales del número real, en {n, plural, one {# partido} other {# partidos}} (sin retiradas)."
+ "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "Con qué frecuencia acertamos exactamente el marcador de sets más probable y cuánto se alejaron nuestros juegos totales del número real, en {n, plural, one {# partido} other {# partidos}} (sin retiradas).",
+ "This email address doesn't look right.": "Esta dirección de correo no parece correcta.",
+ "Retry": "Reintentar",
+ "The security check can't run in this browser, so we'll ask you to confirm your email before your free picks.": "La comprobación de seguridad no funciona en este navegador, así que te pediremos que confirmes tu correo antes de tus pronósticos gratis.",
+ "Tap the check above": "Toca la comprobación de arriba",
+ "Checking you're human…": "Comprobando que eres una persona…",
+ "One moment, then try again.": "Un momento y vuelve a intentarlo.",
+ "The form timed out, please try again.": "El formulario ha caducado, inténtalo de nuevo.",
+ "The security check didn't load. Tap Retry.": "La comprobación de seguridad no se ha cargado. Pulsa Reintentar.",
+ "If it keeps failing, turn off ad-blockers or open the site in Safari or Chrome.": "Si sigue fallando, desactiva los bloqueadores de anuncios o abre el sitio en Safari o Chrome."
 }

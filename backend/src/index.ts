@@ -4,7 +4,7 @@ import { slimForList, clearPredictionCache } from './services/predCache';
 import { withLiveScore, liveBookStatus } from './services/liveScores';
 import { runLinkCheck, lastLinkCheck, linkCheckTick } from './services/linkCheck';
 import { markMissingPlayer } from './services/missingPlayers';
-import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
+import { signupToken, checkSignupToken, honeypotHit, turnstileCheck, turnstileSiteKey, checkSignupSurge, countRefusal, fallbackAllowed, fallbackUsed, flagSignup, uaFamily, noteAttempt, recordWidgetError, fallbackSigned } from './services/signupGuard';
 import { sendMail as sendMailFix168 } from './services/email';
 import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy } from './services/perf';
 import cors from 'cors';
@@ -113,7 +113,7 @@ import { bbLeagueCoverage, bbPickForAdding } from './services/bbLeagueCoverage';
 import { addBbExtraLeague, removeBbExtraLeague, setBbExtraTrial } from './services/bbLeagueConfig';
 import {
   signup, login, loginNeedsCheck, changePassword, setPlan, adminResetPassword, listUsers, userStats, createSession, destroySession, userForToken,
-  parseCookies, setSessionCookie, clearSessionCookie, SESSION_COOKIE, staffOf, permsOf, setRole, Staff, userById, checkPassword, sessionHash, startEmailChange, confirmEmailChange, accessOf, canSeeFull, isPaid, teaseDeep, teaseDeepExcept, AuthError, Access, User,
+  parseCookies, setSessionCookie, clearSessionCookie, SESSION_COOKIE, staffOf, permsOf, setRole, Staff, userById, checkPassword, sessionHash, startEmailChange, confirmEmailChange, accessOf, canSeeFull, isPaid, teaseDeep, teaseDeepExcept, AuthError, EMAIL_BAD, Access, User,
   sendVerification, verifyEmail, requestPasswordReset, resetPassword, setMarketingOptIn, usersCsv, verificationRequired, exportUserData, deleteAccount, cancelPlan, resumePlan, leaveFeedback
 } from './services/auth';
 import { playerDataStatus, teamPlayers } from './services/playerData';
@@ -472,6 +472,17 @@ app.get('/api/auth/config', (_req, res) => {
   res.set('Cache-Control', 'public, max-age=300');
   res.json({ turnstileSiteKey: turnstileSiteKey() });
 });
+// fix198: the Turnstile widget's own errors (error-callback, 10 s timeout, blocked script): Cloudflare's code, logged with
+// the browser family; recorded against the form token so the form may fall back after two of them. No auth, no email, no IP.
+app.post('/api/auth/client-error', rateLimit('cf-client-error', 20, 10 * 60000), jsonOnly, (req, res) => {
+  const code = String(req.body?.code || 'error').replace(/[^\w.-]/g, '').slice(0, 30) || 'error';
+  const where = req.body?.where === 'login' ? 'login' : 'signup';
+  const ua = uaFamily(req.headers['user-agent']);
+  const recorded = recordWidgetError(req.body?.formToken, code);
+  logger.info(`turnstile client error ${code} (${where}, ${ua}${recorded ? '' : ', no valid form token'})`);
+  countRefusal(`widget: ${code} · ${ua}`);
+  res.json({ data: { ok: true, recorded } });
+});
 app.get('/api/auth/signup-token', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ token: signupToken() });
@@ -480,16 +491,42 @@ app.get('/api/auth/signup-token', (_req, res) => {
 app.post('/api/auth/signup', jsonOnly, async (req, res) => {
   try {
     // fix168: the hidden "website" field filled in = a bot: the normal answer, nothing created
+    const ua = uaFamily(req.headers['user-agent']);
     if (honeypotHit(req.body)) {
-      logger.info('signup honeypot');
+      logger.info(`signup refused: honeypot (${ua})`);
+      countRefusal('honeypot'); noteAttempt(false, 'honeypot');
       securityLog(req, 'signup_honeypot', { email: String(req.body?.email || '').trim().slice(0, 254) || null });
       return res.status(201).json({ user: null, codeSent: true });
     }
+    // fix198: every refusal is logged and counted with its reason, and answered with a code the form turns into a clear
+    // message in the visitor's language (never the bare "Please try again")
+    const refuse = (reason: string, code: string, error: string, extra: Record<string, unknown> = {}) => {
+      logger.info(`signup refused: ${reason} (${ua})`);
+      countRefusal(reason); noteAttempt(false, reason);
+      return res.status(400).json({ error, code, ...extra });
+    };
     const why = checkSignupToken(req.body?.formToken);
-    if (why) { logger.info(`signup refused: ${why}`); return res.status(400).json({ error: 'Please try again' }); }
-    if (!(await turnstileOk(req.body?.turnstile, req.ip || ''))) return res.status(400).json({ error: 'Please try again', captcha: true });
+    if (why) return /^too fast/.test(why) ? refuse(why, 'too_fast', 'One moment, then try again.') : refuse(why, 'form_expired', 'The form timed out, please try again.');
+    // the widget couldn't run in this browser: turnstile = "fallback" is accepted only with the signed flag — 2+ widget
+    // errors the browser reported for this very form token (POST /api/auth/client-error) — and the other checks
+    const wantFallback = req.body?.turnstile === 'fallback';
+    const signed = wantFallback ? fallbackSigned(req.body?.formToken) : null;
+    if (wantFallback && !signed) return refuse('fallback without the signed flag', 'captcha_missing', "The security check didn't load. Tap Retry.", { captcha: true });
+    const cf = signed ? { ok: false, missing: true, reason: `turnstile: no token (widget errors ${signed})` } : await turnstileCheck(req.body?.turnstile, req.ip || '');
+    const noCaptcha = signed ? `widget errors ${signed}` : null;
+    if (!cf.ok && !noCaptcha) return cf.missing
+      ? refuse(cf.reason!, 'captcha_missing', "The security check didn't load. Tap Retry.", { captcha: true })
+      : refuse(cf.reason!, 'captcha_refused', 'The form timed out, please try again.', { captcha: true });
+    if (noCaptcha && !fallbackAllowed(req.ip || '')) return refuse(`no captcha, fallback limit (${noCaptcha})`, 'captcha_missing', "The security check didn't load. Please try again later.", { captcha: true });
     const user = signup(req.body?.email, req.body?.password, req.body?.name, req.ip || '', req.body?.optIn === true, req.body?.adult === true);
-    securityLog(req, 'signup', user); // the network, for the CRM trust grade (security log, 90 days)
+    if (noCaptcha) {
+      fallbackUsed(req.ip || '');
+      flagSignup(user.id, `no captcha (${noCaptcha})`);
+      logger.info(`signup without captcha: account #${user.id} (${noCaptcha}, ${ua})`);
+      countRefusal(`allowed without captcha (${noCaptcha})`);
+    }
+    noteAttempt(true, noCaptcha);
+    securityLog(req, 'signup', user, noCaptcha ? `no captcha: ${noCaptcha}` : undefined); // the network, for the CRM trust grade (security log, 90 days)
     void checkSignupSurge(sendMailFix168);
     const s = createSession(user.id, req.headers['user-agent']);
     setSessionCookie(res, s.token, s.expires, req.secure);
@@ -503,6 +540,12 @@ app.post('/api/auth/signup', jsonOnly, async (req, res) => {
     }
     res.status(201).json({ ...sessionPayload(user), codeSent });
   } catch (e) {
+    // fix198: the checks inside signup() (email, limits, existing account) are refusals too
+    if (e instanceof AuthError) {
+      logger.info(`signup refused: ${e.message} (${uaFamily(req.headers['user-agent'])})`);
+      countRefusal(e.message.replace(/\.$/, '')); noteAttempt(false, e.message);
+      if (e.message === EMAIL_BAD) return res.status(400).json({ error: e.message, code: 'bad_email' });
+    }
     authFail(res, e);
   }
 });
@@ -1168,9 +1211,21 @@ app.post('/api/auth/login', jsonOnly, async (req, res) => {
     // fix168: the hidden field filled in: the same answer as a wrong password
     if (honeypotHit(req.body)) { logger.info('login honeypot'); return res.status(401).json({ error: 'Wrong email or password.' }); }
     // after 3 failed attempts: Cloudflare Turnstile (when it is on)
-    if (turnstileSiteKey() && loginNeedsCheck(req.body?.email, req.ip || '') && !(await turnstileOk(req.body?.turnstile, req.ip || '')))
-      return res.status(400).json({ error: 'Please confirm you are not a robot.', captcha: true });
+    // fix198: with the reason in the log; the widget couldn't run in this browser → the same fallback as sign-up (capped;
+    // the password limits still apply)
+    if (turnstileSiteKey() && loginNeedsCheck(req.body?.email, req.ip || '')) {
+      const ua = uaFamily(req.headers['user-agent']);
+      const signed = req.body?.turnstile === 'fallback' ? fallbackSigned(req.body?.formToken) : null;
+      const cf = signed ? { ok: false, missing: true, reason: `turnstile: no token (widget errors ${signed})` } : await turnstileCheck(req.body?.turnstile, req.ip || '');
+      if (!cf.ok && !(signed && fallbackAllowed(req.ip || ''))) {
+        logger.info(`login refused: ${cf.reason || 'fallback without the signed flag'} (${ua})`);
+        countRefusal(`login: ${cf.reason || 'fallback without the signed flag'}`);
+        return res.status(400).json({ error: 'Please confirm you are not a robot.', code: cf.missing ? 'captcha_missing' : 'captcha_refused', captcha: true });
+      }
+      if (signed) logger.info(`login without captcha (widget errors ${signed}, ${ua})`);
+    }
     const user = login(req.body?.email, req.body?.password, req.ip || '');
+    if (turnstileSiteKey() && req.body?.turnstile === 'fallback') fallbackUsed(req.ip || '');
     // two-step login on: no session yet, only a short ticket for the code step
     if (twoFactorEnabled(user.id)) {
       securityLog(req, 'login_password_ok', user, 'waiting for two-step code');

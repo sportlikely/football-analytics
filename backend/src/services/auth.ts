@@ -133,14 +133,16 @@ const DUMMY_HASH = hashPassword(crypto.randomBytes(12).toString('hex'));
 
 // ---------- validation ----------
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+// fix198: a dot between every part of the domain ("gmail com" and "gmail..com" fail), letters at the end
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.(?:[a-z]{2,}|xn--[a-z0-9-]+)$/i;
+export const EMAIL_BAD = "This email address doesn't look right.";
 
 export function normEmail(e: unknown): string {
   return String(e || '').trim().toLowerCase();
 }
 
 function checkCredentials(email: string, password: unknown): string | null {
-  if (!EMAIL_RE.test(email) || email.length > 200) return 'Please enter a valid email address.';
+  if (!EMAIL_RE.test(email) || email.length > 200) return EMAIL_BAD;
   const pw = String(password || '');
   if (pw.length < 8) return 'Password must be at least 8 characters.';
   if (pw.length > 200) return 'Password is too long.';
@@ -738,6 +740,8 @@ export function deleteAccount(userId: number, password: unknown, reason?: unknow
     if (tableExists('assistant_log')) db.prepare('DELETE FROM assistant_log WHERE user_id = ?').run(userId);
     if (tableExists('security_log')) db.prepare('DELETE FROM security_log WHERE user_id = ?').run(userId);
     if (tableExists('contact_messages')) db.prepare('DELETE FROM contact_messages WHERE user_id = ? OR email = ?').run(userId, u.email);
+    // fix198: the "signed up without the security check" mark
+    if (tableExists('signup_flags')) db.prepare('DELETE FROM signup_flags WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM email_codes WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);

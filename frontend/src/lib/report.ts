@@ -5,10 +5,14 @@
  */
 const sent = new Set<string>()
 
-function browserName() {
+/** "Safari · iOS", "Instagram app · iOS", "Chrome · Android" (fix198: in-app browsers by name — WhatsApp, Instagram …) */
+export function browserName() {
   const ua = navigator.userAgent
-  const b = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /SamsungBrowser/.test(ua) ? 'Samsung' : /Firefox\//.test(ua) ? 'Firefox'
-    : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Other'
+  const app = /Instagram/.test(ua) ? 'Instagram app' : /FBAN|FBAV|FB_IAB|FBIOS/.test(ua) ? 'Facebook app' : /WhatsApp/i.test(ua) ? 'WhatsApp app'
+    : /BytedanceWebview|musical_ly|TikTok/i.test(ua) ? 'TikTok app' : /Snapchat/.test(ua) ? 'Snapchat app' : /\bLine\//.test(ua) ? 'LINE app'
+    : /Twitter/.test(ua) ? 'X app' : /LinkedInApp/.test(ua) ? 'LinkedIn app' : /GSA\//.test(ua) ? 'Google app' : null
+  const b = app || (/EdgiOS|Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /SamsungBrowser/.test(ua) ? 'Samsung' : /FxiOS|Firefox\//.test(ua) ? 'Firefox'
+    : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /iPhone|iPad/.test(ua) && /AppleWebKit/.test(ua) ? 'in-app browser' : 'Other')
   const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : ''
   return os ? `${b} · ${os}` : b
 }
@@ -44,4 +48,21 @@ export function watchErrors() {
     if (ev.filename && !ev.filename.startsWith(window.location.origin)) return
     reportError(ev.error, 'uncaught')
   })
+}
+
+/**
+ * fix198: the sign-up security check (Cloudflare Turnstile) failed in this browser — the widget's error code goes to the
+ * server with the form token (logged with the browser family, counted on Admin → Data health; two of them on the same
+ * form let the sign-up through without the check).
+ */
+export function reportCheck(code: string, where: 'signup' | 'login', formToken: string | null) {
+  try {
+    void fetch('/api/auth/client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'omit',
+      keepalive: true,
+      body: JSON.stringify({ where, code, formToken, browser: browserName() })
+    }).catch(() => undefined)
+  } catch { /* reporting never breaks the page */ }
 }

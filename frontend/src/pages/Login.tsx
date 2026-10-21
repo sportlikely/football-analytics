@@ -1,12 +1,16 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { errorText, useAuth } from '../lib/auth'
 import { safeNext } from '../lib/nav'
 import { t } from '../lib/i18n'
 import { TwoFactorStep } from '../components/TwoFactor'
-import Turnstile, { useTurnstileKey } from '../components/Turnstile'
+import Turnstile, { useTurnstileKey, type CheckState } from '../components/Turnstile'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
+
+/** fix198: what a person can type by mistake — "name@gmail com", "name@gmail", "name@@gmail.com", "name@gmail..com" */
+export const emailLooksOk = (e: string) => /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.(?:[a-z]{2,}|xn--[a-z0-9-]+)$/i.test(e.trim())
+const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /** Sign in and create account on one page: /login and /signup. */
 export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
@@ -27,15 +31,33 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
   // fix168: bot checks — the hidden field, the signed "form shown at" token, Cloudflare Turnstile (when it is on)
   const [website, setWebsite] = useState('')
   const [formToken, setFormToken] = useState<string | null>(null)
+  const tokenAt = useRef(0) // when the form token was given (the server refuses a sign-up sent within 3 s of it)
   const [cfToken, setCfToken] = useState('')
   const [cfKey, setCfKey] = useState(0) // a Turnstile token works once: a new widget after a failed try
   const [needCheck, setNeedCheck] = useState(false) // login: after 3 failed attempts the server asks for it
   const siteKey = useTurnstileKey()
+  // fix198: where the security check stands; after 2 widget failures (or a blocked script) the form goes on without it
+  // (the server then asks for email confirmation before any free pick and marks the account "Unsure")
+  const [check, setCheck] = useState<CheckState>({ state: 'loading' })
+  const [checkFails, setCheckFails] = useState(0)
+  const [noCaptcha, setNoCaptcha] = useState<string | null>(null)
+  const getFormToken = () => axios.get(`${API_URL}/auth/signup-token`).then(r => { setFormToken(r.data?.token || null); tokenAt.current = Date.now() }).catch(() => setFormToken(null))
   useEffect(() => {
-    if (mode !== 'signup') return
-    axios.get(`${API_URL}/auth/signup-token`).then(r => setFormToken(r.data?.token || null)).catch(() => setFormToken(null))
-  }, [mode])
+    if (mode !== 'signup' && !needCheck) return
+    void getFormToken()
+  }, [mode, needCheck])
   const showCheck = !!siteKey && (mode === 'signup' || needCheck)
+  const checkOn = showCheck && !noCaptcha
+  const onCheck = (s: CheckState) => {
+    setCheck(s)
+    if (s.state !== 'error') return
+    const fails = checkFails + 1
+    setCheckFails(fails)
+    // two failures on this form (the server recorded both) → the sign-up goes on without the check
+    if (fails >= 2) setNoCaptcha(`${s.code || 'error'} · ${fails}x`)
+  }
+  const retryCheck = () => { setCfToken(''); setCheck({ state: 'loading' }); setCfKey(k => k + 1) }
+  const waiting = checkOn && !cfToken
 
   useEffect(() => setMode(initial), [initial])
   useEffect(() => {
@@ -50,19 +72,40 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
     setError(null)
     if (mode === 'signup' && password.length < 8) return setError(t("Password must be at least 8 characters."))
     if (mode === 'signup' && !adult) return setError(t("Please confirm you are 18 or older and accept the terms."))
+    if (mode === 'signup' && !emailLooksOk(email)) return setError(t("This email address doesn't look right."))
+    if (waiting) return
     setBusy(true)
     try {
-      const guard = { website, formToken, turnstile: cfToken || null }
+      // the form token must be 3 s old (bots are faster): a person who fills the form in under 3 s just waits a moment
+      if (mode === 'signup') {
+        if (!formToken) await getFormToken()
+        const left = 3300 - (Date.now() - tokenAt.current)
+        if (left > 0) await wait(left)
+      }
+      // fix198: no token because the widget failed twice → "fallback", which the server accepts only for a form token it
+      // recorded two widget errors for
+      const guard = { website, formToken, turnstile: cfToken || (showCheck && noCaptcha ? 'fallback' : null) }
       if (mode === 'login') {
         const step = await login(email, password, guard)
         if (step.ticket) { setTicket(step.ticket); setPassword('') }
       } else await signup(email, password, name, optIn, adult, guard)
     } catch (err: any) {
-      if (err?.response?.data?.captcha) setNeedCheck(true)
-      setCfToken(''); setCfKey(k => k + 1)
-      // a fresh form token for the next try (the old one stays valid, but a stale page may have kept one past its hour)
-      if (mode === 'signup') axios.get(`${API_URL}/auth/signup-token`).then(r => setFormToken(r.data?.token || null)).catch(() => undefined)
-      setError(errorText(err))
+      const d = err?.response?.data || {}
+      if (d.captcha) setNeedCheck(true)
+      // fix198: a Turnstile token works once — a new widget; the form token stays (a new one would make a quick retry
+      // "too fast"), unless the server says it expired
+      if (checkOn || d.captcha) retryCheck()
+      // never a new form token after a failed submit (that made the retry "too fast") — except when the server says this
+      // one is dead (an hour old / not ours): the only way to recover, and the form waits the 3 s before sending again
+      if (mode === 'signup' && d.code === 'form_expired') void getFormToken()
+      if (d.code === 'captcha_missing') onCheck({ state: 'error', code: 'no token at the server' })
+      setError(
+        d.code === 'too_fast' ? t("One moment, then try again.")
+          : d.code === 'form_expired' || d.code === 'captcha_refused' ? t("The form timed out, please try again.")
+          : d.code === 'captcha_missing' ? null // the check box says what to do
+          : d.code === 'bad_email' ? t("This email address doesn't look right.")
+          : errorText(err)
+      )
     } finally {
       setBusy(false)
     }
@@ -158,16 +201,26 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
           <div aria-hidden="true" style={{ position: 'absolute', left: '-10000px', width: 1, height: 1, overflow: 'hidden' }}>
             <label>Website<input type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={e => setWebsite(e.target.value)} /></label>
           </div>
-          {showCheck && <Turnstile key={cfKey} siteKey={siteKey} onToken={setCfToken} />}
+          {showCheck && !noCaptcha && <Turnstile key={cfKey} siteKey={siteKey} onToken={setCfToken} onState={onCheck} hidden={check.state === 'error'} where={mode} formToken={formToken} />}
+          {/* fix198: never the bare "Please try again": what went wrong, what to do, a Retry */}
+          {showCheck && !noCaptcha && check.state === 'error' && (
+            <div role="alert" className="rounded-xl border border-loss/40 bg-loss/10 px-3 py-2.5 text-sm text-ink space-y-2">
+              <p>{t("The security check didn't load. Tap Retry.")} <span className="text-muted">{t("If it keeps failing, turn off ad-blockers or open the site in Safari or Chrome.")}</span></p>
+              <button type="button" onClick={retryCheck} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-bold text-ink hover:border-accent/60">{t("Retry")}</button>
+            </div>
+          )}
+          {showCheck && noCaptcha && mode === 'signup' && (
+            <p className="rounded-xl border border-line bg-surface2/60 px-3 py-2 text-xs text-muted">{t("The security check can't run in this browser, so we'll ask you to confirm your email before your free picks.")}</p>
+          )}
 
           {error && <div className="rounded-xl border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-loss">{error}</div>}
 
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || waiting}
             className="w-full rounded-xl bg-accent text-bg font-semibold py-2.5 text-sm disabled:opacity-60 transition-opacity"
           >
-            {busy ? t("Please wait…") : mode === 'login' ? t("Sign in") : t("Create account")}
+            {busy ? t("Please wait…") : waiting && check.state !== 'error' ? (check.state === 'interactive' ? t("Tap the check above") : t("Checking you're human…")) : mode === 'login' ? t("Sign in") : t("Create account")}
           </button>
         </form>
 

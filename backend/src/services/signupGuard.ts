@@ -48,26 +48,124 @@ export function checkSignupToken(token: unknown): string | null {
 /** The hidden field was filled in (a person never sees it). */
 export const honeypotHit = (body: any) => typeof body?.website === 'string' && body.website.trim() !== '';
 
+/* ---------- fix198: every refusal logged and counted (Admin → Data health: "sign-ups refused today, by reason") ---------- */
+
+/** "iPhone Safari", "Android Chrome", "in-app (Instagram)" — for the log lines (never the email or the IP) */
+export function uaFamily(ua: unknown): string {
+  const u = String(ua || '');
+  if (!u.trim()) return 'no UA';
+  const app = /Instagram/.test(u) ? 'Instagram' : /FBAN|FBAV|FB_IAB|FBIOS/.test(u) ? 'Facebook' : /WhatsApp/i.test(u) ? 'WhatsApp' : /BytedanceWebview|musical_ly|TikTok/i.test(u) ? 'TikTok'
+    : /Snapchat/.test(u) ? 'Snapchat' : /\bLine\//.test(u) ? 'LINE' : /Twitter/.test(u) ? 'X' : /LinkedInApp/.test(u) ? 'LinkedIn' : /GSA\//.test(u) ? 'Google app' : null;
+  const os = /iPhone|iPad/.test(u) ? 'iPhone' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows' : /Mac OS/.test(u) ? 'Mac' : /Linux/.test(u) ? 'Linux' : 'other';
+  if (app) return `in-app (${app}, ${os})`;
+  const b = /EdgiOS|Edg\//.test(u) ? 'Edge' : /OPR\//.test(u) ? 'Opera' : /SamsungBrowser/.test(u) ? 'Samsung' : /FxiOS|Firefox\//.test(u) ? 'Firefox' : /CriOS|Chrome\//.test(u) ? 'Chrome'
+    : /Safari\//.test(u) ? 'Safari' : /iPhone|iPad/.test(u) && /AppleWebKit/.test(u) ? 'in-app (unknown)' : 'other';
+  return `${os} ${b}`;
+}
+
+db.exec(`CREATE TABLE IF NOT EXISTS signup_refusals (day TEXT NOT NULL, reason TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, reason))`);
+// every sign-up try with its outcome (7 days): the admin alert "attempts but no success" reads it
+db.exec(`CREATE TABLE IF NOT EXISTS signup_attempts (at TEXT NOT NULL, ok INTEGER NOT NULL, reason TEXT)`);
+export function noteAttempt(ok: boolean, reason: string | null) {
+  try {
+    db.prepare(`INSERT INTO signup_attempts (at, ok, reason) VALUES (?, ?, ?)`).run(new Date().toISOString(), ok ? 1 : 0, reason ? reason.slice(0, 80) : null);
+    if (Math.random() < 0.05) db.prepare(`DELETE FROM signup_attempts WHERE at < ?`).run(new Date(Date.now() - 7 * 86400000).toISOString());
+  } catch { /* never blocks a sign-up */ }
+}
+/** the last 24 h: how many tries, how many accounts — the alert fires at 4+ tries and 0 accounts */
+export function signupLast24h(): { attempts: number; successes: number } {
+  const since = new Date(Date.now() - 86400000).toISOString();
+  const r = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(ok), 0) AS ok FROM signup_attempts WHERE at >= ?`).get(since) as any;
+  return { attempts: r?.n || 0, successes: r?.ok || 0 };
+}
+
+/* ---------- fix198: the widget's own errors, recorded against the form token (the signed fallback flag) ---------- */
+
+// nonce of the form token → the Cloudflare error codes the widget reported for that form (kept an hour)
+const widgetErrors = new Map<string, { at: number; codes: string[] }>();
+const nonceOf = (token: unknown) => { const p = String(token || '').split('.'); return p.length === 3 ? `${p[0]}.${p[1]}` : null; };
+/** the widget failed on this form: only counted for a form token we signed (so a bot can't just claim two failures) */
+export function recordWidgetError(formToken: unknown, code: string): boolean {
+  const why = checkSignupToken(formToken);
+  if (why && !/^too fast/.test(why)) return false;
+  const n = nonceOf(formToken)!;
+  const e = widgetErrors.get(n) || { at: Date.now(), codes: [] };
+  if (e.codes.length < 10) e.codes.push(code.slice(0, 30));
+  widgetErrors.set(n, e);
+  if (widgetErrors.size > 5000) for (const [k, v] of widgetErrors) if (Date.now() - v.at > 3600000) widgetErrors.delete(k);
+  return true;
+}
+/** the fallback flag: 2+ recorded widget failures on this very form */
+export function fallbackSigned(formToken: unknown): string | null {
+  const n = nonceOf(formToken);
+  const e = n ? widgetErrors.get(n) : null;
+  return e && e.codes.length >= 2 ? e.codes.join(',') : null;
+}
+/** "too fast (1662 ms)" → "too fast": one row per kind of reason a day (kept 30 days) */
+export function countRefusal(reason: string) {
+  const r = reason.replace(/\s*\(\d+ ms\)/, '').slice(0, 80);
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    db.prepare(`INSERT INTO signup_refusals (day, reason, n) VALUES (?, ?, 1) ON CONFLICT(day, reason) DO UPDATE SET n = n + 1`).run(day, r);
+    db.prepare(`DELETE FROM signup_refusals WHERE day < ?`).run(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
+  } catch { /* counting never blocks a sign-up */ }
+}
+export function signupRefusals(day = new Date().toISOString().slice(0, 10)): { reason: string; n: number }[] {
+  return db.prepare(`SELECT reason, n FROM signup_refusals WHERE day = ? ORDER BY n DESC`).all(day) as any[];
+}
+
 /* ---------- Cloudflare Turnstile ---------- */
 
 export const turnstileSiteKey = () => (process.env.TURNSTILE_SITE_KEY && process.env.TURNSTILE_SECRET ? process.env.TURNSTILE_SITE_KEY : null);
-/** true when Turnstile is off or Cloudflare accepted the token. */
-export async function turnstileOk(token: unknown, ip: string): Promise<boolean> {
+/**
+ * fix198: Cloudflare's answer with the reason. ok when Turnstile is off or Cloudflare accepted the token; reason
+ * "turnstile: no token" (the widget never gave one: blocked script, in-app browser …) or "turnstile: refused <codes>".
+ */
+export async function turnstileCheck(token: unknown, ip: string): Promise<{ ok: boolean; reason: string | null; missing: boolean }> {
   const secret = process.env.TURNSTILE_SECRET;
-  if (!secret || !process.env.TURNSTILE_SITE_KEY) return true;
+  if (!secret || !process.env.TURNSTILE_SITE_KEY) return { ok: true, reason: null, missing: false };
   const response = String(token || '');
-  if (!response || response.length > 2048) return false;
+  if (!response) return { ok: false, reason: 'turnstile: no token', missing: true };
+  if (response.length > 2048) return { ok: false, reason: 'turnstile: refused too-long-token', missing: false };
   try {
     const body = new URLSearchParams({ secret, response, ...(ip ? { remoteip: ip } : {}) });
     const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body, signal: AbortSignal.timeout(8000) });
     const j: any = await r.json();
-    if (!j?.success) logger.info(`turnstile refused: ${(j?.['error-codes'] || []).join(', ') || 'no reason'}`);
-    return !!j?.success;
+    if (j?.success) return { ok: true, reason: null, missing: false };
+    return { ok: false, reason: `turnstile: refused ${(j?.['error-codes'] || []).join(', ') || 'no reason'}`, missing: false };
   } catch (e: any) {
     // Cloudflare unreachable: let the person in (the other checks still apply) rather than block every sign-up
     logger.warn(`turnstile check failed: ${e?.message || e}`);
-    return true;
+    return { ok: true, reason: null, missing: false };
   }
+}
+
+/**
+ * fix198: the fallback when the widget can't run in the person's browser (failed twice, or Cloudflare's script never
+ * loaded): the sign-up goes on with the other checks (form token, honeypot, network / email limits, disposable-email
+ * block), the account must confirm its email before any free pick and is marked "Unsure · no captcha" in the CRM.
+ * Capped so a bot can't use it as a back door: 2 a day per network, 30 an hour in all.
+ */
+const fallbackHits = new Map<string, number[]>();
+const recent = (k: string, ms: number) => (fallbackHits.get(k) || []).filter(t => Date.now() - t < ms);
+/** may this network still use the fallback? (3 accounts a day per network, 30 an hour in all) */
+export function fallbackAllowed(ip: string): boolean {
+  return recent(`ip:${ip}`, 86400000).length < 3 && recent('all', 3600000).length < 30;
+}
+/** count it only once an account (or a login) really went through: a mistyped email doesn't use up a try */
+export function fallbackUsed(ip: string) {
+  const now = Date.now();
+  fallbackHits.set(`ip:${ip}`, [...recent(`ip:${ip}`, 86400000), now]);
+  fallbackHits.set('all', [...recent('all', 3600000), now]);
+  if (fallbackHits.size > 5000) fallbackHits.clear();
+}
+db.exec(`CREATE TABLE IF NOT EXISTS signup_flags (user_id INTEGER PRIMARY KEY, reason TEXT NOT NULL, at TEXT NOT NULL)`);
+export function flagSignup(userId: number, reason: string) {
+  db.prepare(`INSERT OR REPLACE INTO signup_flags (user_id, reason, at) VALUES (?, ?, ?)`).run(userId, reason.slice(0, 120), new Date().toISOString());
+}
+/** the account was created without the Turnstile check (null = with it) */
+export function signupFlag(userId: number): string | null {
+  try { return (db.prepare(`SELECT reason FROM signup_flags WHERE user_id = ?`).get(userId) as any)?.reason || null; } catch { return null; }
 }
 
 /* ---------- trust (CRM) ---------- */
@@ -106,9 +204,12 @@ export function trustOf(u: { id: number; email: string; created_at: string; last
     const n = one(`SELECT COUNT(*) AS n FROM security_log WHERE event = 'signup' AND ip = ? AND at BETWEEN ? AND ?`, ip, new Date(t - 3600 * 1000).toISOString(), new Date(t + 3600 * 1000).toISOString());
     if (n >= 3) minus.push(`${n} sign-ups from the same network within an hour`);
   }
+  // fix198: signed up without the security check (the widget failed in their browser): never "Real"
+  const flag = signupFlag(u.id);
+  if (flag) minus.push('no captcha');
   const reasons = [...plus, ...minus];
   const strongBad = minus.some(m => /same network|random-looking/.test(m));
-  const trust: Trust = plus.length >= 3 && !strongBad ? 'real' : (!u.email_verified && !back && !used && (strongBad || minus.length >= 3)) ? 'bot' : 'unsure';
+  const trust: Trust = plus.length >= 3 && !strongBad && !flag ? 'real' : (!u.email_verified && !back && !used && (strongBad || minus.length >= 3)) ? 'bot' : 'unsure';
   return { trust, reasons };
 }
 

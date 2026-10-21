@@ -15,6 +15,7 @@
  * A problem that stays for 3 runs in a row (30 minutes) is emailed to ADMIN_EMAILS, at most once every 6 hours.
  */
 import { db } from '../db';
+import { signupRefusals, signupLast24h } from './signupGuard';
 import logger from '../utils/logger';
 import footballDataAPI from './footballDataAPI';
 import { afUpcoming, afWithPredictions, afOverdue, fallbackReason } from './afMatches';
@@ -156,6 +157,26 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     });
   } catch (e: any) {
     checks.push({ id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
+  // fix198: sign-ups refused today, by reason (form token, Turnstile, the widget's own errors, email / limits), and the
+  // sign-ups let in without the check — a warning when the security check itself stops people (3+ today)
+  try {
+    const rows = signupRefusals();
+    const allowed = rows.filter(r => r.reason.startsWith('allowed without captcha'));
+    const refused = rows.filter(r => !r.reason.startsWith('allowed without captcha'));
+    const n = (xs: typeof rows) => xs.reduce((a, r) => a + r.n, 0);
+    const checkTrouble = n(rows.filter(r => /^turnstile: no token|^widget:|fallback limit/.test(r.reason)));
+    // the alert (emailed like every other persistent failure): 4+ tries in 24 h and not one account made
+    const day = signupLast24h();
+    const stuck = day.attempts > 3 && day.successes === 0;
+    if (stuck) logger.warn(`sign-up alert: ${day.attempts} attempts in 24 h, 0 accounts`);
+    checks.push({
+      id: 'signup-refusals', label: 'Sign-ups refused today, by reason', level: stuck ? 'fail' : checkTrouble >= 3 ? 'warn' : 'ok',
+      detail: `${stuck ? `NOBODY GETS IN: ${day.attempts} sign-up attempts in 24 h, 0 accounts · ` : ''}${n(refused)} refused today${allowed.length ? ` · ${n(allowed)} let in without the security check (email confirmation required)` : ''}${checkTrouble ? ` · ${checkTrouble} because the security check didn't run in the browser` : ''}`,
+      items: rows.map(r => `${r.reason}: ${r.n}`).slice(0, 40)
+    });
+  } catch (e: any) {
+    checks.push({ id: 'signup-refusals', label: 'Sign-ups refused today, by reason', level: 'warn', detail: `Check failed: ${e.message}` });
   }
   await slice();
   // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason
