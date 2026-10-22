@@ -98,3 +98,26 @@ queue (feature state, data health, AF lineups/injuries … one at a time); "matc
 no request to /api/matches/upcoming is named in a stall. Also re-check the fix194 item (04:00 UTC daily job).
 
 Result: _to fill in after the check._
+
+## fix200 (23 Oct 2026): data health, news, tennis model, live ticks
+
+`/api/perf` → recentStalls before fix200 (from Yarin's brief, 22–23 Oct):
+
+| Where | Before | Cause | Fix |
+| --- | --- | --- | --- |
+| `/api/data-health` | 5.8 s | the checks ran inside the admin request (outside the heavy() queue, next to the 10-min job), and the 7-day "every game has a prediction" check computed a basketball / NFL prediction per game in one block | never computed on a request: a background job (heavy() queue, every 5 min, first a minute after start) runs it in slices and stores the JSON (`data_health_store`, utils/healthStore.ts); the endpoint, the admin card and the 07:00 report read the stored copy with its `at` time. The 7-day check is sliced too. Alert e-mail: 6 failing runs in a row (still 30 min) |
+| news | 4.4 s | the refresh stored every story in one transaction with the league matching (one big regex per story) inside; the parse of 50+ feeds; a league page with no stories ran a search and stored it inside the visitor's request; the first request on a fresh database waited for the whole refresh | refresh and searches in the heavy() queue only (a request only queues them, a league search waits at most 8 s for its turn); parse with the heavy slicer, matchers built with a yield around each, stories stored 40 per transaction with a yield between |
+| tennis model + ratings | 2.9 s | the replay, the report / re-tune and the 48-h predictions on the main thread (sliced since fix194, but long loops between yields and the typed-array copies) | a worker thread (`workers/tennisModelWorker.ts`) with its own read-only connection does all of it; its writes (store keys, predictions) come back and the main thread applies them in one transaction ("tennis model write-back" in /api/perf); the pages read a ratings snapshot (typed arrays, transferred, not copied). `TENNIS_WORKER=0` or 3 crashes → the old in-process path |
+| lineups / bb live / nfl live / football live | 0.4–1.2 s | every live game of a tick processed in one block (predictions, recording, push; basketball / NFL writes + win-chance samples for the whole list) | at most 20 games per turn, the rest on the next macrotask (`perGames` / `mapGames` in perf.ts): football live poll (predictions, recording, push), AF live=all mapping, FD scores from AF, basketball and NFL live writes; lineup/injury feature rebuild 20 fixtures per turn |
+
+Tested locally: the worker builds the same ratings as the in-process run on a made-up set of 900 matches / 48 players
+(every array equal, the same player-page numbers) and a full tick in the worker writes its 3 predictions back through
+the main thread (`npm run test:fix200`). Not measurable locally: the stall numbers (no live data, no provider keys).
+
+### Check after deploy (pending)
+
+Target with normal traffic, one hour after the deploy: `/api/perf` → `worstLastHour` < 1,000 ms and `stallsLastHour` < 20;
+no stall naming data health, news, tennis model / tennis ratings; `jobs` shows "tennis model write-back" (short) and
+`/api/admin/tennis-model` → `worker.on: true`.
+
+Result: _to fill in after the check (worstLastHour, stallsLastHour, the top 5 recentStalls)._

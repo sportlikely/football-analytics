@@ -25,7 +25,7 @@ import { reportLive } from './liveScores';
 import { predictNational, isNationalTeam } from './nationalElo';
 import { predictClubEuro, eloEuroMiss } from './clubElo';
 import { onExtraLeague } from './leagueConfig';
-import { every, after, yielder } from './perf';
+import { every, after, yielder, mapGames, yieldLoop } from './perf';
 
 export const AF_OFFSET = 1_000_000_000;
 export const isAfMatchId = (id: number) => id >= AF_OFFSET;
@@ -378,6 +378,25 @@ async function nationalByDate(from: string, to: string): Promise<any[]> {
   return out;
 }
 
+/*
+ * fix200: the teams of a league's current season (/teams, once a day). API-Football listed fixtures of a team that is
+ * not in the league this season (Abha in the 2026-27 Saudi Pro League: relegated) — phantom games that were predicted
+ * and never played. Such a fixture is not imported (logged once per fixture). An empty or failed list filters nothing.
+ */
+async function seasonTeams(leagueId: number, season: number): Promise<Set<number> | null> {
+  return cached(`teams:${leagueId}:${season}`, 24 * 3600 * 1000, async () => {
+    try {
+      const ids = ((await afGet('/teams', { league: leagueId, season })).response || []).map((t: any) => t?.team?.id).filter(Boolean);
+      return ids.length >= 4 ? new Set<number>(ids) : null;
+    } catch { return null; }
+  });
+}
+const loggedOutside = new Set<number>();
+export function outsideSeason(f: any, teams: Set<number> | null): boolean {
+  if (!teams) return false;
+  return !teams.has(f?.teams?.home?.id) || !teams.has(f?.teams?.away?.id);
+}
+
 export async function refreshAfWindow() {
   if (!afConfigured()) return 0;
   const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
@@ -389,7 +408,20 @@ export async function refreshAfWindow() {
       const season = await currentSeason(c.id);
       if (!season) continue;
       const j = await afGet('/fixtures', { league: c.id, season, from, to });
-      for (const f of j.response || []) if (senior(f)) all.push(toFdMatch(f));
+      const teams = c.kind === 'league' && (j.response || []).length ? await seasonTeams(c.id, season) : null;
+      for (const f of j.response || []) {
+        if (!senior(f)) continue;
+        if (outsideSeason(f, teams)) {
+          const fid = f.fixture?.id;
+          if (fid && !loggedOutside.has(fid)) {
+            loggedOutside.add(fid);
+            const who = [f.teams?.home, f.teams?.away].filter((t: any) => !teams!.has(t?.id)).map((t: any) => `${t?.name} (${t?.id})`).join(', ');
+            logger.warn(`AF fixture ${fid} skipped: ${f.teams?.home?.name} – ${f.teams?.away?.name} ${String(f.fixture?.date || '').slice(0, 10)} (league ${c.id}, season ${season}): ${who} not in the league this season`);
+          }
+          continue;
+        }
+        all.push(toFdMatch(f));
+      }
     } catch (e: any) {
       failed++;
       logger.warn(`AF window ${c.id}: ${e.message}`);
@@ -481,9 +513,10 @@ export async function pollAfLive(force = false) {
     const j = await afGet('/fixtures', { live: 'all' });
     afLiveRaw = new Map((j.response || []).filter((f: any) => f?.fixture?.id).map((f: any) => [f.fixture.id, f]));
     afLiveAt = Date.now();
-    const live = (j.response || [])
+    // fix200: 20 fixtures per turn (live=all lists every game in play worldwide)
+    const live = await mapGames((j.response || []) as any[], b => b
       .filter((f: any) => senior(f) && (inWindow.has(AF_OFFSET + f.fixture.id) || fixed.has(f.league?.id) || isNationalLeague(f.league)))
-      .map(toFdMatch);
+      .map(toFdMatch));
     liveById = new Map(live.map((m: any) => [m.id, m]));
     // fold live status/score into the window
     const liveIds = new Set(liveById.keys());
@@ -1038,8 +1071,10 @@ function logLiveStats(match: any, fid: number, raw: any, n: number) {
  */
 export async function syncFdLiveFromAf(fdMatches: any[]) {
   if (!afConfigured()) return;
+  let n = 0;
   for (const m of fdMatches) {
     if (!['IN_PLAY', 'PAUSED'].includes(m?.status)) continue;
+    if (++n % 20 === 0) await yieldLoop(); // fix200: 20 games per turn
     try {
       const fid = await afFixtureForFd(m);
       if (!fid) continue;

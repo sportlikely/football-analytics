@@ -25,15 +25,22 @@ export interface Database {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const sqlite = require('node:sqlite') as { DatabaseSync: new (file: string) => Database };
+const sqlite = require('node:sqlite') as { DatabaseSync: new (file: string, opts?: { readOnly?: boolean }) => Database };
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const threads = require('node:worker_threads') as typeof import('worker_threads');
+/**
+ * fix200: a worker thread (the tennis model, services/tennisModel.ts) opens its own connection in read mode; the main
+ * thread writes what it computed. The schema statements below are no-ops there (the main thread made every table).
+ */
+export const DB_READ_ONLY = !threads.isMainThread && !!threads.workerData?.readOnlyDb;
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
 export const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'bet-to-beat.sqlite');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
-export const db: Database = new sqlite.DatabaseSync(DB_FILE);
-db.exec('PRAGMA journal_mode = WAL');
+export const db: Database = DB_READ_ONLY ? new sqlite.DatabaseSync(DB_FILE, { readOnly: true }) : new sqlite.DatabaseSync(DB_FILE);
+if (!DB_READ_ONLY) db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
 db.exec(`

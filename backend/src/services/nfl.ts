@@ -13,7 +13,7 @@
  */
 import { db } from '../db';
 import logger from '../utils/logger';
-import { timed, yieldLoop, every, after, slicer } from './perf';
+import { timed, yieldLoop, every, after, slicer, perGames } from './perf';
 import { schoolOf } from './collegeNames';
 
 const BASE = 'https://v1.american-football.api-sports.io';
@@ -438,7 +438,7 @@ export async function nflLiveTick(): Promise<number> {
     const before = new Map((db.prepare(`SELECT game_id, status FROM nfl_games WHERE status IN ('Q1','Q2','Q3','Q4','OT','HT')`).all() as any[]).map(r => [r.game_id, r.status]));
     const j = await nfl('/games', { live: 'all' });
     const list: any[] = (Array.isArray(j.response) ? j.response : []).filter((g: any) => num(g?.league?.id) === 1 || num(g?.league?.id) === 2);
-    storeGames(list);
+    await perGames(list, b => storeGames(b)); // fix200: 20 games per write, the rest on the next macrotask
     // games that were live and dropped off the live list: fetch them once to get the final score
     const live = new Set(list.map(g => num(g?.game?.id)));
     for (const id of before.keys()) if (!live.has(id) && budget() >= 1) {

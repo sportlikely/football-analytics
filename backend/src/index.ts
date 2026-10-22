@@ -6,7 +6,7 @@ import { runLinkCheck, lastLinkCheck, linkCheckTick } from './services/linkCheck
 import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
 import { sendMail as sendMailFix168 } from './services/email';
-import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy } from './services/perf';
+import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy, perGames, mapGames } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
 import { Server } from 'socket.io';
@@ -105,7 +105,8 @@ import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview,
 import { askAssistant, assistantConfigured, messagesToday, assistantStats } from './services/assistant';
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
-import { dataHealth, startDataHealthScheduler } from './services/dataHealth';
+import { storedDataHealth, startDataHealthScheduler } from './services/dataHealth';
+import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders } from './services/unsettled';
 import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1034,6 +1035,10 @@ app.get('/api/admin/tennis/status', (_req, res) => {
   try { res.json({ data: tennisStatus() }); } catch (e) { sendError(res, e, 'Tennis status failed'); }
 });
 // fix195: duplicates, fixture ids, matches without a prediction (48 h), stale matches, names to check — target zero
+// fix200: voided games (reason) and the games waiting for another lookup (rules: utils/voidRules.ts)
+app.get('/api/admin/voided', (req, res) => {
+  try { res.json({ data: { voided: voidedGames(Math.min(365, Number(req.query.days) || 90)), waiting: pendingLookups() } }); } catch (e) { sendError(res, e, 'Voided games failed'); }
+});
 app.get('/api/admin/tennis/check', async (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: await tennisDataCheck() }); } catch (e) { sendError(res, e, 'Tennis check failed'); }
@@ -1050,7 +1055,7 @@ app.get('/api/admin/tennis/sample', (req, res) => {
 app.get('/api/admin/tennis-model', (req, res) => {
   res.set('Cache-Control', 'no-store');
   // fix194: in the heavy-job queue like the scheduled ticks
-  if (req.query.rebuild === '1' || req.query.retune === '1') { const f = req.query.rebuild === '1' ? 'report' : 'retune'; void heavy('tennis model (admin)', () => timed('tennis model (admin)', () => tennisModelTick(f))).catch(() => undefined); }
+  if (req.query.rebuild === '1' || req.query.retune === '1') { const f = req.query.rebuild === '1' ? 'report' : 'retune'; void tennisModelTick(f).catch(() => undefined); } // fix200: the worker thread (or the heavy() queue in-process)
   try { res.json({ data: tennisModelReport() }); } catch (e) { sendError(res, e, 'Tennis model report failed'); }
 });
 // fix190: ?status=upcoming|done&tour=slam|atp|wta|challenger|itf&limit= — saved predictions with the outcome + the live record
@@ -2028,10 +2033,11 @@ app.get('/api/model/goals-calibration', (req, res) => {
   }
 });
 
-// Admin: data health — every feed's age and the validity checks (see services/dataHealth.ts). Runs the checks now.
-app.get('/api/data-health', async (_req, res) => {
+// Admin: data health — every feed's age and the validity checks (see services/dataHealth.ts).
+// fix200: never computed on request (5.8 s stalls): the stored copy of the 5-minute background job, with its "at" time
+app.get('/api/data-health', (_req, res) => {
   try {
-    res.json({ data: await dataHealth(), timestamp: new Date().toISOString() });
+    res.json({ data: storedDataHealth(), timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Data health failed');
   }
@@ -3468,20 +3474,27 @@ every('live poll', async () => {
     const fdRaw: any[] = await timed('football live', () => (fresh ? footballDataAPI.getLiveMatches(true) : footballDataAPI.liveSnapshot()));
     const afLiveNow = await timed('AF live', () => pollAfLive(fdRaw.length > 0));
     await timed('AF live', () => syncFdLiveFromAf(fdRaw));
-    const live: any[] = await timed('football live', () => {
-      const fdLive = footballDataAPI.withPredictions(fdRaw.map(withLiveScore));
-      recordPredictions(fdLive); // locks anything that has kicked off (Football-Data.org matches only)
-      return [...fdLive, ...afWithPredictions(afLiveNow)].map(slimForList);
+    // fix200: at most 20 games per turn, the rest on the next macrotask (a Saturday has 100+ live games)
+    const live: any[] = await timed('football live', async () => {
+      const fdLive = await mapGames(fdRaw, b => {
+        const withP = footballDataAPI.withPredictions(b.map(withLiveScore));
+        recordPredictions(withP); // locks anything that has kicked off (Football-Data.org matches only)
+        return withP;
+      });
+      const afLive = await mapGames(afLiveNow, b => afWithPredictions(b));
+      return mapGames([...fdLive, ...afLive], b => b.map(slimForList));
     });
-    await timed('live push', () => {
+    await timed('live push', async () => {
       const ts = new Date().toISOString();
       io.to('full').emit('matches:live', { data: live, timestamp: ts });
       io.to('teaser').emit('matches:live', teaseDeep({ data: live, timestamp: ts }));
       // Per-match rooms get their own update (score / status / minute)
-      for (const m of live) {
-        io.to(`match:${m.id}:full`).emit('match:live', m);
-        io.to(`match:${m.id}:teaser`).emit('match:live', teaseDeep({ m }).m);
-      }
+      await perGames(live, b => {
+        for (const m of b) {
+          io.to(`match:${m.id}:full`).emit('match:live', m);
+          io.to(`match:${m.id}:teaser`).emit('match:live', teaseDeep({ m }).m);
+        }
+      });
     });
     lastLiveList = live; lastLiveAt = Date.now(); // fix165: /api/admin/live-consistency
     markFresh('live', `${live.length} live`);
@@ -3623,12 +3636,29 @@ server.listen(PORT, () => {
   ];
   STARTS.forEach(([label, start], i) => after(`start ${label}`, start, Math.round((i * 120_000) / STARTS.length)));
   // Settle finished matches every 10 minutes (first run after 1 minute)
+  // fix200: games past kick-off + 48 h without a final are looked up (by id, then by the two teams) once an hour and
+  // settled, moved or voided (services/unsettled.ts); the stuck ones of 11–19 Oct once right after the deploy
+  const settleProviders: SettleProviders = {
+    afByIds: async ids => { if (afRemaining() < 50) throw new Error('API-Football budget reserve'); return (await afGet('/fixtures', { ids: ids.join('-') })).response || []; },
+    afByTeams: async (home, away, from, to) => { if (afRemaining() < 50) throw new Error('API-Football budget reserve'); return (await afGet('/fixtures/headtohead', { h2h: `${home}-${away}`, from, to })).response || []; },
+    fdRange: (from, to) => footballDataAPI.getMatchesInRange(from, to)
+  };
+  let unsettledAt = 0;
   const settle = () =>
     settlePending(
       (from, to) => footballDataAPI.getMatchesInRange(from, to),
       async ids => (afRemaining() > 50 ? ((await afGet('/fixtures', { ids: ids.join('-') })).response || []) : [])
     )
-      .then(r => { markFresh('results', r ? `${r.settled} settled, ${r.pending} pending` : undefined); return backfillAfOdds(); })
+      .then(async r => {
+        if (Date.now() - unsettledAt > 3600 * 1000) {
+          unsettledAt = Date.now();
+          await resolveUnsettledOnce(settleProviders);
+          const u = await resolveUnsettled(settleProviders, { log: true });
+          if (u.checked) logger.info(`unsettled: ${u.checked} checked · ${u.settled} settled · ${u.moved} moved · ${u.voided} void · ${u.retry} to retry`);
+        }
+        markFresh('results', r ? `${r.settled} settled, ${r.pending} pending` : undefined);
+        return backfillAfOdds();
+      })
       .catch(err => { markFailed('results', err); logger.warn('Settle job failed', { message: err.message }); });
   after('settle picks', settle, 60 * 1000);
   every('settle picks', settle, parseInt(process.env.SETTLE_INTERVAL_MS || '600000', 10));

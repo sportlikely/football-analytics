@@ -35,11 +35,19 @@
  * over the months before it — no replay per month. Starts only once the monthly backfill has reached 2023-01.
  * GET /api/admin/tennis-model has the report. Live: ratings updated after each finished match, settings re-tuned
  * weekly (Monday 04:00 Israel time), the next 48 h predicted every 30 min until the start (then frozen).
+ *
+ * fix200: all of it (report, re-tune, ratings replay, new results, predictions) runs in a worker thread
+ * (workers/tennisModelWorker.ts) with its own database connection in read mode. The worker collects its writes; the main
+ * thread applies them in one short transaction and keeps a snapshot of the ratings for the pages (tennisPlayerModel).
+ * TENNIS_WORKER=0, or a worker that crashes 3 times, falls back to the in-process run (the fix194 slices).
  */
-import { db } from '../db';
+import fs from 'fs';
+import path from 'path';
+import { Worker, isMainThread, workerData, MessagePort } from 'worker_threads';
+import { db, Statement } from '../db';
 import logger from '../utils/logger';
 import { winnerBands, winnerByConfidence } from '../utils/winnerBands';
-import { slicer, yieldLoop, timed, heavy, everyHeavy, afterHeavy } from './perf';
+import { slicer, yieldLoop, timed, heavy, track } from './perf';
 import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
 
 export const TENNIS_MODEL = 'tennis-v1';
@@ -57,12 +65,25 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS tennis_model_store (k TEXT PRIMARY KEY, v TEXT, at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS tennis_market_bench (match_id INTEGER PRIMARY KEY, p1 REAL, at TEXT, rows INTEGER, fetched_at TEXT NOT NULL);
 `);
+/*
+ * fix200: in the worker thread every write is collected (`sink`) and sent to the main thread, which applies them in one
+ * transaction; what the worker stored itself is read back from `overlay` until then.
+ */
+const IN_WORKER = !isMainThread && !!workerData?.tennisModel;
+interface Write { sql: string; params: unknown[] }
+let sink: Write[] | null = IN_WORKER ? [] : null;
+const overlay = new Map<string, unknown>();
+const write = (sql: string, params: unknown[]) => { if (sink) sink.push({ sql, params }); else db.prepare(sql).run(...params); };
+const STORE_SET = `INSERT OR REPLACE INTO tennis_model_store (k, v, at) VALUES (?, ?, ?)`;
 const store = {
-  get: (k: string): any => { const r = db.prepare(`SELECT v FROM tennis_model_store WHERE k = ?`).get(k) as any; try { return r ? JSON.parse(r.v) : null; } catch { return null; } },
-  set: (k: string, v: unknown) => db.prepare(`INSERT OR REPLACE INTO tennis_model_store (k, v, at) VALUES (?, ?, ?)`).run(k, JSON.stringify(v), new Date().toISOString())
+  get: (k: string): any => {
+    if (overlay.has(k)) return overlay.get(k);
+    const r = db.prepare(`SELECT v FROM tennis_model_store WHERE k = ?`).get(k) as any; try { return r ? JSON.parse(r.v) : null; } catch { return null; }
+  },
+  set: (k: string, v: unknown) => { if (sink) overlay.set(k, JSON.parse(JSON.stringify(v))); write(STORE_SET, [k, JSON.stringify(v), new Date().toISOString()]); }
 };
 // the live record counts from the day this model was first deployed
-if (!store.get('deploy_day')) store.set('deploy_day', new Date().toISOString().slice(0, 10));
+if (!IN_WORKER && !store.get('deploy_day')) store.set('deploy_day', new Date().toISOString().slice(0, 10));
 
 /* ------------------------------------------------------------------ */
 /* Categories, levels, formats                                          */
@@ -1272,7 +1293,7 @@ function needsBuild(): boolean {
 function ensureLive(): LiveState | null {
   if (!needsBuild()) return liveState;
   if (!liveBuilding) {
-    liveBuilding = heavy('tennis ratings', () => (needsBuild() ? timed('tennis ratings', buildLive) : undefined))
+    liveBuilding = heavy('tennis ratings', () => (needsBuild() ? timed('tennis ratings', async () => { await buildLive(); refreshSnap(); }) : undefined))
       .catch(e => { logger.warn(`${TENNIS_MODEL} replay: ${e.message}`); }).finally(() => { liveBuilding = null; });
   }
   return liveState;
@@ -1403,24 +1424,25 @@ export async function saveTennisPredictions(): Promise<number> {
   }
   applyRules(L.c, R);
   grow(L);
-  const up = db.prepare(`INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at)
+  const UP = `INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET model = excluded.model, scheduled_at = excluded.scheduled_at, cat = excluded.cat,
     p1 = excluded.p1, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
-    WHERE tennis_predictions.scheduled_at IS NULL OR tennis_predictions.scheduled_at > excluded.made_at`);
+    WHERE tennis_predictions.scheduled_at IS NULL OR tennis_predictions.scheduled_at > excluded.made_at`;
   const out: { id: number; at: string; pr: TennisPred }[] = [];
   for (let i = 0; i < R.n; i++) {
     out.push({ id: R.id[i], at: new Date(R.t[i]).toISOString(), pr: predictRow(L, R, i, names[i]) });
     await slice();
   }
   const at = new Date().toISOString();
+  // a match that started while we were computing keeps the prediction it had at the start (and the SQL guard above)
+  const params = (o: typeof out[number]) => [o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
+    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at];
+  if (sink) { for (const o of out) if (Date.parse(o.at) > Date.now()) sink.push({ sql: UP, params: params(o) }); return out.length; } // fix200: the worker
+  const up = db.prepare(UP);
   for (let k = 0; k < out.length; k += 200) {
     db.exec('BEGIN');
     try {
-      // a match that started while we were computing keeps the prediction it had at the start
-      for (const o of out.slice(k, k + 200)) if (Date.parse(o.at) > Date.now()) {
-        up.run(o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
-          JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at);
-      }
+      for (const o of out.slice(k, k + 200)) if (Date.parse(o.at) > Date.now()) up.run(...params(o));
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     await yieldLoop();
@@ -1463,13 +1485,19 @@ export function tennisPredictions(o: { status?: string; tour?: string; limit?: n
 
 export function tennisModelReport() {
   const s: Settings | null = store.get('settings');
+  const st = remote && !workerOff ? remote : localState();
   return {
-    model: TENNIS_MODEL, ready: backfillReady(), running: busy, progress, lastTick,
+    model: TENNIS_MODEL, ready: backfillReady(), running: st.busy, progress: st.progress, lastTick: st.lastTick,
     report: store.get('report'), live: s ? { mode: s.mode, at: s.at, elo: s.a, pointModel: s.b, rankToElo: s.rm, blend: s.blend, strong: s.strong, matches: s.matches } : null,
-    ratings: liveState ? { builtAt: new Date(liveState.builtAt).toISOString(), players: liveState.c.reg.size, lastResult: new Date(liveState.lastT).toISOString() } : null,
+    ratings: st.ratings,
+    worker: workerInfo(),
     marketBenchmark: marketBench()
   };
 }
+const localState = (): WorkerState => ({
+  busy, progress: { ...progress }, lastTick,
+  ratings: liveState ? { builtAt: new Date(liveState.builtAt).toISOString(), players: liveState.c.reg.size, lastResult: new Date(liveState.lastT).toISOString() } : null
+});
 
 /* ------------------------------------------------------------------ */
 /* Jobs                                                                 */
@@ -1481,19 +1509,39 @@ function israelNow() {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', weekday: 'short', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
   return { day: parts.find(p => p.type === 'weekday')?.value || '', hour: Number(parts.find(p => p.type === 'hour')?.value) };
 }
-/** Heavy work (report / re-tune) in the background; then ratings + predictions. `force` = admin ?rebuild=1. */
+/**
+ * Heavy work (report / re-tune) in the background; then ratings + predictions. `force` = admin ?rebuild=1.
+ * fix200: in the worker thread when it runs (else in-process, in the heavy() queue).
+ */
 export async function tennisModelTick(force: 'report' | 'retune' | null = null): Promise<void> {
-  if (busy) return;
+  if (IN_WORKER) { await tickHere(force); return; }
+  if (useWorker()) {
+    try {
+      const r = await callWorker({ cmd: 'tick', force });
+      // the benchmark reads the provider's price histories (the main thread keeps the tennis API budget)
+      if (r.reportBuilt) void heavy('tennis benchmark', () => timed('tennis benchmark', runMarketBench)).then(x => { if (x) logger.info(`${TENNIS_MODEL} benchmark: ${x}`); }).catch(e => logger.warn(`${TENNIS_MODEL} benchmark: ${e.message}`));
+      return;
+    } catch (e: any) {
+      logger.warn(`${TENNIS_MODEL} worker: ${e.message}${workerOff ? ' (in-process from now on)' : ''}`);
+      if (!workerOff) return;
+    }
+  }
+  await heavy('tennis model', () => timed('tennis model', async () => { if ((await tickHere(force)).reportBuilt) await runMarketBench().catch(() => undefined); }));
+}
+/** one tick here (in the worker, or in-process): returns whether the report was rebuilt */
+async function tickHere(force: 'report' | 'retune' | null): Promise<{ reportBuilt: boolean }> {
+  let reportBuilt = false;
+  if (busy) return { reportBuilt };
   busy = true;
   try {
-    if (!backfillReady()) { lastTick = { at: new Date().toISOString(), info: 'waiting: the monthly backfill has not reached 2023-01 yet' }; return; }
+    if (!backfillReady()) { lastTick = { at: new Date().toISOString(), info: 'waiting: the monthly backfill has not reached 2023-01 yet' }; return { reportBuilt }; }
     const report = store.get('report'), settings: Settings | null = store.get('settings');
     const il = israelNow();
     const weekly = il.day === 'Mon' && il.hour >= 4 && (!settings || Date.now() - Date.parse(settings.at) > 5 * DAY);
     const newMonth = report && report.test?.to !== monthName(lastFullMonth());
     if (force === 'report' || !report || !settings || (weekly && newMonth)) {
       await timed('tennis model report', buildTennisReport);
-      try { lastTick = { at: new Date().toISOString(), info: `benchmark: ${await runMarketBench()}` }; } catch (e: any) { logger.warn(`${TENNIS_MODEL} benchmark: ${e.message}`); }
+      reportBuilt = true; // fix200: the benchmark (provider calls) runs on the main thread after the write-back
     } else if (force === 'retune' || weekly) {
       await timed('tennis model retune', retuneLive);
     }
@@ -1501,65 +1549,222 @@ export async function tennisModelTick(force: 'report' | 'retune' | null = null):
     if (needsBuild()) await timed('tennis ratings', buildLive);
     const applied = await applyNewResults();
     const n = await saveTennisPredictions();
-    lastTick = { at: new Date().toISOString(), info: `${applied} new results in the ratings, ${n} predictions saved (${predsSkipped} unchanged)` };
+    lastTick = { at: new Date().toISOString(), info: `${applied} new results in the ratings, ${n} predictions saved (${predsSkipped} unchanged)${IN_WORKER ? ' · worker thread' : ''}` };
+    if (!IN_WORKER) refreshSnap();
   } catch (e: any) {
     progress.error = `${new Date().toISOString()}: ${e.message}`;
     setPhase(null);
     logger.warn(`${TENNIS_MODEL}: ${e.message}`);
   } finally { busy = false; }
+  return { reportBuilt };
 }
-/** after the tennis results job (services/tennis.ts): new results into the live ratings */
-export async function tennisResultsHook(): Promise<void> { try { await applyNewResults(); } catch (e: any) { logger.warn(`${TENNIS_MODEL} results: ${e.message}`); } }
+/** after the tennis results job (services/tennis.ts): new results into the live ratings (fix200: in the worker) */
+export async function tennisResultsHook(): Promise<void> {
+  try {
+    if (!IN_WORKER && useWorker()) { await callWorker({ cmd: 'results' }); return; }
+    if (await applyNewResults()) refreshSnap();
+  } catch (e: any) { logger.warn(`${TENNIS_MODEL} results: ${e.message}`); }
+}
 
 let started = false;
 export function startTennisModelScheduler() {
-  if (started) return;
+  if (started || IN_WORKER) return;
   started = true;
-  // fix194: in the heavy-job queue (never with the other tennis jobs, the daily model job or the player-page warm-up)
-  afterHeavy('tennis model', () => tennisModelTick(), 12 * 60 * 1000).unref();
-  everyHeavy('tennis model', () => tennisModelTick(), 30 * 60 * 1000).unref();
+  // fix200: the worker thread does the work, so the tick no longer holds the heavy() queue (tennisModelTick queues
+  // itself there only in the in-process fallback); its write-back is timed as "tennis model write-back"
+  setTimeout(() => void tennisModelTick().catch(e => logger.warn(`${TENNIS_MODEL}: ${e.message}`)), 12 * 60 * 1000).unref();
+  setInterval(() => void tennisModelTick().catch(e => logger.warn(`${TENNIS_MODEL}: ${e.message}`)), 30 * 60 * 1000).unref();
 }
+
+/* ------------------------------------------------------------------ */
+/* fix200: the worker thread                                            */
+/* ------------------------------------------------------------------ */
+
+/** The ratings the pages read (player page "how our model rates them"): one row per rated player, typed arrays. */
+export interface RatingsSnap {
+  at: number; builtAt: number; lastT: number; players: number;
+  pid: Float64Array; eO: Float64Array; nO: Float64Array; last: Float64Array; eS: Float64Array; nS: Float64Array; devS: Float64Array; devR: Float64Array;
+  formWon: Uint8Array; formPlayed: Uint8Array; mu: Float64Array; men: Float64Array; women: Float64Array;
+}
+/** the snapshot of the live ratings at time `t` (serve / return strengths decay with time: read at `t`) */
+function ratingsSnapshot(L: LiveState, t = Date.now()): RatingsSnap {
+  const A = L.A, B = L.B, idx: number[] = [];
+  for (let k = 0; k < L.c.reg.size; k++) if (A.init[k]) idx.push(k);
+  const n = idx.length, f64 = (m = 1) => new Float64Array(n * m);
+  const S: RatingsSnap = { at: t, builtAt: L.builtAt, lastT: L.lastT, players: L.c.reg.size, pid: f64(), eO: f64(), nO: f64(), last: f64(), eS: f64(3), nS: f64(3),
+    devS: f64(3), devR: f64(3), formWon: new Uint8Array(n), formPlayed: new Uint8Array(n), mu: Float64Array.from(B.mu), men: new Float64Array(0), women: new Float64Array(0) };
+  const men: number[] = [], wom: number[] = [];
+  for (let j = 0; j < n; j++) {
+    const k = idx[j];
+    S.pid[j] = L.c.reg.pid[k]; S.eO[j] = A.eO[k]; S.nO[j] = A.nO[k]; S.last[j] = A.last[k];
+    for (let s = 0; s < 3; s++) { S.eS[j * 3 + s] = A.eS[k * 3 + s]; S.nS[j * 3 + s] = A.nS[k * 3 + s]; S.devS[j * 3 + s] = B.dev(B.s, k, s, t); S.devR[j * 3 + s] = B.dev(B.r, k, s, t); }
+    const h = (L.F.hist.get(k) || []).slice(-10);
+    S.formWon[j] = h.filter(x => x.won).length; S.formPlayed[j] = h.length;
+    // the rank lists: players with a match in the last 365 days, by tour
+    if (A.last[k] && t - A.last[k] <= 365 * DAY) (L.c.playerTour.get(L.c.reg.pid[k]) === 'wta' ? wom : men).push(A.eO[k]);
+  }
+  S.men = Float64Array.from(men).sort().reverse(); S.women = Float64Array.from(wom).sort().reverse();
+  return S;
+}
+const snapBuffers = (S: RatingsSnap) => [S.pid, S.eO, S.nO, S.last, S.eS, S.nS, S.devS, S.devR, S.formWon, S.formPlayed, S.mu, S.men, S.women].map(a => a.buffer as ArrayBuffer);
+
+let snap: RatingsSnap | null = null;
+let snapIdx = new Map<number, number>();
+function setSnap(S: RatingsSnap) {
+  const m = new Map<number, number>();
+  for (let j = 0; j < S.pid.length; j++) if (S.pid[j] > 0) m.set(S.pid[j], j);
+  snap = S; snapIdx = m;
+}
+/** in-process: the pages' snapshot from the live ratings (after a tick / new results / a replay) */
+function refreshSnap() { if (liveState) setSnap(ratingsSnapshot(liveState)); }
+
+interface WorkerState { busy: boolean; progress: typeof progress; lastTick: { at: string; info: string } | null; ratings: { builtAt: string; players: number; lastResult: string } | null }
+interface Reply { id: number; ok: boolean; error?: string; writes: Write[]; state: WorkerState; snap?: RatingsSnap; reportBuilt?: boolean; ms: number }
+let worker: Worker | null = null;
+let workerOff = process.env.TENNIS_WORKER === '0';
+let crashes = 0, seq = 0;
+let remote: WorkerState | null = null;
+let lastWriteBack: { at: string; writes: number; ms: number } | null = null;
+const waiting = new Map<number, { resolve: (r: Reply) => void; reject: (e: Error) => void }>();
+const workerInfo = () => ({ on: !workerOff && !!worker, off: workerOff, crashes, lastWriteBack });
+const useWorker = () => !IN_WORKER && !workerOff && !!startWorker();
+
+function workerFile(): { file: string; execArgv?: string[] } | null {
+  const js = path.join(__dirname, '../workers/tennisModelWorker.js');
+  if (fs.existsSync(js)) return { file: js };
+  // ts-node-dev (npm run dev): the TypeScript source through ts-node
+  const ts = path.join(__dirname, '../workers/tennisModelWorker.ts');
+  if (fs.existsSync(ts)) return { file: ts, execArgv: ['-r', 'ts-node/register/transpile-only'] };
+  return null;
+}
+function workerDown(e: Error) {
+  for (const w of waiting.values()) w.reject(e);
+  waiting.clear();
+  worker = null; remote = null;
+  if (++crashes >= 3) { workerOff = true; logger.warn(`${TENNIS_MODEL}: the worker thread stopped 3 times: in-process from now on`); }
+}
+function startWorker(): Worker | null {
+  if (worker) return worker;
+  const f = workerFile();
+  if (!f) { workerOff = true; logger.warn(`${TENNIS_MODEL}: no worker file, in-process`); return null; }
+  try {
+    const w = new Worker(f.file, { workerData: { readOnlyDb: true, tennisModel: true }, execArgv: f.execArgv });
+    w.on('message', (m: Reply) => onReply(m));
+    w.on('error', e => { logger.warn(`${TENNIS_MODEL} worker error: ${e.message}`); workerDown(e); });
+    w.on('exit', code => { if (worker === w) { if (code) logger.warn(`${TENNIS_MODEL} worker exited (${code})`); workerDown(new Error(`worker exited (${code})`)); } });
+    w.unref();
+    worker = w;
+    return w;
+  } catch (e: any) {
+    workerOff = true;
+    logger.warn(`${TENNIS_MODEL}: worker thread failed to start (${e.message}), in-process`);
+    return null;
+  }
+}
+/** the worker's writes in ONE transaction on the main thread (prepared once per statement) */
+function applyWrites(ws: Write[]) {
+  if (!ws.length) return;
+  const st = new Map<string, Statement>();
+  db.exec('BEGIN');
+  try {
+    for (const w of ws) { let s = st.get(w.sql); if (!s) { s = db.prepare(w.sql); st.set(w.sql, s); } s.run(...w.params); }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* none open */ } throw e; }
+}
+function onReply(m: Reply) {
+  remote = m.state;
+  const t0 = Date.now();
+  try {
+    if (m.writes?.length) {
+      const done = track('tennis model write-back'); // named in /api/perf like a job
+      try { applyWrites(m.writes); } finally { done(); }
+      strongCache = null;
+    }
+    lastWriteBack = { at: new Date().toISOString(), writes: m.writes?.length || 0, ms: Date.now() - t0 };
+    if (m.snap) setSnap(m.snap);
+  } catch (e: any) {
+    logger.warn(`${TENNIS_MODEL} write-back: ${e.message}`);
+    const w = waiting.get(m.id); waiting.delete(m.id); w?.reject(e); return;
+  }
+  const w = waiting.get(m.id);
+  waiting.delete(m.id);
+  if (!w) return;
+  if (m.ok) w.resolve(m); else w.reject(new Error(m.error || 'worker failed'));
+}
+function callWorker(msg: { cmd: 'tick'; force: 'report' | 'retune' | null } | { cmd: 'results' } | { cmd: 'snapshot'; t: number }): Promise<Reply> {
+  const w = startWorker();
+  if (!w) return Promise.reject(new Error('no worker'));
+  const id = ++seq;
+  return new Promise<Reply>((resolve, reject) => { waiting.set(id, { resolve, reject }); w.postMessage({ id, ...msg }); });
+}
+
+/** the worker thread's side (workers/tennisModelWorker.ts): one command at a time, the writes and a snapshot back */
+export function runTennisWorker(port: MessagePort) {
+  let chain: Promise<unknown> = Promise.resolve();
+  let sentBuilt = 0, sentLastT = 0, sentAt = 0;
+  port.on('message', (m: any) => {
+    chain = chain.then(async () => {
+      const t0 = Date.now();
+      let ok = true, error: string | undefined, reportBuilt = false, applied = 0;
+      try {
+        if (m.cmd === 'tick') reportBuilt = (await tickHere(m.force ?? null)).reportBuilt;
+        else if (m.cmd === 'results') applied = await applyNewResults();
+        else if (m.cmd === 'snapshot' && needsBuild()) await buildLive();
+      } catch (e: any) { ok = false; error = e.message; }
+      const writes = sink || [];
+      sink = [];
+      const L = liveState;
+      // a snapshot when the ratings moved (a replay, new results) or every 10 minutes; always when asked for
+      let S: RatingsSnap | undefined;
+      if (L && (m.cmd === 'snapshot' || L.builtAt !== sentBuilt || L.lastT !== sentLastT || applied || Date.now() - sentAt > 10 * 60 * 1000)) {
+        S = ratingsSnapshot(L, m.cmd === 'snapshot' ? m.t : Date.now());
+        sentBuilt = L.builtAt; sentLastT = L.lastT; sentAt = Date.now();
+      }
+      const reply: Reply = { id: m.id, ok, error, writes, state: localState(), snap: S, reportBuilt, ms: Date.now() - t0 };
+      port.postMessage(reply, S ? snapBuffers(S) : []);
+    });
+  });
+}
+
+/** scripts/tennis-worker.test.ts: the ratings built here and in the worker, read at the same time `t` */
+export const tennisModelTest = {
+  inProcess: async (t: number): Promise<RatingsSnap | null> => { await buildLive(); return liveState ? ratingsSnapshot(liveState, t) : null; },
+  inWorker: async (t: number): Promise<RatingsSnap | null> => (await callWorker({ cmd: 'snapshot', t })).snap ?? null,
+  playerModel: (pid: number, women: boolean) => tennisPlayerModel(pid, women),
+  useSnap: (S: RatingsSnap) => setSnap(S),
+  stop: async () => { const w = worker; worker = null; if (w) await w.terminate(); }
+};
 
 /* ------------------------------------------------------------------ */
 /* fix193: what the public tennis pages read (services/tennisSite.ts)   */
 /* ------------------------------------------------------------------ */
 
-const ratingsRank = new Map<number, { at: number; byGen: [Float64Array, Float64Array] }>();
 /**
  * "How our model rates them" (player page): overall and per-surface Elo, serve / return points won against an average
  * opponent, form (last 10), and the overall rank among players with a match in the last 12 months (same tour).
  * null = the ratings are not built yet or the player has no match.
+ * fix200: read from the ratings snapshot (sent by the worker thread after each tick, or made in-process), never from
+ * the replay itself.
  */
 export function tennisPlayerModel(pid: number, women: boolean) {
-  const L = ensureLive();
-  if (!L) return null;
-  const i = L.c.reg.idx.get(`p${pid}`);
-  if (i === undefined || !L.A.init[i]) return null;
-  const t = Date.now(), A = L.A, B = L.B, gen = women ? 1 : 0;
-  // ranks of everyone (by tour), cached 10 minutes: players with a match in the last 365 days
-  let rk = ratingsRank.get(L.builtAt);
-  if (!rk || t - rk.at > 10 * 60 * 1000) {
-    const men: number[] = [], wom: number[] = [];
-    for (let k = 0; k < L.c.reg.size; k++) {
-      if (!A.init[k] || !A.last[k] || t - A.last[k] > 365 * DAY) continue;
-      (L.c.playerTour.get(L.c.reg.pid[k]) === 'wta' ? wom : men).push(A.eO[k]);
-    }
-    rk = { at: t, byGen: [Float64Array.from(men).sort().reverse(), Float64Array.from(wom).sort().reverse()] };
-    ratingsRank.clear(); ratingsRank.set(L.builtAt, rk);
-  }
-  const list = rk.byGen[gen];
-  let rank = 1; for (const e of list) if (e > A.eO[i]) rank++; else break;
+  if (!useWorker()) { ensureLive(); if (liveState && (!snap || snap.builtAt !== liveState.builtAt || Date.now() - snap.at > 10 * 60 * 1000)) refreshSnap(); }
+  const S = snap;
+  if (!S) return null;
+  const i = snapIdx.get(pid);
+  if (i === undefined) return null;
+  const gen = women ? 1 : 0;
+  const list = gen ? S.women : S.men;
+  let rank = 1; for (const e of list) if (e > S.eO[i]) rank++; else break;
   const pct = (x: number) => Math.round(x * 1000) / 10;
-  const mu = (s: number) => B.mu[gen * 3 + s];
-  const serve = (s: number) => clampP(mu(s) + B.dev(B.s, i, s, t)), ret = (s: number) => clampP(1 - mu(s) + B.dev(B.r, i, s, t));
-  const h = (L.F.hist.get(i) || []).slice(-10);
+  const mu = (s: number) => S.mu[gen * 3 + s];
+  const serve = (s: number) => clampP(mu(s) + S.devS[i * 3 + s]), ret = (s: number) => clampP(1 - mu(s) + S.devR[i * 3 + s]);
   return {
-    elo: Math.round(A.eO[i]), rank, of: list.length,
-    surfaces: SURF_NAME.map((name, s) => ({ surface: name, elo: Math.round(A.eS[i * 3 + s]), matches: Math.round(A.nS[i * 3 + s]) })),
+    elo: Math.round(S.eO[i]), rank, of: list.length,
+    surfaces: SURF_NAME.map((name, s) => ({ surface: name, elo: Math.round(S.eS[i * 3 + s]), matches: Math.round(S.nS[i * 3 + s]) })),
     serve: pct((serve(0) + serve(1) + serve(2)) / 3), ret: pct((ret(0) + ret(1) + ret(2)) / 3),
     tourServe: pct((mu(0) + mu(1) + mu(2)) / 3),
-    form: { won: h.filter(x => x.won).length, played: h.length },
-    matches: Math.round(A.nO[i]), lastMatch: A.last[i] ? new Date(A.last[i]).toISOString() : null
+    form: { won: S.formWon[i], played: S.formPlayed[i] },
+    matches: Math.round(S.nO[i]), lastMatch: S.last[i] ? new Date(S.last[i]).toISOString() : null
   };
 }
 

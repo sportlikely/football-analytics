@@ -1,18 +1,19 @@
 /**
- * Data health: is everything on the site current and consistent? Runs every 10 minutes (and on demand at
- * /api/data-health). Two kinds of checks:
+ * Data health: is everything on the site current and consistent? fix200: a background job runs it every 5 minutes (in
+ * slices, in the heavy() queue) and stores the report; /api/data-health, the admin card and the daily email read the
+ * stored copy with its "at" time (it is never computed on a request). Two kinds of checks:
  *
  *  1. Freshness — every background feed must have updated within its promised time:
  *       live scores 3 min (only while games are on) · fixtures 15 min · extra competitions 75 min · tables 60 min
  *       · results (settling) 30 min · odds 30 min · injuries / lineups 30 min · model 8 h
  *  2. Validity — the data itself:
  *       games still "live" or "not started" long after kick-off · finished games without a score
- *       · predictions past kick-off + 4 h that were never settled · upcoming games (48 h) without a prediction
+ *       · predictions past kick-off + 4 h that were never settled (fail only past 48 h and not void: services/unsettled.ts) · upcoming games (48 h) without a prediction
  *       · probabilities that don't add up to 100% · the same game listed twice · league tables that don't add up
  *       (played = W+D+L, goal difference = GF−GA) · stored results whose outcome doesn't match the score
  *       · model history (results feed) missing games that were played
  *
- * A problem that stays for 3 runs in a row (30 minutes) is emailed to ADMIN_EMAILS, at most once every 6 hours.
+ * A problem that stays for 6 runs in a row (30 minutes) is emailed to ADMIN_EMAILS, at most once every 6 hours.
  */
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -25,6 +26,8 @@ import { lastDataAudit } from './dataAudit';
 import { everyHeavy, afterHeavy, heavySlicer, inBatches } from './perf';
 import { missingPredictions } from './missingPredictions';
 import { tennisDataCheck } from './tennis';
+import { voidedThisMonth } from './unsettled';
+import { createHealthStore, NOT_YET } from '../utils/healthStore';
 
 type Level = 'ok' | 'warn' | 'fail';
 export interface Check { id: string; label: string; level: Level; detail: string; items?: string[] }
@@ -127,7 +130,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   });
   // fix192: every sport, next 7 days: games without a prediction, with the reason (target: zero; logged once a day)
   try {
-    const mp = missingPredictions(matches, now);
+    const mp = await missingPredictions(matches, now);
     const dayKey = new Date(now).toISOString().slice(0, 10);
     for (const line of mp.items) { const k = `np|${dayKey}|${line}`; if (!loggedFallback.has(k)) { loggedFallback.add(k); logger.warn(`no prediction: ${line}`); } }
     checks.push({
@@ -184,14 +187,22 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
 
   await slice();
   // predictions never settled
+  // fix200: past kick-off + 48 h the game is looked up and settled, moved or voided (services/unsettled.ts); "fail" only
+  // for games unsettled > 48 h that are not void yet, a voided game is a note ("6 voided this month"), never a fail
   try {
     const cutoff = new Date(now - 4 * 3600 * 1000).toISOString();
-    const rows = db.prepare(`SELECT match_id, home_team, away_team, competition_name, utc_date FROM predictions WHERE settled = 0 AND utc_date < ? GROUP BY match_id ORDER BY utc_date`).all(cutoff) as any[];
-    const old = rows.filter(r => new Date(r.utc_date).getTime() < now - 24 * 3600 * 1000);
+    const rows = db.prepare(`SELECT match_id, MAX(home_team) AS home_team, MAX(away_team) AS away_team, MAX(competition_name) AS competition_name, MAX(utc_date) AS utc_date
+      FROM predictions WHERE settled = 0 AND utc_date < ? GROUP BY match_id ORDER BY utc_date`).all(cutoff) as any[];
+    const old = rows.filter(r => new Date(r.utc_date).getTime() < now - 48 * 3600 * 1000);
+    let voided = 0;
+    try { voided = voidedThisMonth(now); } catch { /* table missing */ }
+    const tries = new Map<number, string>();
+    try { for (const t of db.prepare(`SELECT match_id, note FROM settle_lookups`).all() as any[]) tries.set(t.match_id, t.note); } catch { /* none yet */ }
+    const note = voided ? ` · ${voided} voided this month` : '';
     checks.push({
       id: 'unsettled', label: 'Finished games are scored in our record', level: old.length ? 'fail' : rows.length ? 'warn' : 'ok',
-      detail: rows.length ? `${rows.length} game(s) past kick-off + 4 h not settled yet (${old.length} older than a day)` : 'Every finished game is settled',
-      items: rows.slice(0, 15).map(gameName)
+      detail: rows.length ? `${rows.length} game(s) past kick-off + 4 h not settled yet (${old.length} older than 48 h)${note}` : `Every finished game is settled${note}`,
+      items: rows.slice(0, 15).map(r => `${gameName(r)}${tries.has(r.match_id) ? ` · ${tries.get(r.match_id)}` : ''}`)
     });
   } catch (e: any) {
     checks.push({ id: 'unsettled', label: 'Finished games are scored in our record', level: 'warn', detail: `Check failed: ${e.message}` });
@@ -265,11 +276,14 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
 
 /* ---------------- scheduler + email ---------------- */
 
-let last: Awaited<ReturnType<typeof dataHealth>> | null = null;
+const store = createHealthStore(db);
 const failStreak = new Map<string, number>();
 let lastEmailAt = 0;
 
-export const lastDataHealth = () => last;
+/** fix200: the last stored report (null before the first run on a fresh database) */
+export const lastDataHealth = () => store.read();
+/** fix200: what /api/data-health returns: the stored report with its "at" time, never computed on the request */
+export const storedDataHealth = () => store.read() || NOT_YET;
 
 /** Alert email: what has been failing for 30+ minutes, then what still works. */
 export function healthEmail(failing: Check[], all: Check[]) {
@@ -316,10 +330,11 @@ export function healthEmail(failing: Check[], all: Check[]) {
 
 async function run() {
   try {
-    last = await dataHealth();
+    const last = await dataHealth();
+    store.save(last);
     const failing = last.checks.filter(c => c.level === 'fail');
     for (const c of last.checks) failStreak.set(c.id, c.level === 'fail' ? (failStreak.get(c.id) || 0) + 1 : 0);
-    const persistent = failing.filter(c => (failStreak.get(c.id) || 0) >= 3);
+    const persistent = failing.filter(c => (failStreak.get(c.id) || 0) >= 6); // 30 minutes at 5-minute runs
     if (failing.length) logger.warn(`Data health: ${failing.map(c => c.label).join(', ')}`);
     const to = (process.env.ADMIN_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
     if (persistent.length && emailEnabled && to.length && Date.now() - lastEmailAt > 6 * 3600 * 1000) {
@@ -334,6 +349,7 @@ async function run() {
 
 export function startDataHealthScheduler() {
   // fix196: in the heavy() queue (one heavy job at a time, never during a live tick)
-  afterHeavy('data health', run, 5 * MIN);
-  everyHeavy('data health', run, 10 * MIN);
+  // fix200: every 5 minutes (the endpoint reads the stored copy), the first a minute after start
+  afterHeavy('data health', run, 1 * MIN);
+  everyHeavy('data health', run, 5 * MIN);
 }

@@ -163,8 +163,10 @@ export function freezePredictions(match: any, computed: Prediction[]): Predictio
 const pendingStmt = db.prepare(
   `SELECT DISTINCT match_id, utc_date FROM predictions WHERE settled = 0 AND utc_date <= ? ORDER BY utc_date`
 );
+// fix200: a void game keeps its reason (admin: /api/admin/voided)
+if (!(db.prepare(`PRAGMA table_info(results)`).all() as any[]).some(c => c.name === 'reason')) db.exec(`ALTER TABLE results ADD COLUMN reason TEXT`);
 const insertResult = db.prepare(
-  `INSERT OR REPLACE INTO results (match_id, status, home_goals, away_goals, outcome, settled_at) VALUES (?, ?, ?, ?, ?, ?)`
+  `INSERT OR REPLACE INTO results (match_id, status, home_goals, away_goals, outcome, settled_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?)`
 );
 const markSettled = db.prepare(`UPDATE predictions SET settled = 1, locked = 1, updated_at = ? WHERE match_id = ?`);
 // Postponed / suspended: unlock so the rescheduled date (and a fresh pre-match prediction) can be recorded
@@ -231,7 +233,7 @@ export async function settlePending(
     // Too old to still be waiting: void (keeps the fetch range short)
     const stale = pending.filter(p => p.utc_date < giveUp);
     for (const p of stale) {
-      insertResult.run(p.match_id, 'UNRESOLVED', null, null, 'VOID', now);
+      insertResult.run(p.match_id, 'UNRESOLVED', null, null, 'VOID', now, `no result ${MAX_PENDING_DAYS} days after kick-off`);
       markSettled.run(now, p.match_id);
       settled++;
     }
@@ -271,11 +273,11 @@ export async function settlePending(
       if (!ids.has(r.id)) continue;
       if (r.status === 'FINISHED') {
         const outcome: Outcome = r.h! > r.a! ? 'H' : r.h! < r.a! ? 'A' : 'D';
-        insertResult.run(r.id, r.raw, r.h, r.a, outcome, now);
+        insertResult.run(r.id, r.raw, r.h, r.a, outcome, now, null);
         markSettled.run(now, r.id);
         settled++;
       } else if (r.status === 'VOID') {
-        insertResult.run(r.id, r.raw, null, null, 'VOID', now);
+        insertResult.run(r.id, r.raw, null, null, 'VOID', now, `${r.raw === 'CANC' || r.raw === 'CANCELLED' ? 'cancelled' : r.raw === 'ABD' ? 'abandoned' : r.raw === 'AWD' || r.raw === 'WO' ? 'awarded (no score)' : r.raw} by the provider`);
         markSettled.run(now, r.id);
         settled++;
       } else if (r.status === 'RESCHEDULE') {

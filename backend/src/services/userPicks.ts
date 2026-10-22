@@ -165,7 +165,8 @@ export function personalRecord(userId: number, access: string) {
     else { s.settled++; if (result === 'hit') s.hits++; }
     // current streak of correct picks, newest settled first
     if (streakOpen && (result === 'hit' || result === 'miss')) { if (result === 'hit') streak++; else streakOpen = false; }
-    if (list.length < 300) list.push({ sport: r.sport, gameId: r.game_id, market: r.market, pick: r.pick, line: r.line, kickoff: r.kickoff, result,
+    // fix200: a void game (cancelled, never played) is left out of the history (never a loss)
+    if (list.length < 300 && result !== 'void') list.push({ sport: r.sport, gameId: r.game_id, market: r.market, pick: r.pick, line: r.line, kickoff: r.kickoff, result,
       home: g?.home || null, away: g?.away || null, league: g?.league || null });
   }
   const total = Object.values(stats).reduce((a, s) => ({ picks: a.picks + s.picks, settled: a.settled + s.settled, hits: a.hits + s.hits, pending: a.pending + s.pending }), { picks: 0, settled: 0, hits: 0, pending: 0 });

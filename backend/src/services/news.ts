@@ -13,7 +13,7 @@
 import logger from '../utils/logger';
 import { schoolName, collegeNick } from './nfl';
 import { db } from '../db';
-import { every, after } from './perf';
+import { after, heavy, timed, heavySlicer, yieldLoop } from './perf';
 import { isBlockedSource, JUNK_TITLE, YOUTH_WOMEN, SPAM, BUSINESS, mostlyNonLatin, otherSport, isBlockedDomain, blockDomain } from './newsBlocklist';
 import { isTrustedSource, domainOf } from './newsSources';
 
@@ -258,12 +258,14 @@ const BETTING_LINK = /\/(betting|odds|gambling|sportsbook|picks-and-odds)(\/|-|$
 export const isBettingStory = (x: { title: string; summary?: string | null; link: string }) => BETTING.test(x.title) || BETTING.test(x.summary || '') || BETTING_LINK.test(x.link);
 
 
-async function fetchFeed(f: Feed): Promise<Raw[]> {
+/** fix200: `slice` = the refresh's slicer (the parse gives the thread back every ~30 ms) */
+async function fetchFeed(f: Feed, slice?: () => Promise<void>): Promise<Raw[]> {
   const res = await fetch(f.url, { signal: AbortSignal.timeout(8000), headers: UA });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const xml = await res.text();
   const items: Raw[] = [];
   for (const m of xml.matchAll(/<item[\s>][\s\S]*?<\/item>/gi)) {
+    if (slice) await slice();
     const b = m[0];
     const title = tag(b, 'title');
     const link = tag(b, 'link') || (b.match(/<guid[^>]*>(https?:[^<]+)<\/guid>/i)?.[1] ?? '');
@@ -678,10 +680,12 @@ const feedStatus = new Map<string, { source: string; league: string | null; ok: 
 let lastRefresh: string | null = null;
 let refreshing: Promise<void> | null = null;
 
+/** fix200: runs in the heavy() queue only (never on a request); the parse, the matchers and the storage in ~30 ms slices */
 async function refresh() {
   const t0 = Date.now();
+  const slice = heavySlicer();
   const feeds = [...FEEDS, ...searchFeedsOf()]; // fix176: plus a few league searches each time
-  const results = await Promise.allSettled(feeds.map(fetchFeed));
+  const results = await Promise.allSettled(feeds.map(f => fetchFeed(f, slice)));
   markSearched(feeds);
   const now = new Date().toISOString();
   const raws: Raw[] = [];
@@ -703,35 +707,48 @@ async function refresh() {
       feedStatus.set(f.url, { source: f.source, league: f.league || null, ok: false, items: 0, error: msg, at: now });
     }
   });
+  await slice();
   buildMatcher(); // team lists can change (new season, promotions)
+  await yieldLoop();
   buildBbMatcher();
-  const fresh = storeRaws(raws);
+  await yieldLoop();
+  const fresh = await storeRaws(raws, slice);
   // pictures for new stories whose feed has none (fix180: one background queue, 4 at a time)
   queuePictures(fresh);
   lastRefresh = now;
   logger.info(`News refreshed: ${raws.length} stories from ${results.filter(r => r.status === 'fulfilled').length}/${feeds.length} feeds, ${fresh.length} new pictures looked up, ${Math.round((Date.now() - t0) / 1000)} s`);
 }
 
-/** Files and stores stories (new ones inserted, a known link gets the extra leagues); the new links without a picture. */
-function storeRaws(raws: Raw[]): string[] {
+/**
+ * Files and stores stories (new ones inserted, a known link gets the extra leagues); the new links without a picture.
+ * fix200: 40 stories per transaction, the thread given back between them (one transaction over every story, with the
+ * league matching inside, stalled 4.4 s).
+ */
+async function storeRaws(raws: Raw[], slice: () => Promise<void> = heavySlicer()): Promise<string[]> {
   const now = new Date().toISOString();
   const get = db.prepare(`SELECT leagues, image FROM news_items WHERE link = ?`);
   const ins = db.prepare(`INSERT INTO news_items (link, title, source, published, summary, image, leagues, seen_at, sport, domain) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const upd = db.prepare(`UPDATE news_items SET leagues = ?, image = COALESCE(image, ?), published = COALESCE(published, ?) WHERE link = ?`);
   const fresh: string[] = [];
   const titles = new Set<string>();
-  db.exec('BEGIN');
+  const CHUNK = 40;
+  let open = false;
+  const begin = () => { db.exec('BEGIN'); open = true; };
+  const commit = () => { if (open) { db.exec('COMMIT'); open = false; } };
   try {
     const dupWithin48h = db.prepare(`SELECT 1 FROM news_items WHERE title = ? AND link != ? AND seen_at >= ? LIMIT 1`);
     const since48 = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
     // fix182: the same match report in another language ("Highlights: A 2-3 B" / "Melhores momentos: A 2 x 3 B")
     const byMatch = new Map<string, { link: string; english: boolean }>();
     for (const r of db.prepare(`SELECT link, title FROM news_items WHERE seen_at >= ?`).all(since48) as any[]) {
+      await slice();
       const k = matchKey(r.title);
       if (k && (!byMatch.has(k) || isEnglishTitle(r.title))) byMatch.set(k, { link: r.link, english: isEnglishTitle(r.title) });
     }
     const dropLink = db.prepare(`DELETE FROM news_items WHERE link = ?`);
-    for (const it of raws) {
+    for (let n = 0; n < raws.length; n++) {
+      if (n % CHUNK === 0) { commit(); await slice(); begin(); }
+      const it = raws[n];
       const tkey = it.title.toLowerCase().slice(0, 60);
       // fix181: search stories — spam blocks its publisher's domain; trusted publishers only; filed only under leagues
       // the story names
@@ -767,11 +784,12 @@ function storeRaws(raws: Raw[]): string[] {
       ins.run(it.link, it.title, it.source, it.published, it.summary, it.image, codes.length ? `,${codes.join(',')},` : '', now, it.sport, it.domain ?? null);
       if (!it.image) fresh.push(it.link); // fix180: Google News stories too (their publisher page is looked up)
     }
+    commit();
+    await slice();
     db.prepare(`DELETE FROM news_items WHERE seen_at < ? AND (leagues = '' OR seen_at < ?)`)
       .run(new Date(Date.now() - 21 * 86400000).toISOString(), new Date(Date.now() - 60 * 86400000).toISOString());
-    db.exec('COMMIT');
   } catch (e) {
-    db.exec('ROLLBACK');
+    if (open) db.exec('ROLLBACK');
     throw e;
   }
   return fresh;
@@ -859,7 +877,13 @@ async function searchNow(code: string, sport: Sport): Promise<void> {
   let run = searching.get(key);
   if (!run) {
     const f: Feed = { source: 'Google News', url: searchFeed(topic.query), league: code, sport, search: true };
-    run = fetchFeed(f).then(raws => { markSearched([f]); storeRaws(raws); }).catch(e => { logger.warn(`news search ${code}: ${e.message}`); markSearched([f]); })
+    // fix200: fetched, parsed and stored in the heavy() queue (the visitor's request only waits, at most 8 s)
+    run = heavy(`news search ${key}`, () => timed('news search', async () => {
+      const slice = heavySlicer();
+      const raws = await fetchFeed(f, slice);
+      markSearched([f]);
+      await storeRaws(raws, slice);
+    })).then(() => undefined).catch(e => { logger.warn(`news search ${code}: ${e.message}`); markSearched([f]); })
       .finally(() => searching.delete(key));
     searching.set(key, run);
   }
@@ -870,7 +894,8 @@ const markSearched = (feeds: Feed[]) => { for (const f of feeds) if (f.search &&
 
 function refreshNow(): Promise<void> {
   if (!refreshing) {
-    refreshing = refresh()
+    // fix200: in the heavy() queue (one heavy job at a time, never during a live tick)
+    refreshing = heavy('news', () => timed('news', refresh)).then(() => undefined)
       .catch((e: any) => { logger.warn('News refresh failed', { message: e?.message }); })
       .finally(() => { refreshing = null; });
   }
@@ -925,8 +950,9 @@ export function startNewsScheduler() {
       }
     } catch (e: any) { logger.warn(`news purge: ${e.message}`); }
   }, 10 * 1000).unref();
-  after('news', () => refreshNow(), 20 * 1000).unref();
-  every('news', () => void refreshNow(), 15 * 60 * 1000).unref();
+  // fix200: not timed here (refreshNow times the refresh once its turn in the heavy() queue comes)
+  setTimeout(() => void refreshNow(), 20 * 1000).unref();
+  setInterval(() => void refreshNow(), 15 * 60 * 1000).unref();
 }
 
 function toItem(r: any): NewsItem {
@@ -1005,8 +1031,8 @@ export async function newsFor(opts: { sport?: Sport; limit?: number; league?: st
   const sport = opts.sport || 'football';
   const limit = opts.limit || 12;
   const have: any = db.prepare(`SELECT COUNT(*) AS n FROM news_items`).get();
-  if (!have.n) await refreshNow(); // first boot: wait for the first fill
-  else if (!lastRefresh) void refreshNow();
+  // fix200: a request never runs the refresh (it is queued; a fresh database shows no news until the first one is in)
+  if (!have.n || !lastRefresh) void refreshNow();
   if (opts.team && opts.team.length) {
     const names = [...new Set(opts.team.map(n => norm(n).trim()).filter(n => n.length >= 3))].sort((a, b) => b.length - a.length);
     if (!names.length) return [];

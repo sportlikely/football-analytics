@@ -7,6 +7,7 @@ import { db } from '../db';
 import { fallbackReason } from './afMatches';
 import { predictGameCached, bbModelReady } from './bbModel';
 import { predictNfl } from './nflModel';
+import { heavySlicer } from './perf';
 
 const DAY = 86400000;
 const FINAL_FD = ['FINISHED', 'AWARDED', 'CANCELLED', 'POSTPONED', 'SUSPENDED'];
@@ -17,14 +18,19 @@ const when = (iso: string) => String(iso || '').slice(0, 16).replace('T', ' ');
 
 export interface Missing { items: string[]; off: string[]; checked: number }
 
-/** `football`: the match list data health already loaded (with predictions). */
-export function missingPredictions(football: any[], now = Date.now()): Missing {
+/**
+ * `football`: the match list data health already loaded (with predictions).
+ * fix200: in ~30 ms slices (a basketball / NFL prediction per game is computed here: hundreds in one block stalled 5.8 s)
+ */
+export async function missingPredictions(football: any[], now = Date.now()): Promise<Missing> {
+  const slice = heavySlicer();
   const to = now + 7 * DAY;
   const items: string[] = [], off: string[] = [];
   let checked = 0;
 
   // football: Football-Data.org + API-Football lists
   for (const m of football) {
+    await slice();
     const t = new Date(m.utcDate).getTime();
     if (!(t > now && t < to) || LIVE_FD.includes(m.status)) continue;
     const name = `Football · ${m.homeTeam?.name ?? '?'} – ${m.awayTeam?.name ?? '?'} (${m.competition?.name ?? m.competition?.code ?? ''}, ${when(m.utcDate)} UTC)`;
@@ -41,6 +47,7 @@ export function missingPredictions(football: any[], now = Date.now()): Missing {
   try {
     const rows = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week, home_name, away_name FROM bb_games WHERE kickoff > ? AND kickoff < ? ORDER BY kickoff`).all(fromIso, toIso) as any[];
     for (const g of rows) {
+      await slice();
       const name = `Basketball · ${g.home_name} – ${g.away_name} (${g.code}, game ${g.game_id}, ${when(g.kickoff)} UTC)`;
       const st = g.status || 'NS';
       if (BB_OFF.includes(st)) { off.push(`${name} · ${st}`); continue; }
@@ -55,6 +62,7 @@ export function missingPredictions(football: any[], now = Date.now()): Missing {
   try {
     const rows = db.prepare(`SELECT game_id, league, kickoff, status, home_id, away_id, home_name, away_name FROM nfl_games WHERE kickoff > ? AND kickoff < ? ORDER BY kickoff`).all(fromIso, toIso) as any[];
     for (const g of rows) {
+      await slice();
       const name = `${g.league === 2 ? 'College football' : 'NFL'} · ${g.home_name || 'TBD'} – ${g.away_name || 'TBD'} (game ${g.game_id}, ${when(g.kickoff)} UTC)`;
       const st = g.status || 'NS';
       if (NFL_OFF.includes(st)) { off.push(`${name} · ${st}`); continue; }

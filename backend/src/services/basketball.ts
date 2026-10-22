@@ -11,7 +11,7 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { buildAll, recordBbPredictions, bumpBbInjuries } from './bbModel';
-import { timed, every, after } from './perf';
+import { timed, every, after, perGames } from './perf';
 import { refreshNbaInjuries, nbaInjuryStatus } from './bbInjuries';
 import { applyResultFixes, checkResults } from './bbResults';
 import { onBbExtraLeague } from './bbLeagueConfig';
@@ -270,7 +270,8 @@ async function liveTick() {
       .all(new Date(now - 4 * 3600 * 1000).toISOString(), new Date(now + 10 * 60 * 1000).toISOString()) as any[];
     for (const r of rows) {
       const json = await bb('/games', { league: r.league_id, season: r.season, date: r.day });
-      upsertGames(r.code, r.league_id, r.season, json.response || []);
+      // fix200: 20 games per write (with their win-chance samples), the rest on the next macrotask
+      await perGames((json.response || []) as any[], b => upsertGames(r.code, r.league_id, r.season, b));
     }
   } catch (e: any) {
     logger.warn(`API-Basketball live: ${e.message}`);

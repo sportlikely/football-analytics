@@ -7,6 +7,7 @@
  * the worst stall seen while it ran, and the live jobs (30 s / 60 s ticks) get an hourly "live ticks: max X ms" line.
  */
 import { PerformanceObserver, performance } from 'node:perf_hooks';
+import { isMainThread } from 'node:worker_threads';
 import logger from '../utils/logger';
 
 /*
@@ -50,7 +51,8 @@ const runningLabel = () => {
   return names.length ? names.join(' + ') : null;
 };
 
-setInterval(() => {
+// fix200: the main thread only (a worker thread's own loop is meant to be busy: the tennis model)
+if (isMainThread) setInterval(() => {
   const now = Date.now();
   const lag = now - last - STEP;
   const since = last;
@@ -76,7 +78,7 @@ setInterval(() => {
 }, STEP).unref();
 
 // once an hour: the worst event-loop stall while each live job was running (the goal: under 500 ms)
-setInterval(() => {
+if (isMainThread) setInterval(() => {
   for (const l of LIVE_JOBS) if (jobs.get(l)?.lastAt && Date.now() - Date.parse(jobs.get(l)!.lastAt) < 3600 * 1000 && !liveHour.has(l)) liveHour.set(l, 0);
   if (!liveHour.size) return;
   const max = Math.max(...liveHour.values());
@@ -113,6 +115,22 @@ export async function inBatches<T, R>(items: T[], size: number, fn: (batch: T[])
   const out: R[] = [];
   const slice = opts.live ? heavySlicer() : slicer();
   for (let i = 0; i < items.length; i += size) { out.push(...fn(items.slice(i, i + size))); await slice(); }
+  return out;
+}
+/**
+ * fix200: live ticks — at most `size` games (20) per turn, then the rest continues on the next macrotask (setImmediate),
+ * so a busy Saturday (100+ live games) never holds the thread for the whole list.
+ */
+export async function perGames<T>(items: T[], fn: (chunk: T[]) => unknown | Promise<unknown>, size = 20): Promise<void> {
+  for (let i = 0; i < items.length; i += size) {
+    if (i) await yieldLoop();
+    await fn(items.slice(i, i + size));
+  }
+}
+/** fix200: perGames() that keeps what each chunk returns (in order). */
+export async function mapGames<T, R>(items: T[], fn: (chunk: T[]) => R[], size = 20): Promise<R[]> {
+  const out: R[] = [];
+  await perGames(items, c => { out.push(...fn(c)); }, size);
   return out;
 }
 /**

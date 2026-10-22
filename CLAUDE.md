@@ -65,7 +65,8 @@ is model work, the matching note, in the same commit.
 Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
-  `history.ts` (football-data.co.uk result history + per-league groups), `leagueConfig.ts` / `leagueCoverage.ts`
+  `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a
+  reason; admin `/api/admin/voided`), `history.ts` (football-data.co.uk result history + per-league groups), `leagueConfig.ts` / `leagueCoverage.ts`
   (leagues added from Admin → Football leagues; each = group `AF<id>`, history from API-Football fixtures).
 - Football models: `gridModel.ts` = **v3 (grid-v3)**, the live model for leagues: factor rows (squad value, Elo,
   attack/defence, confirmed XI, missing players, freshness, home/away record, H2H…) → points → probabilities, with the
@@ -91,7 +92,8 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
 - Tennis (fix184, admin only, no pages or model yet): `tennis.ts` — data from Live Tennis API **Pro** (key `TENNIS_API_KEY`, 10,000 calls a day, reserve `TENNIS_RESERVE` 1,500), **singles only**, market prices (`tennis_prices`) are an **admin-only** benchmark, never on a public route. Stats computed from the point tape (`tennis_match_stats`). Admin: `/api/admin/tennis-probe`, `/api/admin/tennis/status`. Notes: `docs/notes/tennis-data.md`.
   fix190: `tennisModel.ts` = **tennis-v1** (admin only: surface Elo + serve/return Markov chain + context, blend only if it
   wins the monthly walk-forward test; `tennis_predictions`; `/api/admin/tennis-model`, `/api/admin/tennis/predictions`).
-  Notes: `docs/notes/tennis-model.md`.
+  Notes: `docs/notes/tennis-model.md`. fix200: the model runs in a worker thread (`workers/tennisModelWorker.ts`, read-only
+  DB connection; writes applied on the main thread; pages read a ratings snapshot; `TENNIS_WORKER=0` = in-process).
 - Tennis (fix190, fix193): `tennis.ts` (Live Tennis API: tables tennis_*), `tennisModel.ts` (tennis-v1, public name SL Tennis 1.0:
   surface Elo + serve/return points → Markov chain; live chance), `tennisSite.ts` (pages: matches, match, player, tournament,
   rankings, search, accuracy), `seoTennis.ts` (crawler pages + sitemaps), `/api/tennis/*`. **`TENNIS_PUBLIC=1`** opens /tennis

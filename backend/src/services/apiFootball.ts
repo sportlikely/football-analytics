@@ -504,8 +504,10 @@ async function buildFeatures(group: string, force = false): Promise<number> {
     valueCache.forEach(v => { if (v !== null) withValue++; });
     return { players: valueCache.size, withValue };
   };
+  let k = 0;
   for (const f of fixtures) {
-    await pause();
+    // fix200: at most 20 fixtures per turn (and ~30 ms), waiting for a live tick
+    if (++k % 20 === 0) { await yieldLoop(); await afterLive(); sliceAt = Date.now(); } else await pause();
     if (f.fd_home && f.fd_away) {
       fresh.set(`${group}|${f.fd_home}|${f.fd_away}|${f.date}`, {
         fixtureId: f.fixture_id,
