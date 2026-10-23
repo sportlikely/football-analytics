@@ -7,6 +7,7 @@ import { t, LOCALE } from '../../lib/i18n'
 import { useRevealState } from '../../lib/reveal'
 import GameRow from './GameRow'
 import SectionTitle from './SectionTitle'
+import CalendarCard from '../CalendarCard'
 import { dayLabel } from './Games'
 import type { GamesAdapter, SGame } from './types'
 
@@ -141,6 +142,9 @@ export default function Favorites({ a }: { a: FavoritesAdapter }) {
           )}
         </div>
       )}
+
+      {/* fix205: the favorites of every sport in one calendar file */}
+      <CalendarCard className="max-w-2xl" />
     </div>
   )
 }

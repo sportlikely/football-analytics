@@ -2217,5 +2217,16 @@
  "West": "Westen",
  "the East": "im Osten",
  "the West": "im Westen",
- "{0} {1} in {2}, {3} {4} in {5}": "{0} {1} {2}, {3} {4} {5}"
+ "{0} {1} in {2}, {3} {4} in {5}": "{0} {1} {2}, {3} {4} {5}",
+ "Calendar": "Kalender",
+ "The games of your favorite teams and players, with our pick, in Google, Apple or Outlook calendar.": "Die Spiele deiner Lieblingsteams und -spieler, mit unserem Tipp, in Google-, Apple- oder Outlook-Kalender.",
+ "Sign in to get your calendar": "Melde dich an, um deinen Kalender zu bekommen",
+ "Add to Google Calendar": "Zu Google Kalender hinzufügen",
+ "Add to Apple / Outlook": "Zu Apple / Outlook hinzufügen",
+ "Copy link": "Link kopieren",
+ "Link copied": "Link kopiert",
+ "Reset link": "Link zurücksetzen",
+ "Reset your calendar link? The old link stops working: calendars that use it must be added again.": "Kalender-Link zurücksetzen? Der alte Link funktioniert dann nicht mehr: Kalender, die ihn nutzen, musst du neu hinzufügen.",
+ "New link ready. Add it to your calendar again.": "Neuer Link bereit. Füge ihn erneut zu deinem Kalender hinzu.",
+ "Calendar apps refresh every few hours. Keep the link private: anyone who has it sees these games.": "Kalender-Apps aktualisieren alle paar Stunden. Halte den Link privat: Wer ihn hat, sieht diese Spiele."
 }

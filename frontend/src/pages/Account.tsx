@@ -7,6 +7,7 @@ import { useGuessFirst } from '../lib/reveal'
 import { useUnlocks, resetDay } from '../lib/unlocks'
 import { t, LOCALE } from '../lib/i18n'
 import { TwoFactorCard } from '../components/TwoFactor'
+import CalendarCard from '../components/CalendarCard'
 
 function fmtDay(iso: string | null) {
   return iso ? new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' }) : ''
@@ -109,6 +110,8 @@ export default function Account() {
           />
         </label>
       </div>
+
+      <CalendarCard />
 
       <EmailCard />
 

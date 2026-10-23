@@ -729,6 +729,8 @@ export function deleteAccount(userId: number, password: unknown, reason?: unknow
   db.exec('BEGIN');
   try {
     if (tableExists('user_favorites')) db.prepare('DELETE FROM user_favorites WHERE user_id = ?').run(userId);
+    // fix205: the private calendar link stops working with the account
+    if (tableExists('calendar_tokens')) db.prepare('DELETE FROM calendar_tokens WHERE user_id = ?').run(userId);
     if (tableExists('match_unlocks')) db.prepare('DELETE FROM match_unlocks WHERE user_id = ?').run(userId);
     // fix147: pick packs go with the account
     if (tableExists('user_credits')) db.prepare('DELETE FROM user_credits WHERE user_id = ?').run(userId);

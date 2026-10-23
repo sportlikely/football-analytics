@@ -52,6 +52,9 @@ function open(sealed: string): string {
   d.setAuthTag(Buffer.from(tag, 'base64'));
   return Buffer.concat([d.update(Buffer.from(ct, 'base64')), d.final()]).toString('utf8');
 }
+/** fix205: the same sealing for other small secrets (calendar links), so the database never holds them in plain text */
+export const sealText = seal;
+export const openText = open;
 
 /* ---------- TOTP ---------- */
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';

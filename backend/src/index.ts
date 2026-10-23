@@ -92,6 +92,7 @@ import { hubBySlug, hubByOld, hubOpen, buildHub, warmHubs, HUBS } from './servic
 import { refreshFromDetails } from './services/matchPreview';
 import { fontRoute, warmFonts } from './services/fonts';
 import { listFavorites, addFavorites, removeFavorite, MAX_FAVORITES } from './services/favorites';
+import { calendarToken, resetCalendarToken, calendarIcs, asCalLang, tokenHint, TOKEN_RE } from './services/calendar';
 import { tuneV3Full, tuneStatus, isTuning } from './services/v3Tuner';
 import { cleanName, mayHaveSponsor, NAME_KEYS } from './services/sponsorNames';
 import { hiddenModels, v3MixBacktest, featureModelStatus, setConfig as setModelConfig, setMixLive, startFeatureModelScheduler } from './services/featureModel';
@@ -215,7 +216,8 @@ app.use('/api', (_req, res, next) => {
 });
 
 app.use((req, _res, next) => {
-  logger.info(`${req.method} ${req.originalUrl.replace(/([?&]token=)[^&]+/g, '$1***')}`);
+  // fix205: a calendar link is a secret too: only its first 6 characters reach the log
+  logger.info(`${req.method} ${req.originalUrl.replace(/([?&]token=)[^&]+/g, '$1***').replace(/^(\/cal\/[A-Za-z0-9_-]{6})[^/?]*/, '$1…')}`);
   next();
 });
 
@@ -241,7 +243,7 @@ const PUBLIC_FILES = new Set(['/favicon.svg', '/apple-touch-icon.png', '/og-imag
 // Health check stays open so the host can monitor the service. Unset = open site (local dev).
 if (SITE_PASSWORD) {
   app.use((req, res, next) => {
-    if (req.path === '/api/health' || PUBLIC_FILES.has(req.path) || req.path.startsWith('/fonts/')) return next();
+    if (req.path === '/api/health' || PUBLIC_FILES.has(req.path) || req.path.startsWith('/fonts/') || req.path.startsWith('/cal/')) return next(); // fix205: the calendar link is its own key
     if (req.headers.authorization === SITE_AUTH) return next();
     if (req.method === 'GET' && req.path.startsWith('/api/') && tokenKind(req.query.token)) return next();
     res.set('WWW-Authenticate', 'Basic realm="SportLikely - private beta", charset="UTF-8"');
@@ -647,6 +649,42 @@ app.post('/api/favorites', jsonOnly, (req, res) => {
 app.post('/api/favorites/remove', jsonOnly, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Sign in required' });
   res.json({ data: removeFavorite(req.user.id, req.body?.kind, req.body?.ref) });
+});
+// fix205: calendar subscription (services/calendar.ts). The signed-in user's private link (made the first time,
+// ?lang= = the site language the file's words follow); "Reset link" makes a new one and the old stops at once.
+const calSite = (req: express.Request) => (CANONICAL_HOST ? `https://${CANONICAL_HOST}` : `${req.protocol}://${req.get('host')}`);
+const calOut = (req: express.Request, token: string, createdAt: string, lastUsedAt: string | null) => {
+  const ics = `${calSite(req)}/cal/${token}.ics`;
+  const webcal = ics.replace(/^https?:/, 'webcal:');
+  return { url: ics, webcal, google: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`, createdAt, lastUsedAt };
+};
+app.get('/api/favorites/calendar', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!req.user) return res.status(401).json({ error: 'Sign in to get your calendar.' });
+  const c = calendarToken(req.user.id, req.query.lang ? asCalLang(req.query.lang) : undefined);
+  if (c.created) securityLog(req, 'calendar_link_created', req.user, `calendar link ${tokenHint(c.token)}`);
+  res.json({ data: calOut(req, c.token, c.createdAt, c.lastUsedAt) });
+});
+app.post('/api/favorites/calendar/reset', rateLimit('cal-reset', 10, 3600000, r => String(r.user?.id || ipKey(r))), jsonOnly, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Sign in to get your calendar.' });
+  const token = resetCalendarToken(req.user.id, req.body?.lang ? asCalLang(req.body.lang) : undefined);
+  securityLog(req, 'calendar_link_reset', req.user, `new calendar link ${tokenHint(token)}; the old link no longer works`);
+  res.json({ data: calOut(req, token, new Date().toISOString(), null) });
+});
+// The file itself: no login (the link is the key), 60 requests an hour per link
+const calKey = (r: express.Request) => createHash('sha256').update(String(r.params[0] || '')).digest('hex').slice(0, 20);
+app.get(/^\/cal\/([A-Za-z0-9_-]{32})\.ics$/, rateLimit('cal', 60, 3600000, calKey), (req, res) => {
+  const token = String(req.params[0] || '');
+  res.set('Cache-Control', 'private, max-age=900');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  try {
+    const body = TOKEN_RE.test(token) ? calendarIcs(token, calSite(req)) : null;
+    if (!body) return res.status(404).type('text/plain').send('This calendar link is not valid any more. Get your link on sportlikely.com/account.');
+    res.type('text/calendar; charset=utf-8').set('Content-Disposition', 'inline; filename="sportlikely.ics"').send(body);
+  } catch (e: any) {
+    logger.warn(`calendar ${tokenHint(token)}: ${e.message}`);
+    res.status(500).type('text/plain').send('The calendar could not be made right now. Try again later.');
+  }
 });
 
 // ---------- Staff console login ----------

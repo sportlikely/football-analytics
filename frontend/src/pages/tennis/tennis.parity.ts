@@ -43,6 +43,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'league.liveNextResults',
     'search.players',
     'search.leagues', // tournaments
-    'search.games'
+    'search.games',
+    'favorites.calendar' // fix205: CalendarCard in components/sport/Favorites
   ]
 }

@@ -23,6 +23,7 @@ export const PARITY = [
   { key: 'home.introStats', label: 'First-visit stat tiles', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'home.special', label: 'Special card (draw picks / upset watch)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'home.favorites', label: 'Your favorites rail', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'favorites.calendar', label: 'Calendar subscription card on the Favorites page (fix205)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'home.news', label: 'News', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'home.modelName', label: 'Public model name on the featured card (SL <Sport> <version>, fix191)', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- games list ---------- */

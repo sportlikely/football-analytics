@@ -2217,5 +2217,16 @@
  "West": "Ouest",
  "the East": "l'Est",
  "the West": "l'Ouest",
- "{0} {1} in {2}, {3} {4} in {5}": "{0} {1} dans {2}, {3} {4} dans {5}"
+ "{0} {1} in {2}, {3} {4} in {5}": "{0} {1} dans {2}, {3} {4} dans {5}",
+ "Calendar": "Calendrier",
+ "The games of your favorite teams and players, with our pick, in Google, Apple or Outlook calendar.": "Les matchs de vos équipes et joueurs favoris, avec notre pronostic, dans Google, Apple ou Outlook Agenda.",
+ "Sign in to get your calendar": "Connectez-vous pour obtenir votre calendrier",
+ "Add to Google Calendar": "Ajouter à Google Agenda",
+ "Add to Apple / Outlook": "Ajouter à Apple / Outlook",
+ "Copy link": "Copier le lien",
+ "Link copied": "Lien copié",
+ "Reset link": "Réinitialiser le lien",
+ "Reset your calendar link? The old link stops working: calendars that use it must be added again.": "Réinitialiser le lien du calendrier ? L’ancien lien ne fonctionnera plus : les calendriers qui l’utilisent devront être ajoutés à nouveau.",
+ "New link ready. Add it to your calendar again.": "Nouveau lien prêt. Ajoutez-le à nouveau à votre calendrier.",
+ "Calendar apps refresh every few hours. Keep the link private: anyone who has it sees these games.": "Les applications de calendrier se mettent à jour toutes les quelques heures. Gardez le lien privé : toute personne qui l’a voit ces matchs."
 }

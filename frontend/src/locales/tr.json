@@ -2217,5 +2217,16 @@
  "West": "Batı",
  "the East": "Doğu",
  "the West": "Batı",
- "{0} {1} in {2}, {3} {4} in {5}": "{0} {2} {1}, {3} {5} {4}"
+ "{0} {1} in {2}, {3} {4} in {5}": "{0} {2} {1}, {3} {5} {4}",
+ "Calendar": "Takvim",
+ "The games of your favorite teams and players, with our pick, in Google, Apple or Outlook calendar.": "Favori takımlarının ve oyuncularının maçları, tahminimizle, Google, Apple veya Outlook takviminde.",
+ "Sign in to get your calendar": "Takvimini almak için giriş yap",
+ "Add to Google Calendar": "Google Takvim’e ekle",
+ "Add to Apple / Outlook": "Apple / Outlook’a ekle",
+ "Copy link": "Bağlantıyı kopyala",
+ "Link copied": "Bağlantı kopyalandı",
+ "Reset link": "Bağlantıyı sıfırla",
+ "Reset your calendar link? The old link stops working: calendars that use it must be added again.": "Takvim bağlantısı sıfırlansın mı? Eski bağlantı çalışmayı durdurur: onu kullanan takvimlerin yeniden eklenmesi gerekir.",
+ "New link ready. Add it to your calendar again.": "Yeni bağlantı hazır. Takvimine yeniden ekle.",
+ "Calendar apps refresh every few hours. Keep the link private: anyone who has it sees these games.": "Takvim uygulamaları birkaç saatte bir yenilenir. Bağlantıyı gizli tut: ona sahip olan herkes bu maçları görür."
 }
