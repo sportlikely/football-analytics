@@ -294,3 +294,150 @@ test('fix204b: rows made with older maths are made again before the start', asyn
   assert.equal((await mp.saveExtras('nfl')).nfl, 1);
   assert.equal(db.prepare(`SELECT calc FROM prediction_extras WHERE sport = 'nfl' AND game_id = 24733`).get().calc, mp.MORE_CALC);
 });
+
+// ---------- fix204c ----------
+const C = require('../dist/utils/moreCalib.js');
+/** deterministic draws (mulberry32 + Box–Muller) */
+function rng(seed) {
+  let s = seed;
+  const u = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  return { u, n: () => Math.sqrt(-2 * Math.log(Math.max(1e-12, u()))) * Math.cos(2 * Math.PI * u()) };
+}
+
+test('fix204c: bias removal moves the NBA mean predicted total to the league average (fixture set)', () => {
+  // the model says 8 points too many and is too far from the league's usual score (slope 0.8)
+  const r = rng(11), fit = { share: 0.49, kHalf: 1, kOt: 1, meanTotal: 225, sigma: 12, sigmaT: 18, games: 900 };
+  const games = [];
+  for (let i = 0; i < 1200; i++) {
+    const truth = 225 + 10 * r.n(), margin = 6 * r.n(), actual = Math.round(truth + 14 * r.n()), hs = Math.round((actual + margin) / 2);
+    const total = 225 + 8 + (truth - 225) / 0.8;
+    games.push({ g: { league: 'NBA', pHome: 0.5 + margin / 40, margin, total, home: (total + margin) / 2, away: (total - margin) / 2, fit }, hs, as: actual - hs });
+  }
+  const src = mp.fitPointsSource(games.map(x => ({ league: 'NBA', row: { league: 'NBA', total: x.g.total, home: x.g.home, away: x.g.away, hs: x.hs, as: x.as, sdT: 18, sdTeam: 10 } })));
+  const nba = src.leagues.NBA;
+  close(nba.bT, 8, 1.2, 'fitted total bias');
+  close(nba.kT, 0.8, 0.08, 'fitted slope');
+  const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+  const actualMean = mean(games.map(x => x.hs + x.as));
+  const raw = mean(games.map(x => x.g.total));
+  const after = mean(games.map(x => { const e = mp.pointsMake('basketball', x.g, src); return e.info.expected[0] + e.info.expected[1]; }));
+  assert.ok(raw - actualMean > 6, `raw mean ${raw} vs ${actualMean}`);
+  close(after, actualMean, 1.5, 'corrected mean total = league average');
+  // the margin bands and the win chance are not touched
+  const x0 = games[0].g, a = mp.pointsMake('basketball', x0, src), b = M.normalExtras({ sport: 'basketball', pHome: x0.pHome, margin: x0.margin, total: x0.total, homePts: x0.home, awayPts: x0.away, fit });
+  assert.deepEqual(a.sets.margin.p, b.sets.margin.p);
+  for (const k of ['total', 'homePts', 'awayPts']) close(sum(a.sets[k].p), 1, 1e-9, `${k} sums`);
+});
+
+test('fix204c: isotonic / Platt maps are monotone and calibrated sets sum to 100%', () => {
+  const r = rng(5);
+  // an over-confident output: said p, happened 0.5 + 0.7·(p − 0.5)
+  const pairs = Array.from({ length: 5000 }, () => { const p = r.u(); return { x: p, y: r.u() < 0.5 + 0.7 * (p - 0.5) ? 1 : 0 }; });
+  const iso = C.fitIsotonic(pairs);
+  assert.equal(iso.kind, 'iso');
+  assert.ok(C.monotone(iso), 'isotonic map non-decreasing');
+  const pl = C.fitPlatt(pairs);
+  assert.equal(pl.kind, 'platt');
+  assert.ok(C.monotone(pl) && pl.a < 1, `Platt a ${pl.a} < 1 (pulls toward 50%)`);
+  for (let p = 0; p <= 0.95; p += 0.05) assert.ok(C.applyMap(iso, p) <= C.applyMap(iso, p + 0.05) + 1e-12);
+  // multi-label: per-label and pooled maps, each set renormalised
+  const labels = ['loser', '1–5', '6–10', '11–15', '16+'];
+  const items = Array.from({ length: 4000 }, () => {
+    const w = labels.map(() => r.u() + 0.1), s = sum(w), p = w.map(x => x / s);
+    let c = r.u(), i = 0;
+    while (i < 4 && c > p[i]) { c -= p[i]; i++; }
+    return { p, i, labels };
+  });
+  for (const fixed of [[], ['loser']]) {
+    const oc = C.fitOutputCalib(items, fixed);
+    assert.ok(oc.perLabel || oc.pooled);
+    for (const m of Object.values(oc.perLabel || { all: oc.pooled })) assert.ok(C.monotone(m));
+    for (const it of items.slice(0, 200)) {
+      const out = C.calibrateSet({ labels, p: it.p }, oc);
+      close(sum(out.p), 1, 1e-9, 'calibrated set sums to 1');
+      assert.ok(out.p.every(q => q >= 0));
+      if (fixed.length) close(out.p[0], it.p[0], 1e-12, "'the other side wins' keeps its chance");
+    }
+  }
+  const pooled = C.fitOutputCalib(items.slice(0, 900));
+  assert.ok(pooled.pooled && C.monotone(pooled.pooled), 'under 1,000 forecasts: one pooled map');
+  // two outcomes
+  const two = C.calibrateSet({ labels: ['yes', 'no'], p: [0.8, 0.2] }, { n: 5000, pooled: pl });
+  close(sum(two.p), 1, 1e-12, 'yes/no sums to 1');
+  assert.ok(two.p[0] < 0.8, 'pulled toward 50%');
+});
+
+test('fix204c: the Dixon–Coles grid sums to 1 (Poisson and negative binomial), football sets still sum to 100%', () => {
+  for (const [lh, la, rho, sh, sa] of [[1.4, 1.1, -0.08, null, null], [2.6, 1.9, -0.05, null, null], [0.4, 3.1, 0.05, 8, 12], [1.5, 1.2, -0.12, 20, null]]) {
+    const g = C.dcGrid(lh, la, rho, sh, sa);
+    close(g.reduce((s, row) => s + sum(row), 0), 1, 1e-9, `grid ${lh}-${la}`);
+    assert.ok(g.every(row => row.every(q => q >= 0)));
+    const x = M.footballExtras(lh, la, 0.45, { k: 0.8, mh: 1.5, ma: 1.2, kT: 0.6, kD: 0.92 }, { rho, sizeH: sh, sizeA: sa });
+    for (const [k, set] of Object.entries(x.sets)) close(sum(set.p), 1, 1e-9, `${k} sums`);
+    const ht = x.sets.ht.p, htft = x.sets.htft.p;
+    for (let r = 0; r < 3; r++) close(htft[3 * r] + htft[3 * r + 1] + htft[3 * r + 2], ht[r], 1e-9, `HT/FT row ${r}`);
+  }
+  // ρ < 0 raises 0-0 and 1-1 against independent Poisson
+  const p0 = C.dcGrid(1.3, 1.1, 0), p1 = C.dcGrid(1.3, 1.1, -0.1);
+  assert.ok(p1[0][0] > p0[0][0] && p1[1][1] > p0[1][1] && p1[1][0] < p0[1][0]);
+  // the negative binomial keeps the mean and widens the spread
+  const v = C.countVec(1.6, 5), m = v.reduce((s, q, k) => s + k * q, 0), varr = v.reduce((s, q, k) => s + q * (k - m) ** 2, 0);
+  close(m, 1.6, 0.03, 'NB mean');
+  assert.ok(varr > 1.6 + 0.2, `NB variance ${varr}`);
+  // the total and difference shrink pulls a 4.5-goal game harder than the per-side one
+  const per = M.shrinkPair(2.6, 1.9, { k: 0.8, mh: 1.5, ma: 1.2 }), td = M.shrinkPair(2.6, 1.9, { k: 0.8, mh: 1.5, ma: 1.2, kT: 0.6, kD: 0.92 });
+  assert.ok(td[0] + td[1] < per[0] + per[1]);
+});
+
+test('fix204c: the NFL backtest produces gates from the stored walk-forward games, with before → after and the fits', async () => {
+  const r = rng(3), now = new Date().toISOString();
+  const ins = db.prepare(`INSERT INTO nfl_games (game_id, league, season, kickoff, home_id, home_name, away_id, away_name, status, home_pts, away_pts, updated_at) VALUES (?, 1, ?, ?, ?, 'H', ?, 'A', 'FT', ?, ?, ?)`);
+  const wf = [];
+  let id = 600000;
+  db.exec('BEGIN');
+  for (const season of [2023, 2024, 2025]) {
+    for (let k = 0; k < 330; k++) {
+      const ko = new Date(Date.UTC(season, 8, 5) + k * 4 * 3600e3).toISOString();
+      const edge = 6 * r.n(), total = 44 + 4 * r.n();
+      const hs = Math.max(0, Math.round((total + edge) / 2 + 7 * r.n())), as = Math.max(0, Math.round((total - edge) / 2 + 7 * r.n()));
+      ins.run(++id, season, ko, 1 + (k % 32), 1 + ((k + 7) % 32), hs, as, now);
+      const pHome = 1 / (1 + Math.exp(-edge / 6));
+      wf.push([id, Math.round(pHome * 1e4) / 1e4, Math.round(edge * 10) / 10, Math.round((total + 3) * 10) / 10]); // says 3 points too many
+    }
+  }
+  db.exec('COMMIT');
+  db.prepare(`INSERT OR REPLACE INTO nfl_sync (key, at, detail) VALUES ('more-wf-1', ?, ?)`).run(now, JSON.stringify(wf));
+  const out = await mp.runBacktests('nfl');
+  assert.ok(out.nfl && out.nfl.games > 300, JSON.stringify(out));
+  const gates = db.prepare(`SELECT output, public, games FROM more_pred_gate WHERE sport = 'nfl'`).all();
+  assert.deepEqual(gates.map(g => g.output).sort(), [...mp.MORE_KEYS.nfl].sort());
+  assert.ok(gates.filter(g => g.output !== 'half').every(g => g.games > 300), 'every output but the first half (no quarter scores here)');
+  const rep = mp.backtestReports().find(x => x.sport === 'nfl');
+  assert.ok(rep.before && rep.before.total && rep.diag && rep.diag.leagues['1'], 'before → after and the cause stored');
+  close(rep.diag.leagues['1'].bT, 3, 1, 'the cause: 3 points too many');
+  const src = db.prepare(`SELECT json FROM more_pred_fit WHERE sport = 'nfl' AND league = 'source'`).get();
+  assert.ok(src && JSON.parse(src.json).leagues['1'], 'live fit stored');
+  assert.match(mp.backtestMarkdown(), /American football[\s\S]*Worst step before → after/);
+});
+
+test("fix204c: an expected total outside the league's range ± 3 SD is flagged", () => {
+  const range = { mean: 225, sd: 18 };
+  assert.equal(mp.rangeAlarm(232, range), null);
+  assert.match(mp.rangeAlarm(160, range) || '', /outside 171–279/);
+  assert.equal(mp.rangeAlarm(160, null), null);
+});
+
+test('fix204c: tennis total games — the group bias moves the chain\x27s games distribution, the sets stay at 100%', () => {
+  const dist = tm.tennisExtrasDist(0.64, 0.6, 3, 0);
+  const rows = Array.from({ length: 400 }, (_, i) => ({ group: 'atp|bo3|clay', tour: 'atp', pred: C.meanOf(dist.games), actual: C.meanOf(dist.games) - 1.5 + (i % 3) - 1 }));
+  const src = mp.fitTennisSource(rows);
+  close(src.groups['atp|bo3|clay'].bias, 1.5, 0.01, 'group bias');
+  const raw = mp.tennisMake({ group: 'atp|bo3|clay', tour: 'atp', dist, bo: 3 }, null), fixed = mp.tennisMake({ group: 'atp|bo3|clay', tour: 'atp', dist, bo: 3 }, src);
+  close(C.meanOf(C.shiftGames(dist.games, 1.5)), C.meanOf(dist.games) - 1.5, 0.05, 'mean moved by the bias');
+  assert.ok(fixed.sets.games.p[0] > raw.sets.games.p[0], 'fewer games: more weight in the lowest band');
+  for (const [k, set] of Object.entries(fixed.sets)) close(sum(set.p), 1, 1e-9, `${k} sums`);
+  assert.deepEqual(fixed.sets.sets.p, raw.sets.sets.p, 'set score untouched by the games bias');
+  // a group with few matches falls back to its tour
+  close(mp.tennisMake({ group: 'atp|bo3|grass', tour: 'atp', dist, bo: 3 }, src).info.gamesBias, 1.5, 0.01, 'tour fallback');
+  assert.equal(mp.tennisGroup('wta', 3, 'Hard (indoor)'), 'wta|bo3|hard');
+});

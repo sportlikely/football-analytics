@@ -15,6 +15,8 @@
  * cuts[k-1] ≤ value < cuts[k] → label k, value ≥ the last cut → the last label.
  */
 
+import { dcGrid, gammaPoints } from './moreCalib';
+
 export type MoreSport = 'football' | 'basketball' | 'nfl' | 'tennis';
 export interface PSet { labels: string[]; p: number[]; cuts?: number[] }
 export interface Extras {
@@ -46,8 +48,22 @@ export function normInv(p: number): number {
 }
 
 /** probabilities of the bins of N(mu, sd) cut at `cuts` (cut values are already half-integers or edges) */
-function binsOf(mu: number, sd: number, cuts: number[]): number[] {
-  const cdf = cuts.map(c => normCdf((c - mu) / sd));
+/**
+ * fix204c: the measured shape of the misses — K quantiles of the standardised misses at (k + ½) / K; between them
+ * linear, outside them the normal tail scaled to meet the end quantile. null = the normal curve.
+ */
+export function shapeCdf(q: number[] | null | undefined, z: number): number {
+  if (!q || q.length < 5) return normCdf(z);
+  const K = q.length, P = (k: number) => (k + 0.5) / K;
+  if (z <= q[0]) return P(0) * normCdf(z) / Math.max(1e-9, normCdf(q[0]));
+  if (z >= q[K - 1]) return 1 - (1 - P(K - 1)) * (1 - normCdf(z)) / Math.max(1e-9, 1 - normCdf(q[K - 1]));
+  let lo = 0, hi = K - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (q[m] <= z) lo = m; else hi = m; }
+  const w = q[hi] - q[lo];
+  return w > 0 ? P(lo) + ((z - q[lo]) / w) * (P(hi) - P(lo)) : P(hi);
+}
+function binsOf(mu: number, sd: number, cuts: number[], shape: number[] | null = null): number[] {
+  const cdf = cuts.map(c => shapeCdf(shape, (c - mu) / sd));
   const out: number[] = [];
   for (let k = 0; k <= cuts.length; k++) out.push((k === cuts.length ? 1 : cdf[k]) - (k === 0 ? 0 : cdf[k - 1]));
   return out.map(x => Math.max(0, x));
@@ -77,7 +93,14 @@ export const HTFT = ['H/H', 'H/D', 'H/A', 'D/H', 'D/D', 'D/A', 'A/H', 'A/D', 'A/
  * averaged 3.4). The full-time extras pull each side's expected goals toward the average by k (fitted on earlier seasons:
  * goals = m + k·(xg − m)); the main pick and its 1X2 are not touched.
  */
-export interface GoalShrink { k: number; mh: number; ma: number }
+export interface GoalShrink {
+  k: number; mh: number; ma: number;
+  /**
+   * fix204c: the total and the difference shrunk apart (walk-forward 2425–2627: the two sides' errors move together, so
+   * the total needs more pull than each side — games put at 4+ goals after the per-side shrink still scored 0.4 fewer)
+   */
+  kT?: number; kD?: number;
+}
 /**
  * fix204b: before the server has its own fit, never "no shrink": k between the local walk-forward fits (2526 0.877,
  * 2627 0.791), averages = typical league goals per side
@@ -93,38 +116,83 @@ export function fitGoalShrink(rows: { xh: number; xa: number; hg: number; ag: nu
   for (const r of rows) { cov += (r.xh - xmh) * (r.hg - mh) + (r.xa - xma) * (r.ag - ma); v += (r.xh - xmh) ** 2 + (r.xa - xma) ** 2; }
   return v > 0 ? { k: Math.round(Math.min(1, Math.max(0.3, cov / v)) * 1000) / 1000, mh: Math.round(mh * 1000) / 1000, ma: Math.round(ma * 1000) / 1000 } : null;
 }
+/**
+ * fix204c: k for the total (kT) and for the difference (kD) by least squares, on top of the per-side fit; each row
+ * centred on its group's means (a league with 300+ games is its own group: its scoring level is not the model's error)
+ */
+export function fitGoalShrinkTD(rows: { xh: number; xa: number; hg: number; ag: number; league?: string }[]): GoalShrink | null {
+  const base = fitGoalShrink(rows);
+  if (!base) return null;
+  const size = new Map<string, number>();
+  for (const r of rows) size.set(r.league || '*', (size.get(r.league || '*') || 0) + 1);
+  const grp = rows.map(r => ((size.get(r.league || '*') || 0) >= 300 ? r.league || '*' : '*'));
+  const slope = (x: number[], y: number[]) => {
+    const n = x.length, gx = new Map<string, [number, number, number]>();
+    for (let i = 0; i < n; i++) { const a = gx.get(grp[i]) || [0, 0, 0]; a[0] += x[i]; a[1] += y[i]; a[2]++; gx.set(grp[i], a); }
+    let c = 0, v = 0;
+    for (let i = 0; i < n; i++) { const a = gx.get(grp[i])!, mx = a[0] / a[2], my = a[1] / a[2]; c += (x[i] - mx) * (y[i] - my); v += (x[i] - mx) ** 2; }
+    return v > 0 ? Math.round(Math.min(1.5, Math.max(0.2, c / v)) * 1000) / 1000 : base.k;
+  };
+  return { ...base, kT: slope(rows.map(r => r.xh + r.xa), rows.map(r => r.hg + r.ag)), kD: slope(rows.map(r => r.xh - r.xa), rows.map(r => r.hg - r.ag)) };
+}
+/** each side's expected goals after the shrink (per side, or total and difference apart when fitted) */
+export function shrinkPair(xh: number, xa: number, s: GoalShrink | null): [number, number] {
+  if (!s) return [xh, xa];
+  if (s.kT === undefined || s.kD === undefined) return [shrinkGoals(xh, s.mh, s.k), shrinkGoals(xa, s.ma, s.k)];
+  const T = s.mh + s.ma + s.kT * (xh + xa - s.mh - s.ma), D = s.mh - s.ma + s.kD * (xh - xa - (s.mh - s.ma));
+  return [Math.max(0.05, (T + D) / 2), Math.max(0.05, (T - D) / 2)];
+}
 
-export function footballExtras(xgHome0: number, xgAway0: number, htShare = DEFAULT_HT_SHARE, shrink: GoalShrink | null = null): Extras {
-  const xgHome = shrink ? shrinkGoals(xgHome0, shrink.mh, shrink.k) : xgHome0, xgAway = shrink ? shrinkGoals(xgAway0, shrink.ma, shrink.k) : xgAway0;
-  const ph = poissonVec(xgHome), pa = poissonVec(xgAway);
+/**
+ * fix204c: the goal-count model of one league — Dixon–Coles ρ on the low scores and, when its goals are over-dispersed,
+ * negative-binomial counts of that size per side (null = Poisson). Without it: the fix204 independent Poisson grid.
+ */
+export interface GoalModel { rho: number; sizeH: number | null; sizeA: number | null }
+
+/** half-time and HT/FT from the two halves (independent given each side's rate; a gamma-mixed rate when dispersed) */
+function halves(lh: number, la: number, s: number, sizeH: number | null, sizeA: number | null) {
+  const gh = sizeH ? gammaPoints(sizeH) : [1], ga = sizeA ? gammaPoints(sizeA) : [1];
+  const ht = [0, 0, 0], htft = new Array(9).fill(0);
+  const res = (d: number) => (d > 0 ? 0 : d === 0 ? 1 : 2);
+  const w = 1 / (gh.length * ga.length);
+  for (const xh of gh) for (const xa of ga) {
+    const h1 = poissonVec(lh * xh * s), a1 = poissonVec(la * xa * s);
+    const d2 = diffVec(lh * xh * (1 - s), la * xa * (1 - s));
+    for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
+      const q = h1[i] * a1[j] * w;
+      if (q < 1e-12) continue;
+      const r1 = res(i - j);
+      ht[r1] += q;
+      for (let k = 0; k < d2.length; k++) { const d = i - j + k - MAXG; htft[r1 * 3 + res(d)] += q * d2[k]; }
+    }
+  }
+  return { ht, htft };
+}
+
+export function footballExtras(xgHome0: number, xgAway0: number, htShare = DEFAULT_HT_SHARE, shrink: GoalShrink | null = null, gm: GoalModel | null = null): Extras {
+  const [xgHome, xgAway] = shrinkPair(xgHome0, xgAway0, shrink);
+  // the full-time grid: independent Poisson (fix204) or the league's Dixon–Coles / negative-binomial grid (fix204c)
+  const grid: number[][] = gm ? dcGrid(xgHome, xgAway, gm.rho, gm.sizeH, gm.sizeA) : (() => { const a = poissonVec(xgHome), b = poissonVec(xgAway); return a.map(x => b.map(y => x * y)); })();
+  const ph = grid.map(row => row.reduce((s, q) => s + q, 0)), pa = grid[0].map((_, j) => grid.reduce((s, row) => s + row[j], 0));
   const score: PSet = { labels: [], p: [] };
   let other = 1;
-  for (let i = 0; i <= 5; i++) for (let j = 0; j <= 5; j++) { const q = ph[i] * pa[j]; score.labels.push(`${i}-${j}`); score.p.push(q); other -= q; }
+  for (let i = 0; i <= 5; i++) for (let j = 0; j <= 5; j++) { const q = grid[i][j]; score.labels.push(`${i}-${j}`); score.p.push(q); other -= q; }
   score.labels.push('other'); score.p.push(Math.max(0, other));
   const goals = [0, 0, 0, 0, 0];
   let w2h = 0, w2a = 0;
   for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
-    const q = ph[i] * pa[j];
+    const q = grid[i][j];
     goals[Math.min(4, i + j)] += q;
     if (i - j >= 2) w2h += q;
     if (j - i >= 2) w2a += q;
   }
-  const team = (v: number[]) => [v[0], v[1], v[2], 1 - v[0] - v[1] - v[2]];
+  const team = (v: number[]) => [v[0], v[1], v[2], Math.max(0, 1 - v[0] - v[1] - v[2])];
   // halves: first-half rates = full-time rates × share; the second half the rest (independent of the first)
   const s = Math.min(0.7, Math.max(0.3, htShare));
   // (the halves keep the model's own expected goals: the shrink made half-time worse on the later seasons, log loss 1.0522 vs 1.0516)
-  const h1 = poissonVec(xgHome0 * s), a1 = poissonVec(xgAway0 * s);
-  const d2 = diffVec(xgHome0 * (1 - s), xgAway0 * (1 - s));
-  const ht = [0, 0, 0], htft = new Array(9).fill(0);
-  const res = (d: number) => (d > 0 ? 0 : d === 0 ? 1 : 2);
-  for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
-    const q = h1[i] * a1[j];
-    if (q < 1e-12) continue;
-    const r1 = res(i - j);
-    ht[r1] += q;
-    for (let k = 0; k < d2.length; k++) { const d = i - j + k - MAXG; htft[r1 * 3 + res(d)] += q * d2[k]; }
-  }
-  const grid6 = Array.from({ length: 6 }, (_, i) => Array.from({ length: 6 }, (_, j) => Math.round(ph[i] * pa[j] * 1000) / 10));
+  const [hh, ha] = gm ? [xgHome, xgAway] : [xgHome0, xgAway0];
+  const { ht, htft } = halves(hh, ha, s, gm?.sizeH ?? null, gm?.sizeA ?? null);
+  const grid6 = Array.from({ length: 6 }, (_, i) => Array.from({ length: 6 }, (_, j) => Math.round(grid[i][j] * 1000) / 10));
   return {
     sport: 'football', v: 1,
     sets: {
@@ -139,7 +207,7 @@ export function footballExtras(xgHome0: number, xgAway0: number, htShare = DEFAU
       ht: { labels: ['H', 'D', 'A'], p: norm1(ht) },
       htft: { labels: HTFT, p: norm1(htft) }
     },
-    info: { xg: [round2(xgHome0), round2(xgAway0)], grid6, htShare: round3(s), ...(shrink ? { shrink: shrink.k } : {}) }
+    info: { xg: [round2(xgHome0), round2(xgAway0)], grid6, htShare: round3(s), ...(shrink ? { shrink: shrink.k } : {}), ...(gm ? { rho: gm.rho, nb: [gm.sizeH, gm.sizeA] } : {}) }
   };
 }
 
@@ -169,6 +237,10 @@ export interface NormalIn {
   /** home win chance (0–1), predicted margin (home − away), total, each side's points */
   pHome: number; margin: number; total: number; homePts: number; awayPts: number;
   fit: LeagueFit;
+  /** fix204c: the measured spreads of the total and each side (league bias fit; default: the model spreads) */
+  sdT?: number; sdHome?: number; sdAway?: number;
+  /** fix204c: the measured shape of the total's and each side's misses (quantiles of the standardised misses) */
+  shapeT?: number[] | null; shapeTeam?: number[] | null;
 }
 
 /** the margin's spread that turns the predicted margin into our own win chance (league spread when they disagree) */
@@ -186,6 +258,9 @@ function threeWay(mu: number, sd: number, k: number): [number, number, number] {
 }
 const intCuts = (edges: number[]) => edges.map(e => e - 0.5);
 
+/** the spread of one side's points the bands use (from the total's and the margin's) */
+export const teamSd = (sigmaT: number, sdMargin: number) => Math.sqrt(sigmaT ** 2 + sdMargin ** 2) / 2;
+
 export function normalExtras(x: NormalIn): Extras {
   const B = SPORT_BANDS[x.sport], f = x.fit;
   const { mu, sd } = marginSpread(x.pHome, x.margin, f.sigma);
@@ -197,7 +272,7 @@ export function normalExtras(x: NormalIn): Extras {
   const totalLabels = [`<${tEdges[0]}`, `${tEdges[0]}–${tEdges[1] - 1}`, `${tEdges[1]}–${tEdges[2] - 1}`, `${tEdges[2]}–${tEdges[3] - 1}`, `${tEdges[3]}+`];
   const wt = B.teamWidth, a1 = Math.round(f.meanTotal / 2 - wt), aEdges = [a1, a1 + wt, a1 + 2 * wt];
   const teamLabels = [`<${aEdges[0]}`, `${aEdges[0]}–${aEdges[1] - 1}`, `${aEdges[1]}–${aEdges[2] - 1}`, `${aEdges[2]}+`];
-  const sdTeam = Math.sqrt(f.sigmaT ** 2 + sd ** 2) / 2;
+  const sdTeam = teamSd(f.sigmaT, sd);
   const s = Math.min(0.65, Math.max(0.35, f.share));
   const half = threeWay(s * mu, sd * Math.sqrt(s), f.kHalf);
   const pT0 = normCdf((0.5 - mu) / sd) - normCdf((-0.5 - mu) / sd);
@@ -206,9 +281,9 @@ export function normalExtras(x: NormalIn): Extras {
     sport: x.sport, v: 1,
     sets: {
       margin: { labels: [...B.marginLabels], p: norm1(marginP), cuts: [...B.margin] },
-      total: { labels: totalLabels, p: norm1(binsOf(x.total, f.sigmaT, intCuts(tEdges))), cuts: tEdges },
-      homePts: { labels: teamLabels, p: norm1(binsOf(x.homePts, sdTeam, intCuts(aEdges))), cuts: aEdges },
-      awayPts: { labels: teamLabels, p: norm1(binsOf(x.awayPts, sdTeam, intCuts(aEdges))), cuts: aEdges },
+      total: { labels: totalLabels, p: norm1(binsOf(x.total, x.sdT || f.sigmaT, intCuts(tEdges), x.shapeT)), cuts: tEdges },
+      homePts: { labels: teamLabels, p: norm1(binsOf(x.homePts, x.sdHome || sdTeam, intCuts(aEdges), x.shapeTeam)), cuts: aEdges },
+      awayPts: { labels: teamLabels, p: norm1(binsOf(x.awayPts, x.sdAway || sdTeam, intCuts(aEdges), x.shapeTeam)), cuts: aEdges },
       half: { labels: ['H', 'D', 'A'], p: norm1(half) },
       ot: { labels: ['yes', 'no'], p: [ot, 1 - ot] }
     },

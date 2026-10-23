@@ -79,13 +79,176 @@ fit is redone daily on the server.
 - Margin bands: the "loser" row reads "<other team> wins instead" (new string: "{0} wins" is translated as a count of
   wins in the six languages).
 
+## fix204c (23 Oct 2026): causes, fixes at the source, calibration layer, NFL / college now
+
+**Server gates after fix204b** (worst 10% step, points): football total goals 10.8, away goals 3.1, away clean sheet 5.3,
+HT/FT 6.6; basketball margin 7.7, total 27.9, home points 14.5, away points 20.4, first half 4.9, overtime 3.3; tennis set
+score 7.2, total games 13.2, tie-break 7.5; NFL / college "no backtest yet" (examples: Pacers – Mavericks total 240+ 48%,
+home 120+ 59%; Barça – Real Madrid total goals 4+ 53%).
+
+### Causes found (walk-forward data)
+
+- **Football total goals / 4+:** not dispersion — goals are *under*-dispersed against Poisson (0.82–1.16 per division,
+  0.91–1.02 by expected-goals band), so the negative binomial almost never applies (dispersion over 1.1 only in USA and
+  NOR home goals). The cause is the mean: the two sides' expected-goals errors move together, so the per-side shrink
+  (k 0.79) left the total too far from the average — games the model put at 4+ goals scored 3.57 on average, and 4+
+  happened 46% where fix204b said 56%. Second cause: the shrink pulled every league toward the pooled average (~2.7
+  goals), pushing low-scoring Argentina (2.04 goals) up to 2.38 expected and the Bundesliga down. Barça – Real (≈4.5
+  expected goals raw) sits in the 4+ band: said 56% (fix204b) → 49% now → happened 46% for that band.
+- **Basketball points (local copy):** the bias per league is small (|bias| ≤ 1.2 points except FEC 2.2; NBA +0.6),
+  spread ratios 0.88–1.27 (CBA 1.27: its bands were too narrow). The real cause is the **slope**: actual totals move only
+  0.3–0.85 of the way the predicted total moves away from the league's usual score (sport-wide 0.74), so the open-ended
+  outer bands ("175+", "<145") were over-said; and the misses are **fat-tailed** (kurtosis 6.4 vs 3 for a normal curve:
+  more games near the centre, more far out). The server's 27.9 / 14.5 / 20.4 are far bigger than the local 7.7 / 7 / 9:
+  the server data (more leagues, the new season) must carry real per-league biases — its cause table is in the admin
+  view and in `?format=md` (same columns as below).
+- **Tennis, NFL / college:** not in the local copy (no tables). The server backtest writes their cause tables (tennis:
+  total-games bias and spread ratio per tour / best-of / surface, tie-break and straight sets said vs happened by the
+  favourite's chance; NFL / college: the points table).
+
+### What changed (all fitted walk-forward: each period only from the games before it)
+
+- **Football:** goal counts from a **Dixon–Coles grid** (dixonColes.ts τ; ρ fitted per division with 300+ games, pooled
+  otherwise) with the **total and the difference shrunk apart** (kT 0.42 / kD 0.92 on the 10 Oct copy, least squares
+  with each division centred on its own means) **toward each division's own average goals**; negative-binomial counts
+  (gamma-mixed Poisson) when a division's dispersion is over 1.1. Half-time and HT/FT now use the shrunk means too. The
+  main pick and its 1X2 are untouched.
+- **Basketball / NFL / college:** per league (300+ games in the last ~13 months, else sport-wide): bias removed, the
+  prediction pulled toward the league's mean prediction by the fitted slope, the measured spread (spread ratio), and the
+  measured **shape** of the misses (39 quantiles, sport-wide) instead of the normal curve for the total and team-point
+  bands. The margin bands and the win chance are untouched.
+- **Tennis:** total games shifted by the bias of its tour / best-of / surface group (300+ matches, else the tour, else all).
+- **Calibration layer** (`more_pred_calib`): per output, Platt (two outcomes) or isotonic (per label with 1,000+
+  forecasts and ≤ 10 labels, else pooled), renormalised to 100% (margin: "the other side wins" keeps its chance). Fitted
+  only on out-of-sample predictions (each season predicted with fits from the seasons before it), 3,000+ of them, and kept
+  only when — fitted on the first 70% in time — it lowers both the worst step and the log loss on the last 30%. Applied
+  when saving; a new fit re-saves the upcoming games (the row's `calc` stamp).
+- **NFL / college now:** when no weekly report is stored, the backtest builds it from the stored history (the same
+  walk-forward as the Tuesday report; 200+ finished games needed).
+- **Sanity rules:** no regular game with > 85% in one band (fix204b), and a basketball / NFL expected total outside the
+  league's usual range ± 3 SD (finished games of the last ~13 months) → logged, that game's extras admin-only.
+- Heavy work: the backtests run in the heavy() queue (start-up, daily and the admin POST), sliced every ~30 ms, waiting
+  for live ticks.
+
+### Before → after (local walk-forward, 10 Oct copy)
+
+Football: log loss better on 9 of 10 outputs (equal on home goals); total goals now passes (10.8 → 2.4); likely scores
+fail on one thin step (20%+: 173 forecasts of 0-0 in low-scoring games, said 23 → happened 15). Basketball: margin
+10.4 → 5.6, total 7.7 → 5.7, away points 9 → 3.6, overtime 5.2 → 0.4 (public); log loss better for margin, total, first
+half and overtime, **slightly worse for home / away points** (+0.0007 / +0.002) — kept because they are the fixes asked
+for and the server's biases are far bigger than the local ones; check the server numbers. The worst step of a thin bin
+(100–300 forecasts) moves by ±3–5 points by chance alone (174 forecasts at 50%: ±3.8-point standard error), so the
+3-point gate on those bins is partly luck; log loss is the steadier measure.
+
+### Football (local, 10 Oct copy)
+
+grid-v3 walk-forward predictions, seasons 2425, 2526, 2627 (15486 games); test 2526, 2627 (12017 games), goal model and calibration from the seasons before each; before = fix204b (shrink k 2526: 0.877, 2627: 0.791, independent Poisson) (run 2026-10-23 17:52 UTC).
+
+| Output | Games | Worst step before → after | Log loss before → after | Top pick right | Public |
+|---|---:|---:|---:|---:|---|
+| Likely scores (exact) | 12,017 | 0 → 8.4 | 2.8979 → 2.8938 | 12.6% | no (admin only) |
+| Total goals 0/1/2/3/4+ | 12,017 | 10.8 → 2.4 | 1.523 → 1.5184 | 29.9% | **yes** |
+| Home goals 0/1/2/3+ | 12,017 | 2.9 → 2.1 | 1.3306 → 1.3287 | 35.7% | **yes** |
+| Away goals 0/1/2/3+ | 12,017 | 3.1 → 5.5 | 1.2959 → 1.2946 | 36.6% | no (admin only) |
+| Home clean sheet | 12,017 | 1.9 → 1.9 | 0.6008 → 0.6004 | 69.3% | **yes** |
+| Away clean sheet | 12,017 | 5.3 → 4.4 | 0.5168 → 0.5156 | 77.4% | no (admin only) |
+| Home win by 2+ | 12,017 | 2.6 → 2.9 | 0.4901 → 0.49 | 78.8% | **yes** |
+| Away win by 2+ | 12,017 | 1.7 → 3 | 0.3558 → 0.3557 | 87.4% | **yes** |
+| Half-time result | 7,184 | 1.1 → 3 | 1.0516 → 1.0509 | 43.8% | **yes** |
+| HT/FT (9) | 7,184 | 6.6 → 9 | 1.9069 → 1.9058 | 29.7% | no (admin only) |
+
+Cause (all walk-forward games; live shrink: each side k 0.787, total kT 0.418, difference kD 0.92): expected goals raw / shrunk vs goals, dispersion = actual variance ÷ Poisson variance (shrunk means), 4+ goals said (fix204b) vs happened:
+
+| Division | Games | Expected raw → shrunk | Goals | Dispersion | 4+ said → happened | ρ | NB size H / A |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| B1 | 680 | 2.7 → 2.73 | 2.75 | 1.06 | 28.9 → 29 | -0.08 | – / – |
+| SC0 | 498 | 2.94 → 2.88 | 2.84 | 0.91 | 33 → 31.9 | -0.005 | – / – |
+| P1 | 668 | 2.61 → 2.62 | 2.63 | 0.85 | 27.4 → 28.7 | 0.02 | – / – |
+| T1 | 695 | 2.77 → 2.8 | 2.82 | 1.04 | 30.2 → 31.5 | -0.095 | – / – |
+| N1 | 670 | 3.09 → 3.13 | 3.15 | 0.91 | 35.7 → 38.2 | -0.045 | – / – |
+| SP1 | 829 | 2.72 → 2.7 | 2.69 | 0.9 | 29.3 → 25.9 | 0.015 | – / – |
+| E0 | 810 | 3.01 → 2.91 | 2.84 | 0.9 | 34.2 → 31.5 | -0.08 | – / – |
+| F1 | 657 | 2.99 → 2.93 | 2.89 | 1.04 | 33.9 → 33.9 | -0.03 | – / – |
+| G1 | 500 | 2.52 → 2.51 | 2.51 | 0.88 | 25.8 → 22.4 | -0.09 | – / – |
+| I1 | 810 | 2.57 → 2.54 | 2.52 | 0.91 | 26.6 → 24.3 | -0.03 | – / – |
+| D1 | 648 | 3.24 → 3.23 | 3.22 | 0.97 | 38.2 → 43.8 | -0.08 | – / – |
+| ARG | 922 | 2.09 → 2.06 | 2.04 | 0.95 | 19 → 14.1 | -0.105 | – / – |
+| JPN | 454 | 2.53 → 2.51 | 2.5 | 1.09 | 26.1 → 23.6 | 0.09 | – / – |
+| USA | 943 | 3.21 → 3.15 | 3.11 | 1.05 | 37.6 → 37.3 | -0.025 | – / – |
+| BRA | 652 | 2.68 → 2.62 | 2.58 | 0.88 | 28.5 → 24.8 | -0.01 | – / – |
+| NOR | 404 | 3.15 → 3.17 | 3.18 | 0.96 | 36.7 → 38.9 | -0.045 | – / – |
+| SWE | 413 | 2.95 → 2.91 | 2.87 | 1.05 | 33.2 → 30 | -0.03 | – / – |
+| MEX | 423 | 3.01 → 2.95 | 2.91 | 1.04 | 34.3 → 33.8 | -0.04 | – / – |
+| DNK | 243 | 3.28 → 2.97 | 3.05 | 0.98 | 38.9 → 35 | – | – |
+| POL | 379 | 2.87 → 2.82 | 2.78 | 0.97 | 31.8 → 30.1 | -0.135 | – / – |
+| D2 | 357 | 3.11 → 3.03 | 2.97 | 1.02 | 35.9 → 31.9 | 0.01 | – / – |
+| SC1 | 221 | 2.54 → 2.66 | 2.36 | 0.98 | 26.2 → 22.2 | – | – |
+| E2 | 634 | 2.72 → 2.7 | 2.68 | 0.95 | 29.3 → 28.7 | 0.03 | – / – |
+| E1 | 647 | 2.69 → 2.67 | 2.65 | 0.83 | 28.8 → 26.7 | -0.07 | – / – |
+| F2 | 361 | 2.6 → 2.58 | 2.56 | 1.19 | 27.2 → 27.1 | -0.035 | – / 11.14 |
+| SP2 | 545 | 2.71 → 2.67 | 2.63 | 1.03 | 29.2 → 27.9 | -0.005 | – / – |
+| I2 | 423 | 2.64 → 2.59 | 2.56 | 0.84 | 27.9 → 25.5 | -0.085 | – / – |
+
+| Expected total (raw) | Games | Shrunk | Goals | Dispersion | 4+ said (fix204b) → after → happened |
+|---|---:|---:|---:|---:|---:|
+| 0–2 | 857 | 2.14 | 2.13 | 0.93 | 14.6 → 17 → 15.6 |
+| 2–2.5 | 3,749 | 2.48 | 2.48 | 0.96 | 21.8 → 23.8 → 23.6 |
+| 2.5–3 | 5,712 | 2.75 | 2.7 | 0.96 | 29.5 → 29.8 → 28.6 |
+| 3–3.5 | 3,634 | 3.01 | 2.99 | 0.98 | 37.7 → 35.4 → 35.1 |
+| 3.5–4 | 1,222 | 3.25 | 3.22 | 0.95 | 46.1 → 40.8 → 39.9 |
+| 4+ | 312 | 3.55 | 3.57 | 1.03 | 56.2 → 47.4 → 46.2 |
+
+### Basketball (local, 10 Oct copy)
+
+bb-v3 walk-forward predictions of 18 leagues (26085 games); test = each league's last two seasons (7949 games), fits and calibration from the games before each (run 2026-10-23 17:52 UTC). Calibration layer on: margin, half, ot.
+
+| Output | Games | Worst step before → after | Log loss before → after | Top pick right | Public |
+|---|---:|---:|---:|---:|---|
+| Winning margin bands | 7,949 | 10.4 → 5.6 | 1.5208 → 1.5085 | 24.6% | no (admin only) |
+| Total points bands | 7,949 | 7.7 → 5.7 | 1.5208 → 1.5203 | 31.5% | no (admin only) |
+| Home points bands | 7,949 | 7 → 4.7 | 1.2725 → 1.2732 | 39.5% | no (admin only) |
+| Away points bands | 7,949 | 9 → 3.6 | 1.296 → 1.298 | 37.5% | no (admin only) |
+| First-half winner | 7,946 | 5.9 → 6.7 | 0.7738 → 0.7724 | 61.8% | no (admin only) |
+| Overtime | 7,949 | 5.2 → 0.4 | 0.1871 → 0.1855 | 95.4% | **yes** |
+
+Cause, per league (all walk-forward games): bias = predicted − actual (points); slope = how much of a prediction's distance from the league's usual score really happens (1 = all of it); spread ratio = corrected misses ÷ the spread the bands used:
+
+| League | Games | Predicted total | Actual | Bias total / home / away | Slope total / home / away | Spread ratio total / home / away |
+|---|---:|---:|---:|---:|---:|---:|
+| BSN | 1,225 | 178.7 | 178.8 | -0.11 / -0.08 / -0.03 | 0.791 / 0.733 / 0.793 | 1.057 / 1.03 / 1.035 |
+| BCL | 832 | 161.5 | 161.8 | -0.25 / -0.31 / 0.06 | 0.449 / 0.809 / 0.605 | 0.893 / 0.952 / 0.931 |
+| LNB | 1,203 | 166.7 | 166.9 | -0.15 / -0.02 / -0.12 | 0.784 / 0.973 / 0.797 | 0.945 / 0.994 / 0.976 |
+| LKL | 821 | 170.8 | 171.4 | -0.59 / -0.65 / 0.06 | 0.692 / 0.942 / 0.784 | 1.067 / 1.098 / 1.088 |
+| FEC | 787 | 162.7 | 160.5 | 2.22 / 0.94 / 1.28 | 0.475 / 0.85 / 0.735 | 1.023 / 1.076 / 1.056 |
+| BBL | 1,343 | 168.5 | 168.7 | -0.19 / -0.07 / -0.13 | 0.689 / 0.824 / 0.763 | 1.048 / 1.064 / 1.037 |
+| ACB | 1,320 | 169.2 | 169.8 | -0.66 / -0.27 / -0.39 | 0.78 / 0.952 / 0.764 | 0.925 / 0.981 / 0.953 |
+| JBL | 3,081 | 158.8 | 159.3 | -0.45 / -0.18 / -0.27 | 0.773 / 0.839 / 0.83 | 0.879 / 0.941 / 0.94 |
+| NBA | 5,285 | 228.8 | 228.2 | 0.57 / 0.29 / 0.28 | 0.845 / 0.862 / 0.885 | 1.035 / 1.028 / 1.028 |
+| ABA | 925 | 167.2 | 167.2 | 0.03 / 0.13 / -0.1 | 0.588 / 0.943 / 0.849 | 0.983 / 1.044 / 1.007 |
+| BSL | 1,066 | 166.5 | 167.4 | -0.85 / -0.4 / -0.45 | 0.3 / 0.499 / 0.366 | 1.026 / 1.087 / 1.048 |
+| NBL | 673 | 181 | 181.9 | -0.85 / -0.27 / -0.58 | 0.641 / 0.792 / 0.663 | 0.945 / 1.005 / 0.972 |
+| LBA | 1,073 | 166.5 | 166.8 | -0.27 / -0.25 / -0.02 | 0.639 / 0.822 / 0.637 | 0.955 / 0.992 / 0.979 |
+| CBA | 1,978 | 198.3 | 197.1 | 1.18 / 0.45 / 0.73 | 0.816 / 0.873 / 0.832 | 1.272 / 1.215 / 1.204 |
+| EL | 1,431 | 166.6 | 166.6 | 0.05 / 0.01 / 0.04 | 0.731 / 0.751 / 0.757 | 0.974 / 1 / 0.981 |
+| GBL | 725 | 160.8 | 161 | -0.16 / -0.03 / -0.13 | 0.629 / 0.94 / 0.773 | 0.96 / 1.007 / 1.006 |
+| EC | 813 | 167.7 | 167.7 | 0.02 / 0.19 / -0.17 | 0.639 / 0.766 / 0.726 | 1.015 / 1.042 / 1.003 |
+| NBB | 1,504 | 158.7 | 158.9 | -0.24 / -0.12 / -0.12 | 0.733 / 0.824 / 0.905 | 1.005 / 1.025 / 1.03 |
+| all | 26,085 | 181.1 | 181.1 | 0.05 / 0.02 / 0.04 | 0.737 / 0.847 / 0.797 | 1.01 / 1.031 / 1.02 |
+
+**Tried and rejected (out of sample, 10 Oct copy):** the per-side shrink only (total goals 8.7 even with calibration);
+the difference shrunk by the per-side k (win by 2+ better, team goals / clean sheets / half-time worse); halves on the raw
+expected goals (HT/FT 6.6 vs 5.2); calibration fitted on in-sample predictions (half-time 1.1 → 5.9: overfit); one cut per
+season label (calendar-year leagues' "2526" starts in Jan 2025); the basketball slope from all history (total log loss
+1.5227 vs 1.5203 with the last ~13 months); a pooled ρ instead of per division (likely scores 2.8940 vs 2.8938).
+
 # Backtest results (server, live)
 
-Not filled yet: the server can't be reached from the local checkout. After the fix204b deploy (first run ~3 minutes after
-the start; tennis takes a few minutes more) open `/api/admin/more-predictions?format=md` as admin and paste the output
-here, replacing this paragraph.
+Not filled yet: the server can't be reached from the local checkout. After the fix204c deploy (first run ~3 minutes after
+the start for a sport with no report; otherwise `POST /api/admin/more-predictions/backtest?refit=1`) open
+`/api/admin/more-predictions?format=md` as admin and paste the output here (before → after, the cause tables, said vs
+happened), replacing this paragraph.
 
-# Backtest results (walk-forward, run locally on the 10 Oct 2026 database copy)
+# fix204 backtest results (walk-forward, run locally on the 10 Oct 2026 database copy; before the fix204c fixes)
 
 ## Football
 

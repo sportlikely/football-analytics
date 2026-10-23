@@ -16,13 +16,17 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { yieldLoop, heavySlicer, afterLive, after, every, afterHeavy, everyHeavy, heavy } from './perf';
 import {
-  footballExtras, fitGoalShrink, type GoalShrink, normalExtras, tennisExtras, checkSet, calibration, calibrationOk, topIndex, pctSet, normCdf,
-  DEFAULT_HT_SHARE, DEFAULT_GOAL_SHRINK, bandAlarm, type Extras, type LeagueFit, type MoreSport, type PSet, type SetCheck
+  footballExtras, fitGoalShrink, fitGoalShrinkTD, shrinkPair, type GoalShrink, normalExtras, tennisExtras, checkSet, calibration, calibrationOk, topIndex, pctSet, normCdf,
+  DEFAULT_HT_SHARE, DEFAULT_GOAL_SHRINK, bandAlarm, marginSpread, teamSd, type GoalModel, type Extras, type LeagueFit, type MoreSport, type PSet, type SetCheck
 } from '../utils/moreMath';
+import {
+  fitPoints, correctPts, fitRho, fitDispersion, shiftGames, meanOf, calibrateSet, fitOutputCalib, MIN_LEAGUE_GAMES,
+  type PointsFit, type PointsRow, type OutputCalib
+} from '../utils/moreCalib';
 import { GROUPS } from './history';
 import { mainRank } from './tracking';
 import { leagueModelInfo, bbWalkForward } from './bbModel';
-import { nflWalkForward } from './nflModel';
+import { nflWalkForward, buildReport as buildNflReport } from './nflModel';
 import { tennisExtrasDist, tennisServeChances, tennisRuleFor, tennisExtrasWalkForward } from './tennisModel';
 
 db.exec(`
@@ -45,7 +49,7 @@ db.exec(`
   if (!cols.has('flag')) db.exec(`ALTER TABLE prediction_extras ADD COLUMN flag TEXT`);
 }
 /** bump when the maths behind saved rows changes: upcoming games are saved again on the next tick */
-export const MORE_CALC = '204b';
+export const MORE_CALC = '204c';
 
 export const MORE_SPORTS: MoreSport[] = ['football', 'basketball', 'nfl', 'tennis'];
 /** the outputs of each sport, in page order */
@@ -66,6 +70,7 @@ const now = () => new Date().toISOString();
 /* ------------------------------------------------------------------ */
 
 const fitCache = new Map<string, any>();
+// fix202: the worker re-fits daily; the web process reads the stored fits again every 30 minutes
 function storeFit(sport: string, league: string, v: any) {
   db.prepare(`INSERT OR REPLACE INTO more_pred_fit (sport, league, json, at) VALUES (?, ?, ?, ?)`).run(sport, league, JSON.stringify(v), now());
   fitCache.set(`${sport}|${league}`, v);
@@ -207,6 +212,202 @@ export function nflFit(league: number): LeagueFit {
 }
 
 /* ------------------------------------------------------------------ */
+/* fix204c: fixes at the source + the calibration layer                 */
+/* ------------------------------------------------------------------ */
+/*
+ * Fitted by the backtests (runBacktests) on every walk-forward game, stored, applied when saving:
+ *  - more_pred_fit (sport, 'source'): points bias / spread per league (basketball, NFL / college), football goal model per
+ *    division (shrink, Dixon–Coles ρ, negative-binomial size), tennis total-games bias per tour / format / surface;
+ *  - more_pred_calib (sport, output): the final calibration map of each output that still missed on the fitting games.
+ */
+db.exec(`CREATE TABLE IF NOT EXISTS more_pred_calib (sport TEXT NOT NULL, output TEXT NOT NULL, json TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (sport, output))`);
+
+export interface PointsSource { leagues: Record<string, PointsFit>; all: PointsFit | null }
+export interface FootballSource { shrink: GoalShrink; leagues: Record<string, GoalModel & { n: number; dispersion: [number, number]; mh?: number; ma?: number }>; all: GoalModel }
+/** a league with 300+ games is shrunk toward its own average goals (the pooled average pulled low-scoring Argentina up by 0.3) */
+export function shrinkOfLeague(src: FootballSource, league: string | null): GoalShrink {
+  const l = league ? src.leagues[league] : undefined;
+  return l && l.n >= MIN_LEAGUE_GAMES && l.mh !== undefined && l.ma !== undefined ? { ...src.shrink, mh: l.mh, ma: l.ma } : src.shrink;
+}
+export interface TennisSource { groups: Record<string, { n: number; bias: number }>; tours: Record<string, { n: number; bias: number }>; all: { n: number; bias: number } | null }
+type Calibs = Record<string, OutputCalib>;
+
+const calibCache = new Map<string, Calibs>();
+function readCalib(sport: MoreSport): Calibs {
+  if (calibCache.has(sport)) return calibCache.get(sport)!;
+  const out: Calibs = {};
+  for (const r of db.prepare(`SELECT output, json FROM more_pred_calib WHERE sport = ?`).all(sport) as any[]) { try { out[r.output] = JSON.parse(r.json); } catch { /* skip */ } }
+  calibCache.set(sport, out);
+  return out;
+}
+function storeCalib(sport: MoreSport, c: Calibs) {
+  const t = now();
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM more_pred_calib WHERE sport = ?`).run(sport);
+    const ins = db.prepare(`INSERT INTO more_pred_calib (sport, output, json, at) VALUES (?, ?, ?, ?)`);
+    for (const [k, v] of Object.entries(c)) ins.run(sport, k, JSON.stringify(v), t);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  calibCache.set(sport, c);
+}
+/** the version a saved row was made with: the maths + when its fits were stored (a new fit re-saves the upcoming games) */
+function calcStamp(sport: MoreSport): string {
+  const r = db.prepare(`SELECT MAX(at) AS at FROM (SELECT at FROM more_pred_fit WHERE sport = ? AND league = 'source' UNION ALL SELECT at FROM more_pred_calib WHERE sport = ?)`).get(sport, sport) as any;
+  return `${MORE_CALC}${r?.at ? `:${r.at}` : ''}`;
+}
+
+/** every set of an output with a calibration map goes through it (renormalised to 100%) */
+export function applyCalib(x: Extras, c: Calibs | null): Extras {
+  if (!c || !Object.keys(c).length) return x;
+  const sets: Record<string, PSet> = {};
+  for (const [k, s] of Object.entries(x.sets)) sets[k] = c[k] ? calibrateSet(s, c[k]) : s;
+  return { ...x, sets, info: { ...x.info, calibrated: Object.keys(c).filter(k => x.sets[k]) } };
+}
+
+/* ---------- points (basketball, NFL / college) ---------- */
+
+export interface PtsGame { league: string; pHome: number; margin: number; total: number; home: number; away: number; fit: LeagueFit }
+const pointsFitOf = (src: PointsSource | null, league: string): PointsFit | null => {
+  const l = src?.leagues[league];
+  return l && l.n >= MIN_LEAGUE_GAMES ? l : src?.all || null;
+};
+/**
+ * the bands of one game: the total and each side's points corrected (bias removed, pulled toward the league's mean
+ * prediction by the fitted slope), measured spreads; the margin bands and the win chance as they are
+ */
+export function pointsMake(sport: 'basketball' | 'nfl', g: PtsGame, src: PointsSource | null): Extras {
+  const pf = pointsFitOf(src, g.league);
+  if (!pf) return normalExtras({ sport, pHome: g.pHome, margin: g.margin, total: g.total, homePts: g.home, awayPts: g.away, fit: g.fit });
+  // centre: the league's own mean prediction (its fit, even a small one), else its typical total
+  const own = src?.leagues[g.league], mT = own?.mT ?? g.fit.meanTotal, mH = own?.mH ?? g.fit.meanTotal / 2, mA = own?.mA ?? g.fit.meanTotal / 2;
+  const { sd } = marginSpread(g.pHome, g.margin, g.fit.sigma), st = teamSd(g.fit.sigmaT, sd);
+  const x = normalExtras({
+    sport, pHome: g.pHome, margin: g.margin, fit: g.fit,
+    total: correctPts(g.total, mT, pf.bT, pf.kT), homePts: correctPts(g.home, mH, pf.bH, pf.kH), awayPts: correctPts(g.away, mA, pf.bA, pf.kA),
+    sdT: g.fit.sigmaT * pf.rT, sdHome: st * pf.rH, sdAway: st * pf.rA,
+    // the shape of the misses: sport-wide (every league's games)
+    shapeT: src?.all?.qT || null, shapeTeam: src?.all?.qTeam || null
+  });
+  return { ...x, info: { ...x.info, bias: [pf.bT, pf.bH, pf.bA], slope: [pf.kT ?? 1, pf.kH ?? 1, pf.kA ?? 1], spread: [pf.rT, pf.rH, pf.rA] } };
+}
+const ptsRow = (g: PtsGame, hs: number, as: number): PointsRow => ({
+  league: g.league, total: g.total, home: g.home, away: g.away, hs, as, sdT: g.fit.sigmaT, sdTeam: teamSd(g.fit.sigmaT, marginSpread(g.pHome, g.margin, g.fit.sigma).sd)
+});
+export function fitPointsSource(rows: { league: string; row: PointsRow }[]): PointsSource {
+  const by = new Map<string, PointsRow[]>();
+  for (const r of rows) { const l = by.get(r.league) || []; l.push(r.row); by.set(r.league, l); }
+  const leagues: Record<string, PointsFit> = {};
+  for (const [l, rs] of by) { const f = fitPoints(rs); if (f) leagues[l] = f; }
+  return { leagues, all: fitPoints(rows.map(r => r.row)) };
+}
+
+/* ---------- football ---------- */
+
+export interface FbGame { league: string | null; xh: number; xa: number; share: number }
+export function footballMake(g: FbGame, src: FootballSource | null): Extras {
+  if (!src) return footballExtras(g.xh, g.xa, g.share, goalShrink());
+  const l = g.league ? src.leagues[g.league] : undefined;
+  return footballExtras(g.xh, g.xa, g.share, shrinkOfLeague(src, g.league), l && l.n >= MIN_LEAGUE_GAMES ? l : src.all);
+}
+export function fitFootballSource(rows: { league: string; xh: number; xa: number; hg: number; ag: number }[]): FootballSource {
+  const shrink = fitGoalShrinkTD(rows) || DEFAULT_GOAL_SHRINK;
+  const model = (rs: typeof rows, fallback: GoalModel | null, s: GoalShrink) => {
+    const m = rs.map(r => { const [mh, ma] = shrinkPair(r.xh, r.xa, s); return { mh, ma, hg: r.hg, ag: r.ag }; });
+    const dh = fitDispersion(m.map(r => ({ m: r.mh, y: r.hg }))), da = fitDispersion(m.map(r => ({ m: r.ma, y: r.ag })));
+    return { n: rs.length, rho: fitRho(m) ?? fallback?.rho ?? -0.1, sizeH: dh.size, sizeA: da.size, dispersion: [dh.dispersion, da.dispersion] as [number, number] };
+  };
+  const all = model(rows, null, shrink);
+  const by = new Map<string, typeof rows>();
+  for (const r of rows) { const l = by.get(r.league) || []; l.push(r); by.set(r.league, l); }
+  const leagues: FootballSource['leagues'] = {};
+  for (const [l, rs] of by) {
+    if (rs.length < MIN_LEAGUE_GAMES) continue;
+    const mh = Math.round((rs.reduce((a, r) => a + r.hg, 0) / rs.length) * 1000) / 1000, ma = Math.round((rs.reduce((a, r) => a + r.ag, 0) / rs.length) * 1000) / 1000;
+    leagues[l] = { ...model(rs, all, { ...shrink, mh, ma }), mh, ma };
+  }
+  return { shrink, leagues, all: { rho: all.rho, sizeH: all.sizeH, sizeA: all.sizeA } };
+}
+
+/* ---------- tennis ---------- */
+
+type TDist = ReturnType<typeof tennisExtrasDist>;
+export interface TnGame { group: string; tour: string; dist: TDist; bo: number }
+const tennisBiasOf = (src: TennisSource | null, g: { group: string; tour: string }) => {
+  const a = src?.groups[g.group];
+  if (a && a.n >= MIN_LEAGUE_GAMES) return a.bias;
+  const b = src?.tours[g.tour];
+  if (b && b.n >= MIN_LEAGUE_GAMES) return b.bias;
+  return src?.all?.bias || 0;
+};
+export function tennisMake(g: TnGame, src: TennisSource | null): Extras {
+  const bias = tennisBiasOf(src, g);
+  const x = tennisExtras(bias ? { ...g.dist, games: shiftGames(g.dist.games, bias) } : g.dist, g.bo);
+  return bias ? { ...x, info: { ...x.info, gamesBias: Math.round(bias * 100) / 100 } } : x;
+}
+export function fitTennisSource(rows: { group: string; tour: string; pred: number; actual: number }[]): TennisSource {
+  const agg = (rs: typeof rows) => ({ n: rs.length, bias: rs.length ? Math.round((rs.reduce((s, r) => s + r.pred - r.actual, 0) / rs.length) * 100) / 100 : 0 });
+  const groups: TennisSource['groups'] = {}, tours: TennisSource['tours'] = {};
+  const by = (key: (r: (typeof rows)[number]) => string) => { const m = new Map<string, typeof rows>(); for (const r of rows) { const k = key(r); const l = m.get(k) || []; l.push(r); m.set(k, l); } return m; };
+  for (const [k, rs] of by(r => r.group)) groups[k] = agg(rs);
+  for (const [k, rs] of by(r => r.tour)) tours[k] = agg(rs);
+  return { groups, tours, all: rows.length ? agg(rows) : null };
+}
+
+/* ---------- the calibration layer ---------- */
+
+/**
+ * per output (3,000+ out-of-sample predictions), a map only when it helps on games it was not fitted on: fitted on the
+ * first 70% (in time), kept when on the last 30% the worst 10% step gets smaller and the log loss lower (then refitted on
+ * all). Margin: 'the other side wins' keeps its chance.
+ */
+export const MIN_CALIB_GAMES = 3000;
+export function fitCalibs(sport: MoreSport, list: Eval[]): Calibs {
+  const out: Calibs = {};
+  for (const k of MORE_KEYS[sport]) {
+    const items: { p: number[]; i: number; labels: string[] }[] = [];
+    for (const e of list) { const s = e.x.sets[k]; if (!s) continue; const c = checkSet(s, e.actual[k]); if (c) items.push({ p: s.p, i: c.i, labels: s.labels }); }
+    if (items.length < MIN_CALIB_GAMES) continue;
+    const fixed = k === 'margin' ? ['loser'] : [];
+    const cut = Math.floor(items.length * 0.7), fitPart = items.slice(0, cut), val = items.slice(cut);
+    const c0 = fitOutputCalib(fitPart, fixed);
+    if (!c0.pooled && !c0.perLabel) continue;
+    const score = (xs: { p: number[]; i: number }[]) => ({ worst: calibrationOk(calibration(xs)).worst ?? Infinity, ll: xs.reduce((a, x) => a - Math.log(Math.max(1e-4, x.p[x.i])), 0) / xs.length });
+    const was = score(val), now1 = score(val.map(x => ({ p: calibrateSet({ labels: x.labels, p: x.p }, c0).p, i: x.i })));
+    if (!(now1.worst < was.worst && now1.ll < was.ll - 0.0002)) continue;
+    const c = fitOutputCalib(items, fixed);
+    if (c.pooled || c.perLabel) out[k] = { ...c, check: { worst: [r1(was.worst), r1(now1.worst)], logLoss: [r4(was.ll), r4(now1.ll)] } } as OutputCalib;
+  }
+  return out;
+}
+const r4 = (x: number) => Math.round(x * 10000) / 10000;
+
+/* ---------- source fits as stored ---------- */
+
+const pointsSource = (sport: 'basketball' | 'nfl'): PointsSource | null => readFit(sport, 'source');
+const footballSource = (): FootballSource | null => readFit('football', 'source');
+const tennisSource = (): TennisSource | null => readFit('tennis', 'source');
+
+/** sanity rule (fix204c): a league's usual total (finished games of the last ~13 months: mean, SD) */
+const rangeCache = new Map<string, { at: number; v: { mean: number; sd: number; n: number } | null }>();
+export function leagueRange(sport: 'basketball' | 'nfl', key: string | number) {
+  const k = `${sport}|${key}`, hit = rangeCache.get(k);
+  if (hit && Date.now() - hit.at < 6 * 3600 * 1000) return hit.v;
+  const since = new Date(Date.now() - 400 * DAY).toISOString();
+  const r = (sport === 'basketball'
+    ? db.prepare(`SELECT COUNT(*) AS n, AVG(hs + as_) AS m, AVG((hs + as_) * (hs + as_)) AS m2 FROM bb_games WHERE code = ? AND status IN ('FT','AOT') AND hs IS NOT NULL AND as_ IS NOT NULL AND kickoff > ?`).get(String(key), since)
+    : db.prepare(`SELECT COUNT(*) AS n, AVG(home_pts + away_pts) AS m, AVG((home_pts + away_pts) * (home_pts + away_pts)) AS m2 FROM nfl_games WHERE league = ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL AND away_pts IS NOT NULL AND kickoff > ?`).get(Number(key), since)) as any;
+  const v = r && r.n >= 50 ? { mean: r.m, sd: Math.sqrt(Math.max(1, r.m2 - r.m * r.m)), n: r.n } : null;
+  rangeCache.set(k, { at: Date.now(), v });
+  return v;
+}
+/** an expected total outside the league's usual range ± 3 SD: what is wrong, else null */
+export function rangeAlarm(total: number, range: { mean: number; sd: number } | null): string | null {
+  if (!range) return null;
+  return Math.abs(total - range.mean) > 3 * range.sd ? `expected total ${Math.round(total)} outside ${Math.round(range.mean - 3 * range.sd)}–${Math.round(range.mean + 3 * range.sd)}` : null;
+}
+
+/* ------------------------------------------------------------------ */
 /* B. Saving before the start                                           */
 /* ------------------------------------------------------------------ */
 
@@ -221,22 +422,24 @@ export interface SaveStat { at: string; sources: number; saved: number; unchange
 const saveStats = new Map<MoreSport, SaveStat>();
 export const lastSave = (sport: MoreSport) => saveStats.get(sport) || null;
 
-interface Src { id: number; model: string; kickoff: string; at: string; make: () => Extras | null }
+/** make: the extras (fixes + calibration); check: a sanity rule of its own (fix204c: the expected total in the league's range) */
+interface Src { id: number; model: string; kickoff: string; at: string; make: () => Extras | null; check?: (x: Extras) => string | null }
 async function save(sport: MoreSport, list: Src[], opts: { log?: boolean } = {}): Promise<number> {
   const t = now();
   const have = new Map((sourceStmt.all(sport, t) as any[]).map(r => [r.game_id as number, `${r.model}|${r.source_at}|${r.calc}`]));
   const slice = heavySlicer(30);
+  const stamp = calcStamp(sport);
   const out: [Src, Extras, string | null][] = [];
   const st: SaveStat = { at: t, sources: list.length, saved: 0, unchanged: 0, errors: 0, flagged: 0, lastError: null };
   for (const s of list) {
     if (s.kickoff <= t) continue;
-    if (have.get(s.id) === `${s.model}|${s.at}|${MORE_CALC}`) { st.unchanged++; continue; }
+    if (have.get(s.id) === `${s.model}|${s.at}|${stamp}`) { st.unchanged++; continue; }
     try {
       const x = s.make();
       if (!x) continue;
       // sanity check: a band set with > 85% in one band is centred on the wrong league → this game's extras admin-only
-      const alarm = bandAlarm(x);
-      if (alarm) { st.flagged++; logger.warn(`more predictions ${sport} ${s.id}: ${alarm} in one band — admin only`); }
+      const band = bandAlarm(x), alarm = band ? `${band} in one band` : s.check?.(x) || null;
+      if (alarm) { st.flagged++; logger.warn(`more predictions ${sport} ${s.id}: ${alarm} — admin only`); }
       out.push([s, x, alarm]);
     } catch (e: any) { st.errors++; st.lastError = `${s.id}: ${e.message}`; logger.warn(`more predictions ${sport} ${s.id}: ${e.message}`); }
     await slice();
@@ -246,7 +449,7 @@ async function save(sport: MoreSport, list: Src[], opts: { log?: boolean } = {})
     db.exec('BEGIN');
     try {
       // a game that started while we were computing keeps what it had
-      for (const [s, x, alarm] of out) if (Date.parse(s.kickoff) > Date.now()) { upsert.run(sport, s.id, s.model, s.kickoff, at, JSON.stringify(x), s.at, MORE_CALC, alarm ? 1 : 0, alarm); st.saved++; }
+      for (const [s, x, alarm] of out) if (Date.parse(s.kickoff) > Date.now()) { upsert.run(sport, s.id, s.model, s.kickoff, at, JSON.stringify(x), s.at, stamp, alarm ? 1 : 0, alarm); st.saved++; }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
@@ -265,17 +468,20 @@ function footballSources(only?: number): Src[] {
     const cur = best.get(r.match_id);
     if (!cur || mainRank(r.model, r.utc_date) < mainRank(cur.model, cur.utc_date)) best.set(r.match_id, r);
   }
+  const src = footballSource(), cal = readCalib('football');
   return [...best.values()].map(r => ({
     id: r.match_id, model: r.model, kickoff: r.utc_date, at: r.updated_at,
-    make: () => footballExtras(r.xg_home, r.xg_away, htShareFor(r.competition_code), goalShrink())
+    make: () => applyCalib(footballMake({ league: divisionOf(r.competition_code), xh: r.xg_home, xa: r.xg_away, share: htShareFor(r.competition_code) }, src), cal)
   }));
 }
 function basketballSources(only?: number): Src[] {
   const rows = db.prepare(`SELECT game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at FROM bb_predictions WHERE kickoff > ? ${only ? 'AND game_id = ?' : ''}`)
     .all(...[now(), ...(only ? [only] : [])]) as any[];
+  const src = pointsSource('basketball'), cal = readCalib('basketball');
   return rows.map(r => ({
     id: r.game_id, model: r.model, kickoff: r.kickoff, at: r.made_at,
-    make: () => normalExtras({ sport: 'basketball', pHome: r.p_home, margin: r.margin, total: r.total, homePts: r.home_pts, awayPts: r.away_pts, fit: bbFit(r.code) })
+    make: () => applyCalib(pointsMake('basketball', { league: r.code, pHome: r.p_home, margin: r.margin, total: r.total, home: r.home_pts, away: r.away_pts, fit: bbFit(r.code) }, src), cal),
+    check: x => rangeAlarm(x.info.expected[0] + x.info.expected[1], leagueRange('basketball', r.code))
   }));
 }
 // NFL / tennis (fix204b): the game's own current start time (a moved game is saved under its new time), any row whose
@@ -284,9 +490,11 @@ function nflSources(only?: number): Src[] {
   const rows = db.prepare(`SELECT p.game_id, COALESCE(g.kickoff, p.kickoff) AS kickoff, p.model, p.p_home, p.margin, p.total, p.home_pts, p.away_pts, p.made_at, g.league FROM nfl_predictions p
     JOIN nfl_games g ON g.game_id = p.game_id WHERE COALESCE(g.kickoff, p.kickoff) > ? AND (g.status IS NULL OR g.status = 'NS') ${only ? 'AND p.game_id = ?' : ''}`)
     .all(...[now(), ...(only ? [only] : [])]) as any[];
+  const src = pointsSource('nfl'), cal = readCalib('nfl');
   return rows.map(r => ({
     id: r.game_id, model: r.model, kickoff: r.kickoff, at: r.made_at,
-    make: () => normalExtras({ sport: 'nfl', pHome: r.p_home, margin: r.margin, total: r.total, homePts: r.home_pts, awayPts: r.away_pts, fit: nflFit(r.league || 1) })
+    make: () => applyCalib(pointsMake('nfl', { league: String(r.league || 1), pHome: r.p_home, margin: r.margin, total: r.total, home: r.home_pts, away: r.away_pts, fit: nflFit(r.league || 1) }, src), cal),
+    check: x => rangeAlarm(x.info.expected[0] + x.info.expected[1], leagueRange('nfl', r.league || 1))
   }));
 }
 /** the chain behind a saved tennis prediction (its serve chances rescaled to its win chance) */
@@ -295,18 +503,27 @@ export function tennisExtrasFor(p1: number, servePoint: [number, number] | null,
   const { pa, pb } = tennisServeChances(servePoint, p1, b, rule);
   return tennisExtras(tennisExtrasDist(pa, pb, b, rule), b);
 }
+/** tennis bias groups: tour (slam / atp / wta / challenger) × best of × surface */
+export const tennisGroup = (tour: string, bo: number, surface: string | null) => {
+  const s = String(surface || '').toLowerCase(), sf = /clay/.test(s) ? 'clay' : /grass/.test(s) ? 'grass' : /hard|carpet|indoor/.test(s) ? 'hard' : 'other';
+  return `${tour}|bo${bo}|${sf}`;
+};
 function tennisSources(only?: number): Src[] {
-  const rows = db.prepare(`SELECT p.match_id, p.model, COALESCE(m.scheduled_at, p.scheduled_at) AS scheduled_at, p.p1, p.why, p.made_at, m.best_of, m.tier FROM tennis_predictions p
+  const rows = db.prepare(`SELECT p.match_id, p.model, COALESCE(m.scheduled_at, p.scheduled_at) AS scheduled_at, p.p1, p.why, p.made_at, p.cat, m.best_of, m.tier, m.surface FROM tennis_predictions p
     JOIN tennis_matches m ON m.id = p.match_id WHERE COALESCE(m.scheduled_at, p.scheduled_at) > ?
       AND COALESCE(m.status, '') IN ('', 'upcoming', 'scheduled', 'not_started') ${only ? 'AND p.match_id = ?' : ''}`)
     .all(...[now(), ...(only ? [only] : [])]) as any[];
+  const src = tennisSource(), cal = readCalib('tennis');
   return rows.map(r => ({
     id: r.match_id, model: r.model, kickoff: r.scheduled_at, at: r.made_at,
     make: () => {
       let why: any = null;
       try { why = r.why ? JSON.parse(r.why) : null; } catch { why = null; }
       const sp = Array.isArray(why?.numbers?.servePoint) ? why.numbers.servePoint as [number, number] : null;
-      return tennisExtrasFor(r.p1, sp, r.best_of === 5 ? 5 : 3, tennisRuleFor(r.tier, r.scheduled_at));
+      const bo = r.best_of === 5 ? 5 : 3, rule = tennisRuleFor(r.tier, r.scheduled_at);
+      const { pa, pb } = tennisServeChances(sp, r.p1, bo, rule);
+      const tour = String(r.cat || 'atp');
+      return applyCalib(tennisMake({ group: tennisGroup(tour, bo, r.surface), tour, dist: tennisExtrasDist(pa, pb, bo, rule), bo }, src), cal);
     }
   }));
 }
@@ -463,7 +680,7 @@ export function summarise(sport: MoreSport, list: Eval[], keys: string[] = MORE_
   }
   return out;
 }
-function writeGates(sport: MoreSport, sum: Record<string, any>, note: string) {
+function writeGates(sport: MoreSport, sum: Record<string, any>, note: string, extra: Record<string, any> = {}) {
   const t = now();
   const up = db.prepare(`INSERT OR REPLACE INTO more_pred_gate (sport, output, public, games, worst, why, at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
   for (const k of MORE_KEYS[sport]) {
@@ -471,122 +688,312 @@ function writeGates(sport: MoreSport, sum: Record<string, any>, note: string) {
     const why = !s || !s.games ? 'no backtest games' : s.worst === null ? 'no 10% step with 100+ forecasts' : s.public ? null : `calibration off by ${s.worst} points in a step with 100+ forecasts`;
     up.run(sport, k, s?.public ? 1 : 0, s?.games || 0, s?.worst ?? null, why, t);
   }
-  db.prepare(`INSERT OR REPLACE INTO more_pred_backtest (sport, report, at) VALUES (?, ?, ?)`).run(sport, JSON.stringify({ note, outputs: sum }), t);
+  db.prepare(`INSERT OR REPLACE INTO more_pred_backtest (sport, report, at) VALUES (?, ?, ?)`).run(sport, JSON.stringify({ note, outputs: sum, ...extra }), t);
   gateCache = null;
 }
 
-/* ---------- walk-forward backtests ---------- */
+/* ---------- walk-forward backtests (fix204c) ---------- */
+/*
+ * Every sport: the model's walk-forward pre-game numbers of every stored game (items), in periods (a league's season,
+ * a football season, a tennis year). Each period is predicted with the source fits made only on the games before it
+ * (out of sample); the calibration maps of a test period are fitted only on those out-of-sample predictions of the
+ * games before it. "before" = the fix204b maths on the same test games. The live fits use every game, the live maps
+ * every out-of-sample prediction.
+ */
+interface WItem<G> { t: number; period: string; test: boolean; g: G; base: Extras | null; actual: Actual }
+interface Engine<G, S> { fit: (train: WItem<G>[]) => S; make: (g: G, s: S) => Extras }
+interface BtResult<S> { before: Eval[]; after: Eval[]; live: S | null; calib: Calibs; periods: number }
+/** a period needs this many earlier games for its out-of-sample fits */
+const MIN_TRAIN = 300;
 
-/** football: grid-v3's walk-forward test predictions (backtest tables) of the last two seasons, half-time from ht_scores;
- *  the first-half share of each division from the games before each match (0.45 under 200 games) */
-export async function backtestFootball(): Promise<{ list: Eval[]; note: string }> {
-  const seasons = (db.prepare(`SELECT DISTINCT season FROM backtest_runs WHERE model = 'grid-v3' ORDER BY season DESC LIMIT 2`).all() as any[]).map(r => r.season as string);
-  if (!seasons.length) return { list: [], note: 'no grid-v3 backtest runs stored' };
-  // the goal-spread shrink of each test season, fitted on the seasons before it (none before: no shrink)
-  const allBt = db.prepare(`SELECT r.season, b.xg_home AS xh, b.xg_away AS xa, b.hg, b.ag, MAX(b.run_id) FROM backtest_predictions b JOIN backtest_runs r ON r.id = b.run_id AND r.model = 'grid-v3'
-    WHERE b.xg_home IS NOT NULL GROUP BY b.division, b.date, b.home, b.away`).all() as any[];
-  const shrinkOf = new Map(seasons.map(s => [s, fitGoalShrink(allBt.filter(r => r.season < s))]));
-  const rows = db.prepare(`SELECT r.season, b.division, b.date, b.home, b.away, b.hg, b.ag, b.xg_home, b.xg_away, h.ht_hg, h.ht_ag, MAX(b.run_id) AS run
-    FROM backtest_predictions b JOIN backtest_runs r ON r.id = b.run_id AND r.model = 'grid-v3' AND r.season IN (${seasons.map(() => '?').join(',')})
-    LEFT JOIN ht_scores h ON h.division = b.division AND h.date = b.date AND h.home = b.home AND h.away = b.away
-    WHERE b.xg_home IS NOT NULL AND b.xg_away IS NOT NULL GROUP BY b.division, b.date, b.home, b.away ORDER BY b.date`).all(...seasons) as any[];
-  // running first-half share per division from every stored half-time score before the match
-  const hist = db.prepare(`SELECT h.division AS d, h.date, h.ht_hg + h.ht_ag AS ht, m.hg + m.ag AS ft FROM ht_scores h
-    JOIN history_matches m ON m.division = h.division AND m.date = h.date AND m.home = h.home AND m.away = h.away ORDER BY h.date`).all() as any[];
-  const acc = new Map<string, { n: number; ht: number; ft: number }>();
-  let k = 0;
-  const list: Eval[] = [];
+async function walkForward<G, S>(sport: MoreSport, items: WItem<G>[], eng: Engine<G, S>): Promise<BtResult<S>> {
   const slice = heavySlicer(30);
-  for (const r of rows) {
-    while (k < hist.length && hist[k].date < r.date) { const a = acc.get(hist[k].d) || { n: 0, ht: 0, ft: 0 }; a.n++; a.ht += hist[k].ht; a.ft += hist[k].ft; acc.set(hist[k].d, a); k++; }
-    const a = acc.get(r.division), share = a && a.n >= MIN_FIT_GAMES && a.ft > 0 ? a.ht / a.ft : DEFAULT_HT_SHARE;
-    const x = footballExtras(r.xg_home, r.xg_away, share, shrinkOf.get(r.season) || null);
-    list.push({ x, actual: footballActual(r.hg, r.ag, r.ht_hg != null ? [r.ht_hg, r.ht_ag] : null) });
+  const periods = new Map<string, WItem<G>[]>();
+  for (const i of items) { const l = periods.get(i.period) || []; l.push(i); periods.set(i.period, l); }
+  // fits by cut-off day (leagues whose seasons start the same day share them)
+  const srcByDay = new Map<number, S>();
+  const oos = new Map<WItem<G>, Extras>();
+  for (const list of periods.values()) {
+    const day = Math.floor(Math.min(...list.map(i => i.t)) / DAY), cut = day * DAY;
+    if (!srcByDay.has(day)) {
+      const train = items.filter(i => i.t < cut);
+      if (train.length < MIN_TRAIN) continue;
+      srcByDay.set(day, eng.fit(train));
+      await slice();
+    }
+    const src = srcByDay.get(day)!;
+    for (const i of list) { oos.set(i, eng.make(i.g, src)); await slice(); }
+  }
+  const before: Eval[] = [], after: Eval[] = [];
+  const calByDay = new Map<number, Calibs>();
+  for (const list of periods.values()) {
+    if (!list[0].test) continue;
+    const day = Math.floor(Math.min(...list.map(i => i.t)) / DAY), cut = day * DAY;
+    if (!calByDay.has(day)) {
+      const earlier: Eval[] = [];
+      for (const i of items) if (i.t < cut && oos.has(i)) earlier.push({ x: oos.get(i)!, actual: i.actual });
+      calByDay.set(day, fitCalibs(sport, earlier));
+      await slice();
+    }
+    const cal = calByDay.get(day)!;
+    for (const i of list) {
+      const x = oos.get(i);
+      if (!x || !i.base) continue; // no earlier games to fit on: not testable out of sample
+      before.push({ x: i.base, actual: i.actual });
+      after.push({ x: applyCalib(x, cal), actual: i.actual });
+    }
     await slice();
   }
-  return { list, note: `grid-v3 walk-forward predictions, seasons ${seasons.join(', ')}, ${rows.length} games (half-time scores where stored); goal shrink k ${seasons.map(s => `${s}: ${shrinkOf.get(s)?.k ?? 'none'}`).join(', ')}` };
+  if (!items.length) return { before, after, live: null, calib: {}, periods: periods.size };
+  const all: Eval[] = [];
+  for (const i of items) { const x = oos.get(i); if (x) all.push({ x, actual: i.actual }); }
+  return { before, after, live: eng.fit(items), calib: fitCalibs(sport, all), periods: periods.size };
 }
-/** basketball: bb-v3's walk-forward predictions (built with the league models) of the last two seasons; the league fit
- *  from the seasons before them; spreads = the league model's current ones */
-export async function backtestBasketball(): Promise<{ list: Eval[]; note: string }> {
+
+/* ---------- points (basketball, NFL / college) ---------- */
+
+type PtsItem = PtsGame & { hs: number; as: number };
+export const PTS_WINDOW_DAYS = 400;
+const pointsEngine = (sport: 'basketball' | 'nfl'): Engine<PtsItem, PointsSource> => ({
+  // the last ~13 months before the cut: the first seasons' walk-forward numbers (cold ratings) are noisier and pulled
+  // the slope too far (local test, 2 seasons × 18 leagues: all history total log loss 1.5227, last 400 days 1.5203)
+  fit: train => {
+    const last = train.length ? train[train.length - 1].t : 0;
+    return fitPointsSource(train.filter(i => i.t > last - PTS_WINDOW_DAYS * DAY).map(i => ({ league: i.g.league, row: ptsRow(i.g, i.g.hs, i.g.as) })));
+  },
+  make: (g, s) => pointsMake(sport, g, s)
+});
+const r1 = (x: number) => Math.round(x * 10) / 10;
+/** cause, per league: bias (predicted − actual) of the total and each side, spread ratio (de-biased misses ÷ the spread used) */
+function pointsDiag(items: WItem<PtsItem>[]) {
+  const by = new Map<string, WItem<PtsItem>[]>();
+  for (const i of items) { const l = by.get(i.g.league) || []; l.push(i); by.set(i.g.league, l); }
+  const one = (rs: WItem<PtsItem>[]) => {
+    const f = fitPoints(rs.map(i => ptsRow(i.g, i.g.hs, i.g.as)));
+    return f ? { ...f, meanPred: r1(rs.reduce((s, i) => s + i.g.total, 0) / rs.length), meanActual: r1(rs.reduce((s, i) => s + i.g.hs + i.g.as, 0) / rs.length), sigmaT: r1(rs.reduce((s, i) => s + i.g.fit.sigmaT, 0) / rs.length) } : { n: rs.length };
+  };
+  return { leagues: Object.fromEntries([...by].map(([l, rs]) => [l, one(rs)])), all: one(items) };
+}
+const otOf = (status: string, q: { h: (number | null)[]; a: (number | null)[] } | null) => status === 'AOT' || (q ? (q.h[4] || 0) + (q.a[4] || 0) > 0 : false);
+
+/** basketball: bb-v3's walk-forward predictions of every league; test = each league's last two seasons */
+export async function backtestBasketball() {
   const codes = (db.prepare(`SELECT DISTINCT code FROM bb_games`).all() as any[]).map(r => r.code as string);
-  const list: Eval[] = [];
+  const items: WItem<PtsItem>[] = [];
   let leagues = 0;
   for (const code of codes) {
     const wf = bbWalkForward(code).rows, info = leagueModelInfo(code);
     if (!wf.length || !info) continue;
-    const seasons = [...new Set((db.prepare(`SELECT DISTINCT season FROM bb_games WHERE code = ? AND status IN ('FT','AOT')`).all(code) as any[]).map(r => r.season as string))].sort().slice(-2);
-    if (!seasons.length) continue;
-    const games = new Map((db.prepare(`SELECT game_id, season, kickoff, status, hs, as_, quarters FROM bb_games WHERE code = ? AND season IN (${seasons.map(() => '?').join(',')}) AND status IN ('FT','AOT')`)
-      .all(code, ...seasons) as any[]).map(r => [r.game_id, r]));
-    const first = [...games.values()].reduce((m, g) => (g.kickoff < m ? g.kickoff : m), '9999');
+    const games = new Map((db.prepare(`SELECT game_id, season, kickoff, status, hs, as_, quarters FROM bb_games WHERE code = ? AND status IN ('FT','AOT') AND hs IS NOT NULL AND as_ IS NOT NULL`)
+      .all(code) as any[]).map(r => [r.game_id, r]));
+    const seasons = [...new Set([...games.values()].map(g => g.season as string))].sort();
+    const test = new Set(seasons.slice(-2));
+    const first = [...games.values()].filter(g => test.has(g.season)).reduce((m, g) => (g.kickoff < m ? g.kickoff : m), '9999');
+    // the league's halves / overtime factors and typical total from the seasons before the test seasons
     const f0 = fitFromQuarters(bbGamesOf(code, first), { sigma: info.sigma, sigmaT: info.sigmaTotal, meanTotal: 2 * info.avgPoints });
     const fit: LeagueFit = { ...f0, sigma: info.sigma, sigmaT: info.sigmaTotal };
     for (const [id, pHome, margin, total] of wf) {
       const g = games.get(id);
       if (!g) continue;
-      const x = normalExtras({ sport: 'basketball', pHome, margin, total, homePts: (total + margin) / 2, awayPts: (total - margin) / 2, fit });
+      const pg: PtsItem = { league: code, pHome, margin, total, home: (total + margin) / 2, away: (total - margin) / 2, fit, hs: g.hs, as: g.as_ };
+      const base = test.has(g.season) ? normalExtras({ sport: 'basketball', pHome, margin, total, homePts: pg.home, awayPts: pg.away, fit }) : null;
       const q = parseQ(g.quarters);
-      list.push({ x, actual: pointsActual(x, g.hs, g.as_, q, g.status === 'AOT' || (q ? (q.h[4] || 0) + (q.a[4] || 0) > 0 : false)) });
+      const x = base || normalExtras({ sport: 'basketball', pHome, margin, total, homePts: pg.home, awayPts: pg.away, fit });
+      items.push({ t: Date.parse(g.kickoff), period: `${code}|${g.season}`, test: test.has(g.season), g: pg, base, actual: pointsActual(x, g.hs, g.as_, q, otOf(g.status, q)) });
     }
     leagues++;
     await afterLiveYield();
   }
-  return { list, note: `bb-v3 walk-forward predictions, last two seasons of ${leagues} leagues, ${list.length} games` };
+  items.sort((a, b) => a.t - b.t);
+  const r = await walkForward('basketball', items, pointsEngine('basketball'));
+  return { ...r, diag: pointsDiag(items), note: `bb-v3 walk-forward predictions of ${leagues} leagues (${items.length} games); test = each league's last two seasons (${r.after.length} games), fits and calibration from the games before each` };
 }
-/** NFL and college: the walk-forward test games of the last model report (last two seasons), fit from the seasons before */
-export async function backtestNfl(): Promise<{ list: Eval[]; note: string }> {
-  const list: Eval[] = [];
+
+/** NFL and college: the walk-forward games of the model report — built now from the stored history when none is stored */
+export async function backtestNfl() {
+  const items: WItem<PtsItem>[] = [];
   const parts: string[] = [];
-  for (const lg of [1, 2]) {
-    const wf = nflWalkForward(lg as 1 | 2);
-    if (!wf.length) { parts.push(`${lg === 1 ? 'NFL' : 'college'}: no walk-forward report stored yet`); continue; }
-    const rows = new Map((db.prepare(`SELECT game_id, season, kickoff, status, home_pts, away_pts, quarters FROM nfl_games WHERE league = ? AND status IN ('FT','AOT')`).all(lg) as any[]).map(r => [r.game_id, r]));
-    const seasons = [...new Set(wf.map(w => rows.get(w[0])?.season).filter(Boolean))].sort().slice(-2);
-    const test = wf.filter(w => seasons.includes(rows.get(w[0])?.season));
-    if (!test.length) continue;
-    const first = test.reduce((m, w) => (rows.get(w[0])!.kickoff < m ? rows.get(w[0])!.kickoff : m), '9999');
-    // spreads from the test seasons' own misses would be hindsight: the seasons before them
-    const before = wf.filter(w => (rows.get(w[0])?.kickoff || '9999') < first);
+  for (const lg of [1, 2] as const) {
+    let wf = nflWalkForward(lg);
+    if (!wf.length) {
+      const done = (db.prepare(`SELECT COUNT(*) AS n FROM nfl_games WHERE league = ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL`).get(lg) as any)?.n || 0;
+      if (done >= 200) {
+        // the same walk-forward as the weekly model report (it stores the test games' pre-game numbers)
+        logger.info(`more backtest nfl: building the ${lg === 1 ? 'NFL' : 'college'} walk-forward report now (${done} finished games)`);
+        try { await buildNflReport(lg); } catch (e: any) { logger.warn(`more backtest nfl ${lg}: report failed: ${e.message}`); }
+        wf = nflWalkForward(lg);
+      }
+    }
+    if (!wf.length) { parts.push(`${lg === 1 ? 'NFL' : 'college'}: no walk-forward games (not enough finished games)`); continue; }
+    const rows = new Map((db.prepare(`SELECT game_id, season, kickoff, status, home_pts, away_pts, quarters FROM nfl_games WHERE league = ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL AND away_pts IS NOT NULL`).all(lg) as any[]).map(r => [r.game_id, r]));
+    const seasons = [...new Set(wf.map(w => rows.get(w[0])?.season).filter(s => s !== undefined))].sort((a, b) => a - b);
+    const test = new Set(seasons.slice(-2));
+    const first = wf.filter(w => test.has(rows.get(w[0])?.season)).reduce((m, w) => (rows.get(w[0])!.kickoff < m ? rows.get(w[0])!.kickoff : m), '9999');
+    // spreads from the seasons before the test seasons (the test seasons' own misses would be hindsight)
     let m2 = 0, t2 = 0, n = 0;
-    for (const [id, , margin, total] of before) { const r = rows.get(id); if (!r) continue; m2 += (r.home_pts - r.away_pts - margin) ** 2; t2 += (r.home_pts + r.away_pts - total) ** 2; n++; }
+    for (const [id, , margin, total] of wf) { const r = rows.get(id); if (!r || r.kickoff >= first) continue; m2 += (r.home_pts - r.away_pts - margin) ** 2; t2 += (r.home_pts + r.away_pts - total) ** 2; n++; }
     const spreads = n >= 100 ? { sigma: Math.sqrt(m2 / n), sigmaT: Math.sqrt(t2 / n), meanTotal: NFL_DEFAULT[lg].meanTotal } : NFL_DEFAULT[lg];
     const fit = fitFromQuarters(nflGamesOf(lg, first), spreads);
-    for (const [id, pHome, margin, total] of test) {
-      const g = rows.get(id)!;
-      const x = normalExtras({ sport: 'nfl', pHome, margin, total, homePts: (total + margin) / 2, awayPts: (total - margin) / 2, fit });
+    let k = 0;
+    for (const [id, pHome, margin, total] of wf) {
+      const g = rows.get(id);
+      if (!g) continue;
+      const pg: PtsItem = { league: String(lg), pHome, margin, total, home: (total + margin) / 2, away: (total - margin) / 2, fit, hs: g.home_pts, as: g.away_pts };
+      const x = normalExtras({ sport: 'nfl', pHome, margin, total, homePts: pg.home, awayPts: pg.away, fit });
       const q = parseQ(g.quarters);
-      list.push({ x, actual: pointsActual(x, g.home_pts, g.away_pts, q, g.status === 'AOT' || (q ? (q.h[4] || 0) + (q.a[4] || 0) > 0 : false)) });
+      items.push({ t: Date.parse(g.kickoff), period: `${lg}|${g.season}`, test: test.has(g.season), g: pg, base: test.has(g.season) ? x : null, actual: pointsActual(x, g.home_pts, g.away_pts, q, otOf(g.status, q)) });
+      k++;
     }
-    parts.push(`${lg === 1 ? 'NFL' : 'college'}: seasons ${seasons.join(', ')}, ${test.length} games`);
+    parts.push(`${lg === 1 ? 'NFL' : 'college'}: ${k} walk-forward games, test seasons ${[...test].join(', ')}`);
     await afterLiveYield();
   }
-  return { list, note: `nfl-v1 / ncaa-v1 walk-forward test games; ${parts.join('; ')}` };
+  items.sort((a, b) => a.t - b.t);
+  const r = await walkForward('nfl', items, pointsEngine('nfl'));
+  return { ...r, diag: pointsDiag(items), note: `nfl-v1 / ncaa-v1 walk-forward games; ${parts.join('; ')}` };
 }
-/** tennis: the point model's walk-forward serve chances of every finished tour match since 2023 (not retired) */
-export async function backtestTennis(): Promise<{ list: Eval[]; note: string }> {
+
+/* ---------- football ---------- */
+
+type FbItem = FbGame & { league: string; hg: number; ag: number };
+const footballEngine: Engine<FbItem, FootballSource> = {
+  fit: train => fitFootballSource(train.map(i => ({ league: i.g.league, xh: i.g.xh, xa: i.g.xa, hg: i.g.hg, ag: i.g.ag }))),
+  make: (g, s) => footballMake(g, s)
+};
+const poisTail4 = (m: number) => { let p = Math.exp(-m), c = p; for (let k = 1; k < 4; k++) { p *= m / k; c += p; } return 1 - c; };
+/** cause: total-goals bias and dispersion per division and by expected-goals band; P(4+) said (fix204b) vs after vs happened */
+function footballDiag(items: WItem<FbItem>[], live: FootballSource | null) {
+  const sh = live?.shrink || DEFAULT_GOAL_SHRINK;
+  // what fix204b said: the per-side shrink, independent Poisson
+  const old = fitGoalShrink(items.map(i => ({ xh: i.g.xh, xa: i.g.xa, hg: i.g.hg, ag: i.g.ag }))) || DEFAULT_GOAL_SHRINK;
+  const one = (rs: WItem<FbItem>[], withAfter: boolean) => {
+    const n = rs.length;
+    if (!n) return { n };
+    let raw = 0, shr = 0, goals = 0, ss = 0, said4 = 0, after4 = 0, hap4 = 0;
+    for (const i of rs) {
+      const [ph, pa] = shrinkPair(i.g.xh, i.g.xa, live ? shrinkOfLeague(live, i.g.league) : sh), m = ph + pa, y = i.g.hg + i.g.ag;
+      raw += i.g.xh + i.g.xa; shr += m; goals += y; ss += (y - m) ** 2;
+      const [oh, oa] = shrinkPair(i.g.xh, i.g.xa, old);
+      said4 += poisTail4(oh + oa); hap4 += y >= 4 ? 1 : 0;
+      if (withAfter && live) after4 += footballMake(i.g, live).sets.goals.p[4];
+    }
+    return {
+      n, expectedRaw: r2(raw / n), expectedShrunk: r2(shr / n), goals: r2(goals / n), biasRaw: r2((raw - goals) / n), biasShrunk: r2((shr - goals) / n),
+      dispersion: r2(ss / Math.max(1e-9, shr)), said4: r1((100 * said4) / n), ...(withAfter && live ? { after4: r1((100 * after4) / n) } : {}), happened4: r1((100 * hap4) / n)
+    };
+  };
+  const by = new Map<string, WItem<FbItem>[]>();
+  for (const i of items) { const l = by.get(i.g.league) || []; l.push(i); by.set(i.g.league, l); }
+  const BANDS: [number, number][] = [[0, 2], [2, 2.5], [2.5, 3], [3, 3.5], [3.5, 4], [4, 99]];
+  return {
+    shrink: sh, leagues: Object.fromEntries([...by].map(([l, rs]) => [l, { ...one(rs, false), ...(live?.leagues[l] ? { rho: live.leagues[l].rho, nb: [live.leagues[l].sizeH, live.leagues[l].sizeA], dispersionHA: live.leagues[l].dispersion } : {}) }])),
+    bands: BANDS.map(([a, b]) => ({ band: b > 50 ? `${a}+` : `${a}–${b}`, ...one(items.filter(i => i.g.xh + i.g.xa >= a && i.g.xh + i.g.xa < b), true) })),
+    all: one(items, false)
+  };
+}
+const r2 = (x: number) => Math.round(x * 100) / 100;
+
+/** football: grid-v3's walk-forward predictions of every stored season (backtest tables); test = the last two seasons */
+export async function backtestFootball() {
+  const seasons = (db.prepare(`SELECT DISTINCT season FROM backtest_runs WHERE model = 'grid-v3' ORDER BY season`).all() as any[]).map(r => r.season as string);
+  if (!seasons.length) return { before: [], after: [], live: null, calib: {}, periods: 0, diag: null, note: 'no grid-v3 backtest runs stored' };
+  const test = new Set(seasons.slice(-2));
+  const rows = db.prepare(`SELECT r.season, b.division, b.date, b.home, b.away, b.hg, b.ag, b.xg_home, b.xg_away, h.ht_hg, h.ht_ag, MAX(b.run_id) AS run
+    FROM backtest_predictions b JOIN backtest_runs r ON r.id = b.run_id AND r.model = 'grid-v3'
+    LEFT JOIN ht_scores h ON h.division = b.division AND h.date = b.date AND h.home = b.home AND h.away = b.away
+    WHERE b.xg_home IS NOT NULL AND b.xg_away IS NOT NULL GROUP BY b.division, b.date, b.home, b.away ORDER BY b.date`).all() as any[];
+  // fix204b's shrink of each test season (fitted on the seasons before it): the "before" numbers
+  const shrinkOf = new Map([...test].map(s => [s, fitGoalShrink(rows.filter(r => r.season < s).map(r => ({ xh: r.xg_home, xa: r.xg_away, hg: r.hg, ag: r.ag })))]));
+  // running first-half share per division from every stored half-time score before the match
+  const hist = db.prepare(`SELECT h.division AS d, h.date, h.ht_hg + h.ht_ag AS ht, m.hg + m.ag AS ft FROM ht_scores h
+    JOIN history_matches m ON m.division = h.division AND m.date = h.date AND m.home = h.home AND m.away = h.away ORDER BY h.date`).all() as any[];
+  const acc = new Map<string, { n: number; ht: number; ft: number }>();
+  let k = 0;
+  const items: WItem<FbItem>[] = [];
+  const slice = heavySlicer(30);
+  for (const r of rows) {
+    while (k < hist.length && hist[k].date < r.date) { const a = acc.get(hist[k].d) || { n: 0, ht: 0, ft: 0 }; a.n++; a.ht += hist[k].ht; a.ft += hist[k].ft; acc.set(hist[k].d, a); k++; }
+    const a = acc.get(r.division), share = a && a.n >= MIN_FIT_GAMES && a.ft > 0 ? a.ht / a.ft : DEFAULT_HT_SHARE;
+    const isTest = test.has(r.season);
+    items.push({
+      t: Date.parse(r.date), period: `${r.division}|${r.season}`, test: isTest, g: { league: r.division, xh: r.xg_home, xa: r.xg_away, share, hg: r.hg, ag: r.ag },
+      base: isTest ? footballExtras(r.xg_home, r.xg_away, share, shrinkOf.get(r.season) || null) : null,
+      actual: footballActual(r.hg, r.ag, r.ht_hg != null ? [r.ht_hg, r.ht_ag] : null)
+    });
+    await slice();
+  }
+  const r = await walkForward('football', items, footballEngine);
+  return {
+    ...r, diag: footballDiag(items, r.live),
+    note: `grid-v3 walk-forward predictions, seasons ${seasons.join(', ')} (${items.length} games); test ${[...test].join(', ')} (${r.after.length} games), goal model and calibration from the seasons before each; before = fix204b (shrink k ${[...test].map(s => `${s}: ${shrinkOf.get(s)?.k ?? 'none'}`).join(', ')}, independent Poisson)`
+  };
+}
+
+/* ---------- tennis ---------- */
+
+type TnItem = TnGame & { games: number; p1: number };
+const tennisEngine: Engine<TnItem, TennisSource> = {
+  fit: train => fitTennisSource(train.map(i => ({ group: i.g.group, tour: i.g.tour, pred: meanOf(i.g.dist.games), actual: i.g.games }))),
+  make: (g, s) => tennisMake(g, s)
+};
+/** cause: total-games bias and spread per tour / format / surface; tie-break and straight sets by match-up strength */
+function tennisDiag(items: WItem<TnItem>[]) {
+  const sdOf = (d: ArrayLike<number>) => { const m = meanOf(d); let v = 0; for (let x = 0; x < d.length; x++) v += d[x] * (x - m) ** 2; return Math.sqrt(v); };
+  const by = new Map<string, WItem<TnItem>[]>();
+  for (const i of items) { const l = by.get(i.g.group) || []; l.push(i); by.set(i.g.group, l); }
+  const groups = Object.fromEntries([...by].map(([gk, rs]) => {
+    const n = rs.length, pred = rs.reduce((s, i) => s + meanOf(i.g.dist.games), 0) / n, act = rs.reduce((s, i) => s + i.g.games, 0) / n;
+    const miss = Math.sqrt(rs.reduce((s, i) => s + (i.g.games - meanOf(i.g.dist.games) - (pred - act)) ** 2, 0) / n), used = Math.sqrt(rs.reduce((s, i) => s + sdOf(i.g.dist.games) ** 2, 0) / n);
+    return [gk, { n, predicted: r1(pred), actual: r1(act), bias: r2(pred - act), spreadRatio: r2(miss / Math.max(1e-9, used)) }];
+  }));
+  const BUCKETS: [number, number][] = [[0.5, 0.6], [0.6, 0.75], [0.75, 0.9], [0.9, 1.01]];
+  const strength = BUCKETS.map(([a, b]) => {
+    const rs = items.filter(i => { const f = Math.max(i.g.p1, 1 - i.g.p1); return f >= a && f < b; });
+    if (!rs.length) return { favourite: `${a * 100}–${Math.min(100, b * 100)}%`, n: 0 };
+    let tbS = 0, tbH = 0, stS = 0, stH = 0;
+    for (const i of rs) {
+      const x = i.base!, sets = x.sets.sets, need = i.g.bo === 5 ? 3 : 2;
+      tbS += x.sets.tb.p[0]; tbH += i.actual.tb === 'yes' ? 1 : 0;
+      stS += sets.p[sets.labels.indexOf(`${need}-0`)] + sets.p[sets.labels.indexOf(`0-${need}`)];
+      stH += i.actual.sets === `${need}-0` || i.actual.sets === `0-${need}` ? 1 : 0;
+    }
+    return { favourite: `${a * 100}–${Math.min(100, b * 100)}%`, n: rs.length, tieBreakSaid: r1((100 * tbS) / rs.length), tieBreakHappened: r1((100 * tbH) / rs.length), straightSaid: r1((100 * stS) / rs.length), straightHappened: r1((100 * stH) / rs.length) };
+  });
+  return { groups, strength };
+}
+/** tennis: the point model's walk-forward serve chances of every finished tour match since 2023; test = the last two years */
+export async function backtestTennis() {
   const wf = await tennisExtrasWalkForward(0);
-  if (!wf.length) return { list: [], note: 'no tennis matches' };
-  const st = db.prepare(`SELECT id, games FROM tennis_matches WHERE id = ?`);
-  const list: Eval[] = [];
-  const memo = new Map<string, Extras>();
+  if (!wf.length) return { before: [], after: [], live: null, calib: {}, periods: 0, diag: null, note: 'no tennis matches' };
+  const st = db.prepare(`SELECT games, surface FROM tennis_matches WHERE id = ?`);
+  const years = [...new Set(wf.map(w => new Date(w.t).getUTCFullYear()))].sort((a, b) => a - b), test = new Set(years.slice(-2));
+  const items: WItem<TnItem>[] = [];
+  const memo = new Map<string, { dist: TDist; x: Extras }>();
   const slice = heavySlicer(30);
   for (const w of wf) {
-    const g0 = (st.get(w.id) as any)?.games || '';
+    const m = st.get(w.id) as any;
     let g: any = null;
-    try { g = g0 ? JSON.parse(g0) : null; } catch { g = null; }
+    try { g = m?.games ? JSON.parse(m.games) : null; } catch { g = null; }
     const act = Array.isArray(g) ? tennisActual(g as [number[], number[]], w.rule) : null;
     if (!act) continue;
     // serve chances on a 0.005 grid (the chain is the slow part; the error is far below a percentage point)
     const qa = Math.round(w.pa * 200) / 200, qb = Math.round(w.pb * 200) / 200, key = `${qa}|${qb}|${w.bo}|${w.rule}`;
-    let x = memo.get(key);
-    if (!x) { x = tennisExtras(tennisExtrasDist(qa, qb, w.bo, w.rule), w.bo); memo.set(key, x); }
-    list.push({ x, actual: act });
+    let d = memo.get(key);
+    if (!d) { const dist = tennisExtrasDist(qa, qb, w.bo, w.rule); d = { dist, x: tennisExtras(dist, w.bo) }; memo.set(key, d); }
+    const sets = d.x.sets.sets, p1 = sets.labels.reduce((s, l, k) => { const [a, b] = l.split('-').map(Number); return s + (a > b ? sets.p[k] : 0); }, 0);
+    const year = new Date(w.t).getUTCFullYear();
+    items.push({
+      t: w.t, period: String(year), test: test.has(year), g: { group: tennisGroup(w.cat, w.bo, m?.surface), tour: w.cat, dist: d.dist, bo: w.bo, games: Number(act.games), p1 },
+      base: d.x, actual: act
+    });
     await slice();
   }
-  return { list, note: `tennis-v1 point model (serve and return chain, live settings), walk-forward, ${list.length} tour matches since Jan 2023 (retirements left out)` };
+  items.sort((a, b) => a.t - b.t);
+  const r = await walkForward('tennis', items, tennisEngine);
+  return { ...r, diag: tennisDiag(items), note: `tennis-v1 point model (serve and return chain, live settings), walk-forward, ${items.length} tour matches since Jan 2023 (retirements left out); test ${[...test].join(', ')} (${r.after.length} matches), games bias and calibration from the matches before each` };
 }
-const BACKTESTS: Record<MoreSport, () => Promise<{ list: Eval[]; note: string }>> = { football: backtestFootball, basketball: backtestBasketball, nfl: backtestNfl, tennis: backtestTennis };
+
+type Bt = { before: Eval[]; after: Eval[]; live: any; calib: Calibs; periods: number; diag: any; note: string };
+const BACKTESTS: Record<MoreSport, () => Promise<Bt>> = { football: backtestFootball, basketball: backtestBasketball, nfl: backtestNfl, tennis: backtestTennis };
 let backtesting = false;
 /** summarise() one output at a time, giving the thread back between them (tennis: 55k matches) */
 async function summariseSliced(sport: MoreSport, list: Eval[]) {
@@ -598,9 +1005,15 @@ async function summariseSliced(sport: MoreSport, list: Eval[]) {
   return out;
 }
 const lastBacktestAt = (s: MoreSport): string | null => (db.prepare(`SELECT at FROM more_pred_backtest WHERE sport = ?`).get(s) as any)?.at || null;
+/** a stored report made with the current maths (an older one is redone on start) */
+const backtestCurrent = (s: MoreSport): boolean => {
+  const r = db.prepare(`SELECT report FROM more_pred_backtest WHERE sport = ?`).get(s) as any;
+  try { return !!r && JSON.parse(r.report).calc === MORE_CALC; } catch { return false; }
+};
 /**
- * the backtests and the gates from them. `freshMs`: skip a sport whose stored report is younger (the start-up run and
- * the first daily run don't do the same work twice)
+ * the backtests, the gates from them (the fixed and calibrated numbers), and the live fits and maps (stored: the
+ * upcoming games are saved again with them). `freshMs`: skip a sport whose stored report is younger (the start-up run
+ * and the first daily run don't do the same work twice)
  */
 export async function runBacktests(only?: MoreSport, freshMs = 0): Promise<Record<string, any>> {
   if (backtesting) return { skipped: 'already running' };
@@ -613,13 +1026,16 @@ export async function runBacktests(only?: MoreSport, freshMs = 0): Promise<Recor
       if (!only && s === 'tennis' && last && Date.now() - Date.parse(last) < 7 * DAY) { out[s] = { skipped: 'weekly' }; continue; }
       if (freshMs && last && Date.now() - Date.parse(last) < freshMs) { out[s] = { skipped: 'fresh' }; continue; }
       try {
-        const { list, note } = await BACKTESTS[s]();
-        const sum = await summariseSliced(s, list);
-        // nothing to test yet (e.g. no NFL report stored): keep what is there
-        if (list.length) writeGates(s, sum, note);
+        const bt = await BACKTESTS[s]();
+        if (!bt.after.length) { out[s] = { note: bt.note, games: 0 }; logger.info(`more backtest ${s}: nothing to test yet (${bt.note})`); continue; }
+        const sum = await summariseSliced(s, bt.after), was = await summariseSliced(s, bt.before);
+        const before = Object.fromEntries(Object.entries(was).map(([k, o]: [string, any]) => [k, { games: o.games, hitRate: o.hitRate, brier: o.brier, logLoss: o.logLoss, worst: o.worst, public: o.public }]));
+        if (bt.live) storeFit(s, 'source', bt.live);
+        storeCalib(s, bt.calib);
+        writeGates(s, sum, bt.note, { calc: MORE_CALC, before, diag: bt.diag, calibrated: Object.keys(bt.calib), live: bt.live });
         const pub = MORE_KEYS[s].filter(k => sum[k]?.public).length;
-        out[s] = { note, games: list.length, public: pub };
-        logger.info(list.length ? `more backtest ${s}: ${pub} outputs public (of ${MORE_KEYS[s].length}; ${note})` : `more backtest ${s}: nothing to test yet (${note})`);
+        out[s] = { note: bt.note, games: bt.after.length, public: pub };
+        logger.info(`more backtest ${s}: ${pub} outputs public (of ${MORE_KEYS[s].length}; ${bt.note}); worst step before → after: ${MORE_KEYS[s].map(k => `${k} ${before[k]?.worst ?? '–'} → ${sum[k]?.worst ?? '–'}`).join(', ')}`);
       } catch (e: any) { out[s] = { error: e.message }; logger.warn(`more backtest ${s}: ${e.message}`); }
       await afterLiveYield();
     }
@@ -635,24 +1051,45 @@ const OUT_NAME: Record<string, string> = {
   margin: 'Winning margin bands', total: 'Total points bands', homePts: 'Home points bands', awayPts: 'Away points bands', half: 'First-half winner', ot: 'Overtime',
   sets: 'Set score', first: 'First set', games: 'Total games bands', tb: 'At least one tie-break'
 };
-/** fix204b: the stored reports as the Markdown tables of docs/notes/more-predictions-backtest.md (live section) */
+/** the stored reports as the Markdown of docs/notes/more-predictions-backtest.md: before → after, the causes, said vs happened */
 export function backtestMarkdown(): string {
   const SPORT: Record<string, string> = { football: 'Football', basketball: 'Basketball', nfl: 'American football (NFL + college)', tennis: 'Tennis' };
   const n = (x: number | null | undefined) => (x === null || x === undefined ? '–' : x.toLocaleString('en-US'));
-  const lines: string[] = [`# Backtest results (walk-forward, server, ${now().slice(0, 10)})`, ''];
+  const v = (x: any) => (x === null || x === undefined ? '–' : String(x));
+  const lines: string[] = [`# Backtest results (walk-forward, ${now().slice(0, 10)})`, ''];
   const reps = new Map(backtestReports().map(r => [r.sport, r]));
   for (const s of MORE_SPORTS) {
     const r = reps.get(s);
     lines.push(`## ${SPORT[s]}`, '');
     if (!r || !r.outputs) { lines.push('No backtest stored yet.', ''); continue; }
-    lines.push(`${r.note} (run ${String(r.at).slice(0, 16).replace('T', ' ')} UTC).`, '',
-      '| Output | Games | Top pick right | Brier | Log loss | Worst step (100+) | Public |', '|---|---:|---:|---:|---:|---:|---|');
+    lines.push(`${r.note} (run ${String(r.at).slice(0, 16).replace('T', ' ')} UTC).${r.calibrated?.length ? ` Calibration layer on: ${r.calibrated.join(', ')}.` : ''}`, '',
+      '| Output | Games | Worst step before → after | Log loss before → after | Top pick right | Public |', '|---|---:|---:|---:|---:|---|');
     for (const k of MORE_KEYS[s]) {
-      const o = r.outputs[k];
+      const o = r.outputs[k], b = r.before?.[k];
       if (!o) continue;
-      lines.push(`| ${OUT_NAME[k] || k} | ${n(o.games)} | ${o.hitRate ?? '–'}% | ${o.brier ?? '–'} | ${o.logLoss ?? '–'} | ${o.worst ?? '–'} | ${o.public ? '**yes**' : 'no (admin only)'} |`);
+      lines.push(`| ${OUT_NAME[k] || k} | ${n(o.games)} | ${v(b?.worst)} → ${v(o.worst)} | ${v(b?.logLoss)} → ${v(o.logLoss)} | ${o.hitRate ?? '–'}% | ${o.public ? '**yes**' : 'no (admin only)'} |`);
     }
-    lines.push('', 'Said vs happened, 10% steps with 100+ forecasts (step: forecasts, said → happened):', '');
+    const d = r.diag;
+    if (d && (s === 'basketball' || s === 'nfl')) {
+      lines.push('', 'Cause, per league (all walk-forward games): bias = predicted − actual (points); slope = how much of a prediction\x27s distance from the league\x27s usual score really happens (1 = all of it); spread ratio = corrected misses ÷ the spread the bands used:', '',
+        '| League | Games | Predicted total | Actual | Bias total / home / away | Slope total / home / away | Spread ratio total / home / away |', '|---|---:|---:|---:|---:|---:|---:|');
+      for (const [l, x] of Object.entries<any>({ ...d.leagues, all: d.all })) if (x.bT !== undefined) lines.push(`| ${l} | ${n(x.n)} | ${x.meanPred} | ${x.meanActual} | ${x.bT} / ${x.bH} / ${x.bA} | ${x.kT} / ${x.kH} / ${x.kA} | ${x.rT} / ${x.rH} / ${x.rA} |`);
+    }
+    if (d && s === 'football') {
+      lines.push('', `Cause (all walk-forward games; live shrink: each side k ${d.shrink?.k}, total kT ${d.shrink?.kT ?? '–'}, difference kD ${d.shrink?.kD ?? '–'}): expected goals raw / shrunk vs goals, dispersion = actual variance ÷ Poisson variance (shrunk means), 4+ goals said (fix204b) vs happened:`, '',
+        '| Division | Games | Expected raw → shrunk | Goals | Dispersion | 4+ said → happened | ρ | NB size H / A |', '|---|---:|---:|---:|---:|---:|---:|---:|');
+      for (const [l, x] of Object.entries<any>(d.leagues)) lines.push(`| ${l} | ${n(x.n)} | ${x.expectedRaw} → ${x.expectedShrunk} | ${x.goals} | ${x.dispersion} | ${x.said4} → ${x.happened4} | ${v(x.rho)} | ${x.nb ? `${v(x.nb[0])} / ${v(x.nb[1])}` : '–'} |`);
+      lines.push('', '| Expected total (raw) | Games | Shrunk | Goals | Dispersion | 4+ said (fix204b) → after → happened |', '|---|---:|---:|---:|---:|---:|');
+      for (const x of d.bands) if (x.n) lines.push(`| ${x.band} | ${n(x.n)} | ${x.expectedShrunk} | ${x.goals} | ${x.dispersion} | ${x.said4} → ${v(x.after4)} → ${x.happened4} |`);
+    }
+    if (d && s === 'tennis') {
+      lines.push('', 'Cause: total games per tour / format / surface (bias = predicted − actual; spread ratio = misses ÷ the chain\'s spread):', '',
+        '| Group | Matches | Predicted | Actual | Bias | Spread ratio |', '|---|---:|---:|---:|---:|---:|');
+      for (const [l, x] of Object.entries<any>(d.groups)) lines.push(`| ${l} | ${n(x.n)} | ${x.predicted} | ${x.actual} | ${x.bias} | ${x.spreadRatio} |`);
+      lines.push('', '| Favourite\'s chance | Matches | Tie-break said → happened | Straight sets said → happened |', '|---|---:|---:|---:|');
+      for (const x of d.strength) if (x.n) lines.push(`| ${x.favourite} | ${n(x.n)} | ${x.tieBreakSaid} → ${x.tieBreakHappened} | ${x.straightSaid} → ${x.straightHappened} |`);
+    }
+    lines.push('', 'Said vs happened after the fixes, 10% steps with 100+ forecasts (step: forecasts, said → happened):', '');
     for (const k of MORE_KEYS[s]) {
       const o = r.outputs[k];
       if (!o?.calibration) continue;
@@ -852,12 +1289,12 @@ export async function moreDaily(force = false) {
   await runBacktests(undefined, force ? 0 : 20 * 3600 * 1000);
 }
 /**
- * fix204b: on start, every sport without a stored backtest report is tested now (in the heavy queue, sliced, never
+ * fix204b: on start, every sport without a stored backtest report (fix204c: or with one made by older maths) is tested now (in the heavy queue, sliced, never
  * during a live tick), then its gates are set; the league fits first when none are stored. Until then every output
  * stays admin-only ("no backtest yet").
  */
 export async function moreFirstRun(): Promise<Record<string, any>> {
-  const todo = MORE_SPORTS.filter(s => !lastBacktestAt(s));
+  const todo = MORE_SPORTS.filter(s => !backtestCurrent(s));
   if (!todo.length) return {};
   logger.info(`more backtest: first run for ${todo.join(', ')}`);
   if (!(db.prepare(`SELECT 1 FROM more_pred_fit LIMIT 1`).get())) { try { await refitLeagues(); } catch (e: any) { logger.warn(`more predictions fits: ${e.message}`); } }

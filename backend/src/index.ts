@@ -1116,10 +1116,10 @@ app.get('/api/admin/more-predictions', (req, res) => {
     res.json({ data: { gates: gateList(), backtests: backtestReports(), health: moreHealth() } });
   } catch (e) { sendError(res, e, 'Failed'); }
 });
-// runs in the background (football + basketball about a minute, tennis a few); ?sport= one sport, ?refit=1 league fits first
+// runs in the background in the heavy queue (football + basketball a few minutes, tennis more); ?sport= one sport, ?refit=1 league fits first
 app.post('/api/admin/more-predictions/backtest', (req, res) => {
   const sport = MORE_SPORTS.includes(String(req.query.sport) as any) ? (String(req.query.sport) as any) : undefined;
-  void (req.query.refit === '1' ? moreDaily(true) : runBacktests(sport)).catch(e => logger.warn(`more backtest: ${e.message}`));
+  void heavy('more predictions backtest', async () => { await (req.query.refit === '1' ? moreDaily(true) : runBacktests(sport)); }).catch(e => logger.warn(`more backtest: ${e.message}`));
   res.json({ data: { started: true, sport: sport || 'all' } });
 });
 app.get('/api/admin/tennis-model', (req, res) => {
