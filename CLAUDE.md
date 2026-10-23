@@ -63,6 +63,10 @@ is model work, the matching note, in the same commit.
 ## Map of the code
 
 Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
+- Processes (fix202): `web.ts` is the container entry (answers visitors: stored pages from `page_cache` via `services/pageCache.ts`,
+  the built site, the live socket `services/liveSocket.ts`; passes everything else on) and starts `worker.ts` = `index.ts` in the
+  worker role (every job, model and route, on 127.0.0.1:3901; `services/pageBuilder.ts` keeps the stored pages fresh; messages
+  in `services/ipc.ts`). A new list endpoint the home pages read belongs in `PAGE_RULES` / `PREBUILD`. `WORKER=0` = one process.
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
   `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a

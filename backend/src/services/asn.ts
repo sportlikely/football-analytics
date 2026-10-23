@@ -126,6 +126,13 @@ async function refresh() {
   logger.info(`asn: ${status}`);
 }
 
+/** fix202: the web process reads the ranges the worker downloaded (no download of its own) */
+export function loadAsnFile(): boolean {
+  if (process.env.GEO_OFF === '1') return false;
+  try { const saved: Saved = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (saved) { use(saved); return true; } } catch { /* none yet */ }
+  return false;
+}
+
 export function startAsn() {
   if (process.env.GEO_OFF === '1') { status = 'off (GEO_OFF=1)'; return; }
   let saved: Saved | null = null;

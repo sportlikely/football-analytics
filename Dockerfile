@@ -36,4 +36,5 @@ COPY --from=web /web/dist /app/frontend/dist
 COPY frontend/src/content/guides /app/frontend/src/content/guides
 RUN mkdir -p /data
 EXPOSE 3001
-CMD ["node", "dist/index.js"]
+# fix202: the web process (dist/web.js) starts the worker (dist/worker.js) as a child process; WORKER=0 = one process
+CMD ["node", "--max-old-space-size=512", "dist/web.js"]

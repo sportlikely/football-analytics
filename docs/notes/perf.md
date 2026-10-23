@@ -121,3 +121,77 @@ no stall naming data health, news, tennis model / tennis ratings; `jobs` shows "
 `/api/admin/tennis-model` → `worker.on: true`.
 
 Result: _to fill in after the check (worstLastHour, stallsLastHour, the top 5 recentStalls)._
+
+## fix202 (23 Oct 2026): background jobs in a separate worker process; pages never built on a visitor's request
+
+Before (`/api/perf`, 23 Oct, 67 min after a start, one process): **90 stalls an hour, worst 5.9 s, event-loop max 8.8 s**,
+memory 975 MB. Causes: football live tick (one 5.9 s stall, job max 38 s), basketball model rebuild (8.8 s), basketball
+live (1–1.5 s), and endpoints built on request when cold: `/api/basketball/games` 3.8 s, `/api/tennis/record` 2.7 s,
+`/api/draw-alerts` 2.4 s, `/api/nfl/home` 2.0 s (0.3 s when cached).
+
+How it works now (two processes, one container, one SQLite file in WAL mode, `busy_timeout` 5000):
+
+| Process | Entry | Runs |
+| --- | --- | --- |
+| web (PID 1, `node --max-old-space-size=512 dist/web.js`) | `web.ts` | stored pages, the built site's files, the live socket, `/api/health`; passes everything else to the worker as it came in (`X-Forwarded-For` + the address it saw). No job, no model, no provider call. |
+| worker (child, `--max-old-space-size=$WORKER_HEAP_MB`, default 1536) | `worker.ts` → `index.ts` in the worker role | every scheduled job (live polls of every sport, fixtures, results / settling, odds, line-ups / injuries, model builds and daily tuners, news, data health, backups, warmers, sitemaps), every route on `127.0.0.1:$WORKER_PORT` (3901), the page builds |
+
+- **Stored pages** (`services/pageCache.ts`, table `page_cache`): the football lists (`/api/matches/upcoming`, `/live`),
+  `/api/public/summary`, `/results`, `/api/draw-alerts`, `/api/news`, `/api/hub*`, basketball games / record / standings,
+  NFL home / record, tennis home / record, and the crawler HTML of the home pages and hubs in every language. The worker
+  builds each one by asking its own route once per plan that sees it differently (signed out, free, Premium, Pro; e.g.
+  the football lists: everyone but Pro gets the trimmed copy) — `services/pageBuilder.ts`. The web process answers from
+  the stored copy at once (header `X-Stored-Age`), never waits for a build: a copy past its ttl (15 s – 15 min per page)
+  is rebuilt by the worker, which hears every 2 s which pages were asked for. Prebuilt on start (`PREBUILD`: what the
+  four home pages and the lists ask for); other query variants are stored after their first request (that one goes to
+  the worker). A copy made before the worker's start (a deploy, other settings) is served and rebuilt in the first
+  rounds; HTML only with the same `index.html` (asset names). A route that fails (5xx) keeps the last good copy and is
+  asked again after its ttl (30 s – 5 min).
+- **Who gets a stored page**: anyone signed out or on a plan, except admins, staff with permissions, data-centre /
+  proxy networks (fix199 limits live in the worker) and maintenance tokens — those go to the worker. Signed-in users
+  with unlocked games: football lists = the full copy trimmed for that user in the web process (same `teaseDeepExcept`
+  as the auth middleware); basketball / NFL / tennis lists go to the worker (it decides per game).
+- **Live**: the football live poll (worker) writes one row per live game to `live_state` (only rows that changed) and
+  sends `{ ids, changed }` over the child-process channel; the web process re-reads the changed rows and pushes them on
+  the socket (`services/liveSocket.ts`, same events as before). No live polling code in the web process.
+- **Restarts**: the web process answers within a second of a start (stored pages + files; `/api/health` at once), the
+  worker loads models after. If the worker exits it is started again (1 s, doubling up to 30 s while it keeps dying
+  within 5 min); requests for it wait up to 20 s, then a page gets the app shell (`index.html`) and an API call 503 +
+  `Retry-After: 5`. The worker stops if the web process goes away.
+- **`/api/perf`**: the web process's numbers on top (`stallsLastHour`, `worstLastHour`, `memoryMb`, `front`: stored /
+  trimmed / passed on / missed), `worker`: the worker's own perf (jobs with `lastAt` = last tick per job, stalls,
+  memory) + `restarts`, `lastExit`, `pages` (built, failed, queue). Logs: the worker's lines carry `proc: "worker"`.
+- **`WORKER=0`** runs `index.ts` alone, exactly as before fix202 (one process: jobs and requests together).
+
+Not changed: pages outside the stored list (match / team / player / game pages, search, accounts, admin) are still
+built by the worker on request, so a long worker job can still delay them (never the web process: it only waits).
+Visitor counting (`trackVisit`) runs in the worker only: a stored-page request is not counted itself, the same visitor's
+other requests (`/api/auth/me`, the "seen" beacon …) are. Rate limits apply to what reaches the worker; stored pages
+cost nothing.
+
+Tested locally (10 Oct database copy, provider keys blank, `BASKETBALL_PUBLIC` / `NFL_PUBLIC` / `TENNIS_PUBLIC` = 1):
+- `npm run test:fix202`: page keys, which plans share a copy, stored-page ages / prune, live rows (order, changed only,
+  removed when a game ends or after a worker restart).
+- `npm run test:fix202:live` against `node dist/web.js` (env as above + `DB=` the copy): 15 pages × 5 visitors (signed
+  out, free, Premium, Pro, free with unlocked games): **71 of 75 answers from stored copies, every one equal to the
+  worker's own answer** for that visitor (timestamps left out; the only other difference: basketball standings, where
+  the worker answers 500 here without a provider key and the stored copy is kept). Stored pages 2–3 ms (under 50 ms
+  each); the 4 home pages' HTML byte-identical to the worker's. Live: the socket of the web process gets every 20-s
+  tick. Worker killed: stored pages still answered (18 ms), a request for the worker waited 2.4 s for the restart.
+- Start: the home page answered **0.63 s** after `node dist/web.js` (stored copy); worker ready ~1 s later.
+- Memory here: web 70 MB, worker 172 MB (no provider data; production: ~975 MB in the worker).
+- `WORKER=0`: one process, as before.
+
+### Check after deploy (pending)
+
+1. Railway memory: web + worker under the plan's limit (`/api/perf` → `memoryMb` + `worker.memoryMb`); if the worker
+   needs more heap, set `WORKER_HEAP_MB` (default 1536).
+2. Within 10 s of the deploy: `/` and `/api/public/summary` answer in < 1 s (`X-Stored-Age` header present).
+3. After 1 hour of normal traffic, `/api/perf` (web process, top level): **stallsLastHour < 5, worstLastHour < 500 ms**;
+   `worker.restarts` 0; `worker.pages.failed` small next to `built`.
+4. First and second load < 600 ms: `/api/matches/upcoming?days=30`, `/api/public/summary`, `/api/public/results`,
+   `/api/draw-alerts` (Pro), `/api/basketball/games?days=7`, `/api/basketball/standings/NBA`, `/api/nfl/home`,
+   `/api/tennis/record?days=30&tour=all`, `/`, `/es/basketball`.
+5. A live football match: the home Live strip and the match page move with the score (socket), signed out and as Pro.
+
+Result: _to fill in after the check (before → after: stallsLastHour 90 → ?, worstLastHour 5.9 s → ?, the endpoint times)._

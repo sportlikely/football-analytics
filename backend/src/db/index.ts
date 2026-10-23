@@ -42,6 +42,8 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 export const db: Database = DB_READ_ONLY ? new sqlite.DatabaseSync(DB_FILE, { readOnly: true }) : new sqlite.DatabaseSync(DB_FILE);
 if (!DB_READ_ONLY) db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
+// fix202: two processes share the file (web.ts reads, the worker writes): wait for a lock instead of failing at once
+db.exec('PRAGMA busy_timeout = 5000');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS predictions (

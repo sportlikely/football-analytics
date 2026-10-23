@@ -6,10 +6,9 @@ import { runLinkCheck, lastLinkCheck, linkCheckTick } from './services/linkCheck
 import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
 import { sendMail as sendMailFix168 } from './services/email';
-import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy, perGames, mapGames } from './services/perf';
+import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy, mapGames } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
-import { Server } from 'socket.io';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -77,6 +76,11 @@ import { highlightsFor, highlightsStatus, lastCandidates } from './services/high
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
 import { db } from './db';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
+import { isWorker, INTERNAL_SECRET, WORKER_PORT, toWeb, askWeb } from './services/ipc';
+import { startPageBuilder, pageBuilderStatus } from './services/pageBuilder';
+import { writeLive, type Persona } from './services/pageCache';
+import { liveSocket, pushLive, allowedOrigins, corsOrigin, SITE_PASSWORD, SITE_AUTH } from './services/liveSocket';
+import { BAD_BOTS } from './utils/badBots';
 import { startAsn, networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions } from './services/proxyGuard';
 import { noteNetworkRequest, noteWho, whoToday } from './services/proxyScrapers';
@@ -124,16 +128,7 @@ import { MODEL_V3, modelV3Status, runBacktestV3, runBacktestV3All, backtestProgr
 
 const isDev = (process.env.NODE_ENV || 'development') !== 'production';
 
-// In development accept any local origin (Vite may switch ports, 127.0.0.1 vs localhost, etc.)
-const allowedOrigins = (process.env.CORS_ORIGIN || (isDev ? 'http://localhost:3000' : 'https://sportlikely.com,https://www.sportlikely.com,https://bettobeat.com,https://www.bettobeat.com'))
-  .split(',')
-  .map(o => o.trim());
-const corsOrigin = isDev ? true : allowedOrigins;
-
-// Private beta credentials (see the gate below); empty password = open site
-const SITE_USER = process.env.SITE_USER || '';
-const SITE_PASSWORD = process.env.SITE_PASSWORD || '';
-const SITE_AUTH = SITE_PASSWORD ? 'Basic ' + Buffer.from(`${SITE_USER}:${SITE_PASSWORD}`).toString('base64') : '';
+// CORS origins and the private beta credentials (see the gate below): services/liveSocket.ts (fix202: web.ts uses them too)
 // Read token for maintenance: GET /api/...?token=<API_READ_TOKEN> passes the gate (pages and sockets stay locked)
 const API_READ_TOKEN = process.env.API_READ_TOKEN || '';
 // Job token: like the read token but it may also START maintenance jobs (syncs, backfills, backtests, the data check).
@@ -150,36 +145,29 @@ const isActionGet = (req: express.Request) =>
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: corsOrigin,
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
-  transports: ['websocket', 'polling'],
-  // Socket.io bypasses Express middleware, so the gate is applied here too
-  allowRequest: (req, cb) => cb(null, !SITE_AUTH || req.headers.authorization === SITE_AUTH)
-});
-
 // Each socket joins 'full' (premium/admin) or 'teaser' (anonymous/free) — predictions are trimmed for 'teaser'
-io.use((socket, next) => {
-  try {
-    const cookies = parseCookies(socket.request.headers.cookie);
-    const user = userForToken(cookies[SESSION_COOKIE]);
-    socket.data.full = canSeeFull(accessOf(user));
-  } catch {
-    socket.data.full = false;
-  }
-  next();
-});
+// (services/liveSocket.ts). fix202: in the worker no visitor reaches this server's socket (web.ts holds them).
+const io = liveSocket(server);
 
 // Middleware (CSP off: the site loads Google Fonts and club crests from other hosts)
 // Railway terminates TLS in front of us: trust the first proxy so req.ip / req.secure are real
-app.set('trust proxy', 1);
+// fix202: the worker sits behind the web process too (web.ts adds the address it saw): one more hop
+app.set('trust proxy', isWorker ? 2 : 1);
+// fix202: the worker's own page builds (services/pageBuilder.ts), from this machine with the per-start secret only:
+// treated as that plan signed out of any account; no visit counted, no limits, no log line, no visitor's provider budget
+const PERSONA_SET = new Set(['anon', 'free', 'premium', 'pro']);
+const isBuild = (req: express.Request): Persona | null => (req as any).slBuild || null;
+if (isWorker) app.use((req, _res, next) => {
+  const p = req.headers['x-sl-persona'], from = req.socket.remoteAddress || '';
+  if (INTERNAL_SECRET && req.headers['x-sl-build'] === INTERNAL_SECRET && typeof p === 'string' && PERSONA_SET.has(p) && /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(from)) (req as any).slBuild = p;
+  delete req.headers['x-sl-build'];
+  delete req.headers['x-sl-persona'];
+  next();
+});
 // fix140: bad bots get nothing (before every other middleware). ShapBot alone (~17 pages a minute on /team + /player)
 // used up the API-Football quota on 16 Oct. Search engines (Googlebot, bingbot, Applebot, DuckDuckBot) stay allowed;
 // the same list is disallowed in robots.txt.
-const BAD_BOTS = /ShapBot|Bytespider|AhrefsBot|SemrushBot|MJ12bot|DotBot|PetalBot|DataForSeoBot/i;
+// (the list: utils/badBots.ts; fix202: web.ts passes them here)
 app.use((req, res, next) => {
   const ua = req.get('user-agent') || '';
   if (!BAD_BOTS.test(ua)) return next();
@@ -215,6 +203,7 @@ app.use('/api', (_req, res, next) => {
 });
 
 app.use((req, _res, next) => {
+  if (isBuild(req)) return next();
   logger.info(`${req.method} ${req.originalUrl.replace(/([?&]token=)[^&]+/g, '$1***')}`);
   next();
 });
@@ -241,7 +230,7 @@ const PUBLIC_FILES = new Set(['/favicon.svg', '/apple-touch-icon.png', '/og-imag
 // Health check stays open so the host can monitor the service. Unset = open site (local dev).
 if (SITE_PASSWORD) {
   app.use((req, res, next) => {
-    if (req.path === '/api/health' || PUBLIC_FILES.has(req.path) || req.path.startsWith('/fonts/')) return next();
+    if (req.path === '/api/health' || PUBLIC_FILES.has(req.path) || req.path.startsWith('/fonts/') || isBuild(req)) return next();
     if (req.headers.authorization === SITE_AUTH) return next();
     if (req.method === 'GET' && req.path.startsWith('/api/') && tokenKind(req.query.token)) return next();
     res.set('WWW-Authenticate', 'Basic realm="SportLikely - private beta", charset="UTF-8"');
@@ -267,6 +256,8 @@ declare global {
 }
 
 app.use((req, _res, next) => {
+  const build = isBuild(req);
+  if (build) { req.user = null; req.access = build; req.staff = staffOf(null); req.perms = new Set(); return next(); }
   const cookies = parseCookies(req.headers.cookie);
   let user: User | null = null;
   try {
@@ -288,7 +279,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.use('/api', trackVisit); // visitor counts for the admin page (hashed IPs only)
+app.use('/api', (req, res, next) => (isBuild(req) ? next() : trackVisit(req, res, next))); // visitor counts for the admin page (hashed IPs only)
 // keys are salted hashes (salt new at every start), so not even the memory holds a visitor's IP (fix140)
 const RL_SALT = randomBytes(16).toString('hex');
 const ipKey = (req: express.Request) => createHash('sha256').update(RL_SALT + (req.ip || 'unknown')).digest('hex').slice(0, 20);
@@ -312,6 +303,7 @@ const logScraperOnce = (key: string, req: express.Request, detail: string) => {
 const proxyLimiter = new ProxyLimiter();
 const uaHash = (ua: string) => createHash('sha256').update(RL_SALT + ua).digest('hex').slice(0, 20);
 app.use('/api', (req, _res, next) => {
+  if (isBuild(req)) return next(); // fix202: a page build is background work (stored data, the background budget)
   const ua = uaKey(req.get('user-agent'));
   if (req.access === 'admin') return afSource.run({ kind: 'admin', ua }, next);
   const ipH = ipKey(req);
@@ -386,7 +378,7 @@ every('rate-limit cleanup', () => {
 }, 60000).unref();
 function rateLimit(name: string, max: number | ((req: express.Request) => number), windowMs: number, key: (req: express.Request) => string = ipKey) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (req.access === 'admin') return next();
+    if (req.access === 'admin' || isBuild(req)) return next();
     const k = `${name}:${key(req)}`;
     const now = Date.now();
     const b = buckets.get(k);
@@ -3086,8 +3078,14 @@ after('nfl player games', () => backfillPlayerGames().catch(e => logger.warn(`nf
 after('link check', () => linkCheckTick(), 10 * 60 * 1000).unref();
 
 // Admin: event-loop stalls and how long the heavy jobs take (why the site feels slow)
-app.get('/api/perf', (_req, res) => {
+app.get('/api/perf', async (_req, res) => {
   res.set('Cache-Control', 'no-store');
+  // fix202: the web process's numbers on top (the visitors' side: the targets), the worker's below
+  if (isWorker) {
+    const web: any = await askWeb('perf');
+    const worker = { ...perfStatus(), pages: pageBuilderStatus() };
+    return res.json({ data: web ? { process: 'web', ...web.perf, front: web.front, worker: { ...worker, ...web.worker } } : { process: 'worker (web process did not answer)', worker }, timestamp: new Date().toISOString() });
+  }
   res.json({ data: perfStatus(), timestamp: new Date().toISOString() });
 });
 
@@ -3429,30 +3427,7 @@ app.get('/api/backtest', (req, res) => {
   }
 });
 
-// ---------- WebSocket ----------
-
-io.on('connection', socket => {
-  logger.info(`Client connected: ${socket.id}`);
-
-  const tier = socket.data.full ? 'full' : 'teaser';
-  socket.join(tier);
-
-  socket.on('subscribe_match', (matchId: number) => {
-    const id = Number(matchId);
-    if (!Number.isInteger(id) || id <= 0) return;
-    // one match page at a time is plenty: drop older match rooms
-    for (const room of socket.rooms) if (room.startsWith('match:') && room !== `match:${id}:${tier}`) socket.leave(room);
-    socket.join(`match:${id}:${tier}`);
-  });
-
-  socket.on('unsubscribe_match', (matchId: number) => {
-    socket.leave(`match:${matchId}:${tier}`);
-  });
-
-  socket.on('disconnect', reason => {
-    logger.info(`Client disconnected: ${socket.id} (${reason})`);
-  });
-});
+// ---------- WebSocket (services/liveSocket.ts) ----------
 
 app.set('io', io);
 
@@ -3465,6 +3440,7 @@ let livePolling = false;
 let lastLiveList: any[] = [];
 let lastLiveAt = 0;
 let liveTick = 0;
+const liveRows = new Map<number, string>(); // fix202: the stored live row per game (written only when it changed)
 every('live poll', async () => {
   if (livePolling) return; // a slow poll (API waits) must not overlap the next one
   livePolling = true;
@@ -3484,18 +3460,13 @@ every('live poll', async () => {
       const afLive = await mapGames(afLiveNow, b => afWithPredictions(b));
       return mapGames([...fdLive, ...afLive], b => b.map(slimForList));
     });
-    await timed('live push', async () => {
-      const ts = new Date().toISOString();
-      io.to('full').emit('matches:live', { data: live, timestamp: ts });
-      io.to('teaser').emit('matches:live', teaseDeep({ data: live, timestamp: ts }));
-      // Per-match rooms get their own update (score / status / minute)
-      await perGames(live, b => {
-        for (const m of b) {
-          io.to(`match:${m.id}:full`).emit('match:live', m);
-          io.to(`match:${m.id}:teaser`).emit('match:live', teaseDeep({ m }).m);
-        }
-      });
+    // fix202: in the worker the live rows go to the database (live_state) and the web process, which holds the
+    // visitors' sockets, re-reads the rows that changed and pushes them
+    if (isWorker) await timed('live push', () => {
+      const changed = writeLive('football', live, liveRows);
+      toWeb({ type: 'live', sport: 'football', ids: live.map(m => m.id), changed });
     });
+    else await timed('live push', () => pushLive(io, live));
     lastLiveList = live; lastLiveAt = Date.now(); // fix165: /api/admin/live-consistency
     markFresh('live', `${live.length} live`);
   } catch (error: any) {
@@ -3574,9 +3545,15 @@ app.use((_req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
+// fix202: the worker listens on the internal port, on this machine only (web.ts passes visitors' requests to it)
+server.listen(isWorker ? WORKER_PORT : Number(PORT), isWorker ? '127.0.0.1' : undefined, () => {
   setJob('boot (scheduler start)'); setImmediate(() => setJob(null)); // fix165: the sync start-up work is named in /api/perf
-  logger.info(`Server running on http://localhost:${PORT}`);
+  logger.info(isWorker ? `Worker listening on 127.0.0.1:${WORKER_PORT}` : `Server running on http://localhost:${PORT}`);
+  if (isWorker) {
+    toWeb({ type: 'ready' });
+    startPageBuilder(WORKER_PORT, STATIC_DIR);
+    every('worker stats', () => toWeb({ type: 'stats', memoryMb: Math.round(process.memoryUsage().rss / 1048576), heapMb: Math.round(process.memoryUsage().heapUsed / 1048576), at: Date.now() }), 15 * 1000).unref();
+  }
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
   // Save/refresh predictions every time the fixture window is refreshed
   // fix169: recorded in batches of 25 with yields (fix159 style)
