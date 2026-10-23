@@ -8,6 +8,7 @@ import { useBbConfig, bbTeamFav, type BbGame } from '../../lib/bb'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { GameList, Skeleton } from './parts'
 import { StandingsTable, type Standings } from './BbLeague'
+import { teamPlace } from '../../lib/bbTable'
 import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
 import { BbTeamAnalysisCard, TeamRecordCard, type BbAnalysis } from '../../components/TeamAnalysis'
 
@@ -247,7 +248,8 @@ function MiniTable({ code, teamId, name }: { code: string; teamId: number; name:
     axios.get(`${API_URL}/basketball/standings/${code}`).then(r => { if (!off) setData(r.data.data || null) }).catch(() => undefined)
     return () => { off = true }
   }, [code])
-  const gr = data?.groups.find(x => x.rows.some(r => r.team.id === teamId))
+  // fix201: the team's own table (conference / group), the same one the game page uses
+  const gr = teamPlace(data, teamId)?.group
   if (!gr) return null
   const i = gr.rows.findIndex(r => r.team.id === teamId)
   const from = Math.max(0, Math.min(i - 3, gr.rows.length - 7))

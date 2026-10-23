@@ -2210,5 +2210,12 @@
  "From {n, plural, one {# match} other {# matches}} with full stats.": "Tam istatistikli {n, plural, other {# maçtan}}.",
  "Winner, {n, plural, one {# match} other {# matches}}": "Kazanan, {n, plural, other {# maç}}",
  "{n, plural, one {# match} other {# matches}} in the next {1} days": "Önümüzdeki {1} günde {n, plural, other {# maç}}",
- "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "En olası set skorumuzun ne sıklıkla tam doğru çıktığı ve toplam oyun tahminimizin gerçek sayıdan ne kadar saptığı, {n, plural, other {# maçta}} (maçtan çekilmeler hariç)."
+ "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "En olası set skorumuzun ne sıklıkla tam doğru çıktığı ve toplam oyun tahminimizin gerçek sayıdan ne kadar saptığı, {n, plural, other {# maçta}} (maçtan çekilmeler hariç).",
+ "Divisions": "Bölümler",
+ "Conferences": "Konferanslar",
+ "East": "Doğu",
+ "West": "Batı",
+ "the East": "Doğu",
+ "the West": "Batı",
+ "{0} {1} in {2}, {3} {4} in {5}": "{0} {2} {1}, {3} {5} {4}"
 }

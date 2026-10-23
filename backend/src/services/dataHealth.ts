@@ -26,6 +26,7 @@ import { lastDataAudit } from './dataAudit';
 import { everyHeavy, afterHeavy, heavySlicer, inBatches } from './perf';
 import { missingPredictions } from './missingPredictions';
 import { tennisDataCheck } from './tennis';
+import { bbStandingsCheck } from './bbSite';
 import { voidedThisMonth } from './unsettled';
 import { createHealthStore, NOT_YET } from '../utils/healthStore';
 
@@ -159,6 +160,20 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     });
   } catch (e: any) {
     checks.push({ id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
+  await slice();
+  // fix201: basketball tables — one line per league; a table whose rows are not unique teams, or a team in two tables
+  // of the same level (e.g. two conferences), is a warn (target zero)
+  try {
+    const bs = await bbStandingsCheck();
+    const bad = bs.filter(x => x.issues.length);
+    checks.push({
+      id: 'bb-standings', label: 'Basketball tables: each team once per table level', level: bad.length ? 'warn' : 'ok',
+      detail: bad.length ? `${bad.length} of ${bs.length} league table(s) with problems` : `${bs.length} league table(s) checked`,
+      items: bs.map(x => `${x.code}: ${x.groups} table(s)${x.issues.length ? ` · ${x.issues.slice(0, 5).join(' · ')}` : ' · ok'}`)
+    });
+  } catch (e: any) {
+    checks.push({ id: 'bb-standings', label: 'Basketball tables: each team once per table level', level: 'warn', detail: `Check failed: ${e.message}` });
   }
   await slice();
   // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason

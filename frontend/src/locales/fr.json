@@ -2210,5 +2210,12 @@
  "From {n, plural, one {# match} other {# matches}} with full stats.": "Sur {n, plural, one {# match} other {# matchs}} avec statistiques complètes.",
  "Winner, {n, plural, one {# match} other {# matches}}": "Vainqueur, {n, plural, one {# match} other {# matchs}}",
  "{n, plural, one {# match} other {# matches}} in the next {1} days": "{n, plural, one {# match} other {# matchs}} dans les {1} prochains jours",
- "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "À quelle fréquence notre score en sets le plus probable était exact, et l'écart entre notre total de jeux et le vrai, sur {n, plural, one {# match} other {# matchs}} (abandons exclus)."
+ "How often our most likely set score was exactly right, and how far our total games were from the real number, over {n, plural, one {# match} other {# matches}} (retirements left out).": "À quelle fréquence notre score en sets le plus probable était exact, et l'écart entre notre total de jeux et le vrai, sur {n, plural, one {# match} other {# matchs}} (abandons exclus).",
+ "Divisions": "Divisions",
+ "Conferences": "Conférences",
+ "East": "Est",
+ "West": "Ouest",
+ "the East": "l'Est",
+ "the West": "l'Ouest",
+ "{0} {1} in {2}, {3} {4} in {5}": "{0} {1} dans {2}, {3} {4} dans {5}"
 }

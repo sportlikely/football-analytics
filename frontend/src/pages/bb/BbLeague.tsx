@@ -8,17 +8,28 @@ import { useBbConfig, bbLeagueFav, type BbGame } from '../../lib/bb'
 import { GameList, Skeleton, TeamLogo, LiveRow } from './parts'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import { useNews, NewsRows } from '../../components/NewsList'
+import { hasDivisions, tablesToShow, type Standings } from '../../lib/bbTable'
 
-export interface StandRow { position: number; team: { id: number; name: string; logo: string | null }; played: number; won: number; lost: number; pct: number | null; pointsFor: number | null; pointsAgainst: number | null }
-export interface Standings { season: string; groups: { name: string | null; stage: string | null; rows: StandRow[] }[] }
+export type { StandRow, Standings } from '../../lib/bbTable'
 
-/** Standings table(s); the teams of a game are marked (in the home / away colours when given). */
+/**
+ * Standings table(s); the teams of a game are marked (in the home / away colours when given). fix201: one table per
+ * group; a league with conferences and divisions shows the conferences, the divisions behind the "Divisions" toggle.
+ */
 export function StandingsTable({ data, mark = [], colors }: { data: Standings; mark?: number[]; colors?: Record<number, 'H' | 'A'> }) {
+  const [divisions, setDivisions] = useState(false)
+  const split = hasDivisions(data)
+  const shown = tablesToShow(data, divisions)
   return (
     <div className="space-y-5">
-      {data.groups.map((g, i) => (
-        <div key={i}>
-          {data.groups.length > 1 && g.name && <div className="label pb-2">{g.name}</div>}
+      {split && (
+        <div className="seg">
+          {[false, true].map(x => <button key={String(x)} onClick={() => setDivisions(x)} className={`seg-btn ${divisions === x ? 'seg-btn-active' : ''}`}>{x ? t('Divisions') : t('Conferences')}</button>)}
+        </div>
+      )}
+      {shown.map((g, i) => (
+        <div key={`${g.stage}|${g.name}|${i}`}>
+          {(shown.length > 1 || split) && g.name && <div className="label pb-2">{g.name}</div>}
           <table className="w-full table-fixed text-xs sm:text-sm">
             <thead>
               <tr className="text-faint text-[10px] uppercase tracking-wide">

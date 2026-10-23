@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:locked": "node scripts/locked-leak-test.mjs",
     "test:proxy": "node --no-warnings --test scripts/proxy-guard.test.ts",
+    "test:fix201": "node --no-warnings --test scripts/bb-standings.test.ts",
     "test:fix200": "tsc && node --no-warnings --test --test-force-exit scripts/void-rules.test.ts scripts/data-health-store.test.ts scripts/unsettled.test.mjs scripts/tennis-worker.test.mjs",
     "lint": "eslint src/**/*.ts",
     "migrate": "ts-node src/database/migrations.ts"

@@ -13,6 +13,7 @@ import { FavStar } from '../../lib/favorites'
 import { Card, TeamLogo, LiveChanceBox, rid, rstatus } from './parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import type { Standings } from './BbLeague'
+import { teamPlace } from '../../lib/bbTable'
 import { StatsTab, RestTab, H2HTab, StandingsTab } from './GameTabs'
 import { MarketsCard, CompareCard, PlayersCard, ModelTable, type Markets, type ModelInfo, type GamePlayer } from './GameExtras'
 import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
@@ -70,6 +71,12 @@ interface PreviewSide {
   profile: { team: Profile | null; league: Profile | null }
 }
 interface Injury { name: string; status: string; weight: number; comment: string | null; minutes: number | null; playerId: number | null }
+
+/** fix201: the table rows for the compare card's "League position", only when both teams are in the same table */
+function sameTable(s: Standings | null, home: number, away: number) {
+  const h = teamPlace(s, home), a = teamPlace(s, away)
+  return h && a && h.group === a.group ? h.group.rows : null
+}
 
 const TABS = ['prediction', 'lineups', 'box', 'stats', 'players', 'quarters', 'rest', 'h2h', 'table', 'highlights']
 
@@ -138,7 +145,7 @@ export default function BbGame() {
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
           <YourPicks sport="bb" gameId={g.id} home={g.home.name} away={g.away.name} />
           <MarketsGate d={d} />
-          {d.preview && <CompareCard g={g} home={d.preview.home} away={d.preview.away} table={d.standings ? d.standings.groups.flatMap(x => x.rows) : null} form={d.stats.home && d.stats.away ? { home: d.stats.home.form, away: d.stats.away.form } : null} />}
+          {d.preview && <CompareCard g={g} home={d.preview.home} away={d.preview.away} table={sameTable(d.standings, g.home.id, g.away.id)} form={d.stats.home && d.stats.away ? { home: d.stats.home.form, away: d.stats.away.form } : null} />}
           {d.players && <PlayersCard g={g} home={d.players.home} away={d.players.away} limit={4} title={t('Players to watch')} />}
           <AnalysisCard d={d} />
           <GameNews home={{ sport: 'basketball', teamId: g.home.id }} away={{ sport: 'basketball', teamId: g.away.id }} />

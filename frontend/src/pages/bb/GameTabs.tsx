@@ -5,6 +5,7 @@ import { t, LOCALE } from '../../lib/i18n'
 import type { BbGame as Game } from '../../lib/bb'
 import { Card, TeamLogo } from './parts'
 import { StandingsTable, type Standings, type StandRow } from './BbLeague'
+import { teamPlace, groupShort, groupIn, ordinal } from '../../lib/bbTable'
 import type { Avg, Sched, Brief, H2H } from './BbGame'
 
 /** The richer game-page tabs (Oct 2026): statistics, schedule & rest, head-to-head and standings. */
@@ -345,13 +346,16 @@ export function H2HTab({ g, list }: { g: Game; list: H2H[] }) {
 /* ---------------- Standings ---------------- */
 
 export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
+  // fix201: the position inside the team's own table (conference / group), e.g. "7th of 15 · East"
   const find = (id: number) => {
-    for (const gr of data.groups) { const r = gr.rows.find(x => x.team.id === id); if (r) return { r, of: gr.rows.length } }
-    return null
+    const p = teamPlace(data, id)
+    return p ? { r: p.row, of: p.of, group: p.group } : null
   }
   const h = find(g.home.id), a = find(g.away.id)
+  const same = !!h && !!a && h.group === a.group
+  const where = (x: { group: { name: string | null } }) => (data.groups.length > 1 ? groupShort(x.group.name) : '')
   const diff = (r: StandRow) => (r.pointsFor !== null && r.pointsAgainst !== null && r.played ? (r.pointsFor - r.pointsAgainst) / r.played : null)
-  const card = (s: Side, x: { r: StandRow; of: number } | null) => {
+  const card = (s: Side, x: { r: StandRow; of: number; group: { name: string | null } } | null) => {
     const team = s === 'H' ? g.home : g.away
     const d = x ? diff(x.r) : null
     return (
@@ -364,8 +368,8 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
         {x ? (
           <div className={`mt-3 flex items-end gap-4 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
             <div>
-              <div className={`num font-display text-4xl font-extrabold leading-none ${TEXT[s]}`}>{x.r.position}<span className="text-sm text-faint font-semibold">/{x.of}</span></div>
-              <div className="text-[10px] text-faint uppercase tracking-wide mt-1">{t('Position')}</div>
+              <div className={`num font-display text-4xl font-extrabold leading-none ${TEXT[s]}`}>{ordinal(x.r.position)}</div>
+              <div className="text-[10px] text-faint uppercase tracking-wide mt-1">{t('of {0}', { 0: x.of })}{where(x) ? ` · ${where(x)}` : ''}</div>
             </div>
             <div>
               <div className="num text-lg font-bold text-ink leading-none">{x.r.won}–{x.r.lost}</div>
@@ -389,7 +393,12 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
         {card('H', h)}
         {card('A', a)}
       </div>
-      {h && a && gap > 0 && (
+      {h && a && !same && (
+        <p className="mt-3 text-center text-xs text-muted">
+          {t('{0} {1} in {2}, {3} {4} in {5}', { 0: g.home.name, 1: ordinal(h.r.position), 2: groupIn(h.group.name), 3: g.away.name, 4: ordinal(a.r.position), 5: groupIn(a.group.name) })}
+        </p>
+      )}
+      {h && a && same && gap > 0 && (
         <p className="mt-3 text-center text-xs text-muted">
           <b className={TEXT[h.r.position < a.r.position ? 'H' : 'A']}><NameLink to={href.bbTeam(h.r.position < a.r.position ? g.home.id : g.away.id)}>{h.r.position < a.r.position ? g.home.name : g.away.name}</NameLink></b> {gap === 1 ? t('are one place higher') : t('are {0} places higher', { 0: gap })}
         </p>

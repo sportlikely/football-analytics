@@ -17,6 +17,7 @@ import { bbSquad, nbaBoxExtras } from './bbPlayers';
 import { personKey } from './bdl';
 import { bbLiveFor, periodLen, bbLiveCurve } from './bbLive';
 import { bbProbableLineup, bbBeforeAfter } from './bbLineups';
+import { groupStandings, standingsIssues, type StandGroup } from '../utils/bbStandingsGroups';
 
 export const bbPublic = () => process.env.BASKETBALL_PUBLIC === '1';
 
@@ -279,7 +280,7 @@ function markets(code: string, pHome: number, margin: number, total: number, hom
   };
 }
 
-/** API-Basketball standings of a league's current season (cached 1 hour). */
+/** API-Basketball standings of a league's current season (cached 1 hour), grouped by utils/bbStandingsGroups (fix201). */
 const standCache = new Map<string, { at: number; data: any }>();
 export async function bbStandings(code: string) {
   const hit = standCache.get(code);
@@ -291,25 +292,32 @@ export async function bbStandings(code: string) {
   let data: any = null;
   for (const season of [seasons[seasons.length - 1], seasons[seasons.length - 2]].filter(Boolean)) {
     const j = await bbGet('/standings', { league: lg.league_id, season });
-    const groups = (j.response || [])
-      .map((rows: any[]) => rows.filter(r => !/all.?star/i.test(r.stage || '') && !/all.?star/i.test(r.group?.name || '')))
-      .filter((rows: any[]) => rows.length >= 4)
-      .map((rows: any[]) => ({
-        name: rows[0]?.group?.name || rows[0]?.stage || null,
-        stage: rows[0]?.stage || null,
-        rows: rows.map(r => ({
-          position: r.position, team: { id: r.team?.id, name: r.team?.name, logo: r.team?.logo },
-          played: r.games?.played ?? 0, won: r.games?.win?.total ?? 0, lost: r.games?.lose?.total ?? 0,
-          pct: r.games?.win?.percentage != null ? Number(r.games.win.percentage) : null,
-          pointsFor: r.points?.for ?? null, pointsAgainst: r.points?.against ?? null, form: r.form || null
-        }))
-      }));
+    // fix201: one table per (stage, group), the right stage only, rows ranked inside their own table
+    const groups = groupStandings(j.response || []);
     const played = groups.reduce((s: number, gr: any) => s + gr.rows.reduce((a: number, r: any) => a + r.played, 0), 0);
     if (groups.length && played > 0) { data = { season, groups }; break; }
     if (!data && groups.length) data = { season, groups };
   }
   standCache.set(code, { at: Date.now(), data });
   return data;
+}
+
+/**
+ * fix201 data health: one line per basketball league — a table whose rows are not unique teams, or a team in two
+ * tables of the same level. Tables older than 6 h are fetched again (one call per league every 6 h at most).
+ */
+export async function bbStandingsCheck(): Promise<{ code: string; groups: number; issues: string[] }[]> {
+  const out: { code: string; groups: number; issues: string[] }[] = [];
+  for (const l of BB_LEAGUES) {
+    let data = standCache.get(l.code);
+    if (!data || Date.now() - data.at > 6 * HOUR) {
+      try { await bbStandings(l.code); } catch { /* table not available */ }
+      data = standCache.get(l.code);
+    }
+    const groups: StandGroup[] = data?.data?.groups || [];
+    if (groups.length) out.push({ code: l.code, groups: groups.length, issues: standingsIssues(groups) });
+  }
+  return out;
 }
 
 const squadCache = new Map<string, { at: number; v: any[] }>();
@@ -572,7 +580,10 @@ function teamAnalysis(teamId: number, code: string) {
  */
 async function bbTeamFromTable(teamId: number) {
   const find = (code: string, data: any) => {
-    for (const gr of data?.groups || []) for (const r of gr.rows || []) if (r.team?.id === teamId) return { code, row: r, group: gr.name };
+    // fix201: the team's own main table (conference / group), never a division or a playoff table first
+    const gs: StandGroup[] = data?.groups || [];
+    const rank = (g: StandGroup) => (g.kind === 'post' ? 2 : 0) + (g.level === 'division' ? 1 : 0);
+    for (const gr of [...gs].sort((a, b) => rank(a) - rank(b))) for (const r of gr.rows || []) if (r.team?.id === teamId) return { code, row: r, group: gr.name };
     return null;
   };
   let hit: { code: string; row: any; group: string | null } | null = null;
