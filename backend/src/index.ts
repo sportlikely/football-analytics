@@ -88,6 +88,7 @@ import { startGeo, geoCredit, countryOf } from './services/geo';
 import { ensureIndexes } from './services/dbIndexes';
 import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
+import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
 import { hubBySlug, hubByOld, hubOpen, buildHub, warmHubs, HUBS } from './services/hubs';
 import { refreshFromDetails } from './services/matchPreview';
 import { fontRoute, warmFonts } from './services/fonts';
@@ -411,7 +412,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|hub(\/|$)|basketball\/|nfl\/|tennis\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -2182,6 +2183,19 @@ app.get('/api/hub/:slug', (req, res) => {
 });
 app.get('/api/hub', (req, res) => {
   res.json({ data: HUBS.filter(h => hubOpen(h, req.access === 'admin')).map(h => ({ slug: h.slug, sport: h.sport, name: h.name })) });
+});
+
+// fix206: "How our models work" per sport (inputs from the model configs, accuracy by competition from the sport's
+// record, last 365 days, 20+ games) and the changelog (docs/changelog.json). A sport before its launch: admins only.
+app.get('/api/how-it-works/:sport', (req, res) => {
+  const sport = String(req.params.sport) as HiwSport;
+  if (!HIW_SPORTS.includes(sport) || (!hiwPublic(sport) && req.access !== 'admin')) return res.status(404).json({ error: 'Not found' });
+  try { res.set('Cache-Control', 'public, max-age=600').json({ data: howItWorks(sport) }); }
+  catch (e: any) { sendError(res, e, 'How it works failed'); }
+});
+app.get('/api/changelog', (req, res) => {
+  try { res.set('Cache-Control', 'private, max-age=600').json({ data: changelog(req.access === 'admin') }); }
+  catch (e: any) { sendError(res, e, 'Changelog failed'); }
 });
 
 // Guides (fix125): plain-English explainers, rendered on the server (same text as the crawler HTML)

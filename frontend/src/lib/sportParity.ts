@@ -51,6 +51,7 @@ export const PARITY = [
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.modelName', label: 'Public model name + version line under the prediction (ModelName, fix191)', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'game.howItWorks', label: 'How-it-works link under the prediction + the how-it-works page of the sport (fix206)', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- team page ---------- */
   { key: 'team.analysis', label: 'Strengths & weaknesses', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'team.ratingTiles', label: 'Model rating tiles', football: true, basketball: true, nfl: true, tennis: true },

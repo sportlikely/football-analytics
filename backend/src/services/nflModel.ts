@@ -27,7 +27,7 @@
  * (its new settings are fixed at the old values: regression 1/3 to 1500, no FCS, no cap).
  */
 import { db } from '../db';
-import { winnerBands, winnerCalibration, winnerByConfidence } from '../utils/winnerBands';
+import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import logger from '../utils/logger';
 import { yieldLoop, timed, slicer } from './perf';
 import { teamBox, NflGame } from './nflSite';
@@ -915,7 +915,9 @@ export function nflAccuracy(days = 3650) {
     // fix152b: the shared Accuracy page (football's layout)
     calibration: winnerCalibration(rows.map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))),
     byConfidence: winnerByConfidence(rows.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: hit(r) }))),
-    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(rows.filter(r => code(r.league) === c)) })),
+    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(rows.filter(r => code(r.league) === c)),
+      // fix206: the how-it-works pages' accuracy table
+      brier: winnerBrier(rows.filter(r => code(r.league) === c).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))) })),
     // fix174: how far the expected margin and the total were off (football's goals numbers, for a points sport)
     scores: scoreOff(rows),
     recent: rows.slice(0, 50).map(r => ({

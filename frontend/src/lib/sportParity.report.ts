@@ -9,7 +9,7 @@ export interface ParityReport {
 }
 export const PARITY_REPORT: ParityReport = {
  "ok": true,
- "keys": 62,
+ "keys": 64,
  "gaps": [],
  "propGaps": [],
  "problems": [],

@@ -21,6 +21,7 @@ import { useUnlocks, resetDay } from './lib/unlocks'
 import { reportError } from './lib/report'
 import { isChunkError, isReloading, reloadForNewVersion } from './lib/chunkReload'
 import { HUBS } from './lib/hubs'
+import { howPath } from './lib/howItWorks'
 import { SOCIAL, type SocialId } from './lib/social'
 import { t as tt, basename, applyHeadLang, LANGS, lang, setLang, type Lang } from './lib/i18n'
 
@@ -79,6 +80,8 @@ const SportSoon = page(() => import('./pages/SportSoon'))
 const Today = page(() => import('./pages/Today'))
 const Guide = page(() => import('./pages/Guide'))
 const LeagueHub = page(() => import('./pages/LeagueHub'))
+const HowItWorks = page(() => import('./components/sport/HowItWorks'))
+const Changelog = page(() => import('./pages/Changelog'))
 const GuideIndex = page(() => import('./pages/Guide').then(m => ({ default: m.GuideIndex })))
 const BbHome = page(() => import('./pages/bb/BbHome'))
 const BbGames = page(() => import('./pages/bb/BbGames'))
@@ -430,6 +433,12 @@ function useNflOpen() {
 }
 
 /** Footer (fix137): American football link once the NFL site is open for this visitor. */
+/** fix206: "How it works" opens the how-it-works page of the sport on screen (football's elsewhere). */
+function FooterHow() {
+  const sport = sportOfPath(useLocation().pathname).id
+  return <Link to={howPath(sport) || '/how-it-works'} className="hover:text-ink">{tt("How it works")}</Link>
+}
+
 function FooterNfl() {
   const cfg = useNflConfig()
   if (!cfg?.open) return null
@@ -626,6 +635,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/player\//, tt('Player')],
   [/^\/match\//, tt('Match')],
   [/^\/accuracy/, tt('Accuracy')],
+  [/^\/changelog/, tt('Changelog')],
   [/^\/draw-alerts/, tt('Draw picks')],
   [/^\/upset-watch/, tt('Upset watch')],
   [/^\/past/, tt('Past seasons')],
@@ -729,6 +739,9 @@ function Shell() {
             <Route path="/matches" element={<Dashboard />} />
             <Route path="/predictions/today" element={<Today sport="football" />} />
             <Route path="/predictions/:league" element={<LeagueHub />} />
+            {/* fix206: how our models work (every sport) + the changelog */}
+            <Route path="/how-it-works" element={<HowItWorks sport="football" />} />
+            <Route path="/changelog" element={<Changelog />} />
             <Route path="/guides" element={<GuideIndex />} />
             <Route path="/guides/:slug" element={<Guide />} />
             <Route path="/favorites" element={<Favorites />} />
@@ -786,7 +799,8 @@ function Shell() {
 
         <footer className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-28 xl:pb-10 text-xs text-faint space-y-2">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <Link to="/guides/how-it-works" className="hover:text-ink">{tt("How it works")}</Link>
+            <FooterHow />
+            <Link to="/changelog" className="hover:text-ink">{tt("Changelog")}</Link>
             <Link to="/guides/double-chance" className="hover:text-ink">{tt("What is double chance?")}</Link>
             <Link to="/terms" className="hover:text-ink">{tt("Terms")}</Link>
             <Link to="/privacy" className="hover:text-ink">{tt("Privacy")}</Link>
@@ -831,6 +845,7 @@ function TennisRoutes() {
       <Route path="rankings" element={<TennisRankings />} />
       <Route path="favorites" element={<TennisFavorites />} />
       <Route path="accuracy" element={<RecordGate home="/tennis"><TennisAccuracy /></RecordGate>} />
+      <Route path="how-it-works" element={<HowItWorks sport="tennis" />} />
       <Route path="past" element={<ModelOnly><TennisPast /></ModelOnly>} />
       <Route path="upset-watch" element={<PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming matches where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}><UpsetWatch sport="tennis" /></PremiumGate>} />
       <Route path="*" element={<NotFound />} />
@@ -863,6 +878,7 @@ function NflRoutes() {
       <Route path="my-picks" element={<MyPicks initial="nfl" />} />
       <Route path="upset-watch" element={<PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming games where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}><UpsetWatch sport="american-football" /></PremiumGate>} />
       <Route path="accuracy" element={<RecordGate home="/american-football"><NflAccuracy /></RecordGate>} />
+      <Route path="how-it-works" element={<HowItWorks sport="american-football" />} />
       <Route path="past" element={<ModelOnly><NflPast /></ModelOnly>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
@@ -889,6 +905,7 @@ function BbRoutes() {
       <Route path="my-picks" element={<MyPicks initial="bb" />} />
       <Route path="upset-watch" element={<PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming games where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}><UpsetWatch sport="basketball" /></PremiumGate>} />
       <Route path="accuracy" element={<RecordGate home="/basketball"><BbAccuracy /></RecordGate>} />
+      <Route path="how-it-works" element={<HowItWorks sport="basketball" />} />
       <Route path="past" element={<ModelOnly><BbPast /></ModelOnly>} />
       <Route path="*" element={<NotFound />} />
     </Routes>

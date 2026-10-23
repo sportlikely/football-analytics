@@ -36,3 +36,12 @@ export function winnerByConfidence(rows: { p: number; hit: boolean }[]) {
     return { id: `${lo}`, label: hi > 100 ? `${lo}%+` : `${lo}–${hi}%`, n: sel.length, hitRate: sel.length ? r1((100 * hits) / sel.length) : null, said: sel.length ? r1((100 * sel.reduce((s, r) => s + r.p, 0)) / sel.length) : null };
   });
 }
+/**
+ * fix206: Brier score of the winner sports — the average of (chance we gave the home side − 1 if it won, else 0)²,
+ * 0 = perfect, 0.25 = a coin flip every time. The "how it works" pages show it per competition next to the hit rate.
+ */
+export function winnerBrier(rows: { pHome: number; homeWon: boolean }[]): number | null {
+  if (!rows.length) return null;
+  const s = rows.reduce((a, r) => a + (r.pHome - (r.homeWon ? 1 : 0)) ** 2, 0);
+  return Math.round((s / rows.length) * 1000) / 1000;
+}

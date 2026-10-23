@@ -34,6 +34,9 @@ COPY --from=api /api/package.json ./package.json
 COPY --from=web /web/dist /app/frontend/dist
 # guides (markdown) are rendered by the API and the crawler HTML (services/guides.ts)
 COPY frontend/src/content/guides /app/frontend/src/content/guides
+# fix206: the how-it-works pages' search-engine copy uses the app's translations; the changelog is a file in the repo
+COPY frontend/src/locales /app/frontend/src/locales
+COPY docs/changelog.json /app/docs/changelog.json
 RUN mkdir -p /data
 EXPOSE 3001
 CMD ["node", "dist/index.js"]

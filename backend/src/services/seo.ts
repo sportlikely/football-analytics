@@ -10,6 +10,7 @@ import { nflCurrentSeason, schoolName, HIDE_OTHER } from './nfl';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame as nflGameRaw, nflStandings, nflTeam as nflTeamRaw, nflPlayer as nflPlayerRaw, leagueOfTeamId, type NflGame } from './nflSite';
 import { nflPreview } from './nflGameExtras';
 import { listGuides, getGuide } from './guides';
+import { howItWorksSeo, hiwPublic, HIW_PATH } from './howItWorks';
 import { tennisMatchesBetween, levelRank, tierLabel, playedBefore, headToHead } from './tennisSite';
 import { tennisSeoPage, tennisSitemapUrls, tennisPlayerUrls } from './seoTennis';
 import { tennisPublic } from './tennisSite';
@@ -302,6 +303,9 @@ export function seoPage(rawPath: string): SeoInfo {
 
   let m: RegExpMatchArray | null;
   try {
+    // fix206: how-it-works pages (every sport, translated, FAQPage) and the changelog — before tennis, which owns /tennis/*
+    const hw = howItWorksSeo(path, lang);
+    if (hw) return page(hw.title, hw.description, hw.body, { noindex: hw.noindex, jsonld: hw.jsonld });
     // fix193c: tennis (services/seoTennis.ts) — "coming soon" + noindex until TENNIS_PUBLIC=1
     const tn = tennisSeoPage(path, lang);
     if (tn) return page(tn.title, tn.description, tn.body, { noindex: tn.noindex, canonicalEn: tn.canonicalEn, jsonld: tn.jsonld });
@@ -670,6 +674,8 @@ function sitemapFootball(): string {
   add('/', 'hourly', '1.0'); add('/matches', 'hourly', '0.9'); add('/predictions/today', 'daily', '0.9');
   add('/draw-alerts', 'daily', '0.6'); add('/premium', 'monthly', '0.5', '2026-10-01');
   for (const p of ['/terms', '/privacy', '/accessibility', '/contact']) add(p, 'yearly', '0.2', '2026-10-01');
+  // fix206: how it works + changelog, every language
+  add(HIW_PATH.football, 'weekly', '0.6'); add('/changelog', 'weekly', '0.5');
   // guides (fix125): English only, so no language alternates
   const gs = listGuides();
   if (gs.length) {
@@ -689,7 +695,7 @@ function sitemapBasketball(): string {
   if (!bbPublic()) return urlset([]);
   const urls: SmUrl[] = [];
   const today = isoDay();
-  urls.push({ loc: '/basketball', freq: 'hourly', pri: '0.8', mod: today }, { loc: '/basketball/predictions/today', freq: 'daily', pri: '0.8', mod: today });
+  urls.push({ loc: '/basketball', freq: 'hourly', pri: '0.8', mod: today }, { loc: '/basketball/predictions/today', freq: 'daily', pri: '0.8', mod: today }, { loc: HIW_PATH.basketball, freq: 'weekly', pri: '0.6', mod: today });
   const now = new Date().toISOString();
   const from = new Date(Date.now() - 14 * 86400000).toISOString(), to = new Date(Date.now() + 10 * 86400000).toISOString();
   const games = db.prepare(`SELECT game_id, kickoff, updated_at FROM bb_games WHERE kickoff >= ? AND kickoff <= ? AND (status IS NULL OR status NOT IN ('CANC','POST')) ORDER BY kickoff LIMIT 3000`).all(from, to) as any[];
@@ -701,7 +707,8 @@ function sitemapBasketball(): string {
 function sitemapNfl(): string {
   if (!nflPublic()) return urlset([]);
   const today = isoDay();
-  const urls: SmUrl[] = [];
+  // fix206: the how-it-works page is translated (every language), unlike the other NFL pages
+  const urls: SmUrl[] = [{ loc: HIW_PATH['american-football'], freq: 'weekly', pri: '0.6', mod: today }];
   // fix142: NFL and college football (college: games and teams of FBS only)
   for (const lg of [1, 2] as const) {
     const season = nflCurrentSeason(lg);
@@ -790,7 +797,7 @@ function sitemapPlayers(): string {
 }
 
 export const SITEMAPS: Record<string, () => string> = {
-  'sitemap-football.xml': sitemapFootball, 'sitemap-basketball.xml': sitemapBasketball, 'sitemap-nfl.xml': sitemapNfl, 'sitemap-tennis.xml': () => urlset(tennisSitemapUrls()),
+  'sitemap-football.xml': sitemapFootball, 'sitemap-basketball.xml': sitemapBasketball, 'sitemap-nfl.xml': sitemapNfl, 'sitemap-tennis.xml': () => urlset([...tennisSitemapUrls(), ...(hiwPublic('tennis') ? [{ loc: HIW_PATH.tennis, freq: 'weekly', pri: '0.6', mod: isoDay() }] : [])]),
   'sitemap-teams.xml': sitemapTeams, 'sitemap-leagues.xml': sitemapLeagues, 'sitemap-players.xml': sitemapPlayers
 };
 /** sitemap.xml: the index of the four sitemaps. */

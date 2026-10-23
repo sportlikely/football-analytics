@@ -1,0 +1,335 @@
+{
+ "_about": "fix206: the public changelog at /changelog (backend/src/services/howItWorks.ts). Newest first. One or two plain sentences for visitors (no internal fixes, no odds, no betting words), in all seven languages. sport: football | basketball | american-football | tennis | all. kind: model | site. version: the sport's model version at the time (shown as 'SL Basketball 3.0'), null for 'all'. Entries of a sport before its launch are shown to admins only.",
+ "entries": [
+  {
+   "date": "2026-10-23",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "New pages explain how each of our models works, with its accuracy in every competition. This changelog lists every change, newest first.",
+    "es": "Nuevas páginas explican cómo funciona cada uno de nuestros modelos, con su acierto en cada competición. Este registro de cambios recoge cada cambio, del más reciente al más antiguo.",
+    "pt": "Novas páginas explicam como funciona cada um dos nossos modelos, com a precisão em cada competição. Este registro de mudanças lista todas as alterações, das mais recentes para as mais antigas.",
+    "de": "Neue Seiten erklären, wie jedes unserer Modelle funktioniert, mit seiner Trefferquote in jedem Wettbewerb. Dieses Änderungsprotokoll listet jede Änderung, die neueste zuerst.",
+    "fr": "De nouvelles pages expliquent comment fonctionne chacun de nos modèles, avec sa précision dans chaque compétition. Ce journal des modifications liste chaque changement, du plus récent au plus ancien.",
+    "it": "Nuove pagine spiegano come funziona ciascuno dei nostri modelli, con la sua precisione in ogni competizione. Questo registro delle modifiche elenca ogni cambiamento, dal più recente.",
+    "tr": "Yeni sayfalar her modelimizin nasıl çalıştığını ve her turnuvadaki isabet oranını anlatıyor. Bu değişiklik günlüğü her değişikliği en yeniden başlayarak listeliyor."
+   }
+  },
+  {
+   "date": "2026-10-23",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "Every competition now counts in our public record, in every sport. Nothing is left out as \"in testing\".",
+    "es": "Ahora todas las competiciones cuentan en nuestro historial público, en todos los deportes. Nada se deja fuera como \"en pruebas\".",
+    "pt": "Agora todas as competições contam no nosso histórico público, em todos os esportes. Nada fica de fora como \"em teste\".",
+    "de": "Jeder Wettbewerb zählt jetzt in unserer öffentlichen Bilanz, in jeder Sportart. Nichts wird mehr als \"im Test\" ausgelassen.",
+    "fr": "Toutes les compétitions comptent désormais dans notre bilan public, dans tous les sports. Plus rien n'est écarté comme \"en test\".",
+    "it": "Ora ogni competizione conta nel nostro storico pubblico, in ogni sport. Niente viene escluso come \"in prova\".",
+    "tr": "Artık her spor dalında her turnuva herkese açık sicilimizde sayılıyor. Hiçbir şey \"testte\" diye dışarıda bırakılmıyor."
+   }
+  },
+  {
+   "date": "2026-10-23",
+   "sport": "basketball",
+   "kind": "site",
+   "version": "3.0",
+   "text": {
+    "en": "Standings now show one table per conference or group, with divisions behind a switch. Pre-season tables disappear once the season starts.",
+    "es": "Las clasificaciones muestran ahora una tabla por conferencia o grupo, con las divisiones tras un selector. Las tablas de pretemporada desaparecen al empezar la temporada.",
+    "pt": "As classificações agora mostram uma tabela por conferência ou grupo, com as divisões em um seletor. As tabelas da pré-temporada somem quando a temporada começa.",
+    "de": "Die Tabellen zeigen jetzt eine Tabelle pro Conference oder Gruppe, die Divisions hinter einem Umschalter. Vorbereitungstabellen verschwinden, sobald die Saison beginnt.",
+    "fr": "Les classements affichent désormais un tableau par conférence ou groupe, avec les divisions derrière un bouton. Les tableaux de présaison disparaissent dès le début de la saison.",
+    "it": "Le classifiche mostrano ora una tabella per conference o girone, con le division dietro un selettore. Le tabelle di pre-stagione spariscono quando inizia la stagione.",
+    "tr": "Puan durumları artık her konferans veya grup için ayrı bir tablo gösteriyor, bölümler bir düğmenin arkasında. Hazırlık dönemi tabloları sezon başlayınca kayboluyor."
+   }
+  },
+  {
+   "date": "2026-10-23",
+   "sport": "football",
+   "kind": "site",
+   "version": "3.0",
+   "text": {
+    "en": "Matches that were postponed, moved or never played are now settled or marked void with a reason, so none sits unscored in our record.",
+    "es": "Los partidos aplazados, movidos o no jugados se resuelven ahora o se anulan con un motivo, así ninguno queda sin puntuar en nuestro historial.",
+    "pt": "Jogos adiados, remarcados ou não disputados agora são resolvidos ou anulados com um motivo, para que nenhum fique sem avaliação no histórico.",
+    "de": "Verschobene, verlegte oder nie gespielte Partien werden jetzt gewertet oder mit Begründung annulliert, damit keine ungewertet in unserer Bilanz bleibt.",
+    "fr": "Les matchs reportés, déplacés ou jamais joués sont désormais réglés ou annulés avec un motif, pour qu'aucun ne reste sans résultat dans notre bilan.",
+    "it": "Le partite rinviate, spostate o mai giocate ora vengono chiuse o annullate con un motivo, così nessuna resta senza esito nel nostro storico.",
+    "tr": "Ertelenen, taşınan ya da hiç oynanmayan maçlar artık sonuçlandırılıyor veya bir gerekçeyle geçersiz sayılıyor; böylece sicilimizde puanlanmamış maç kalmıyor."
+   }
+  },
+  {
+   "date": "2026-10-20",
+   "sport": "tennis",
+   "kind": "model",
+   "version": "1.0",
+   "text": {
+    "en": "Tennis arrives: matches, players, tournaments and rankings, with predictions for ATP, WTA, Challenger and Grand Slam singles.",
+    "es": "Llega el tenis: partidos, jugadores, torneos y rankings, con pronósticos para individuales de ATP, WTA, Challenger y Grand Slam.",
+    "pt": "Chegou o tênis: partidas, jogadores, torneios e rankings, com previsões para simples da ATP, WTA, Challenger e Grand Slam.",
+    "de": "Tennis ist da: Matches, Spieler, Turniere und Ranglisten, mit Prognosen für ATP-, WTA-, Challenger- und Grand-Slam-Einzel.",
+    "fr": "Le tennis arrive : matchs, joueurs, tournois et classements, avec des prédictions pour les simples ATP, WTA, Challenger et Grand Chelem.",
+    "it": "Arriva il tennis: partite, giocatori, tornei e classifiche, con previsioni per i singolari ATP, WTA, Challenger e Slam.",
+    "tr": "Tenis geldi: maçlar, oyuncular, turnuvalar ve sıralamalar; ATP, WTA, Challenger ve Grand Slam tekler için tahminlerle."
+   }
+  },
+  {
+   "date": "2026-10-20",
+   "sport": "all",
+   "kind": "model",
+   "version": null,
+   "text": {
+    "en": "Every game now gets a prediction. A team new to a league starts from a fair estimate instead of being skipped.",
+    "es": "Ahora cada partido tiene pronóstico. Un equipo nuevo en una liga parte de una estimación razonable en lugar de quedarse fuera.",
+    "pt": "Agora todo jogo tem previsão. Um time novo em uma liga começa com uma estimativa justa em vez de ficar de fora.",
+    "de": "Jedes Spiel bekommt jetzt eine Prognose. Ein Team, das neu in einer Liga ist, startet mit einer fairen Schätzung, statt ausgelassen zu werden.",
+    "fr": "Chaque match a désormais une prédiction. Une équipe nouvelle dans une ligue part d'une estimation juste au lieu d'être ignorée.",
+    "it": "Ora ogni partita ha una previsione. Una squadra nuova in un campionato parte da una stima equa invece di essere saltata.",
+    "tr": "Artık her maçın bir tahmini var. Bir lige yeni gelen takım atlanmak yerine makul bir tahminle başlıyor."
+   }
+  },
+  {
+   "date": "2026-10-20",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "Our models now have public names, shown under every prediction: SL Football 3.0, SL Basketball 3.0 and SL American Football 1.0.",
+    "es": "Nuestros modelos tienen ahora nombre público, visible bajo cada pronóstico: SL Football 3.0, SL Basketball 3.0 y SL American Football 1.0.",
+    "pt": "Nossos modelos agora têm nome público, mostrado em cada previsão: SL Football 3.0, SL Basketball 3.0 e SL American Football 1.0.",
+    "de": "Unsere Modelle haben jetzt öffentliche Namen, die unter jeder Prognose stehen: SL Football 3.0, SL Basketball 3.0 und SL American Football 1.0.",
+    "fr": "Nos modèles ont désormais un nom public, affiché sous chaque prédiction : SL Football 3.0, SL Basketball 3.0 et SL American Football 1.0.",
+    "it": "I nostri modelli ora hanno un nome pubblico, mostrato sotto ogni previsione: SL Football 3.0, SL Basketball 3.0 e SL American Football 1.0.",
+    "tr": "Modellerimizin artık her tahminin altında görünen herkese açık adları var: SL Football 3.0, SL Basketball 3.0 ve SL American Football 1.0."
+   }
+  },
+  {
+   "date": "2026-10-19",
+   "sport": "football",
+   "kind": "model",
+   "version": "3.0",
+   "text": {
+    "en": "A common-sense check for close games: a team with clearly worse form, table position and head-to-head is never made the favourite.",
+    "es": "Un control de sentido común para partidos igualados: un equipo con forma, clasificación y cara a cara claramente peores nunca es el favorito.",
+    "pt": "Um controle de bom senso para jogos equilibrados: um time com fase, classificação e confronto direto claramente piores nunca vira o favorito.",
+    "de": "Eine Plausibilitätsprüfung für enge Spiele: Ein Team mit klar schlechterer Form, Tabellenplatz und Bilanz im direkten Vergleich wird nie zum Favoriten.",
+    "fr": "Un contrôle de bon sens pour les matchs serrés : une équipe nettement moins bien en forme, au classement et en face-à-face n'est jamais la favorite.",
+    "it": "Un controllo di buon senso per le partite equilibrate: una squadra chiaramente peggiore per forma, classifica e scontri diretti non è mai la favorita.",
+    "tr": "Dengeli maçlar için sağduyu kontrolü: formu, sıralaması ve aralarındaki maçları açıkça daha kötü olan takım asla favori yapılmıyor."
+   }
+  },
+  {
+   "date": "2026-10-19",
+   "sport": "american-football",
+   "kind": "site",
+   "version": "1.0",
+   "text": {
+    "en": "American football is one sport on the site: NFL and college games together, with a switch between them.",
+    "es": "El fútbol americano es un solo deporte en la web: partidos de la NFL y universitarios juntos, con un selector entre ambos.",
+    "pt": "O futebol americano é um só esporte no site: jogos da NFL e universitários juntos, com um seletor entre eles.",
+    "de": "American Football ist eine Sportart auf der Seite: NFL- und College-Spiele zusammen, mit einem Umschalter dazwischen.",
+    "fr": "Le football américain devient un seul sport sur le site : matchs NFL et universitaires ensemble, avec un bouton pour passer de l'un à l'autre.",
+    "it": "Il football americano è un solo sport sul sito: partite NFL e college insieme, con un selettore tra le due.",
+    "tr": "Amerikan futbolu sitede tek bir spor: NFL ve kolej maçları bir arada, aralarında geçiş düğmesiyle."
+   }
+  },
+  {
+   "date": "2026-10-18",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "Every team, player and competition name now links to its own page.",
+    "es": "Cada nombre de equipo, jugador y competición enlaza ahora a su propia página.",
+    "pt": "Cada nome de time, jogador e competição agora leva à sua própria página.",
+    "de": "Jeder Team-, Spieler- und Wettbewerbsname verlinkt jetzt auf seine eigene Seite.",
+    "fr": "Chaque nom d'équipe, de joueur et de compétition mène désormais à sa propre page.",
+    "it": "Ogni nome di squadra, giocatore e competizione ora porta alla sua pagina.",
+    "tr": "Her takım, oyuncu ve turnuva adı artık kendi sayfasına bağlanıyor."
+   }
+  },
+  {
+   "date": "2026-10-18",
+   "sport": "basketball",
+   "kind": "site",
+   "version": "3.0",
+   "text": {
+    "en": "Game pages show the probable starting five, and the numbers update after the NBA injury report.",
+    "es": "Las páginas de partido muestran el quinteto inicial probable, y los números se actualizan tras el parte de lesiones de la NBA.",
+    "pt": "As páginas de jogo mostram o quinteto inicial provável, e os números são atualizados após o relatório de lesões da NBA.",
+    "de": "Spielseiten zeigen die wahrscheinliche Startfünf, und die Zahlen ändern sich nach dem NBA-Verletzungsbericht.",
+    "fr": "Les pages de match montrent le cinq de départ probable, et les chiffres se mettent à jour après le rapport des blessures NBA.",
+    "it": "Le pagine partita mostrano il probabile quintetto base, e i numeri si aggiornano dopo il bollettino infortuni NBA.",
+    "tr": "Maç sayfaları muhtemel ilk beşi gösteriyor ve rakamlar NBA sakatlık raporundan sonra güncelleniyor."
+   }
+  },
+  {
+   "date": "2026-10-18",
+   "sport": "american-football",
+   "kind": "site",
+   "version": "1.0",
+   "text": {
+    "en": "Game pages get a live win chance, a projected score and a swing chart, plus standings and schedule tabs.",
+    "es": "Las páginas de partido tienen probabilidad de victoria en directo, marcador proyectado y gráfico de evolución, además de pestañas de clasificación y calendario.",
+    "pt": "As páginas de jogo ganham chance de vitória ao vivo, placar projetado e gráfico de oscilação, além das abas de classificação e calendário.",
+    "de": "Spielseiten bekommen eine Live-Siegchance, ein erwartetes Ergebnis und einen Verlaufsgraphen, dazu Tabs für Tabelle und Spielplan.",
+    "fr": "Les pages de match ont une chance de victoire en direct, un score projeté et une courbe d'évolution, plus des onglets classement et calendrier.",
+    "it": "Le pagine partita hanno la probabilità di vittoria in diretta, il punteggio previsto e un grafico dell'andamento, più le schede classifica e calendario.",
+    "tr": "Maç sayfalarına canlı kazanma şansı, öngörülen skor ve dalgalanma grafiği, ayrıca puan durumu ve fikstür sekmeleri geldi."
+   }
+  },
+  {
+   "date": "2026-10-17",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "New Premium and Pro plans, and single-pick packs, in every sport.",
+    "es": "Nuevos planes Premium y Pro, y paquetes de pronósticos sueltos, en todos los deportes.",
+    "pt": "Novos planos Premium e Pro, e pacotes de palpites avulsos, em todos os esportes.",
+    "de": "Neue Premium- und Pro-Pläne sowie Pakete mit einzelnen Tipps, in jeder Sportart.",
+    "fr": "Nouvelles formules Premium et Pro, et packs de prédictions à l'unité, dans tous les sports.",
+    "it": "Nuovi piani Premium e Pro, e pacchetti di previsioni singole, in ogni sport.",
+    "tr": "Her spor dalında yeni Premium ve Pro planları ile tekli tahmin paketleri."
+   }
+  },
+  {
+   "date": "2026-10-16",
+   "sport": "american-football",
+   "kind": "model",
+   "version": "1.0",
+   "text": {
+    "en": "Predictions for every NFL game, and for college football from the same day: team strength, quarterbacks, efficiency, home field and rest.",
+    "es": "Pronósticos para cada partido de la NFL, y para el fútbol universitario desde el mismo día: fuerza del equipo, quarterbacks, eficiencia, factor campo y descanso.",
+    "pt": "Previsões para todos os jogos da NFL, e para o futebol americano universitário desde o mesmo dia: força do time, quarterbacks, eficiência, mando de campo e descanso.",
+    "de": "Prognosen für jedes NFL-Spiel und ab demselben Tag für College Football: Teamstärke, Quarterbacks, Effizienz, Heimvorteil und Pausen.",
+    "fr": "Des prédictions pour chaque match NFL, et pour le football universitaire dès le même jour : force de l'équipe, quarterbacks, efficacité, avantage du terrain et repos.",
+    "it": "Previsioni per ogni partita NFL, e per il football universitario dallo stesso giorno: forza della squadra, quarterback, efficienza, fattore campo e riposo.",
+    "tr": "Her NFL maçı için ve aynı günden itibaren kolej futbolu için tahminler: takım gücü, oyun kurucular, verimlilik, saha avantajı ve dinlenme."
+   }
+  },
+  {
+   "date": "2026-10-15",
+   "sport": "football",
+   "kind": "model",
+   "version": "3.0",
+   "text": {
+    "en": "Our recommended pick is now the double chance: the two most likely results together. 85% or more is a strong pick.",
+    "es": "Nuestro pronóstico recomendado es ahora la doble oportunidad: los dos resultados más probables juntos. Un 85% o más es un pronóstico fuerte.",
+    "pt": "Nosso palpite recomendado agora é a dupla chance: os dois resultados mais prováveis juntos. 85% ou mais é um palpite forte.",
+    "de": "Unser empfohlener Tipp ist jetzt die Doppelte Chance: die zwei wahrscheinlichsten Ergebnisse zusammen. Ab 85% ist es ein starker Tipp.",
+    "fr": "Notre prédiction recommandée est désormais la double chance : les deux résultats les plus probables ensemble. 85% ou plus, c'est une prédiction forte.",
+    "it": "La nostra previsione consigliata è ora la doppia chance: i due risultati più probabili insieme. Dall'85% in su è una previsione forte.",
+    "tr": "Önerdiğimiz tahmin artık çifte şans: en olası iki sonuç bir arada. %85 ve üzeri güçlü tahmin."
+   }
+  },
+  {
+   "date": "2026-10-15",
+   "sport": "football",
+   "kind": "site",
+   "version": "3.0",
+   "text": {
+    "en": "Plain-English guides explain how to read our numbers, and weekly prediction pages for the big leagues.",
+    "es": "Guías sencillas (en inglés) explican cómo leer nuestros números, y hay páginas semanales de pronósticos para las grandes ligas.",
+    "pt": "Guias simples (em inglês) explicam como ler nossos números, e há páginas semanais de previsões para as grandes ligas.",
+    "de": "Einfache Leitfäden (auf Englisch) erklären, wie man unsere Zahlen liest, dazu wöchentliche Prognoseseiten für die großen Ligen.",
+    "fr": "Des guides simples (en anglais) expliquent comment lire nos chiffres, et des pages hebdomadaires de prédictions couvrent les grands championnats.",
+    "it": "Guide semplici (in inglese) spiegano come leggere i nostri numeri, e ci sono pagine settimanali di previsioni per i grandi campionati.",
+    "tr": "Sade rehberler (İngilizce) rakamlarımızı nasıl okuyacağınızı anlatıyor; büyük ligler için haftalık tahmin sayfaları da var."
+   }
+  },
+  {
+   "date": "2026-10-13",
+   "sport": "basketball",
+   "kind": "site",
+   "version": "3.0",
+   "text": {
+    "en": "Live win chance and projected final score during basketball games.",
+    "es": "Probabilidad de victoria en directo y marcador final proyectado durante los partidos de baloncesto.",
+    "pt": "Chance de vitória ao vivo e placar final projetado durante os jogos de basquete.",
+    "de": "Live-Siegchance und erwartetes Endergebnis während der Basketballspiele.",
+    "fr": "Chance de victoire en direct et score final projeté pendant les matchs de basket.",
+    "it": "Probabilità di vittoria in diretta e punteggio finale previsto durante le partite di basket.",
+    "tr": "Basketbol maçları sırasında canlı kazanma şansı ve öngörülen maç sonu skoru."
+   }
+  },
+  {
+   "date": "2026-10-13",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "My picks: save your own picks and follow your personal record.",
+    "es": "Mis pronósticos: guarda tus propios pronósticos y sigue tu historial personal.",
+    "pt": "Meus palpites: salve seus próprios palpites e acompanhe seu histórico pessoal.",
+    "de": "Meine Tipps: Speichere deine eigenen Tipps und verfolge deine persönliche Bilanz.",
+    "fr": "Mes prédictions : enregistrez vos propres choix et suivez votre bilan personnel.",
+    "it": "Le mie previsioni: salva le tue scelte e segui il tuo storico personale.",
+    "tr": "Tahminlerim: kendi tahminlerinizi kaydedin ve kişisel sicilinizi takip edin."
+   }
+  },
+  {
+   "date": "2026-10-10",
+   "sport": "football",
+   "kind": "model",
+   "version": "3.0",
+   "text": {
+    "en": "Live win chance during football matches, updated with the score and the minute.",
+    "es": "Probabilidad de victoria en directo durante los partidos de fútbol, actualizada con el marcador y el minuto.",
+    "pt": "Chance de vitória ao vivo durante os jogos de futebol, atualizada com o placar e o minuto.",
+    "de": "Live-Siegchance während Fußballspielen, aktualisiert mit Spielstand und Minute.",
+    "fr": "Chance de victoire en direct pendant les matchs de football, mise à jour avec le score et la minute.",
+    "it": "Probabilità di vittoria in diretta durante le partite di calcio, aggiornata con il risultato e il minuto.",
+    "tr": "Futbol maçları sırasında skora ve dakikaya göre güncellenen canlı kazanma şansı."
+   }
+  },
+  {
+   "date": "2026-10-08",
+   "sport": "basketball",
+   "kind": "model",
+   "version": "3.0",
+   "text": {
+    "en": "Basketball predictions get player strength, faster learning early in the season and possession-based ratings, tested on over 14,000 games the model never saw.",
+    "es": "Los pronósticos de baloncesto suman la fuerza de los jugadores, un aprendizaje más rápido al inicio de la temporada y valoraciones por posesión, probados en más de 14.000 partidos que el modelo no había visto.",
+    "pt": "As previsões de basquete passam a usar a força dos jogadores, aprendizado mais rápido no início da temporada e avaliações por posse de bola, testadas em mais de 14.000 jogos que o modelo nunca viu.",
+    "de": "Basketball-Prognosen berücksichtigen jetzt Spielerstärke, lernen am Saisonanfang schneller und nutzen Bewertungen pro Ballbesitz, getestet an über 14.000 Spielen, die das Modell nie gesehen hatte.",
+    "fr": "Les prédictions de basket intègrent la force des joueurs, un apprentissage plus rapide en début de saison et des notes par possession, testées sur plus de 14 000 matchs que le modèle n'avait jamais vus.",
+    "it": "Le previsioni di basket aggiungono la forza dei giocatori, un apprendimento più rapido a inizio stagione e valutazioni per possesso, testate su oltre 14.000 partite mai viste dal modello.",
+    "tr": "Basketbol tahminlerine oyuncu gücü, sezon başında daha hızlı öğrenme ve hücum başına reytingler eklendi; modelin hiç görmediği 14.000'i aşkın maçta test edildi."
+   }
+  },
+  {
+   "date": "2026-10-07",
+   "sport": "football",
+   "kind": "site",
+   "version": "3.0",
+   "text": {
+    "en": "15 more football leagues, with line-ups, injuries and match stats for every league.",
+    "es": "15 ligas de fútbol más, con alineaciones, lesiones y estadísticas de partido en todas las ligas.",
+    "pt": "Mais 15 ligas de futebol, com escalações, lesões e estatísticas de jogo em todas as ligas.",
+    "de": "15 weitere Fußballligen, mit Aufstellungen, Verletzungen und Spielstatistiken für jede Liga.",
+    "fr": "15 championnats de football en plus, avec compositions, blessures et statistiques de match pour chaque championnat.",
+    "it": "Altri 15 campionati di calcio, con formazioni, infortuni e statistiche di ogni partita.",
+    "tr": "15 futbol ligi daha; her lig için kadrolar, sakatlıklar ve maç istatistikleriyle."
+   }
+  },
+  {
+   "date": "2026-10-07",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "SportLikely is now available in Spanish, Portuguese, German, French, Italian and Turkish.",
+    "es": "SportLikely ya está disponible en español, portugués, alemán, francés, italiano y turco.",
+    "pt": "O SportLikely agora está disponível em espanhol, português, alemão, francês, italiano e turco.",
+    "de": "SportLikely gibt es jetzt auf Spanisch, Portugiesisch, Deutsch, Französisch, Italienisch und Türkisch.",
+    "fr": "SportLikely est désormais disponible en espagnol, portugais, allemand, français, italien et turc.",
+    "it": "SportLikely è ora disponibile in spagnolo, portoghese, tedesco, francese, italiano e turco.",
+    "tr": "SportLikely artık İspanyolca, Portekizce, Almanca, Fransızca, İtalyanca ve Türkçe olarak kullanılabiliyor."
+   }
+  }
+ ]
+}

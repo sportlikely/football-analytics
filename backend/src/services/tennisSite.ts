@@ -10,7 +10,7 @@ import { db } from '../db';
 import { tennisModelInternals, tennisStrongLine, tennisPlayerModel, tennisLiveChance, tennisServeChances, tennisRecordSince, TENNIS_MODEL } from './tennisModel';
 import { tournamentKey, setTennisLiveHook, eventGender } from './tennis';
 import { yieldLoop } from './perf';
-import { winnerBands, winnerByConfidence, winnerCalibration } from '../utils/winnerBands';
+import { winnerBands, winnerByConfidence, winnerCalibration, winnerBrier } from '../utils/winnerBands';
 import { shortName, fullName, isAbbreviated } from '../utils/tennisNames';
 import { tournamentPlace, countryName } from '../utils/tennisPlaces';
 import { ROUND_ORDER, normRound, roundEn } from '../utils/tennisRounds';
@@ -742,7 +742,7 @@ export function tennisAccuracy(days = 3650) {
   const rec = (list: typeof rows) => {
     const st = list.filter(strong);
     const h = list.filter(hit).length, sh = st.filter(hit).length;
-    return { n: list.length, hits: h, hitRate: pct(h, list.length), strongN: st.length, strongHits: sh, strongHitRate: pct(sh, st.length) };
+    return { n: list.length, hits: h, hitRate: pct(h, list.length), strongN: st.length, strongHits: sh, strongHitRate: pct(sh, st.length), brier: winnerBrier(list.map(x => ({ pHome: x.r.p1, homeWon: x.m.winner === 1 }))) };
   };
   const groups = new Map<string, typeof rows>();
   const add = (k: string, x: (typeof rows)[number]) => groups.set(k, [...(groups.get(k) || []), x]);

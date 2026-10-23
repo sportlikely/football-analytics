@@ -13,7 +13,7 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { yieldLoop } from './perf';
-import { winnerBands, winnerCalibration, winnerByConfidence } from '../utils/winnerBands';
+import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import { injuryLoss } from './bbInjuries';
 
 export const BB_MODEL = 'bb-v3';
@@ -991,7 +991,9 @@ export function bbRecord(days = 3650, code?: string) {
     // fix152b: the shared Accuracy page (football's layout): calibration and picks by how sure we were
     calibration: winnerCalibration(list.map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))),
     byConfidence: winnerByConfidence(list.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))),
-    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(list.filter(r => r.code === c)) })),
+    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(list.filter(r => r.code === c)),
+      // fix206: the how-it-works pages' accuracy table
+      brier: winnerBrier(list.filter(r => r.code === c).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))) })),
     // fix174: how far the expected margin and the total were off
     scores: scoreOff(list),
     recent: list.slice(0, 50).map(r => ({
