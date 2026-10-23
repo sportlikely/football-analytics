@@ -11,7 +11,8 @@
  */
 import crypto from 'crypto';
 import { db } from '../db';
-import { listFavorites } from './favorites';
+import { listFavorites, type Favorite } from './favorites';
+import { roleByKey, ALL_PERMS } from './roles';
 import { userById, accessOf, canSeeFull, isPaid, type User, type Access } from './auth';
 import { unlockedIds } from './billing';
 import { MIX_MODEL, FEAT_MODEL, mixLive, mixLiveSince } from './featureModel';
@@ -109,7 +110,9 @@ const hashOf = (token: string) => crypto.createHash('sha256').update(token).dige
 /** first 6 characters only: what logs may show of a calendar link */
 export const tokenHint = (token: string) => `${String(token).slice(0, 6)}…`;
 export const TOKEN_RE = /^[A-Za-z0-9_-]{32}$/;
-const cache = new Map<string, { at: number; body: string }>();
+// fix205b: in memory only, so every deploy starts empty; CAL_BUILD also drops anything an older build left behind
+const CAL_BUILD = 'fix205b';
+const cache = new Map<string, { at: number; body: string; build: string }>();
 
 function newToken(userId: number, lang: CalLang): string {
   const token = crypto.randomBytes(24).toString('base64url'); // 32 characters
@@ -153,12 +156,12 @@ export function calendarIcs(token: string, site: string, now = Date.now()): stri
   if (!row) { cache.delete(h); return null; }
   if (!row.last_used_at || Date.parse(row.last_used_at) < now - 10 * 60000) db.prepare(`UPDATE calendar_tokens SET last_used_at = ? WHERE token_hash = ?`).run(new Date(now).toISOString(), h);
   const hit = cache.get(h);
-  if (hit && hit.at > now - CACHE_MS) return hit.body;
+  if (hit && hit.build === CAL_BUILD && hit.at > now - CACHE_MS) return hit.body;
   const user = userById(row.user_id);
   if (!user) return null;
   const body = calendarFor(user, asCalLang(row.lang), site, now);
   if (cache.size > 5000) cache.delete(cache.keys().next().value as string);
-  cache.set(h, { at: now, body });
+  cache.set(h, { at: now, body, build: CAL_BUILD });
   return body;
 }
 export const clearCalendarCache = () => cache.clear();
@@ -174,10 +177,42 @@ interface Game {
   pred: { h: number; d: number | null; a: number } | null; full: boolean
 }
 
-/** Same club whatever the source calls it — the twin of frontend/src/lib/favorites.tsx nameKey(). */
-export function nameKey(s: string | null | undefined) {
-  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').split(' ')
-    .filter(w => w && !['fc', 'cf', 'afc', 'sc', 'ac', 'as', 'ssc', 'sv', 'club', 'cp', 'calcio', 'football'].includes(w)).join(' ');
+/**
+ * fix205b: every id a favourite football club has in our data — never its name (a "Barcelona" favourite listed Barcelona
+ * SC's games). API-Football ids carry AF_OFFSET, Football-Data.org ids don't; the two are linked by team_resolve (the
+ * team page's own resolver) and by the league groups (team_map FD id ↔ fd_name ↔ af_teams AF id, same group only).
+ */
+export function footballTeamIds(favIds: number[]): Set<number> {
+  const af = new Set<number>(), fd = new Set<number>();
+  for (const id of favIds) if (Number.isInteger(id) && id > 0) (id >= AF_OFFSET ? af.add(id - AF_OFFSET) : fd.add(id));
+  const resolve = tableExists('team_resolve'), groups = tableExists('team_map') && tableExists('af_teams');
+  for (const id of [...fd]) {
+    if (resolve) for (const r of db.prepare(`SELECT af_id FROM team_resolve WHERE fd_id = ?`).all(id) as any[]) af.add(r.af_id);
+    if (groups) for (const r of db.prepare(`SELECT a.team_id FROM team_map m JOIN af_teams a ON a.grp = m.grp AND a.fd_name = m.fd_name WHERE m.team_id = ?`).all(id) as any[]) af.add(r.team_id);
+  }
+  for (const id of [...af]) {
+    if (resolve) for (const r of db.prepare(`SELECT fd_id FROM team_resolve WHERE af_id = ?`).all(id) as any[]) fd.add(r.fd_id);
+    if (groups) for (const r of db.prepare(`SELECT m.team_id FROM af_teams a JOIN team_map m ON m.grp = a.grp AND m.fd_name = a.fd_name WHERE a.team_id = ?`).all(id) as any[]) fd.add(r.team_id);
+  }
+  return new Set([...fd, ...[...af].map(a => AF_OFFSET + a)]);
+}
+/** A football favourite saved without ids: found once with the team page's lookup and the ids stored; null = skipped. */
+const triedAt = new Map<string, number>();
+function resolveFavIds(userId: number, f: Favorite): number[] | null {
+  const k = `${userId}|${f.ref}`;
+  if ((triedAt.get(k) || 0) > Date.now() - 6 * 3600000) return null;
+  triedAt.set(k, Date.now());
+  let af: number | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const tp: typeof import('./teamPage') = require('./teamPage');
+    af = tp.resolveAfTeamId(0, f.code || undefined, f.name);
+  } catch { af = null; }
+  if (!af) return null;
+  const ids = [AF_OFFSET + af];
+  const { addedAt: _drop, ...data } = f;
+  db.prepare(`UPDATE user_favorites SET data = ? WHERE user_id = ? AND kind = ? AND ref = ?`).run(JSON.stringify({ ...data, ids }), userId, f.kind, f.ref);
+  return ids;
 }
 /** The model a public page shows for a match (lower = preferred, 99 = a shadow model): as tracking.ts MAIN_PRIORITY. */
 const MAIN_PRIORITY = ['grid-v3', 'elo-intl', 'elo-euro', 'dc-history-v2', 'poisson-dc-v1'];
@@ -193,14 +228,15 @@ const inList = (n: number) => Array(n).fill('?').join(',');
 const FB_OFF = new Set(['PST', 'CANC', 'ABD', 'SUSP', 'INT', 'WO', 'POSTPONED', 'CANCELLED', 'SUSPENDED', 'VOID']);
 const FB_DONE = new Set(['FT', 'AET', 'PEN', 'FINISHED', 'AWARDED']);
 
-function footballGames(ids: Set<number>, keys: Set<string>, from: string, to: string, full: (id: number) => boolean): Game[] {
+function footballGames(ids: Set<number>, from: string, to: string, full: (id: number) => boolean): Game[] {
+  if (!ids.size) return [];
+  const list = [...ids], q = inList(list.length);
   const rows = db.prepare(`SELECT p.match_id, p.model, p.competition_name, p.utc_date, p.home_team_id, p.home_team, p.away_team_id, p.away_team,
       p.p_home, p.p_draw, p.p_away, r.status AS rstatus, r.home_goals, r.away_goals, r.outcome
-    FROM predictions p LEFT JOIN results r ON r.match_id = p.match_id WHERE p.utc_date >= ? AND p.utc_date < ?`).all(from, to) as any[];
-  const mine = (id: number | null, name: string | null) => (id != null && ids.has(id)) || keys.has(nameKey(name));
+    FROM predictions p LEFT JOIN results r ON r.match_id = p.match_id WHERE p.utc_date >= ? AND p.utc_date < ?
+      AND (p.home_team_id IN (${q}) OR p.away_team_id IN (${q}))`).all(from, to, ...list, ...list) as any[];
   const best = new Map<number, any>();
   for (const r of rows) {
-    if (!mine(r.home_team_id, r.home_team) && !mine(r.away_team_id, r.away_team)) continue;
     const rank = mainModelRank(r.model, r.utc_date);
     if (rank >= 99) continue; // shadow models never shown
     const cur = best.get(r.match_id);
@@ -221,14 +257,17 @@ function footballGames(ids: Set<number>, keys: Set<string>, from: string, to: st
       pred: { h: pct(r.p_home)!, d: pct(r.p_draw), a: pct(r.p_away)! }, full: full(r.match_id)
     });
   }
-  // fixtures of the leagues added from Admin (AF<id>) not predicted yet: by the team's name (their ids are API-Football's)
-  if (hasAf && keys.size) {
+  // fixtures of the leagues added from Admin (AF<id>) not predicted yet: by the API-Football team id
+  const afIds = list.filter(i => i >= AF_OFFSET).map(i => i - AF_OFFSET);
+  if (hasAf && afIds.length) {
     const seen = new Set(out.map(g => g.id));
     const names = tableExists('af_extra_leagues') ? new Map((db.prepare(`SELECT league_id, name FROM af_extra_leagues`).all() as any[]).map(l => [l.league_id, l.name])) : new Map();
-    const fx = db.prepare(`SELECT fixture_id, league_id, kickoff, home_name, away_name, status, hg, ag FROM af_fixtures WHERE kickoff >= ? AND kickoff < ? AND grp LIKE 'AF%'`).all(from, to) as any[];
+    const qa = inList(afIds.length);
+    const fx = db.prepare(`SELECT fixture_id, league_id, kickoff, home_name, away_name, status, hg, ag FROM af_fixtures WHERE kickoff >= ? AND kickoff < ? AND grp LIKE 'AF%'
+      AND (home_id IN (${qa}) OR away_id IN (${qa}))`).all(from, to, ...afIds, ...afIds) as any[];
     for (const f of fx) {
       const id = AF_OFFSET + f.fixture_id;
-      if (seen.has(id) || !(keys.has(nameKey(f.home_name)) || keys.has(nameKey(f.away_name)))) continue;
+      if (seen.has(id)) continue;
       const status = String(f.status || '').toUpperCase();
       const state: State = FB_OFF.has(status) ? 'off' : FB_DONE.has(status) ? 'done' : 'sched';
       out.push({ sport: 'football', key: 'fb', id, start: f.kickoff, hours: 2, home: f.home_name, away: f.away_name, comp: names.get(f.league_id) || '', venue: null,
@@ -306,31 +345,34 @@ function describe(g: Game, w: Words, url: string): string {
   if (g.state === 'off') lines.push(w.off);
   else if (g.state === 'done') {
     if (g.score) lines.push(fill(w.final, `${g.home} ${g.score[0]}–${g.score[1]} ${g.away}`));
+    // fix205b: once the game is over everyone sees the whole pick (the site's rule), with ✓ / ✗
     if (known) {
       const p = g.pred!;
+      let hit: boolean | null = null;
       if (g.sport === 'football') {
         const dc = doubleChance(p.h, p.d ?? 0, p.a);
         const o: Outcome | null = g.score ? (g.score[0] > g.score[1] ? 'H' : g.score[0] < g.score[1] ? 'A' : 'D') : null;
-        if (dc && o) lines.push(`${fill(w.pick, dcWords(dc.k, g, w))} ${dcHit(dc.k, o) ? '✓' : '✗'}`);
+        if (dc && o) hit = dcHit(dc.k, o);
       } else {
         const won = g.winner ?? (g.score ? (g.score[0] > g.score[1] ? 1 : g.score[0] < g.score[1] ? 2 : null) : null);
-        if (won) lines.push(`${fill(w.pick, p.h >= p.a ? g.home : g.away)} ${(p.h >= p.a) === (won === 1) ? '✓' : '✗'}`);
+        if (won) hit = (p.h >= p.a) === (won === 1);
       }
+      lines.push(...pickLines(g, p, w, hit));
     }
   } else if (!g.pred) lines.push(fill(w.soon, url));
   else if (!g.full || !known) lines.push(fill(w.see, url));
-  else {
-    const p = g.pred;
-    const parts = [`${g.home} ${r0(p.h)}`, ...(p.d != null ? [`${w.draw} ${r0(p.d)}`] : []), `${g.away} ${r0(p.a)}`];
-    lines.push(`${slModel(g.sport)}: ${parts.join(' · ')}`);
-    if (g.sport === 'football') {
-      const dc = doubleChance(p.h, p.d ?? 0, p.a);
-      if (dc) lines.push(`${fill(w.pick, dcWords(dc.k, g, w))} · ${r0(dc.p)}`);
-    } else lines.push(fill(w.pick, p.h >= p.a ? g.home : g.away));
-  }
+  else lines.push(...pickLines(g, g.pred, w, null));
   if (!lines.some(l => l.includes(url))) lines.push(url);
   lines.push(w.footer);
   return lines.join('\n');
+}
+/** "SL Football 3.0: Arsenal 61% · draw 22% · Everton 17%" + "Our pick: Arsenal or draw · 83%" (+ ✓ / ✗ when settled) */
+function pickLines(g: Game, p: NonNullable<Game['pred']>, w: Words, hit: boolean | null): string[] {
+  const parts = [`${g.home} ${r0(p.h)}`, ...(p.d != null ? [`${w.draw} ${r0(p.d)}`] : []), `${g.away} ${r0(p.a)}`];
+  const mark = hit === null ? '' : hit ? ' ✓' : ' ✗';
+  const dc = g.sport === 'football' ? doubleChance(p.h, p.d ?? 0, p.a) : null;
+  const pick = dc ? `${fill(w.pick, dcWords(dc.k, g, w))} · ${r0(dc.p)}` : fill(w.pick, `${p.h >= p.a ? g.home : g.away} · ${r0(Math.max(p.h, p.a))}`);
+  return [`${slModel(g.sport)}: ${parts.join(' · ')}`, pick + mark];
 }
 const dcWords = (k: DC, g: Game, w: Words) => (k === '1X' ? fill(w.orDraw, g.home) : k === 'X2' ? fill(w.orDraw, g.away) : w.noDraw);
 
@@ -358,8 +400,12 @@ const uidOf = (g: Game) => `sl-${g.key}-${g.id}@sportlikely.com`;
 /** The whole calendar of one user right now (exported for the tests; the route goes through calendarIcs). */
 export function calendarFor(user: User, lang: CalLang, site: string, now = Date.now()): string {
   const w = WORDS[lang];
-  const access: Access = accessOf(user);
   const admin = !!user.isAdmin;
+  // fix205b: admins and staff whose role has every permission see the full pick like Pro (the file has no session,
+  // so the two-step check of the site is replaced by "two-step login is on")
+  const role = roleByKey(user.role);
+  const fullStaff = !!role && user.emailVerified && user.twoFactor && ALL_PERMS.every(p => role.perms.includes(p));
+  const access: Access = admin || fullStaff ? 'admin' : accessOf(user);
   const unlocked = access === 'pro' || access === 'admin' ? new Set<number>() : unlockedIds(user.id);
   const fbFull = (id: number) => canSeeFull(access) || unlocked.has(id);
   const usFull = (rid: number) => isPaid(access) || unlocked.has(rid);
@@ -372,7 +418,9 @@ export function calendarFor(user: User, lang: CalLang, site: string, now = Date.
   const bbIds = bbOn ? ids('bb-team') : [], nflIds = nflOn ? ids('nfl-team') : [], tnIds = tnOn ? ids('tennis-player') : [];
 
   const games: Game[] = [];
-  if (fbTeams.length) games.push(...footballGames(new Set(fbTeams.flatMap(f => f.ids || [])), new Set(fbTeams.map(f => f.ref).filter(Boolean)), from, to, fbFull));
+  // fix205b: football by ids only; a favourite without ids is resolved once and stored, else skipped
+  const fbIds = fbTeams.flatMap(f => (f.ids?.length ? f.ids : resolveFavIds(user.id, f) || []));
+  if (fbIds.length) games.push(...footballGames(footballTeamIds(fbIds), from, to, fbFull));
   games.push(...basketballGames(bbIds, from, to, usFull), ...nflGames(nflIds, from, to, usFull), ...tennisGames(tnIds, from, to, usFull, admin));
   games.sort((a, b) => a.start.localeCompare(b.start) || a.id - b.id);
 

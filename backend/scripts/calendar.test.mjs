@@ -12,6 +12,7 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'fix205-cal-'));
 process.env.NODE_ENV = 'production';
 process.env.LOG_LEVEL = 'warn';
 process.env.BASKETBALL_PUBLIC = '1';
+process.env.ADMIN_EMAILS = 'boss@example.com';
 const require = createRequire(import.meta.url);
 const { db } = require('../dist/db/index.js');
 const auth = require('../dist/services/auth.js');
@@ -28,13 +29,13 @@ const iso = t => new Date(t).toISOString();
 const kick = Math.floor((now + DAY) / H) * H; // tomorrow, on the hour
 
 let uid = 0;
-const user = plan => {
-  const id = Number(db.prepare(`INSERT INTO users (email, pass_hash, plan, created_at, email_verified) VALUES (?, 'x', ?, ?, 1)`).run(`u${++uid}@example.com`, plan, iso(now)).lastInsertRowid);
+const user = (plan, email) => {
+  const id = Number(db.prepare(`INSERT INTO users (email, pass_hash, plan, created_at, email_verified) VALUES (?, 'x', ?, ?, 1)`).run(email || `u${++uid}@example.com`, plan, iso(now)).lastInsertRowid);
   return id;
 };
-const fb = (id, t, home, away, p, result) => {
+const fb = (id, t, home, away, p, result, ids = [57, 62], comp = ['PL', 'Premier League']) => {
   db.prepare(`INSERT INTO predictions (match_id, model, competition_code, competition_name, utc_date, home_team_id, home_team, away_team_id, away_team, p_home, p_draw, p_away, locked, settled, created_at, updated_at)
-    VALUES (?, 'grid-v3', 'PL', 'Premier League', ?, 57, ?, 62, ?, ?, ?, ?, 0, 0, ?, ?)`).run(id, iso(t), home, away, p[0], p[1], p[2], iso(now), iso(now));
+    VALUES (?, 'grid-v3', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`).run(id, comp[0], comp[1], iso(t), ids[0], home, ids[1], away, p[0], p[1], p[2], iso(now), iso(now));
   if (result) db.prepare(`INSERT INTO results (match_id, status, home_goals, away_goals, outcome, settled_at) VALUES (?, ?, ?, ?, ?, ?)`).run(id, result.status, result.h ?? null, result.a ?? null, result.o, iso(now));
 };
 fb(101, kick, 'Arsenal', 'Everton', [61, 22, 17]);
@@ -48,8 +49,8 @@ const FAVS = [
   { kind: 'team', ref: 'arsenal', name: 'Arsenal', ids: [57] },
   { kind: 'bb-team', ref: '145', name: 'Los Angeles Lakers', ids: [145] }
 ];
-const free = user('free'), premium = user('premium'), pro = user('pro'), empty = user('free');
-for (const u of [free, premium, pro]) addFavorites(u, FAVS);
+const free = user('free'), premium = user('premium'), pro = user('pro'), empty = user('free'), boss = user('free', 'boss@example.com');
+for (const u of [free, premium, pro, boss]) addFavorites(u, FAVS);
 db.prepare(`INSERT INTO match_unlocks (user_id, match_id, at) VALUES (?, 101, ?)`).run(free, iso(now));
 const ics = (id, lang = 'en') => cal.calendarFor(auth.userById(id), lang, SITE, now);
 const unfold = s => s.replace(/\r\n /g, '');
@@ -103,7 +104,8 @@ test('finished game: score and our pick ✓ / ✗; cancelled game: STATUS:CANCEL
   const s = ics(free);
   const done = ev(s, 'fb-102');
   assert.match(done, /Final score: Arsenal 2–1 Everton\\, Reserves\\; B/);
-  assert.match(done, /Our pick: Arsenal or draw ✓/);
+  assert.match(done, /SL Football 3\.0: Arsenal 50% · draw 30% · Everton\\, Reserves\\; B 20%/, 'free user: the whole pick once the game is over');
+  assert.match(done, /Our pick: Arsenal or draw · 80% ✓/);
   const off = ev(s, 'fb-103');
   assert.ok(off.includes('STATUS:CANCELLED'));
   assert.match(off, /Postponed or cancelled/);
@@ -153,4 +155,40 @@ test('token: hashed in the database, served by link, reset revokes the old link'
   assert.equal(cal.tokenHint(b), `${b.slice(0, 6)}…`);
   cal.deleteCalendarFor(pro);
   assert.equal(cal.calendarIcs(b, SITE), null, 'gone with the account');
+});
+
+test('fix205b: admins see the full pick before the start, like Pro', () => {
+  const s = ics(boss);
+  assert.match(ev(s, 'fb-101'), /SL Football 3\.0: Arsenal 61%/);
+  assert.match(ev(s, 'bb-900'), /Los Angeles Lakers 64%/);
+});
+
+test("fix205b: two clubs with one name — only the favourite's ids count (FC Barcelona, not Barcelona SC)", () => {
+  // the team page's link tables: Football-Data.org id 81 = API-Football 529 in the Spanish group
+  db.exec(`CREATE TABLE IF NOT EXISTS team_map (grp TEXT NOT NULL, team_id INTEGER NOT NULL, fd_name TEXT NOT NULL, api_name TEXT NOT NULL, score REAL NOT NULL, PRIMARY KEY (grp, team_id));
+    CREATE TABLE IF NOT EXISTS af_teams (grp TEXT NOT NULL, team_id INTEGER NOT NULL, name TEXT NOT NULL, fd_name TEXT, score REAL, PRIMARY KEY (grp, team_id))`);
+  db.prepare(`INSERT OR REPLACE INTO team_map (grp, team_id, fd_name, api_name, score) VALUES ('SP', 81, 'Barcelona', 'FC Barcelona', 1)`).run();
+  db.prepare(`INSERT OR REPLACE INTO af_teams (grp, team_id, name, fd_name, score) VALUES ('SP', 529, 'Barcelona', 'Barcelona', 1)`).run();
+  fb(201, now + 2 * DAY, 'FC Barcelona', 'Sevilla FC', [60, 25, 15], null, [81, 559], ['PD', 'Primera Division']); // Football-Data.org ids
+  fb(202, now + 4 * DAY, 'Girona', 'Barcelona', [30, 25, 45], null, [1000000547, 1000000529], ['AF140', 'La Liga']); // API-Football ids
+  fb(203, now + 2 * DAY, 'Barcelona', 'Emelec', [55, 25, 20], null, [1000001157, 1000001150], ['AF242', 'Liga Pro']); // Barcelona SC, Ecuador
+  const fan = user('pro');
+  addFavorites(fan, [{ kind: 'team', ref: 'barcelona', name: 'Barcelona', ids: [1000000529] }]);
+  const s = ics(fan);
+  assert.ok(ev(s, 'fb-201'), 'FC Barcelona (Football-Data.org ids) listed');
+  assert.ok(ev(s, 'fb-202'), 'FC Barcelona (API-Football ids) listed');
+  assert.ok(!ev(s, 'fb-203'), 'Barcelona SC (same name, Ecuador) not listed');
+  assert.equal(events(s).length, 2);
+  assert.ok(!cal.footballTeamIds([1000000529]).has(1000001157));
+});
+
+test('fix205b: a favourite saved without ids is never matched by name', () => {
+  const fan = user('pro');
+  addFavorites(fan, [{ kind: 'team', ref: 'arsenal', name: 'Arsenal', ids: [] }]);
+  const s = ics(fan);
+  assert.ok(s.startsWith('BEGIN:VCALENDAR'));
+  const stored = JSON.parse(db.prepare(`SELECT data FROM user_favorites WHERE user_id = ?`).get(fan).data);
+  // no team index on this scratch database: the lookup finds nothing, so the favourite is skipped, not matched by name
+  assert.deepEqual(stored.ids, []);
+  for (const n of ['fb-101', 'fb-102', 'fb-103']) assert.ok(!ev(s, n), `${n} not listed by name`);
 });
