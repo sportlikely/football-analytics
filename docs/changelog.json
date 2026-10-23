@@ -3,6 +3,36 @@
  "entries": [
   {
    "date": "2026-10-23",
+   "sport": "basketball",
+   "kind": "model",
+   "version": "3.1",
+   "text": {
+    "en": "SL Basketball 3.1: the pace of each game is now read correctly when a box score lacks part of the rebound figures, so expected scores and totals sit on each league's real scoring level.",
+    "es": "SL Basketball 3.1: el ritmo de cada partido se lee bien aunque a una estadística le falte parte de los rebotes, así que los marcadores y totales esperados se ajustan al nivel real de anotación de cada liga.",
+    "pt": "SL Basketball 3.1: o ritmo de cada jogo agora é lido corretamente mesmo quando faltam dados de rebotes na estatística, então os placares e totais esperados ficam no nível real de pontuação de cada liga.",
+    "de": "SL Basketball 3.1: Das Tempo jedes Spiels wird jetzt richtig gelesen, auch wenn in einer Statistik ein Teil der Rebounds fehlt. Erwartete Ergebnisse und Gesamtpunkte liegen so auf dem echten Punkteniveau jeder Liga.",
+    "fr": "SL Basketball 3.1 : le rythme de chaque match est désormais lu correctement même quand une feuille de match n'a pas tout le détail des rebonds, donc les scores et totaux attendus collent au vrai niveau de points de chaque ligue.",
+    "it": "SL Basketball 3.1: il ritmo di ogni partita ora viene letto correttamente anche quando nelle statistiche manca parte dei rimbalzi, così punteggi e totali attesi corrispondono al vero livello di punti di ogni lega.",
+    "tr": "SL Basketball 3.1: Bir maç istatistiğinde ribaund ayrıntısı eksik olsa da her maçın temposu artık doğru okunuyor; beklenen skorlar ve toplamlar her ligin gerçek sayı düzeyine oturuyor."
+   }
+  },
+  {
+   "date": "2026-10-23",
+   "sport": "all",
+   "kind": "model",
+   "version": null,
+   "text": {
+    "en": "More predictions are checked more strictly: an extra prediction goes public only when it matched what happened in every well-filled 10% step of our test, and its accuracy may never drop below the version shown before.",
+    "es": "Los pronósticos adicionales se comprueban con más rigor: solo se publican cuando coincidieron con lo ocurrido en cada tramo del 10% con suficientes datos de nuestra prueba, y su acierto nunca puede bajar del de la versión anterior.",
+    "pt": "Os palpites extras são verificados com mais rigor: só ficam públicos quando bateram com o que aconteceu em cada faixa de 10% com dados suficientes do nosso teste, e a precisão nunca pode cair abaixo da versão mostrada antes.",
+    "de": "Weitere Prognosen werden strenger geprüft: Eine zusätzliche Prognose wird nur veröffentlicht, wenn sie in jeder gut gefüllten 10-%-Stufe unseres Tests mit dem Ergebnis übereinstimmte, und ihre Genauigkeit darf nie unter die zuvor gezeigte Version fallen.",
+    "fr": "Les pronostics supplémentaires sont vérifiés plus strictement : un pronostic n'est publié que s'il a correspondu aux résultats dans chaque tranche de 10 % bien remplie de notre test, et sa précision ne peut jamais tomber sous celle de la version affichée avant.",
+    "it": "I pronostici aggiuntivi sono controllati in modo più severo: uno diventa pubblico solo se ha rispecchiato i risultati in ogni fascia del 10% con dati sufficienti del nostro test, e la sua precisione non può mai scendere sotto la versione mostrata prima.",
+    "tr": "Ek tahminler daha sıkı kontrol ediliyor: Bir ek tahmin ancak testimizin yeterli veriye sahip her %10'luk diliminde gerçekleşenle örtüştüyse yayınlanıyor ve isabeti daha önce gösterilen sürümün altına asla düşemiyor."
+   }
+  },
+  {
+   "date": "2026-10-23",
    "sport": "all",
    "kind": "site",
    "version": null,

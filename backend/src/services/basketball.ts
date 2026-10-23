@@ -280,6 +280,8 @@ async function liveTick() {
   }
 }
 
+// fix204d: the rebound split is read under each spelling the provider has used (offence / offense / offensive …);
+// bbModel's possessions fall back to the league's own rate when it is missing
 const num = (x: any) => (x === null || x === undefined || x === '' ? null : Number(x));
 const mins = (m: any) => {
   if (m === null || m === undefined || m === '') return null;
@@ -311,7 +313,7 @@ async function syncBoxScores(maxBatches = 400) {
         if (!gid || !tid) continue;
         got.add(gid);
         insT.run(gid, tid, num(r.field_goals?.total), num(r.field_goals?.attempts), num(r.threepoint_goals?.total), num(r.threepoint_goals?.attempts),
-          num(r.freethrows_goals?.total), num(r.freethrows_goals?.attempts), num(r.rebounds?.total), num(r.rebounds?.offence), num(r.rebounds?.defense),
+          num(r.freethrows_goals?.total), num(r.freethrows_goals?.attempts), num(r.rebounds?.total), num(r.rebounds?.offence ?? r.rebounds?.offense ?? r.rebounds?.offensive), num(r.rebounds?.defense ?? r.rebounds?.defence ?? r.rebounds?.defensive),
           num(r.assists), num(r.steals), num(r.blocks), num(r.turnovers), num(r.personal_fouls));
       }
       for (const r of p.response || []) {

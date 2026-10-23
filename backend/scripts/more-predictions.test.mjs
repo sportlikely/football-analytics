@@ -417,7 +417,7 @@ test('fix204c: the NFL backtest produces gates from the stored walk-forward game
   close(rep.diag.leagues['1'].bT, 3, 1, 'the cause: 3 points too many');
   const src = db.prepare(`SELECT json FROM more_pred_fit WHERE sport = 'nfl' AND league = 'source'`).get();
   assert.ok(src && JSON.parse(src.json).leagues['1'], 'live fit stored');
-  assert.match(mp.backtestMarkdown(), /American football[\s\S]*Worst step before → after/);
+  assert.match(mp.backtestMarkdown(), /American football[\s\S]*Worst step \(300\+\) before → after/);
 });
 
 test("fix204c: an expected total outside the league's range ± 3 SD is flagged", () => {
@@ -440,4 +440,96 @@ test('fix204c: tennis total games — the group bias moves the chain\x27s games 
   // a group with few matches falls back to its tour
   close(mp.tennisMake({ group: 'atp|bo3|grass', tour: 'atp', dist, bo: 3 }, src).info.gamesBias, 1.5, 0.01, 'tour fallback');
   assert.equal(mp.tennisGroup('wta', 3, 'Hard (indoor)'), 'wta|bo3|hard');
+});
+
+// ---------- fix204d ----------
+const bbm = require('../dist/services/bbModel.js');
+
+test('fix204d: likely scores come from the independent-Poisson grid (fix204b method), the other outputs from the grid the backtest chose', () => {
+  const shrinkTD = { k: 0.8, mh: 1.5, ma: 1.2, kT: 0.45, kD: 0.92 }, per = { k: 0.79, mh: 1.5, ma: 1.2 };
+  const src = {
+    shrink: shrinkTD, leagues: {}, all: { rho: -0.08, sizeH: null, sizeA: null }, poisson: { shrink: per },
+    use: { score: 'poisson', goals: 'dc', homeGoals: 'dc', awayGoals: 'dc', cleanHome: 'dc', cleanAway: 'dc', win2Home: 'poisson', win2Away: 'poisson', ht: 'dc', htft: 'dc' }
+  };
+  const g = { league: null, xh: 2.6, xa: 1.9, share: 0.45 };
+  const x = mp.footballMake(g, src);
+  const po = M.footballExtras(2.6, 1.9, 0.45, per), dc = M.footballExtras(2.6, 1.9, 0.45, shrinkTD, src.all);
+  assert.deepEqual(x.sets.score.p, po.sets.score.p, 'likely scores = Poisson grid with the per-side shrink');
+  assert.deepEqual(x.info.grid6, po.info.grid6, 'the 6×6 grid comes with the likely scores');
+  assert.deepEqual(x.sets.goals.p, dc.sets.goals.p, 'total goals = Dixon–Coles grid');
+  assert.deepEqual(x.sets.win2Home.p, po.sets.win2Home.p);
+  for (const [k, set] of Object.entries(x.sets)) close(sum(set.p), 1, 1e-9, `${k} sums`);
+  // no choice stored yet: likely scores still Poisson
+  const y = mp.footballMake(g, { ...src, use: undefined });
+  assert.deepEqual(y.sets.score.p, po.sets.score.p);
+});
+
+test('fix204d: a new fit re-saves the stored extras of upcoming games (new calc stamp, new numbers)', async () => {
+  const ko = new Date(Date.now() + 30 * 3600e3).toISOString(), now = new Date().toISOString();
+  db.prepare(`INSERT INTO bb_games (game_id, code, league_id, season, kickoff, status, home_id, home_name, away_id, away_name, updated_at) VALUES (777001, 'ZY', 98, '2026-2027', ?, 'NS', 1, 'A', 2, 'B', ?)`).run(ko, now);
+  db.prepare(`INSERT INTO bb_predictions (game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at) VALUES (777001, 'ZY', ?, 'bb-v3', 0.62, 4, 240, 122, 118, ?)`).run(ko, now);
+  db.prepare(`INSERT OR REPLACE INTO more_pred_fit (sport, league, json, at) VALUES ('basketball', 'ZY', ?, ?)`).run(JSON.stringify({ share: 0.5, kHalf: 1, kOt: 1, meanTotal: 226, sigma: 12, sigmaT: 18, games: 0 }), now);
+  await mp.saveExtras('basketball');
+  const row = () => db.prepare(`SELECT calc, json, made_at FROM prediction_extras WHERE sport = 'basketball' AND game_id = 777001`).get();
+  const a = row();
+  assert.ok(a && a.calc.startsWith(mp.MORE_CALC), 'saved with the current maths');
+  // the backtest stores a fit: the model said 12 points too many in this league
+  await new Promise(r => setTimeout(r, 5));
+  mp.storeSourceFit('basketball', { leagues: { ZY: { n: 900, bT: 12, bH: 6, bA: 6, rT: 1, rH: 1, rA: 1, mT: 240, mH: 121, mA: 119, kT: 1, kH: 1, kA: 1 } }, all: null });
+  const out = await mp.saveExtras('basketball');
+  assert.ok(out.basketball >= 1, 'saved again');
+  const b = row();
+  assert.notEqual(b.calc, a.calc, 'new calc stamp');
+  const ea = JSON.parse(a.json).info.expected, eb = JSON.parse(b.json).info.expected;
+  close(ea[0] + ea[1], 240, 1, 'before: the model total');
+  close(eb[0] + eb[1], 228, 1, 'after: 12 points less');
+  const st = mp.calcStatus().find(s => s.sport === 'basketball');
+  assert.ok(st.fitAt && st.current >= 1 && st.calc === mp.MORE_CALC, JSON.stringify(st));
+});
+
+test('fix204d: the gate decides on steps with 300+ forecasts only, and never lets the log loss get worse than the last public version', () => {
+  const bins = [{ from: 10, n: 5000, said: 15, happened: 15.5 }, { from: 20, n: 900, said: 25, happened: 23.4 }, { from: 50, n: 200, said: 55, happened: 63 }];
+  assert.deepEqual(M.calibrationOk(bins), { ok: true, worst: 1.6 }, 'the 200-forecast step is reported, not deciding');
+  assert.equal(M.calibrationOk(bins, 100).ok, false, 'the old rule would have failed it');
+  const s = { games: 6000, worst: 1.6, public: true, logLoss: 1.2950 };
+  assert.deepEqual(mp.gateOf(s, null), { public: true, why: null }, 'no public version yet');
+  assert.equal(mp.gateOf(s, 1.2946).public, true, 'within the tolerance');
+  const worse = mp.gateOf({ ...s, logLoss: 1.2990 }, 1.2946);
+  assert.equal(worse.public, false);
+  assert.match(worse.why, /log loss 1.299 worse than its last public version/);
+  assert.equal(mp.gateOf({ ...s, public: false, worst: 4.4 }, null).public, false);
+});
+
+test('fix204d: bb-v3 totals stay on the league mean when box scores lose the rebound split (fixture set ± 2 points)', async () => {
+  const r = rng(21), now = new Date().toISOString();
+  const ins = db.prepare(`INSERT INTO bb_games (game_id, code, league_id, season, kickoff, status, home_id, home_name, away_id, away_name, hs, as_, updated_at) VALUES (?, 'NBX', 97, ?, ?, ?, ?, 'H', ?, 'A', ?, ?, ?)`);
+  const box = db.prepare(`INSERT INTO bb_team_stats (game_id, team_id, fgm, fga, tpm, tpa, ftm, fta, reb, oreb, dreb, ast, stl, blk, tov, pf) VALUES (?, ?, ?, ?, 12, 34, ?, ?, ?, ?, ?, 25, 7, 5, ?, 20)`);
+  let id = 880000, sumAct = 0, nAct = 0;
+  db.exec('BEGIN');
+  for (const [season, year] of [['2023-2024', 2023], ['2024-2025', 2024], ['2025-2026', 2025]]) {
+    for (let k = 0; k < 900; k++) {
+      const ko = new Date(Date.UTC(year, 10, 1) + k * 4 * 3600e3).toISOString();
+      const h = 1 + (k % 30), a = 1 + ((k * 7 + 3) % 30) === h ? 1 + ((h + 1) % 30) : 1 + ((k * 7 + 3) % 30);
+      const hs = Math.round(116 + 6 * r.n()), as = Math.round(112 + 6 * r.n());
+      ins.run(++id, season, ko, 'FT', h, a, hs, as, now);
+      if (season === '2025-2026') { sumAct += hs + as; nAct++; }
+      // the provider's split is gone in the last season (the real case since Jan 2026); one box score doubled
+      const split = season !== '2025-2026';
+      for (const [tid, pts] of [[h, hs], [a, as]]) {
+        const fga = 88 + Math.round(4 * r.n()), fgm = Math.round(fga * 0.47), fta = 22, oreb = 10 + Math.round(2 * r.n());
+        const dbl = k === 450 && season === '2025-2026' ? 2 : 1;
+        box.run(id, tid, fgm * dbl, fga * dbl, 17 * dbl, fta * dbl, 44 * dbl, split ? oreb : null, split ? 34 : null, 14 * dbl);
+        void pts;
+      }
+    }
+  }
+  for (let k = 0; k < 40; k++) ins.run(++id, '2026-2027', new Date(Date.now() + (k + 2) * 3600e3).toISOString(), 'NS', 1 + (k % 30), 1 + ((k + 11) % 30), null, null, now);
+  db.exec('COMMIT');
+  const m = await bbm.buildLeague('NBX', { retune: true });
+  assert.ok(m, 'league built');
+  const up = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week FROM bb_games WHERE code = 'NBX' AND status = 'NS'`).all();
+  const tot = up.map(g => bbm.predictGame(g).total), mean = tot.reduce((s, x) => s + x, 0) / tot.length;
+  const chk = bbm.leagueTotalsCheck('NBX');
+  close(mean, sumAct / nAct, 2, `predicted total = the league mean ± 2 (${JSON.stringify(chk)})`);
+  assert.ok(chk && chk.upcoming === 40 && Math.abs(chk.upcomingTotal - sumAct / nAct) < 2, JSON.stringify(chk));
 });

@@ -231,18 +231,35 @@ class LeagueV2 {
   }
 }
 
-/** Possessions of each finished game with a box score (both teams' estimate averaged). */
+/**
+ * Possessions of each finished game with a box score (both teams' estimate averaged).
+ * fix204d: since Jan 2026 the provider's box scores have no offensive / defensive rebound split, and the fixed 27% of
+ * missed shots used instead moved the possession scale mid-season (NBA −3%, most European leagues +2–4%): bb-v2's pace
+ * and points per possession then predicted totals off by up to 4.4 points (FEC). Now: the split when given (or total −
+ * defensive), else the league's own offensive-rebound rate from the box scores that have it; and a game more than 25% from
+ * the league's median possessions (doubled, cumulative or partial stats) is not used. Walk-forward (18 leagues, 14,343
+ * test games): log loss 0.57402 → 0.57394, mean |total bias| per league 0.72 → 0.44 points.
+ */
 function possessionsOf(code: string): Map<number, number> {
-  const rows = db.prepare(`SELECT t.game_id, t.fgm, t.fga, t.oreb, t.tov, t.fta FROM bb_team_stats t JOIN bb_games g ON g.game_id = t.game_id WHERE g.code = ? AND t.fga > 0`).all(code) as any[];
+  const rows = db.prepare(`SELECT t.game_id, t.fgm, t.fga, t.oreb, t.dreb, t.reb, t.tov, t.fta FROM bb_team_stats t JOIN bb_games g ON g.game_id = t.game_id WHERE g.code = ? AND t.fga > 0`).all(code) as any[];
   const by = new Map<number, number[]>();
+  // the league's own offensive-rebound rate (offensive rebounds ÷ missed shots) from the box scores that have the split
+  let om = 0, mm = 0;
+  for (const r of rows) if (r.oreb != null && r.fga - (r.fgm || 0) > 0) { om += r.oreb; mm += r.fga - (r.fgm || 0); }
+  const orate = mm > 2000 ? om / mm : 0.27;
   for (const r of rows) {
-    const oreb = r.oreb != null ? r.oreb : 0.27 * (r.fga - (r.fgm || 0));
+    const oreb = r.oreb != null ? r.oreb : r.reb != null && r.dreb != null && r.reb >= r.dreb && r.dreb > 0 ? r.reb - r.dreb : orate * (r.fga - (r.fgm || 0));
     const est = r.fga - oreb + (r.tov || 0) + 0.44 * (r.fta || 0);
     if (!by.has(r.game_id)) by.set(r.game_id, []);
     by.get(r.game_id)!.push(est);
   }
   const out = new Map<number, number>();
   for (const [id, v] of by) if (v.length === 2) out.set(id, (v[0] + v[1]) / 2);
+  if (out.size >= 50) {
+    // a box score far from the league's usual possessions (doubled, cumulative or partial stats) is not used
+    const med = [...out.values()].sort((a, b) => a - b)[Math.floor(out.size / 2)];
+    for (const [id, v] of out) if (v < 0.75 * med || v > 1.25 * med) out.delete(id);
+  }
   return out;
 }
 
@@ -741,6 +758,29 @@ export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null 
     ...pr, pHome: w * p2.pHome + (1 - w) * pr.pHome, margin: w * p2.margin + (1 - w) * pr.margin, total: w * p2.total + (1 - w) * pr.total,
     home: w * p2.home + (1 - w) * pr.home, away: w * p2.away + (1 - w) * pr.away, hca: w * p2.hca + (1 - w) * pr.hca
   }, sig), sig);
+}
+
+/**
+ * fix204d: where a league's predicted totals come from right now (admin / More predictions backtest): the upcoming games'
+ * predicted total against the league's recent finished games, the v1 league mean, v2's pace × points per possession, and
+ * how many recent box scores lack the rebound split or were left out of the pace.
+ */
+export function leagueTotalsCheck(code: string) {
+  const m = models.get(code);
+  if (!m) return null;
+  const now = Date.now(), iso = (t: number) => new Date(t).toISOString();
+  const up = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week FROM bb_games WHERE code = ? AND status = 'NS' AND kickoff > ? AND kickoff < ? ORDER BY kickoff LIMIT 80`)
+    .all(code, iso(now), iso(now + 10 * 86400000)) as Game[];
+  let s = 0, n = 0;
+  for (const g of up) { const p = predictGameCached(g); if (p) { s += p.total; n++; } }
+  const rec = db.prepare(`SELECT COUNT(*) AS n, AVG(hs + as_) AS t FROM bb_games WHERE code = ? AND status IN ('FT','AOT') AND hs IS NOT NULL AND kickoff > ?`).get(code, iso(now - 60 * 86400000)) as any;
+  const box = db.prepare(`SELECT COUNT(*) AS n, SUM(t.oreb IS NULL) AS noSplit FROM bb_team_stats t JOIN bb_games g ON g.game_id = t.game_id WHERE g.code = ? AND g.kickoff > ?`).get(code, iso(now - 60 * 86400000)) as any;
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  return {
+    upcoming: n, upcomingTotal: n ? r1(s / n) : null, recentGames: rec?.n || 0, recentTotal: rec?.t ? r1(rec.t) : null,
+    v1Mean: r1(2 * m.L.mu), v2Total: m.L2 ? r1((2 * m.L2.pace * m.L2.ppp) / 100) : null, v2Pace: m.L2 ? r1(m.L2.pace) : null,
+    boxScores: box?.n || 0, noReboundSplit: box?.noSplit || 0
+  };
 }
 
 /** The league numbers behind a prediction (for the game page's markets and model table). */

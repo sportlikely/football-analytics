@@ -27,7 +27,7 @@ is model work, the matching note, in the same commit.
 - **Model principle (Yarin):** a pick must make sense when someone looks at the stats. Keep home advantage, but a team
   with clearly worse form / table / head-to-head must not be made the favourite. Every model change is accepted only if
   it improves log loss / Brier on games it never saw (walk-forward or later seasons), never on the fitting data.
-- **Public model names (fix191):** visitors see "SL <Sport> <major.minor>" only (SL Football 3.0, SL Basketball 3.0, SL
+- **Public model names (fix191):** visitors see "SL <Sport> <major.minor>" only (SL Football 3.0, SL Basketball 3.1, SL
   American Football 1.0), from `frontend/src/lib/modelNames.ts` (backend twin `backend/src/utils/modelNames.ts`), never the
   internal ids (grid-v3, bb-v3, nfl-v1 …); admin pages show both ("SL Football 3.0 (v3-mix)"). Major = a new model, minor = a
   tested improvement that goes live: bump `version` and `since` in both modelNames files in the same commit. Weekly re-tunes

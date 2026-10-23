@@ -1343,7 +1343,7 @@ export async function applyNewResults(): Promise<number> {
 export interface TennisPred {
   p1: number; p2: number; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
   sets: Record<string, number>; games: ReturnType<typeof gamesSummary>; why: string[];
-  numbers: { eloSurface: [number, number]; eloOverall: [number, number]; servePoint: [number, number]; pElo: number; pPoint: number; mode: string }
+  numbers: { eloSurface: [number, number]; eloOverall: [number, number]; servePoint: [number, number]; pElo: number; pPoint: number; mode: string; bo?: number; rule?: number }
 }
 function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): TennisPred {
   const s = L.s;
@@ -1363,7 +1363,7 @@ function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): 
     p1: pct(p), p2: pct(1 - p), pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
     firstSetP1: pct(d.first), sets: Object.fromEntries(Object.entries(d.sets).sort().map(([k, v]) => [k, pct(v)])), games: gamesSummary(d.games!, R.bo[i]),
     why: whyLines(L, R, i, names, a, b, f),
-    numbers: { eloSurface: [Math.round(a.a.s), Math.round(a.b.s)], eloOverall: [Math.round(a.a.o), Math.round(a.b.o)], servePoint: [pct(b.pa), pct(b.pb)], pElo: pct(pE), pPoint: pct(pP), mode: s.mode }
+    numbers: { eloSurface: [Math.round(a.a.s), Math.round(a.b.s)], eloOverall: [Math.round(a.a.o), Math.round(a.b.o)], servePoint: [pct(b.pa), pct(b.pb)], pElo: pct(pE), pPoint: pct(pP), mode: s.mode, bo: R.bo[i], rule: R.rule[i] }
   };
 }
 /** "Why" lines from fixed rules (admin view; plain English) */

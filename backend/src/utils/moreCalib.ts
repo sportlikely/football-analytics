@@ -131,7 +131,11 @@ export function monotone(m: CalibMap): boolean {
 /* Points: bias and spread per league                                   */
 /* ------------------------------------------------------------------ */
 
-export interface PointsRow { league?: string; total: number; home: number; away: number; hs: number; as: number; sdT: number; sdTeam: number }
+export interface PointsRow {
+  league?: string; total: number; home: number; away: number; hs: number; as: number; sdT: number; sdTeam: number;
+  /** fix204d: the predicted margin and the league's margin spread (the margin bands' own fit) */
+  margin?: number; sdM?: number;
+}
 /**
  * per league (or sport-wide, each league centred on its own means): bias b (predicted − actual), the slope k of the
  * actual on the predicted around the league's mean prediction m (k < 1: the model's totals are too far from the
@@ -141,6 +145,8 @@ export interface PointsRow { league?: string; total: number; home: number; away:
 export interface PointsFit {
   n: number; bT: number; bH: number; bA: number; rT: number; rH: number; rA: number;
   mT?: number; mH?: number; mA?: number; kT?: number; kH?: number; kA?: number;
+  /** fix204d: margin bias (predicted − actual) and spread ratio (RMS of the de-biased margin misses ÷ RMS of the league spread) */
+  bM?: number; rM?: number;
   /** the shape of the corrected misses ÷ the spread used (SHAPE_K quantiles): the total, each side (home and away pooled) */
   qT?: number[]; qTeam?: number[];
 }
@@ -177,9 +183,17 @@ export function fitPoints(rows: PointsRow[]): PointsFit | null {
     qTeam: quantiles([...rows.map(r => (r.hs - cH(r)) / (r.sdTeam * rH)), ...rows.map(r => (r.as - cA(r)) / (r.sdTeam * rA))])
   } : {};
   return {
-    n, bT: r2(bT), bH: r2(bH), bA: r2(bA), rT: r3(rT), rH: r3(rH), rA: r3(rA), ...shape,
+    n, bT: r2(bT), bH: r2(bH), bA: r2(bA), rT: r3(rT), rH: r3(rH), rA: r3(rA), ...shape, ...marginFit(rows),
     mT: r2(mean(r => r.total)), mH: r2(mean(r => r.home)), mA: r2(mean(r => r.away)), kT: r3(kT), kH: r3(kH), kA: r3(kA)
   };
+}
+/** the margin's bias and spread ratio, from the rows that carry a margin */
+function marginFit(rows: PointsRow[]): { bM?: number; rM?: number } {
+  const m = rows.filter(r => r.margin !== undefined && r.sdM);
+  if (m.length < 30) return {};
+  const bM = m.reduce((s, r) => s + r.margin! - (r.hs - r.as), 0) / m.length;
+  const miss = Math.sqrt(m.reduce((s, r) => s + (r.hs - r.as - (r.margin! - bM)) ** 2, 0) / m.length), used = Math.sqrt(m.reduce((s, r) => s + r.sdM! ** 2, 0) / m.length);
+  return { bM: r2(bM), rM: r3(Math.min(2.5, Math.max(0.4, miss / used))) };
 }
 /** a prediction corrected by a fit: around the centre m (the league's mean prediction) with bias b and slope k */
 export const correctPts = (pred: number, m: number, b: number, k = 1) => m - b + k * (pred - m);

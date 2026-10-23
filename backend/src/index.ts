@@ -108,7 +108,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth, startDataHealthScheduler } from './services/dataHealth';
-import { moreForGame, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, runBacktests, moreDaily, MORE_SPORTS, startMorePredictionsScheduler, gameIdOf, hasExtras, saveOne } from './services/morePredictions';
+import { moreForGame, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, runBacktests, moreDaily, MORE_SPORTS, startMorePredictionsScheduler, gameIdOf, hasExtras, saveOne } from './services/morePredictions';
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders } from './services/unsettled';
 import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
@@ -1113,7 +1113,7 @@ app.get('/api/admin/more-predictions', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     if (req.query.format === 'md') { res.type('text/markdown').send(backtestMarkdown()); return; }
-    res.json({ data: { gates: gateList(), backtests: backtestReports(), health: moreHealth() } });
+    res.json({ data: { calc: calcStatus(), gates: gateList(), backtests: backtestReports(), health: moreHealth() } });
   } catch (e) { sendError(res, e, 'Failed'); }
 });
 // runs in the background in the heavy queue (football + basketball a few minutes, tennis more); ?sport= one sport, ?refit=1 league fits first

@@ -17,7 +17,7 @@ import logger from '../utils/logger';
 import { yieldLoop, heavySlicer, afterLive, after, every, afterHeavy, everyHeavy, heavy } from './perf';
 import {
   footballExtras, fitGoalShrink, fitGoalShrinkTD, shrinkPair, type GoalShrink, normalExtras, tennisExtras, checkSet, calibration, calibrationOk, topIndex, pctSet, normCdf,
-  DEFAULT_HT_SHARE, DEFAULT_GOAL_SHRINK, bandAlarm, marginSpread, teamSd, type GoalModel, type Extras, type LeagueFit, type MoreSport, type PSet, type SetCheck
+  DEFAULT_HT_SHARE, DEFAULT_GOAL_SHRINK, GATE_MIN_N, bandAlarm, marginSpread, teamSd, type GoalModel, type Extras, type LeagueFit, type MoreSport, type PSet, type SetCheck
 } from '../utils/moreMath';
 import {
   fitPoints, correctPts, fitRho, fitDispersion, shiftGames, meanOf, calibrateSet, fitOutputCalib, MIN_LEAGUE_GAMES,
@@ -25,7 +25,7 @@ import {
 } from '../utils/moreCalib';
 import { GROUPS } from './history';
 import { mainRank } from './tracking';
-import { leagueModelInfo, bbWalkForward } from './bbModel';
+import { leagueModelInfo, bbWalkForward, leagueTotalsCheck } from './bbModel';
 import { nflWalkForward, buildReport as buildNflReport } from './nflModel';
 import { tennisExtrasDist, tennisServeChances, tennisRuleFor, tennisExtrasWalkForward } from './tennisModel';
 
@@ -48,8 +48,14 @@ db.exec(`
   if (!cols.has('admin_only')) db.exec(`ALTER TABLE prediction_extras ADD COLUMN admin_only INTEGER NOT NULL DEFAULT 0`);
   if (!cols.has('flag')) db.exec(`ALTER TABLE prediction_extras ADD COLUMN flag TEXT`);
 }
+// fix204d: the log loss of each output's backtest and of its last public version (the gate's "not worse" guard)
+{
+  const cols = new Set((db.prepare(`PRAGMA table_info(more_pred_gate)`).all() as any[]).map(c => c.name));
+  if (!cols.has('ll')) db.exec(`ALTER TABLE more_pred_gate ADD COLUMN ll REAL`);
+  if (!cols.has('public_ll')) db.exec(`ALTER TABLE more_pred_gate ADD COLUMN public_ll REAL`);
+}
 /** bump when the maths behind saved rows changes: upcoming games are saved again on the next tick */
-export const MORE_CALC = '204c';
+export const MORE_CALC = '204d';
 
 export const MORE_SPORTS: MoreSport[] = ['football', 'basketball', 'nfl', 'tennis'];
 /** the outputs of each sport, in page order */
@@ -223,7 +229,15 @@ export function nflFit(league: number): LeagueFit {
 db.exec(`CREATE TABLE IF NOT EXISTS more_pred_calib (sport TEXT NOT NULL, output TEXT NOT NULL, json TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (sport, output))`);
 
 export interface PointsSource { leagues: Record<string, PointsFit>; all: PointsFit | null }
-export interface FootballSource { shrink: GoalShrink; leagues: Record<string, GoalModel & { n: number; dispersion: [number, number]; mh?: number; ma?: number }>; all: GoalModel }
+export interface FootballSource {
+  shrink: GoalShrink; leagues: Record<string, GoalModel & { n: number; dispersion: [number, number]; mh?: number; ma?: number }>; all: GoalModel;
+  /**
+   * fix204d: the fix204b grid (independent Poisson, per-side shrink) and which grid each output uses: likely scores always
+   * the Poisson grid (Yarin: it passed with it), every other output the grid with the lower out-of-sample log loss
+   */
+  poisson?: { shrink: GoalShrink }; use?: Record<string, 'dc' | 'poisson'>;
+}
+type Grid = 'dc' | 'poisson';
 /** a league with 300+ games is shrunk toward its own average goals (the pooled average pulled low-scoring Argentina up by 0.3) */
 export function shrinkOfLeague(src: FootballSource, league: string | null): GoalShrink {
   const l = league ? src.leagues[league] : undefined;
@@ -281,18 +295,20 @@ export function pointsMake(sport: 'basketball' | 'nfl', g: PtsGame, src: PointsS
   if (!pf) return normalExtras({ sport, pHome: g.pHome, margin: g.margin, total: g.total, homePts: g.home, awayPts: g.away, fit: g.fit });
   // centre: the league's own mean prediction (its fit, even a small one), else its typical total
   const own = src?.leagues[g.league], mT = own?.mT ?? g.fit.meanTotal, mH = own?.mH ?? g.fit.meanTotal / 2, mA = own?.mA ?? g.fit.meanTotal / 2;
+  // fix204d: the margin bands centred on the de-biased margin with the measured spread (the win chance as it is)
+  const margin = pf.rM ? { marginMu: g.margin - (pf.bM || 0), sdMargin: g.fit.sigma * pf.rM } : {};
   const { sd } = marginSpread(g.pHome, g.margin, g.fit.sigma), st = teamSd(g.fit.sigmaT, sd);
   const x = normalExtras({
     sport, pHome: g.pHome, margin: g.margin, fit: g.fit,
     total: correctPts(g.total, mT, pf.bT, pf.kT), homePts: correctPts(g.home, mH, pf.bH, pf.kH), awayPts: correctPts(g.away, mA, pf.bA, pf.kA),
-    sdT: g.fit.sigmaT * pf.rT, sdHome: st * pf.rH, sdAway: st * pf.rA,
+    sdT: g.fit.sigmaT * pf.rT, sdHome: st * pf.rH, sdAway: st * pf.rA, ...margin,
     // the shape of the misses: sport-wide (every league's games)
     shapeT: src?.all?.qT || null, shapeTeam: src?.all?.qTeam || null
   });
   return { ...x, info: { ...x.info, bias: [pf.bT, pf.bH, pf.bA], slope: [pf.kT ?? 1, pf.kH ?? 1, pf.kA ?? 1], spread: [pf.rT, pf.rH, pf.rA] } };
 }
 const ptsRow = (g: PtsGame, hs: number, as: number): PointsRow => ({
-  league: g.league, total: g.total, home: g.home, away: g.away, hs, as, sdT: g.fit.sigmaT, sdTeam: teamSd(g.fit.sigmaT, marginSpread(g.pHome, g.margin, g.fit.sigma).sd)
+  league: g.league, margin: g.margin, sdM: g.fit.sigma, total: g.total, home: g.home, away: g.away, hs, as, sdT: g.fit.sigmaT, sdTeam: teamSd(g.fit.sigmaT, marginSpread(g.pHome, g.margin, g.fit.sigma).sd)
 });
 export function fitPointsSource(rows: { league: string; row: PointsRow }[]): PointsSource {
   const by = new Map<string, PointsRow[]>();
@@ -305,10 +321,22 @@ export function fitPointsSource(rows: { league: string; row: PointsRow }[]): Poi
 /* ---------- football ---------- */
 
 export interface FbGame { league: string | null; xh: number; xa: number; share: number }
-export function footballMake(g: FbGame, src: FootballSource | null): Extras {
-  if (!src) return footballExtras(g.xh, g.xa, g.share, goalShrink());
+/** one grid's extras: 'dc' = Dixon–Coles / negative binomial with the league shrink (fix204c), 'poisson' = fix204b */
+export function footballGrid(g: FbGame, src: FootballSource, grid: Grid): Extras {
+  if (grid === 'poisson') return footballExtras(g.xh, g.xa, g.share, src.poisson?.shrink || goalShrink());
   const l = g.league ? src.leagues[g.league] : undefined;
   return footballExtras(g.xh, g.xa, g.share, shrinkOfLeague(src, g.league), l && l.n >= MIN_LEAGUE_GAMES ? l : src.all);
+}
+/** each output from the grid the backtest chose for it (the 6×6 grid shown with the likely scores comes with them) */
+export function footballMake(g: FbGame, src: FootballSource | null): Extras {
+  if (!src) return footballExtras(g.xh, g.xa, g.share, goalShrink());
+  const use = src.use || { score: 'poisson' };
+  const dc = footballGrid(g, src, 'dc');
+  if (!Object.values(use).includes('poisson')) return dc;
+  const po = footballGrid(g, src, 'poisson');
+  const sets: Record<string, PSet> = {};
+  for (const k of Object.keys(dc.sets)) sets[k] = (use[k] === 'poisson' ? po : dc).sets[k];
+  return { ...dc, sets, info: { ...dc.info, grid6: (use.score === 'poisson' ? po : dc).info.grid6, grids: use } };
 }
 export function fitFootballSource(rows: { league: string; xh: number; xa: number; hg: number; ag: number }[]): FootballSource {
   const shrink = fitGoalShrinkTD(rows) || DEFAULT_GOAL_SHRINK;
@@ -509,7 +537,7 @@ export const tennisGroup = (tour: string, bo: number, surface: string | null) =>
   return `${tour}|bo${bo}|${sf}`;
 };
 function tennisSources(only?: number): Src[] {
-  const rows = db.prepare(`SELECT p.match_id, p.model, COALESCE(m.scheduled_at, p.scheduled_at) AS scheduled_at, p.p1, p.why, p.made_at, p.cat, m.best_of, m.tier, m.surface FROM tennis_predictions p
+  const rows = db.prepare(`SELECT p.match_id, p.model, COALESCE(m.scheduled_at, p.scheduled_at) AS scheduled_at, p.p1, p.why, p.made_at, p.cat, m.best_of, m.tier, m.surface, m.tour, m.is_qualifying FROM tennis_predictions p
     JOIN tennis_matches m ON m.id = p.match_id WHERE COALESCE(m.scheduled_at, p.scheduled_at) > ?
       AND COALESCE(m.status, '') IN ('', 'upcoming', 'scheduled', 'not_started') ${only ? 'AND p.match_id = ?' : ''}`)
     .all(...[now(), ...(only ? [only] : [])]) as any[];
@@ -520,7 +548,10 @@ function tennisSources(only?: number): Src[] {
       let why: any = null;
       try { why = r.why ? JSON.parse(r.why) : null; } catch { why = null; }
       const sp = Array.isArray(why?.numbers?.servePoint) ? why.numbers.servePoint as [number, number] : null;
-      const bo = r.best_of === 5 ? 5 : 3, rule = tennisRuleFor(r.tier, r.scheduled_at);
+      // fix204d: the format and deciding-set rule the model itself used (saved with the prediction); older rows: best of 5
+      // for a men's Slam main draw when the provider leaves it out, the Slam tie-break rule by date
+      const bo = why?.numbers?.bo === 5 || why?.numbers?.bo === 3 ? why.numbers.bo : r.best_of === 5 ? 5 : r.best_of === 3 ? 3 : r.cat === 'slam' && r.tour !== 'wta' && !r.is_qualifying ? 5 : 3;
+      const rule = Number.isInteger(why?.numbers?.rule) ? why.numbers.rule : tennisRuleFor(r.tier, r.scheduled_at);
       const { pa, pb } = tennisServeChances(sp, r.p1, bo, rule);
       const tour = String(r.cat || 'atp');
       return applyCalib(tennisMake({ group: tennisGroup(tour, bo, r.surface), tour, dist: tennisExtrasDist(pa, pb, bo, rule), bo }, src), cal);
@@ -680,13 +711,32 @@ export function summarise(sport: MoreSport, list: Eval[], keys: string[] = MORE_
   }
   return out;
 }
+/** one output's gate from its backtest summary and the log loss of its last public version (null: none yet) */
+export function gateOf(s: { games: number; worst: number | null; public: boolean; logLoss: number | null } | undefined, prev: number | null): { public: boolean; why: string | null } {
+  if (!s || !s.games) return { public: false, why: 'no backtest games' };
+  if (s.worst === null) return { public: false, why: `no 10% step with ${GATE_MIN_N}+ forecasts` };
+  if (!s.public) return { public: false, why: `calibration off by ${s.worst} points in a step with ${GATE_MIN_N}+ forecasts` };
+  if (prev !== null && s.logLoss !== null && s.logLoss > prev + LL_TOLERANCE) return { public: false, why: `log loss ${s.logLoss} worse than its last public version (${prev})` };
+  return { public: true, why: null };
+}
+/** the log loss an output may lose against its last public version (the test games grow every day) */
+export const LL_TOLERANCE = 0.001;
+/**
+ * the gates (fix204d, Yarin): public when every 10% step with 300+ forecasts is within 3 points AND the log loss is not
+ * worse than the output's last public version (its log loss then; before fix204d: the stored report's, when public)
+ */
 function writeGates(sport: MoreSport, sum: Record<string, any>, note: string, extra: Record<string, any> = {}) {
   const t = now();
-  const up = db.prepare(`INSERT OR REPLACE INTO more_pred_gate (sport, output, public, games, worst, why, at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  const prevRows = new Map((db.prepare(`SELECT output, public_ll FROM more_pred_gate WHERE sport = ?`).all(sport) as any[]).map(r => [r.output, r.public_ll as number | null]));
+  let old: any = null;
+  try { old = JSON.parse((db.prepare(`SELECT report FROM more_pred_backtest WHERE sport = ?`).get(sport) as any)?.report || 'null'); } catch { old = null; }
+  const up = db.prepare(`INSERT OR REPLACE INTO more_pred_gate (sport, output, public, games, worst, why, at, ll, public_ll) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const k of MORE_KEYS[sport]) {
     const s = sum[k];
-    const why = !s || !s.games ? 'no backtest games' : s.worst === null ? 'no 10% step with 100+ forecasts' : s.public ? null : `calibration off by ${s.worst} points in a step with 100+ forecasts`;
-    up.run(sport, k, s?.public ? 1 : 0, s?.games || 0, s?.worst ?? null, why, t);
+    const prev = prevRows.get(k) ?? (old?.outputs?.[k]?.public && Number.isFinite(old.outputs[k].logLoss) ? old.outputs[k].logLoss : null);
+    const gt = gateOf(s, prev);
+    if (s) s.gate = { public: gt.public, llGuard: prev, why: gt.why };
+    up.run(sport, k, gt.public ? 1 : 0, s?.games || 0, s?.worst ?? null, gt.why, t, s?.logLoss ?? null, gt.public ? s.logLoss : prev);
   }
   db.prepare(`INSERT OR REPLACE INTO more_pred_backtest (sport, report, at) VALUES (?, ?, ?)`).run(sport, JSON.stringify({ note, outputs: sum, ...extra }), t);
   gateCache = null;
@@ -806,7 +856,8 @@ export async function backtestBasketball() {
   }
   items.sort((a, b) => a.t - b.t);
   const r = await walkForward('basketball', items, pointsEngine('basketball'));
-  return { ...r, diag: pointsDiag(items), note: `bb-v3 walk-forward predictions of ${leagues} leagues (${items.length} games); test = each league's last two seasons (${r.after.length} games), fits and calibration from the games before each` };
+  const modelCheck = Object.fromEntries(codes.map(c => [c, leagueTotalsCheck(c)]).filter(([, v]) => v));
+  return { ...r, diag: { ...pointsDiag(items), modelCheck }, note: `bb-v3 walk-forward predictions of ${leagues} leagues (${items.length} games); test = each league's last two seasons (${r.after.length} games), fits and calibration from the games before each` };
 }
 
 /** NFL and college: the walk-forward games of the model report — built now from the stored history when none is stored */
@@ -855,9 +906,17 @@ export async function backtestNfl() {
 /* ---------- football ---------- */
 
 type FbItem = FbGame & { league: string; hg: number; ag: number };
+/** the fix204b grid: independent Poisson with the per-side shrink, halves on the model's own expected goals */
+const footballPoissonEngine: Engine<FbItem, FootballSource> = {
+  fit: train => {
+    const shrink = fitGoalShrink(train.map(i => ({ xh: i.g.xh, xa: i.g.xa, hg: i.g.hg, ag: i.g.ag }))) || DEFAULT_GOAL_SHRINK;
+    return { shrink, leagues: {}, all: { rho: 0, sizeH: null, sizeA: null }, poisson: { shrink }, use: Object.fromEntries(MORE_KEYS.football.map(k => [k, 'poisson'])) as Record<string, Grid> };
+  },
+  make: (g, s) => footballGrid(g, s, 'poisson')
+};
 const footballEngine: Engine<FbItem, FootballSource> = {
   fit: train => fitFootballSource(train.map(i => ({ league: i.g.league, xh: i.g.xh, xa: i.g.xa, hg: i.g.hg, ag: i.g.ag }))),
-  make: (g, s) => footballMake(g, s)
+  make: (g, s) => footballGrid(g, s, 'dc')
 };
 const poisTail4 = (m: number) => { let p = Math.exp(-m), c = p; for (let k = 1; k < 4; k++) { p *= m / k; c += p; } return 1 - c; };
 /** cause: total-goals bias and dispersion per division and by expected-goals band; P(4+) said (fix204b) vs after vs happened */
@@ -921,9 +980,29 @@ export async function backtestFootball() {
     });
     await slice();
   }
-  const r = await walkForward('football', items, footballEngine);
+  // both grids walk-forward; per output the lower out-of-sample log loss (likely scores: the Poisson grid, Yarin)
+  const rd = await walkForward('football', items, footballEngine);
+  const rp = await walkForward('football', items, footballPoissonEngine);
+  if (rd.after.length !== rp.after.length) throw new Error('football grids: test games differ');
+  const llOf = (list: Eval[], k: string) => { let s = 0, n = 0; for (const e of list) { const set = e.x.sets[k]; const c = set && checkSet(set, e.actual[k]); if (c) { s += c.logLoss; n++; } } return n ? s / n : Infinity; };
+  const use: Record<string, Grid> = {}, grids: Record<string, { dc: number; poisson: number; used: Grid }> = {};
+  for (const k of MORE_KEYS.football) {
+    const a = llOf(rd.after, k), b = llOf(rp.after, k);
+    use[k] = k === 'score' ? 'poisson' : b < a ? 'poisson' : 'dc';
+    grids[k] = { dc: Math.round(a * 10000) / 10000, poisson: Math.round(b * 10000) / 10000, used: use[k] };
+  }
+  const pick = (i: number): Extras => {
+    const x = rd.after[i].x, y = rp.after[i].x, sets: Record<string, PSet> = {};
+    for (const k of Object.keys(x.sets)) sets[k] = (use[k] === 'poisson' ? y : x).sets[k];
+    return { ...x, sets };
+  };
+  const r = {
+    before: rd.before, after: rd.after.map((e, i) => ({ x: pick(i), actual: e.actual })), periods: rd.periods,
+    live: rd.live ? { ...rd.live, poisson: { shrink: rp.live?.poisson?.shrink || DEFAULT_GOAL_SHRINK }, use } : null,
+    calib: Object.fromEntries(MORE_KEYS.football.map(k => [k, (use[k] === 'poisson' ? rp.calib : rd.calib)[k]]).filter(([, v]) => v)) as Calibs
+  };
   return {
-    ...r, diag: footballDiag(items, r.live),
+    ...r, extra: { grids }, diag: footballDiag(items, rd.live),
     note: `grid-v3 walk-forward predictions, seasons ${seasons.join(', ')} (${items.length} games); test ${[...test].join(', ')} (${r.after.length} games), goal model and calibration from the seasons before each; before = fix204b (shrink k ${[...test].map(s => `${s}: ${shrinkOf.get(s)?.k ?? 'none'}`).join(', ')}, independent Poisson)`
   };
 }
@@ -992,7 +1071,7 @@ export async function backtestTennis() {
   return { ...r, diag: tennisDiag(items), note: `tennis-v1 point model (serve and return chain, live settings), walk-forward, ${items.length} tour matches since Jan 2023 (retirements left out); test ${[...test].join(', ')} (${r.after.length} matches), games bias and calibration from the matches before each` };
 }
 
-type Bt = { before: Eval[]; after: Eval[]; live: any; calib: Calibs; periods: number; diag: any; note: string };
+type Bt = { before: Eval[]; after: Eval[]; live: any; calib: Calibs; periods: number; diag: any; note: string; extra?: Record<string, any> };
 const BACKTESTS: Record<MoreSport, () => Promise<Bt>> = { football: backtestFootball, basketball: backtestBasketball, nfl: backtestNfl, tennis: backtestTennis };
 let backtesting = false;
 /** summarise() one output at a time, giving the thread back between them (tennis: 55k matches) */
@@ -1032,8 +1111,11 @@ export async function runBacktests(only?: MoreSport, freshMs = 0): Promise<Recor
         const before = Object.fromEntries(Object.entries(was).map(([k, o]: [string, any]) => [k, { games: o.games, hitRate: o.hitRate, brier: o.brier, logLoss: o.logLoss, worst: o.worst, public: o.public }]));
         if (bt.live) storeFit(s, 'source', bt.live);
         storeCalib(s, bt.calib);
-        writeGates(s, sum, bt.note, { calc: MORE_CALC, before, diag: bt.diag, calibrated: Object.keys(bt.calib), live: bt.live });
-        const pub = MORE_KEYS[s].filter(k => sum[k]?.public).length;
+        writeGates(s, sum, bt.note, { calc: MORE_CALC, before, diag: bt.diag, calibrated: Object.keys(bt.calib), live: bt.live, ...(bt.extra || {}) });
+        // the new fits reach every upcoming game now (their calc stamp changed), not at the next 5-minute tick
+        recordCache.clear();
+        try { const n = await saveExtras(s); logger.info(`more predictions ${s}: ${n[s] || 0} upcoming games saved again with the new fits`); } catch (e: any) { logger.warn(`more predictions re-save ${s}: ${e.message}`); }
+        const pub = MORE_KEYS[s].filter(k => sum[k]?.gate?.public).length;
         out[s] = { note: bt.note, games: bt.after.length, public: pub };
         logger.info(`more backtest ${s}: ${pub} outputs public (of ${MORE_KEYS[s].length}; ${bt.note}); worst step before → after: ${MORE_KEYS[s].map(k => `${k} ${before[k]?.worst ?? '–'} → ${sum[k]?.worst ?? '–'}`).join(', ')}`);
       } catch (e: any) { out[s] = { error: e.message }; logger.warn(`more backtest ${s}: ${e.message}`); }
@@ -1041,6 +1123,20 @@ export async function runBacktests(only?: MoreSport, freshMs = 0): Promise<Recor
     }
   } finally { backtesting = false; }
   return out;
+}
+/**
+ * fix204d (admin view): per sport, the maths version, when its fits and calibration maps were stored, and how many
+ * upcoming games carry the current version (the rest are saved again within one tick)
+ */
+export function calcStatus() {
+  const t = now();
+  return MORE_SPORTS.map(s => {
+    const stamp = calcStamp(s);
+    const fitAt = (db.prepare(`SELECT at FROM more_pred_fit WHERE sport = ? AND league = 'source'`).get(s) as any)?.at || null;
+    const calibAt = (db.prepare(`SELECT MAX(at) AS at FROM more_pred_calib WHERE sport = ?`).get(s) as any)?.at || null;
+    const c = db.prepare(`SELECT COUNT(*) AS n, SUM(calc = ?) AS cur FROM prediction_extras WHERE sport = ? AND kickoff > ? AND settled = 0`).get(stamp, s, t) as any;
+    return { sport: s, calc: MORE_CALC, stamp, fitAt, calibAt, upcoming: c?.n || 0, current: c?.cur || 0, older: (c?.n || 0) - (c?.cur || 0) };
+  });
 }
 export function backtestReports() {
   return (db.prepare(`SELECT sport, report, at FROM more_pred_backtest`).all() as any[]).map(r => { let rep: any = null; try { rep = JSON.parse(r.report); } catch { rep = null; } return { sport: r.sport, at: r.at, ...rep }; });
@@ -1063,17 +1159,28 @@ export function backtestMarkdown(): string {
     lines.push(`## ${SPORT[s]}`, '');
     if (!r || !r.outputs) { lines.push('No backtest stored yet.', ''); continue; }
     lines.push(`${r.note} (run ${String(r.at).slice(0, 16).replace('T', ' ')} UTC).${r.calibrated?.length ? ` Calibration layer on: ${r.calibrated.join(', ')}.` : ''}`, '',
-      '| Output | Games | Worst step before → after | Log loss before → after | Top pick right | Public |', '|---|---:|---:|---:|---:|---|');
+      `| Output | Games | Worst step (${GATE_MIN_N}+) before → after | Log loss before → after | Top pick right | Public |`, '|---|---:|---:|---:|---:|---|');
     for (const k of MORE_KEYS[s]) {
       const o = r.outputs[k], b = r.before?.[k];
       if (!o) continue;
-      lines.push(`| ${OUT_NAME[k] || k} | ${n(o.games)} | ${v(b?.worst)} → ${v(o.worst)} | ${v(b?.logLoss)} → ${v(o.logLoss)} | ${o.hitRate ?? '–'}% | ${o.public ? '**yes**' : 'no (admin only)'} |`);
+      const pub = o.gate ? o.gate.public : o.public;
+      lines.push(`| ${OUT_NAME[k] || k} | ${n(o.games)} | ${v(b?.worst)} → ${v(o.worst)} | ${v(b?.logLoss)} → ${v(o.logLoss)} | ${o.hitRate ?? '–'}% | ${pub ? '**yes**' : `no (admin only${o.gate?.why ? `: ${o.gate.why}` : ''})`} |`);
+    }
+    if (r.grids) {
+      lines.push('', 'Grid per output (out-of-sample log loss: Dixon–Coles / negative binomial vs the fix204b Poisson grid; likely scores always Poisson):', '',
+        '| Output | Dixon–Coles | Poisson | Used |', '|---|---:|---:|---|');
+      for (const k of MORE_KEYS[s]) { const x = r.grids[k]; if (x) lines.push(`| ${OUT_NAME[k] || k} | ${x.dc} | ${x.poisson} | ${x.used === 'poisson' ? 'Poisson' : 'Dixon–Coles'} |`); }
     }
     const d = r.diag;
+    if (d?.modelCheck) {
+      lines.push('', 'bb-v3 now, per league: upcoming games\' predicted total vs the last 60 days, the v1 league mean, v2 pace × points per possession, box scores without the rebound split (60 days):', '',
+        '| League | Upcoming | Predicted total | Last 60 days (games) | v1 mean | v2 total (pace) | No rebound split |', '|---|---:|---:|---:|---:|---:|---:|');
+      for (const [l, x] of Object.entries<any>(d.modelCheck)) lines.push(`| ${l} | ${x.upcoming} | ${v(x.upcomingTotal)} | ${v(x.recentTotal)} (${x.recentGames}) | ${x.v1Mean} | ${v(x.v2Total)} (${v(x.v2Pace)}) | ${x.noReboundSplit} / ${x.boxScores} |`);
+    }
     if (d && (s === 'basketball' || s === 'nfl')) {
       lines.push('', 'Cause, per league (all walk-forward games): bias = predicted − actual (points); slope = how much of a prediction\x27s distance from the league\x27s usual score really happens (1 = all of it); spread ratio = corrected misses ÷ the spread the bands used:', '',
-        '| League | Games | Predicted total | Actual | Bias total / home / away | Slope total / home / away | Spread ratio total / home / away |', '|---|---:|---:|---:|---:|---:|---:|');
-      for (const [l, x] of Object.entries<any>({ ...d.leagues, all: d.all })) if (x.bT !== undefined) lines.push(`| ${l} | ${n(x.n)} | ${x.meanPred} | ${x.meanActual} | ${x.bT} / ${x.bH} / ${x.bA} | ${x.kT} / ${x.kH} / ${x.kA} | ${x.rT} / ${x.rH} / ${x.rA} |`);
+        '| League | Games | Predicted total | Actual | Bias total / home / away | Slope total / home / away | Spread ratio total / home / away | Margin bias / spread ratio |', '|---|---:|---:|---:|---:|---:|---:|---:|');
+      for (const [l, x] of Object.entries<any>({ ...d.leagues, all: d.all })) if (x.bT !== undefined) lines.push(`| ${l} | ${n(x.n)} | ${x.meanPred} | ${x.meanActual} | ${x.bT} / ${x.bH} / ${x.bA} | ${x.kT} / ${x.kH} / ${x.kA} | ${x.rT} / ${x.rH} / ${x.rA} | ${v(x.bM)} / ${v(x.rM)} |`);
     }
     if (d && s === 'football') {
       lines.push('', `Cause (all walk-forward games; live shrink: each side k ${d.shrink?.k}, total kT ${d.shrink?.kT ?? '–'}, difference kD ${d.shrink?.kD ?? '–'}): expected goals raw / shrunk vs goals, dispersion = actual variance ÷ Poisson variance (shrunk means), 4+ goals said (fix204b) vs happened:`, '',
@@ -1153,6 +1260,8 @@ function stateOf(sport: MoreSport, id: number, kickoff: string): State {
  * number and no hint (fix182). Open: every public output in %, our pick in each, and once checked what happened.
  * The payload sits under `prediction`, so the proxy guard locks it like every other prediction.
  */
+/** tests and admin: store a sport's source fit (the next save re-makes the upcoming games with it) */
+export const storeSourceFit = (sport: MoreSport, v: any) => storeFit(sport, 'source', v);
 export const hasExtras = (sport: MoreSport, id: number) => !!db.prepare(`SELECT 1 FROM prediction_extras WHERE sport = ? AND game_id = ?`).get(sport, id);
 export function moreForGame(sport: MoreSport, id: number, o: { full: boolean; admin: boolean }) {
   const r = db.prepare(`SELECT model, kickoff, made_at, json, settled, result, admin_only, flag FROM prediction_extras WHERE sport = ? AND game_id = ?`).get(sport, id) as any;

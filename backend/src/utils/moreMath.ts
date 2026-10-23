@@ -239,6 +239,8 @@ export interface NormalIn {
   fit: LeagueFit;
   /** fix204c: the measured spreads of the total and each side (league bias fit; default: the model spreads) */
   sdT?: number; sdHome?: number; sdAway?: number;
+  /** fix204d: the margin bands' own centre and spread (measured misses; the win chance and the half / overtime sets keep theirs) */
+  marginMu?: number; sdMargin?: number;
   /** fix204c: the measured shape of the total's and each side's misses (quantiles of the standardised misses) */
   shapeT?: number[] | null; shapeTeam?: number[] | null;
 }
@@ -266,7 +268,8 @@ export function normalExtras(x: NormalIn): Extras {
   const { mu, sd } = marginSpread(x.pHome, x.margin, f.sigma);
   const side = x.pHome >= 0.5 ? 1 : -1;
   // winner-side margin bands: value = side × (home − away); 'loser' = the other side wins (or a tie)
-  const marginP = binsOf(side * mu, sd, B.margin.map(c => c - 0.5).map((c, k) => (k === 0 ? 0 : c)));
+  const marginP = x.sdMargin ? binsOf(side * (x.marginMu ?? x.margin), x.sdMargin, B.margin.map(c => c - 0.5).map((c, k) => (k === 0 ? 0 : c)))
+    : binsOf(side * mu, sd, B.margin.map(c => c - 0.5).map((c, k) => (k === 0 ? 0 : c)));
   const w = B.totalWidth(f.sigmaT), c = Math.round(f.meanTotal);
   const e1 = Math.round(c - 1.5 * w), tEdges = [e1, e1 + w, e1 + 2 * w, e1 + 3 * w];
   const totalLabels = [`<${tEdges[0]}`, `${tEdges[0]}–${tEdges[1] - 1}`, `${tEdges[1]}–${tEdges[2] - 1}`, `${tEdges[2]}–${tEdges[3] - 1}`, `${tEdges[3]}+`];
@@ -374,8 +377,12 @@ export function calibration(pairs: { p: number[]; i: number }[]): CalBin[] {
   for (const x of pairs) x.p.forEach((q, k) => { const b = acc[Math.min(9, Math.floor(q * 10))]; b.n++; b.sp += q; b.hp += k === x.i ? 1 : 0; });
   return acc.filter(b => b.n).map(b => ({ from: b.from, n: b.n, said: Math.round((1000 * b.sp) / b.n) / 10, happened: Math.round((1000 * b.hp) / b.n) / 10 }));
 }
-/** the public rule (fix204 F): every step with 100+ forecasts within 3 points; at least one such step */
-export function calibrationOk(bins: CalBin[], minN = 100, maxGap = 3): { ok: boolean; worst: number | null } {
+/**
+ * the public rule: every step with enough forecasts within 3 points; at least one such step. fix204d (Yarin): a step
+ * decides only with 300+ forecasts (100–300 are reported but move by ±3–5 points by chance alone)
+ */
+export const GATE_MIN_N = 300;
+export function calibrationOk(bins: CalBin[], minN = GATE_MIN_N, maxGap = 3): { ok: boolean; worst: number | null } {
   const big = bins.filter(b => b.n >= minN);
   if (!big.length) return { ok: false, worst: null };
   const worst = Math.max(...big.map(b => Math.abs(b.said - b.happened)));
