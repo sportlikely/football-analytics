@@ -108,7 +108,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth, startDataHealthScheduler } from './services/dataHealth';
-import { moreForGame, moreRecord, moreHealth, gateList, backtestReports, runBacktests, moreDaily, MORE_SPORTS, startMorePredictionsScheduler } from './services/morePredictions';
+import { moreForGame, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, runBacktests, moreDaily, MORE_SPORTS, startMorePredictionsScheduler, gameIdOf, hasExtras, saveOne } from './services/morePredictions';
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders } from './services/unsettled';
 import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
@@ -1099,16 +1099,22 @@ const MORE_RID: Record<string, (id: number) => number> = { football: id => id, b
 app.get('/api/more/:sport(football|basketball|nfl|tennis)/record', (req, res) => {
   try { res.json({ data: moreRecord(req.params.sport as any, req.access === 'admin') }); } catch (e) { sendError(res, e, 'Failed to load the record'); }
 });
-app.get('/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', (req, res) => {
+app.get('/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', async (req, res) => {
   try {
-    const sport = req.params.sport as any, id = parseInt(req.params.id, 10);
+    // fix204b: the game id or its unlock id; a game the 5-minute job has not reached yet is saved now (before the start only)
+    const sport = req.params.sport as any, id = gameIdOf(sport, parseInt(req.params.id, 10));
+    if (!hasExtras(sport, id)) await saveOne(sport, id);
     res.set('Cache-Control', 'no-store');
     res.json({ data: moreForGame(sport, id, { full: fullOne(req, MORE_RID[sport](id)), admin: req.access === 'admin' }) });
   } catch (e) { sendError(res, e, 'Failed to load more predictions'); }
 });
-app.get('/api/admin/more-predictions', (_req, res) => {
+// ?format=md: the backtest tables as Markdown for docs/notes/more-predictions-backtest.md
+app.get('/api/admin/more-predictions', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  try { res.json({ data: { gates: gateList(), backtests: backtestReports(), health: moreHealth() } }); } catch (e) { sendError(res, e, 'Failed'); }
+  try {
+    if (req.query.format === 'md') { res.type('text/markdown').send(backtestMarkdown()); return; }
+    res.json({ data: { gates: gateList(), backtests: backtestReports(), health: moreHealth() } });
+  } catch (e) { sendError(res, e, 'Failed'); }
 });
 // runs in the background (football + basketball about a minute, tennis a few); ?sport= one sport, ?refit=1 league fits first
 app.post('/api/admin/more-predictions/backtest', (req, res) => {

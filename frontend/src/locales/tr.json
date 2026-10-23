@@ -2378,5 +2378,6 @@
  "WTA": "WTA",
  "Challenger": "Challenger",
  "Winning margin: {0}": "Galibiyet farkı: {0}",
- "by {0}": "{0} farkla"
+ "by {0}": "{0} farkla",
+ "{0} wins instead": "{0} kazanır"
 }

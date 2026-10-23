@@ -2378,5 +2378,6 @@
  "WTA": "WTA",
  "Challenger": "Challenger",
  "Winning margin: {0}": "Margine di vittoria: {0}",
- "by {0}": "di {0}"
+ "by {0}": "di {0}",
+ "{0} wins instead": "Vince {0}"
 }

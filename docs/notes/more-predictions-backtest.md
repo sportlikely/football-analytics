@@ -56,6 +56,35 @@ the gates follow automatically; admin view `/api/admin/more-predictions`, re-run
 Competitions without 200 stored half-time scores (cups, national teams, leagues added from Admin) use 0.45. The live
 fit is redone daily on the server.
 
+## fix204b (23 Oct 2026): first server run, defaults, league bands
+
+- **First run:** on start, every sport without a stored report is backtested 3 minutes in (heavy queue, sliced every
+  ~30 ms, waits for live ticks), the league fits first when none are stored; the log says `more backtest <sport>: N outputs
+  public (of M; …)`. The daily run skips a sport tested in the last 20 h. NFL / college stay "nothing to test yet" until
+  the first Tuesday retrain stores walk-forward rows.
+- **Goal-spread shrink before any fit:** k = 0.83 (between 2526 0.877 and 2627 0.791), averages 1.5 / 1.2 goals — never
+  no correction (the 23 Oct Barça – Real Madrid "4+ goals 58%" was the uncorrected grid).
+- **Bands per league (basketball, NFL / college):** total and team-point bands centred on the league's own running mean:
+  basketball = bb-v3's per-league average points × 2 (NBA ≈ 225), else the league's finished games of the last ~13 months
+  (50+), else the stored fit; NFL / college = the stored fit, else the league's recent games, else 45 / 55. (23 Oct: NBA
+  game 519551 had the 160-point default bands, 100% in 175+.)
+- **Sanity check:** a basketball / NFL total or team-point set with more than 85% in one band is logged
+  (`more predictions <sport> <id>: total 175+ 99.9% in one band — admin only`) and that game's extras become admin-only
+  (`prediction_extras.admin_only`, `flag`; out of the public page, record and crawler sentence). Data health lists them.
+- Rows carry the maths version (`calc`); rows of upcoming games made before fix204b are made again on the next tick.
+- NFL / tennis: rows are saved under the game's own current start time (the prediction table's copy can lag behind a
+  moved game); the page may pass the unlock id (nflRid / tennisRid / basketball's negative id), both are accepted; a game
+  the 5-minute job has not reached is saved when its page asks. Data health shows the real counts: games of the next 48 h
+  with a prediction, with extras, without, flagged, and what the last save did (saved / unchanged / errors).
+- Margin bands: the "loser" row reads "<other team> wins instead" (new string: "{0} wins" is translated as a count of
+  wins in the six languages).
+
+# Backtest results (server, live)
+
+Not filled yet: the server can't be reached from the local checkout. After the fix204b deploy (first run ~3 minutes after
+the start; tennis takes a few minutes more) open `/api/admin/more-predictions?format=md` as admin and paste the output
+here, replacing this paragraph.
+
 # Backtest results (walk-forward, run locally on the 10 Oct 2026 database copy)
 
 ## Football

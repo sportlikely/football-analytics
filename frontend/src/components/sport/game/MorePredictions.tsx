@@ -53,7 +53,8 @@ export default function MorePredictions({ sport, id, rid, status, home, away }: 
   const label = (k: string, l: string) => {
     if (l === 'yes') return t('Yes')
     if (l === 'no') return t('No')
-    if (k === 'margin') return l === 'loser' ? t('{0} wins', { 0: loser }) : t('by {0}', { 0: l })
+    // the stored key stays 'loser'; on screen it is the other team winning (its own string: '{0} wins' is a count of wins)
+    if (k === 'margin') return l === 'loser' ? t('{0} wins instead', { 0: loser }) : t('by {0}', { 0: l })
     if (k === 'ht' || k === 'half') return l === 'H' ? home : l === 'A' ? away : sport === 'football' ? t('Draw') : t('Level')
     if (k === 'htft') return l.split('/').map(x => (x === 'H' ? home : x === 'A' ? away : t('Draw'))).join(' / ')
     if (k === 'first') return l === '1' ? home : away

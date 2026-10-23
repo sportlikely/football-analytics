@@ -14,10 +14,10 @@
  */
 import { db } from '../db';
 import logger from '../utils/logger';
-import { slicer, yieldLoop, after, every, afterHeavy, everyHeavy } from './perf';
+import { yieldLoop, heavySlicer, afterLive, after, every, afterHeavy, everyHeavy, heavy } from './perf';
 import {
   footballExtras, fitGoalShrink, type GoalShrink, normalExtras, tennisExtras, checkSet, calibration, calibrationOk, topIndex, pctSet, normCdf,
-  DEFAULT_HT_SHARE, type Extras, type LeagueFit, type MoreSport, type PSet, type SetCheck
+  DEFAULT_HT_SHARE, DEFAULT_GOAL_SHRINK, bandAlarm, type Extras, type LeagueFit, type MoreSport, type PSet, type SetCheck
 } from '../utils/moreMath';
 import { GROUPS } from './history';
 import { mainRank } from './tracking';
@@ -36,6 +36,16 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS more_pred_gate (sport TEXT NOT NULL, output TEXT NOT NULL, public INTEGER NOT NULL, games INTEGER NOT NULL, worst REAL, why TEXT, at TEXT NOT NULL, PRIMARY KEY (sport, output));
   CREATE TABLE IF NOT EXISTS more_pred_backtest (sport TEXT PRIMARY KEY, report TEXT NOT NULL, at TEXT NOT NULL);
 `);
+// fix204b: calc = the version of the maths a row was made with (older rows of upcoming games are made again);
+// admin_only + flag = the sanity check failed for this game (visitors don't see its extras)
+{
+  const cols = new Set((db.prepare(`PRAGMA table_info(prediction_extras)`).all() as any[]).map(c => c.name));
+  if (!cols.has('calc')) db.exec(`ALTER TABLE prediction_extras ADD COLUMN calc TEXT`);
+  if (!cols.has('admin_only')) db.exec(`ALTER TABLE prediction_extras ADD COLUMN admin_only INTEGER NOT NULL DEFAULT 0`);
+  if (!cols.has('flag')) db.exec(`ALTER TABLE prediction_extras ADD COLUMN flag TEXT`);
+}
+/** bump when the maths behind saved rows changes: upcoming games are saved again on the next tick */
+export const MORE_CALC = '204b';
 
 export const MORE_SPORTS: MoreSport[] = ['football', 'basketball', 'nfl', 'tennis'];
 /** the outputs of each sport, in page order */
@@ -47,6 +57,8 @@ export const MORE_KEYS: Record<MoreSport, string[]> = {
 };
 const DAY = 86400000;
 const MIN_FIT_GAMES = 200;
+/** between two steps of a background job: give the thread back, and wait while a live tick runs */
+const afterLiveYield = async () => { await yieldLoop(); await afterLive(); };
 const now = () => new Date().toISOString();
 
 /* ------------------------------------------------------------------ */
@@ -81,7 +93,8 @@ export function fitFootballShares(): Record<string, { share: number; games: numb
   storeFit('football', 'shrink', fitGoalShrink(bt));
   return out;
 }
-const goalShrink = (): GoalShrink | null => readFit('football', 'shrink');
+/** the latest stored fit; before the first one the local backtest's value (fix204b: never "no correction") */
+export const goalShrink = (): GoalShrink => readFit('football', 'shrink') || DEFAULT_GOAL_SHRINK;
 /** competition code → division (each group lists its competitions in the order of its divisions) */
 function divisionOf(code: string | null): string | null {
   if (!code) return null;
@@ -156,53 +169,96 @@ export async function refitLeagues() {
   const codes = (db.prepare(`SELECT DISTINCT code FROM bb_games`).all() as any[]).map(r => r.code as string);
   for (const code of codes) {
     const info = leagueModelInfo(code);
-    storeFit('basketball', code, fitFromQuarters(bbGamesOf(code), { sigma: info?.sigma || 12, sigmaT: info?.sigmaTotal || 17, meanTotal: 160 }));
-    await yieldLoop();
+    storeFit('basketball', code, fitFromQuarters(bbGamesOf(code), { sigma: info?.sigma || 12, sigmaT: info?.sigmaTotal || 17, meanTotal: info ? 2 * info.avgPoints : 160 }));
+    await afterLiveYield();
   }
-  for (const lg of [1, 2]) { storeFit('nfl', String(lg), fitFromQuarters(nflGamesOf(lg), nflSpreads(lg))); await yieldLoop(); }
+  for (const lg of [1, 2]) { storeFit('nfl', String(lg), fitFromQuarters(nflGamesOf(lg), nflSpreads(lg))); await afterLiveYield(); }
 }
-function bbFit(code: string): LeagueFit {
-  const f: LeagueFit = readFit('basketball', code) || { share: 0.5, kHalf: 1, kOt: 1, meanTotal: 160, sigma: 12, sigmaT: 17, games: 0 };
-  const info = leagueModelInfo(code); // the model's current spreads (they move as it learns; measured misses tested worse, fix204 doc)
-  return info ? { ...f, sigma: info.sigma, sigmaT: info.sigmaTotal } : f;
+/** fix204b: a league's average total of its finished games of the last ~13 months (50+ games), else null */
+const meanCache = new Map<string, { at: number; v: number | null }>();
+function recentMeanTotal(sport: 'basketball' | 'nfl', key: string | number): number | null {
+  const k = `${sport}|${key}`, hit = meanCache.get(k);
+  if (hit && Date.now() - hit.at < 6 * 3600 * 1000) return hit.v;
+  const since = new Date(Date.now() - 400 * DAY).toISOString();
+  const r = (sport === 'basketball'
+    ? db.prepare(`SELECT COUNT(*) AS n, AVG(hs + as_) AS m FROM bb_games WHERE code = ? AND status IN ('FT','AOT') AND hs IS NOT NULL AND as_ IS NOT NULL AND kickoff > ?`).get(String(key), since)
+    : db.prepare(`SELECT COUNT(*) AS n, AVG(home_pts + away_pts) AS m FROM nfl_games WHERE league = ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL AND away_pts IS NOT NULL AND kickoff > ?`).get(Number(key), since)) as any;
+  const v = r && r.n >= 50 && r.m ? Math.round(r.m * 10) / 10 : null;
+  meanCache.set(k, { at: Date.now(), v });
+  return v;
 }
-const nflFit = (league: number): LeagueFit => readFit('nfl', String(league)) || { share: 0.5, kHalf: 1, kOt: 1, ...NFL_DEFAULT[league] || NFL_DEFAULT[1], games: 0 };
+/**
+ * fix204b: the total and team-point bands are centred on the league's own running mean (bb-v3's per-league average
+ * points × 2: NBA ≈ 225), never a global default; spreads = the model's current ones (they move as it learns; measured
+ * misses tested worse, fix204 doc)
+ */
+export function bbFit(code: string): LeagueFit {
+  const info = leagueModelInfo(code);
+  const f: LeagueFit = readFit('basketball', code) || { share: 0.5, kHalf: 1, kOt: 1, meanTotal: 0, sigma: 12, sigmaT: 17, games: 0 };
+  const meanTotal = info && info.avgPoints > 0 ? Math.round(2 * info.avgPoints * 10) / 10 : recentMeanTotal('basketball', code) || f.meanTotal || 160;
+  return info ? { ...f, meanTotal, sigma: info.sigma, sigmaT: info.sigmaTotal } : { ...f, meanTotal };
+}
+/** NFL / college: the stored fit (its mean = the league's recent games), else the league's recent games, else the default */
+export function nflFit(league: number): LeagueFit {
+  const d = NFL_DEFAULT[league] || NFL_DEFAULT[1];
+  const f: LeagueFit | null = readFit('nfl', String(league));
+  if (f && f.meanTotal > 0) return f;
+  return { share: 0.5, kHalf: 1, kOt: 1, ...d, meanTotal: recentMeanTotal('nfl', league) || d.meanTotal, games: 0 };
+}
 
 /* ------------------------------------------------------------------ */
 /* B. Saving before the start                                           */
 /* ------------------------------------------------------------------ */
 
-const upsert = db.prepare(`INSERT INTO prediction_extras (sport, game_id, model, kickoff, made_at, json, source_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(sport, game_id) DO UPDATE SET model = excluded.model, kickoff = excluded.kickoff, made_at = excluded.made_at, json = excluded.json, source_at = excluded.source_at
+const upsert = db.prepare(`INSERT INTO prediction_extras (sport, game_id, model, kickoff, made_at, json, source_at, calc, admin_only, flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(sport, game_id) DO UPDATE SET model = excluded.model, kickoff = excluded.kickoff, made_at = excluded.made_at, json = excluded.json, source_at = excluded.source_at,
+    calc = excluded.calc, admin_only = excluded.admin_only, flag = excluded.flag
   WHERE prediction_extras.settled = 0 AND (prediction_extras.kickoff > excluded.made_at OR prediction_extras.kickoff <> excluded.kickoff)`);
-const sourceStmt = db.prepare(`SELECT game_id, source_at, model FROM prediction_extras WHERE sport = ? AND kickoff > ?`);
+const sourceStmt = db.prepare(`SELECT game_id, source_at, model, calc FROM prediction_extras WHERE sport = ? AND kickoff > ?`);
+
+/** fix204b: what the last save of each sport did (data health shows it, so "0 missing" never hides "nothing tried") */
+export interface SaveStat { at: string; sources: number; saved: number; unchanged: number; errors: number; flagged: number; lastError: string | null }
+const saveStats = new Map<MoreSport, SaveStat>();
+export const lastSave = (sport: MoreSport) => saveStats.get(sport) || null;
 
 interface Src { id: number; model: string; kickoff: string; at: string; make: () => Extras | null }
-async function save(sport: MoreSport, list: Src[]): Promise<number> {
+async function save(sport: MoreSport, list: Src[], opts: { log?: boolean } = {}): Promise<number> {
   const t = now();
-  const have = new Map((sourceStmt.all(sport, t) as any[]).map(r => [r.game_id as number, `${r.model}|${r.source_at}`]));
-  const slice = slicer(25);
-  const out: [Src, Extras][] = [];
+  const have = new Map((sourceStmt.all(sport, t) as any[]).map(r => [r.game_id as number, `${r.model}|${r.source_at}|${r.calc}`]));
+  const slice = heavySlicer(30);
+  const out: [Src, Extras, string | null][] = [];
+  const st: SaveStat = { at: t, sources: list.length, saved: 0, unchanged: 0, errors: 0, flagged: 0, lastError: null };
   for (const s of list) {
-    if (s.kickoff <= t || have.get(s.id) === `${s.model}|${s.at}`) continue;
-    try { const x = s.make(); if (x) out.push([s, x]); } catch (e: any) { logger.warn(`more predictions ${sport} ${s.id}: ${e.message}`); }
+    if (s.kickoff <= t) continue;
+    if (have.get(s.id) === `${s.model}|${s.at}|${MORE_CALC}`) { st.unchanged++; continue; }
+    try {
+      const x = s.make();
+      if (!x) continue;
+      // sanity check: a band set with > 85% in one band is centred on the wrong league → this game's extras admin-only
+      const alarm = bandAlarm(x);
+      if (alarm) { st.flagged++; logger.warn(`more predictions ${sport} ${s.id}: ${alarm} in one band — admin only`); }
+      out.push([s, x, alarm]);
+    } catch (e: any) { st.errors++; st.lastError = `${s.id}: ${e.message}`; logger.warn(`more predictions ${sport} ${s.id}: ${e.message}`); }
     await slice();
   }
-  if (!out.length) return 0;
-  const at = now();
-  db.exec('BEGIN');
-  try {
-    // a game that started while we were computing keeps what it had
-    for (const [s, x] of out) if (Date.parse(s.kickoff) > Date.now()) upsert.run(sport, s.id, s.model, s.kickoff, at, JSON.stringify(x), s.at);
-    db.exec('COMMIT');
-  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  if (out.length) {
+    const at = now();
+    db.exec('BEGIN');
+    try {
+      // a game that started while we were computing keeps what it had
+      for (const [s, x, alarm] of out) if (Date.parse(s.kickoff) > Date.now()) { upsert.run(sport, s.id, s.model, s.kickoff, at, JSON.stringify(x), s.at, MORE_CALC, alarm ? 1 : 0, alarm); st.saved++; }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
+  if (opts.log !== false) saveStats.set(sport, st);
   return out.length;
 }
 
-function footballSources(): Src[] {
+function footballSources(only?: number): Src[] {
   const t = now();
   const rows = db.prepare(`SELECT match_id, model, competition_code, utc_date, xg_home, xg_away, updated_at FROM predictions
-    WHERE locked = 0 AND settled = 0 AND utc_date > ? AND utc_date < ? AND xg_home IS NOT NULL AND xg_away IS NOT NULL`).all(t, new Date(Date.now() + 8 * DAY).toISOString()) as any[];
+    WHERE locked = 0 AND settled = 0 AND utc_date > ? AND utc_date < ? AND xg_home IS NOT NULL AND xg_away IS NOT NULL ${only ? 'AND match_id = ?' : ''}`)
+    .all(...[t, new Date(Date.now() + 8 * DAY).toISOString(), ...(only ? [only] : [])]) as any[];
   const best = new Map<number, any>();
   for (const r of rows) {
     if (mainRank(r.model, r.utc_date) >= 99) continue;
@@ -214,16 +270,20 @@ function footballSources(): Src[] {
     make: () => footballExtras(r.xg_home, r.xg_away, htShareFor(r.competition_code), goalShrink())
   }));
 }
-function basketballSources(): Src[] {
-  const rows = db.prepare(`SELECT game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at FROM bb_predictions WHERE kickoff > ?`).all(now()) as any[];
+function basketballSources(only?: number): Src[] {
+  const rows = db.prepare(`SELECT game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at FROM bb_predictions WHERE kickoff > ? ${only ? 'AND game_id = ?' : ''}`)
+    .all(...[now(), ...(only ? [only] : [])]) as any[];
   return rows.map(r => ({
     id: r.game_id, model: r.model, kickoff: r.kickoff, at: r.made_at,
     make: () => normalExtras({ sport: 'basketball', pHome: r.p_home, margin: r.margin, total: r.total, homePts: r.home_pts, awayPts: r.away_pts, fit: bbFit(r.code) })
   }));
 }
-function nflSources(): Src[] {
-  const rows = db.prepare(`SELECT p.game_id, p.kickoff, p.model, p.p_home, p.margin, p.total, p.home_pts, p.away_pts, p.made_at, g.league FROM nfl_predictions p
-    JOIN nfl_games g ON g.game_id = p.game_id WHERE p.kickoff > ?`).all(now()) as any[];
+// NFL / tennis (fix204b): the game's own current start time (a moved game is saved under its new time), any row whose
+// game has not started — the prediction table's copy of the time can lag behind the schedule
+function nflSources(only?: number): Src[] {
+  const rows = db.prepare(`SELECT p.game_id, COALESCE(g.kickoff, p.kickoff) AS kickoff, p.model, p.p_home, p.margin, p.total, p.home_pts, p.away_pts, p.made_at, g.league FROM nfl_predictions p
+    JOIN nfl_games g ON g.game_id = p.game_id WHERE COALESCE(g.kickoff, p.kickoff) > ? AND (g.status IS NULL OR g.status = 'NS') ${only ? 'AND p.game_id = ?' : ''}`)
+    .all(...[now(), ...(only ? [only] : [])]) as any[];
   return rows.map(r => ({
     id: r.game_id, model: r.model, kickoff: r.kickoff, at: r.made_at,
     make: () => normalExtras({ sport: 'nfl', pHome: r.p_home, margin: r.margin, total: r.total, homePts: r.home_pts, awayPts: r.away_pts, fit: nflFit(r.league || 1) })
@@ -235,9 +295,11 @@ export function tennisExtrasFor(p1: number, servePoint: [number, number] | null,
   const { pa, pb } = tennisServeChances(servePoint, p1, b, rule);
   return tennisExtras(tennisExtrasDist(pa, pb, b, rule), b);
 }
-function tennisSources(): Src[] {
-  const rows = db.prepare(`SELECT p.match_id, p.model, p.scheduled_at, p.p1, p.why, p.made_at, m.best_of, m.tier FROM tennis_predictions p
-    JOIN tennis_matches m ON m.id = p.match_id WHERE p.scheduled_at > ?`).all(now()) as any[];
+function tennisSources(only?: number): Src[] {
+  const rows = db.prepare(`SELECT p.match_id, p.model, COALESCE(m.scheduled_at, p.scheduled_at) AS scheduled_at, p.p1, p.why, p.made_at, m.best_of, m.tier FROM tennis_predictions p
+    JOIN tennis_matches m ON m.id = p.match_id WHERE COALESCE(m.scheduled_at, p.scheduled_at) > ?
+      AND COALESCE(m.status, '') IN ('', 'upcoming', 'scheduled', 'not_started') ${only ? 'AND p.match_id = ?' : ''}`)
+    .all(...[now(), ...(only ? [only] : [])]) as any[];
   return rows.map(r => ({
     id: r.match_id, model: r.model, kickoff: r.scheduled_at, at: r.made_at,
     make: () => {
@@ -248,7 +310,19 @@ function tennisSources(): Src[] {
     }
   }));
 }
-const SOURCES: Record<MoreSport, () => Src[]> = { football: footballSources, basketball: basketballSources, nfl: nflSources, tennis: tennisSources };
+const SOURCES: Record<MoreSport, (only?: number) => Src[]> = { football: footballSources, basketball: basketballSources, nfl: nflSources, tennis: tennisSources };
+/** fix204b: one game now (the page asked for a game whose extras the 5-minute job has not saved yet) */
+export async function saveOne(sport: MoreSport, id: number): Promise<boolean> {
+  try { return (await save(sport, SOURCES[sport](id), { log: false })) > 0; } catch (e: any) { logger.warn(`more predictions ${sport} ${id}: ${e.message}`); return false; }
+}
+/** the page may pass the unlock id (nflRid / tennisRid / basketball's negative id) instead of the game id: accept both */
+export function gameIdOf(sport: MoreSport, id: number): number {
+  if (id >= 0) return id;
+  if (sport === 'nfl' && id <= -2e9 && id > -4e9) return -id - 2e9;
+  if (sport === 'tennis' && id <= -4e9) return -id - 4e9;
+  if (sport === 'basketball') return -id;
+  return id;
+}
 export async function saveExtras(sport?: MoreSport): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const s of sport ? [sport] : MORE_SPORTS) {
@@ -367,9 +441,9 @@ export function gateList() {
 
 interface Eval { x: Extras; actual: Actual }
 /** per output: games, top-pick hit rate, Brier, log loss, said vs happened (10% steps), the public rule */
-export function summarise(sport: MoreSport, list: Eval[]) {
+export function summarise(sport: MoreSport, list: Eval[], keys: string[] = MORE_KEYS[sport]) {
   const out: Record<string, any> = {};
-  for (const k of MORE_KEYS[sport]) {
+  for (const k of keys) {
     const pairs: { p: number[]; i: number }[] = [];
     let hits = 0, brier = 0, ll = 0;
     for (const e of list) {
@@ -422,7 +496,7 @@ export async function backtestFootball(): Promise<{ list: Eval[]; note: string }
   const acc = new Map<string, { n: number; ht: number; ft: number }>();
   let k = 0;
   const list: Eval[] = [];
-  const slice = slicer(25);
+  const slice = heavySlicer(30);
   for (const r of rows) {
     while (k < hist.length && hist[k].date < r.date) { const a = acc.get(hist[k].d) || { n: 0, ht: 0, ft: 0 }; a.n++; a.ht += hist[k].ht; a.ft += hist[k].ft; acc.set(hist[k].d, a); k++; }
     const a = acc.get(r.division), share = a && a.n >= MIN_FIT_GAMES && a.ft > 0 ? a.ht / a.ft : DEFAULT_HT_SHARE;
@@ -446,7 +520,7 @@ export async function backtestBasketball(): Promise<{ list: Eval[]; note: string
     const games = new Map((db.prepare(`SELECT game_id, season, kickoff, status, hs, as_, quarters FROM bb_games WHERE code = ? AND season IN (${seasons.map(() => '?').join(',')}) AND status IN ('FT','AOT')`)
       .all(code, ...seasons) as any[]).map(r => [r.game_id, r]));
     const first = [...games.values()].reduce((m, g) => (g.kickoff < m ? g.kickoff : m), '9999');
-    const f0 = fitFromQuarters(bbGamesOf(code, first), { sigma: info.sigma, sigmaT: info.sigmaTotal, meanTotal: 160 });
+    const f0 = fitFromQuarters(bbGamesOf(code, first), { sigma: info.sigma, sigmaT: info.sigmaTotal, meanTotal: 2 * info.avgPoints });
     const fit: LeagueFit = { ...f0, sigma: info.sigma, sigmaT: info.sigmaTotal };
     for (const [id, pHome, margin, total] of wf) {
       const g = games.get(id);
@@ -456,7 +530,7 @@ export async function backtestBasketball(): Promise<{ list: Eval[]; note: string
       list.push({ x, actual: pointsActual(x, g.hs, g.as_, q, g.status === 'AOT' || (q ? (q.h[4] || 0) + (q.a[4] || 0) > 0 : false)) });
     }
     leagues++;
-    await yieldLoop();
+    await afterLiveYield();
   }
   return { list, note: `bb-v3 walk-forward predictions, last two seasons of ${leagues} leagues, ${list.length} games` };
 }
@@ -485,7 +559,7 @@ export async function backtestNfl(): Promise<{ list: Eval[]; note: string }> {
       list.push({ x, actual: pointsActual(x, g.home_pts, g.away_pts, q, g.status === 'AOT' || (q ? (q.h[4] || 0) + (q.a[4] || 0) > 0 : false)) });
     }
     parts.push(`${lg === 1 ? 'NFL' : 'college'}: seasons ${seasons.join(', ')}, ${test.length} games`);
-    await yieldLoop();
+    await afterLiveYield();
   }
   return { list, note: `nfl-v1 / ncaa-v1 walk-forward test games; ${parts.join('; ')}` };
 }
@@ -496,7 +570,7 @@ export async function backtestTennis(): Promise<{ list: Eval[]; note: string }> 
   const st = db.prepare(`SELECT id, games FROM tennis_matches WHERE id = ?`);
   const list: Eval[] = [];
   const memo = new Map<string, Extras>();
-  const slice = slicer(25);
+  const slice = heavySlicer(30);
   for (const w of wf) {
     const g0 = (st.get(w.id) as any)?.games || '';
     let g: any = null;
@@ -514,30 +588,80 @@ export async function backtestTennis(): Promise<{ list: Eval[]; note: string }> 
 }
 const BACKTESTS: Record<MoreSport, () => Promise<{ list: Eval[]; note: string }>> = { football: backtestFootball, basketball: backtestBasketball, nfl: backtestNfl, tennis: backtestTennis };
 let backtesting = false;
-export async function runBacktests(only?: MoreSport): Promise<Record<string, any>> {
+/** summarise() one output at a time, giving the thread back between them (tennis: 55k matches) */
+async function summariseSliced(sport: MoreSport, list: Eval[]) {
+  const out: Record<string, any> = {};
+  for (const k of MORE_KEYS[sport]) {
+    out[k] = summarise(sport, list, [k])[k];
+    await afterLiveYield();
+  }
+  return out;
+}
+const lastBacktestAt = (s: MoreSport): string | null => (db.prepare(`SELECT at FROM more_pred_backtest WHERE sport = ?`).get(s) as any)?.at || null;
+/**
+ * the backtests and the gates from them. `freshMs`: skip a sport whose stored report is younger (the start-up run and
+ * the first daily run don't do the same work twice)
+ */
+export async function runBacktests(only?: MoreSport, freshMs = 0): Promise<Record<string, any>> {
   if (backtesting) return { skipped: 'already running' };
   backtesting = true;
   const out: Record<string, any> = {};
   try {
     for (const s of only ? [only] : MORE_SPORTS) {
       // tennis replays 55k matches on this thread: once a week unless asked
-      const last = (db.prepare(`SELECT at FROM more_pred_backtest WHERE sport = ?`).get(s) as any)?.at;
+      const last = lastBacktestAt(s);
       if (!only && s === 'tennis' && last && Date.now() - Date.parse(last) < 7 * DAY) { out[s] = { skipped: 'weekly' }; continue; }
+      if (freshMs && last && Date.now() - Date.parse(last) < freshMs) { out[s] = { skipped: 'fresh' }; continue; }
       try {
         const { list, note } = await BACKTESTS[s]();
-        const sum = summarise(s, list);
+        const sum = await summariseSliced(s, list);
         // nothing to test yet (e.g. no NFL report stored): keep what is there
         if (list.length) writeGates(s, sum, note);
-        out[s] = { note, games: list.length };
-        logger.info(`More predictions backtest ${s}: ${note}`);
-      } catch (e: any) { out[s] = { error: e.message }; logger.warn(`More predictions backtest ${s}: ${e.message}`); }
-      await yieldLoop();
+        const pub = MORE_KEYS[s].filter(k => sum[k]?.public).length;
+        out[s] = { note, games: list.length, public: pub };
+        logger.info(list.length ? `more backtest ${s}: ${pub} outputs public (of ${MORE_KEYS[s].length}; ${note})` : `more backtest ${s}: nothing to test yet (${note})`);
+      } catch (e: any) { out[s] = { error: e.message }; logger.warn(`more backtest ${s}: ${e.message}`); }
+      await afterLiveYield();
     }
   } finally { backtesting = false; }
   return out;
 }
 export function backtestReports() {
   return (db.prepare(`SELECT sport, report, at FROM more_pred_backtest`).all() as any[]).map(r => { let rep: any = null; try { rep = JSON.parse(r.report); } catch { rep = null; } return { sport: r.sport, at: r.at, ...rep }; });
+}
+const OUT_NAME: Record<string, string> = {
+  score: 'Likely scores (exact)', goals: 'Total goals 0/1/2/3/4+', homeGoals: 'Home goals 0/1/2/3+', awayGoals: 'Away goals 0/1/2/3+',
+  cleanHome: 'Home clean sheet', cleanAway: 'Away clean sheet', win2Home: 'Home win by 2+', win2Away: 'Away win by 2+', ht: 'Half-time result', htft: 'HT/FT (9)',
+  margin: 'Winning margin bands', total: 'Total points bands', homePts: 'Home points bands', awayPts: 'Away points bands', half: 'First-half winner', ot: 'Overtime',
+  sets: 'Set score', first: 'First set', games: 'Total games bands', tb: 'At least one tie-break'
+};
+/** fix204b: the stored reports as the Markdown tables of docs/notes/more-predictions-backtest.md (live section) */
+export function backtestMarkdown(): string {
+  const SPORT: Record<string, string> = { football: 'Football', basketball: 'Basketball', nfl: 'American football (NFL + college)', tennis: 'Tennis' };
+  const n = (x: number | null | undefined) => (x === null || x === undefined ? '–' : x.toLocaleString('en-US'));
+  const lines: string[] = [`# Backtest results (walk-forward, server, ${now().slice(0, 10)})`, ''];
+  const reps = new Map(backtestReports().map(r => [r.sport, r]));
+  for (const s of MORE_SPORTS) {
+    const r = reps.get(s);
+    lines.push(`## ${SPORT[s]}`, '');
+    if (!r || !r.outputs) { lines.push('No backtest stored yet.', ''); continue; }
+    lines.push(`${r.note} (run ${String(r.at).slice(0, 16).replace('T', ' ')} UTC).`, '',
+      '| Output | Games | Top pick right | Brier | Log loss | Worst step (100+) | Public |', '|---|---:|---:|---:|---:|---:|---|');
+    for (const k of MORE_KEYS[s]) {
+      const o = r.outputs[k];
+      if (!o) continue;
+      lines.push(`| ${OUT_NAME[k] || k} | ${n(o.games)} | ${o.hitRate ?? '–'}% | ${o.brier ?? '–'} | ${o.logLoss ?? '–'} | ${o.worst ?? '–'} | ${o.public ? '**yes**' : 'no (admin only)'} |`);
+    }
+    lines.push('', 'Said vs happened, 10% steps with 100+ forecasts (step: forecasts, said → happened):', '');
+    for (const k of MORE_KEYS[s]) {
+      const o = r.outputs[k];
+      if (!o?.calibration) continue;
+      const bins = (o.calibration as any[]).filter(b => b.n >= 100).map(b => `${b.from}%: ${n(b.n)}, ${b.said} → ${b.happened}`).join(' · ');
+      if (bins) lines.push(`- ${OUT_NAME[k] || k}: ${bins}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
 }
 
 /* ------------------------------------------------------------------ */
@@ -551,7 +675,7 @@ export function moreRecord(sport: MoreSport, admin: boolean) {
   const key = `${sport}|${admin ? 1 : 0}`;
   const hit = recordCache.get(key);
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.v;
-  const rows = db.prepare(`SELECT json, result, kickoff FROM prediction_extras WHERE sport = ? AND settled = 1 AND made_at <= kickoff ORDER BY kickoff`).all(sport) as any[];
+  const rows = db.prepare(`SELECT json, result, kickoff FROM prediction_extras WHERE sport = ? AND settled = 1 AND made_at <= kickoff ${admin ? '' : 'AND admin_only = 0'} ORDER BY kickoff`).all(sport) as any[];
   const list: Eval[] = [];
   for (const r of rows) { try { const res = JSON.parse(r.result); list.push({ x: JSON.parse(r.json), actual: res.actual }); } catch { /* skip */ } }
   const sum = summarise(sport, list);
@@ -592,9 +716,12 @@ function stateOf(sport: MoreSport, id: number, kickoff: string): State {
  * number and no hint (fix182). Open: every public output in %, our pick in each, and once checked what happened.
  * The payload sits under `prediction`, so the proxy guard locks it like every other prediction.
  */
+export const hasExtras = (sport: MoreSport, id: number) => !!db.prepare(`SELECT 1 FROM prediction_extras WHERE sport = ? AND game_id = ?`).get(sport, id);
 export function moreForGame(sport: MoreSport, id: number, o: { full: boolean; admin: boolean }) {
-  const r = db.prepare(`SELECT model, kickoff, made_at, json, settled, result FROM prediction_extras WHERE sport = ? AND game_id = ?`).get(sport, id) as any;
+  const r = db.prepare(`SELECT model, kickoff, made_at, json, settled, result, admin_only, flag FROM prediction_extras WHERE sport = ? AND game_id = ?`).get(sport, id) as any;
   if (!r) return null;
+  // the sanity check flagged this game's bands: admins only
+  if (r.admin_only && !o.admin) return null;
   const state = stateOf(sport, id, r.kickoff);
   const keys = publicKeys(sport, o.admin);
   if (!keys.length) return null;
@@ -612,7 +739,8 @@ export function moreForGame(sport: MoreSport, id: number, o: { full: boolean; ad
     sport, state, keys,
     prediction: {
       model: r.model, locked: false, madeAt: r.made_at, savedBeforeStart: r.made_at <= r.kickoff, sets, info,
-      adminOnly: o.admin ? keys.filter(k => !g.get(`${sport}|${k}`)?.public) : [],
+      adminOnly: o.admin ? keys.filter(k => r.admin_only || !g.get(`${sport}|${k}`)?.public) : [],
+      ...(o.admin && r.flag ? { flag: r.flag } : {}),
       result: r.settled === 1 && res ? { actual: res.actual, hits: Object.fromEntries(Object.entries(res.checks || {}).map(([k, c]: [string, any]) => [k, { hit: c.hit, i: c.i }])) } : null,
       void: r.settled === 2
     }
@@ -646,7 +774,7 @@ const SENT: Record<'score' | 'expected' | 'sets', Record<Lang, string>> = {
 /** "Most likely score in our prediction: 1–1 (12%)." — only when that output is public */
 export function moreSentence(sport: MoreSport, id: number, lang: string): string | null {
   const L = (['en', 'es', 'pt', 'de', 'fr', 'it', 'tr'].includes(lang) ? lang : 'en') as Lang;
-  const r = db.prepare(`SELECT json FROM prediction_extras WHERE sport = ? AND game_id = ?`).get(sport, id) as any;
+  const r = db.prepare(`SELECT json FROM prediction_extras WHERE sport = ? AND game_id = ? AND admin_only = 0`).get(sport, id) as any;
   if (!r) return null;
   let x: Extras | null = null;
   try { x = JSON.parse(r.json); } catch { return null; }
@@ -664,19 +792,29 @@ export function moreSentence(sport: MoreSport, id: number, lang: string): string
 /* G. Data health                                                       */
 /* ------------------------------------------------------------------ */
 
-/** per sport: games of the next 48 h with a saved prediction but no extras; finished 24 h+ ago with no check */
+/**
+ * per sport: games of the next 48 h with a main prediction, how many have extras, the ones without; finished 24 h+ ago
+ * with no check; flagged by the sanity check; what the last save did (fix204b: real counts, so "0 missing" never hides
+ * "nothing tried")
+ */
 export function moreHealth() {
   const in48 = new Date(Date.now() + 2 * DAY).toISOString(), ago24 = new Date(Date.now() - DAY).toISOString();
   // a game that starts within 10 minutes may be waiting for the next save: not counted
   const soon = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const q = (sql: string, ...p: any[]) => (db.prepare(sql).all(...p) as any[]).map(r => Number(r.id));
-  const missing: Record<MoreSport, number[]> = {
-    football: q(`SELECT DISTINCT p.match_id AS id FROM predictions p WHERE p.locked = 0 AND p.utc_date > ? AND p.utc_date < ? AND p.xg_home IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM prediction_extras e WHERE e.sport = 'football' AND e.game_id = p.match_id)`, soon, in48),
-    basketball: q(`SELECT p.game_id AS id FROM bb_predictions p WHERE p.kickoff > ? AND p.kickoff < ? AND NOT EXISTS (SELECT 1 FROM prediction_extras e WHERE e.sport = 'basketball' AND e.game_id = p.game_id)`, soon, in48),
-    nfl: q(`SELECT p.game_id AS id FROM nfl_predictions p WHERE p.kickoff > ? AND p.kickoff < ? AND NOT EXISTS (SELECT 1 FROM prediction_extras e WHERE e.sport = 'nfl' AND e.game_id = p.game_id)`, soon, in48),
-    tennis: q(`SELECT p.match_id AS id FROM tennis_predictions p WHERE p.scheduled_at > ? AND p.scheduled_at < ? AND NOT EXISTS (SELECT 1 FROM prediction_extras e WHERE e.sport = 'tennis' AND e.game_id = p.match_id)`, soon, in48)
+  // the games of the window with a main prediction (the game's own current start time, not started)
+  const predicted: Record<MoreSport, number[]> = {
+    football: q(`SELECT DISTINCT p.match_id AS id FROM predictions p WHERE p.locked = 0 AND p.settled = 0 AND p.utc_date > ? AND p.utc_date < ? AND p.xg_home IS NOT NULL AND p.xg_away IS NOT NULL`, soon, in48),
+    basketball: q(`SELECT p.game_id AS id FROM bb_predictions p WHERE p.kickoff > ? AND p.kickoff < ?`, soon, in48),
+    nfl: q(`SELECT p.game_id AS id FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id WHERE COALESCE(g.kickoff, p.kickoff) > ? AND COALESCE(g.kickoff, p.kickoff) < ?
+      AND (g.status IS NULL OR g.status = 'NS')`, soon, in48),
+    tennis: q(`SELECT p.match_id AS id FROM tennis_predictions p JOIN tennis_matches m ON m.id = p.match_id WHERE COALESCE(m.scheduled_at, p.scheduled_at) > ? AND COALESCE(m.scheduled_at, p.scheduled_at) < ?
+      AND COALESCE(m.status, '') IN ('', 'upcoming', 'scheduled', 'not_started')`, soon, in48)
   };
+  const withExtras = (s: MoreSport) => new Set(q(`SELECT game_id AS id FROM prediction_extras WHERE sport = ? AND kickoff > ?`, s, new Date(Date.now() - DAY).toISOString()));
+  const flagged = (s: MoreSport) => q(`SELECT game_id AS id FROM prediction_extras WHERE sport = ? AND admin_only = 1 AND kickoff > ? AND kickoff < ?`, s, soon, in48);
+  const missing = {} as Record<MoreSport, number[]>;
+  for (const s of MORE_SPORTS) { const have = withExtras(s); missing[s] = predicted[s].filter(id => !have.has(id)); }
   const unchecked: Record<MoreSport, number[]> = {
     football: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN results r ON r.match_id = e.game_id WHERE e.sport = 'football' AND e.settled = 0 AND r.settled_at < ?`, ago24),
     basketball: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN bb_games g ON g.game_id = e.game_id WHERE e.sport = 'basketball' AND e.settled = 0 AND g.status IN ('FT','AOT') AND g.kickoff < ?
@@ -684,7 +822,13 @@ export function moreHealth() {
     nfl: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN nfl_games g ON g.game_id = e.game_id WHERE e.sport = 'nfl' AND e.settled = 0 AND g.status IN ('FT','AOT') AND g.kickoff < ?`, new Date(Date.now() - 30 * 3600000).toISOString()),
     tennis: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN tennis_matches m ON m.id = e.game_id WHERE e.sport = 'tennis' AND e.settled = 0 AND m.status = 'completed' AND m.scheduled_at < ?`, new Date(Date.now() - 30 * 3600000).toISOString())
   };
-  return MORE_SPORTS.map(s => ({ sport: s, missing: missing[s].length, unchecked: unchecked[s].length, missingIds: missing[s].slice(0, 10), uncheckedIds: unchecked[s].slice(0, 10) }));
+  return MORE_SPORTS.map(s => {
+    const fl = flagged(s);
+    return {
+      sport: s, predicted: predicted[s].length, saved: predicted[s].length - missing[s].length, missing: missing[s].length, unchecked: unchecked[s].length,
+      flagged: fl.length, lastSave: lastSave(s), missingIds: missing[s].slice(0, 10), uncheckedIds: unchecked[s].slice(0, 10), flaggedIds: fl.slice(0, 10)
+    };
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -704,12 +848,28 @@ export async function moreDaily(force = false) {
   if (!force && dailyDay === d) return;
   dailyDay = d;
   try { await refitLeagues(); } catch (e: any) { logger.warn(`more predictions fits: ${e.message}`); }
-  await runBacktests();
+  // a sport tested in the last 20 h (e.g. by the start-up run) waits for the next day
+  await runBacktests(undefined, force ? 0 : 20 * 3600 * 1000);
 }
-/** every 5 minutes: save + check; the league fits and backtests 20 minutes after the start (models built), then daily */
+/**
+ * fix204b: on start, every sport without a stored backtest report is tested now (in the heavy queue, sliced, never
+ * during a live tick), then its gates are set; the league fits first when none are stored. Until then every output
+ * stays admin-only ("no backtest yet").
+ */
+export async function moreFirstRun(): Promise<Record<string, any>> {
+  const todo = MORE_SPORTS.filter(s => !lastBacktestAt(s));
+  if (!todo.length) return {};
+  logger.info(`more backtest: first run for ${todo.join(', ')}`);
+  if (!(db.prepare(`SELECT 1 FROM more_pred_fit LIMIT 1`).get())) { try { await refitLeagues(); } catch (e: any) { logger.warn(`more predictions fits: ${e.message}`); } }
+  const out: Record<string, any> = {};
+  for (const s of todo) Object.assign(out, await runBacktests(s));
+  return out;
+}
+/** every 5 minutes: save + check; the first backtests 3 minutes after the start; the fits and backtests daily */
 export function startMorePredictionsScheduler() {
   after('more predictions', () => void moreTick(), 60 * 1000);
   every('more predictions', () => void moreTick(), 5 * 60 * 1000).unref();
+  afterHeavy('more predictions first backtest', () => moreFirstRun(), 3 * 60 * 1000);
   afterHeavy('more predictions daily', () => moreDaily(), 20 * 60 * 1000);
   everyHeavy('more predictions daily', () => moreDaily(), 3 * 3600 * 1000).unref();
 }

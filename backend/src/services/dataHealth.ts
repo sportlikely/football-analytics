@@ -168,11 +168,15 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try {
     const NAME: Record<string, string> = { football: 'Football', basketball: 'Basketball', nfl: 'American football', tennis: 'Tennis' };
     for (const m of moreHealth()) {
-      const bad = m.missing + m.unchecked;
+      // fix204b: the real counts (games with a prediction, saved, missing) and what the last save did
+      const ls = m.lastSave;
+      const bad = m.missing + m.unchecked + m.flagged + (ls?.errors || 0);
+      const last = ls ? `last save ${ls.at.slice(11, 16)} UTC: ${ls.saved} saved, ${ls.unchanged} unchanged, ${ls.errors} error(s)${ls.lastError ? ` (${ls.lastError})` : ''}` : 'no save since the start';
       checks.push({
         id: `more-predictions-${m.sport}`, label: `${NAME[m.sport]}: More predictions saved and settled`, level: bad ? 'warn' : 'ok',
-        detail: bad ? `${m.missing} game(s) of the next 48 h without them · ${m.unchecked} finished game(s) not checked after 24 h` : 'Every game of the next 48 h has them, every finished game is checked',
-        items: [...m.missingIds.map(id => `not saved: ${id}`), ...m.uncheckedIds.map(id => `not checked: ${id}`)]
+        detail: `${m.predicted} game(s) of the next 48 h with a prediction · ${m.saved} with more predictions · ${m.missing} without · ${m.unchecked} finished not checked after 24 h`
+          + `${m.flagged ? ` · ${m.flagged} admin-only (one band over 85%)` : ''} · ${last}`,
+        items: [...m.missingIds.map(id => `not saved: ${id}`), ...m.uncheckedIds.map(id => `not checked: ${id}`), ...m.flaggedIds.map(id => `band check failed: ${id}`)]
       });
     }
   } catch (e: any) {

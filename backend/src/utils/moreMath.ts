@@ -78,6 +78,11 @@ export const HTFT = ['H/H', 'H/D', 'H/A', 'D/H', 'D/D', 'D/A', 'A/H', 'A/D', 'A/
  * goals = m + k·(xg − m)); the main pick and its 1X2 are not touched.
  */
 export interface GoalShrink { k: number; mh: number; ma: number }
+/**
+ * fix204b: before the server has its own fit, never "no shrink": k between the local walk-forward fits (2526 0.877,
+ * 2627 0.791), averages = typical league goals per side
+ */
+export const DEFAULT_GOAL_SHRINK: GoalShrink = { k: 0.83, mh: 1.5, ma: 1.2 };
 export const shrinkGoals = (xg: number, m: number, k: number) => Math.max(0.05, m + k * (xg - m));
 /** least squares through the averages: k = cov(xg, goals) / var(xg), both sides pooled */
 export function fitGoalShrink(rows: { xh: number; xa: number; hg: number; ag: number }[]): GoalShrink | null {
@@ -209,6 +214,23 @@ export function normalExtras(x: NormalIn): Extras {
     },
     info: { expected: [Math.round(x.homePts), Math.round(x.awayPts)], side: side > 0 ? 'H' : 'A', sd: round2(sd), share: round3(s) }
   };
+}
+
+/**
+ * fix204b sanity check: the total and team-point bands sit around the league's typical score, so a regular game never
+ * puts more than 85% in one band. When one does, the bands are centred on the wrong league (e.g. European ranges for an
+ * NBA game): returns what is wrong, else null.
+ */
+export const BAND_MAX = 0.85;
+export function bandAlarm(x: Extras): string | null {
+  if (x.sport !== 'basketball' && x.sport !== 'nfl') return null;
+  for (const k of ['total', 'homePts', 'awayPts']) {
+    const s = x.sets[k];
+    if (!s) continue;
+    const i = s.p.indexOf(Math.max(...s.p));
+    if (s.p[i] > BAND_MAX) return `${k} ${s.labels[i]} ${Math.round(s.p[i] * 1000) / 10}%`;
+  }
+  return null;
 }
 
 /* ---------- tennis (the chain's distributions come from tennisModel.tennisExtrasDist) ---------- */

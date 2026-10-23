@@ -207,3 +207,90 @@ test('locking: free users get no numbers before the end; paid users and finished
   assert.equal(done.prediction.locked, false);
   assert.ok(done.prediction.result && done.prediction.result.actual.score === '1-1');
 });
+
+// ---------- fix204b ----------
+
+test('fix204b: before any stored fit the goal shrink uses k = 0.83, never no correction', () => {
+  db.prepare(`DELETE FROM more_pred_fit WHERE sport = 'football' AND league = 'shrink'`).run();
+  const k = mp.goalShrink();
+  assert.equal(k.k, 0.83);
+  assert.deepEqual(k, M.DEFAULT_GOAL_SHRINK);
+  // a big game (expected goals 2.6 – 1.9): the shrink lowers "4+ goals" against the raw grid
+  const raw = M.footballExtras(2.6, 1.9, 0.45, null), sh = M.footballExtras(2.6, 1.9, 0.45, k);
+  assert.ok(sh.sets.goals.p[4] < raw.sets.goals.p[4] - 0.05, `4+ ${sh.sets.goals.p[4]} vs ${raw.sets.goals.p[4]}`);
+  assert.equal(sh.info.shrink, 0.83);
+});
+
+test('fix204b: NBA bands are centred on the league\'s own scoring (~225), not a European default', () => {
+  const ins = db.prepare(`INSERT INTO bb_games (game_id, code, league_id, season, kickoff, status, home_id, home_name, away_id, away_name, hs, as_, updated_at) VALUES (?, 'NBA', 12, '2025-2026', ?, 'FT', 1, 'A', 2, 'B', ?, ?, ?)`);
+  const now = new Date().toISOString();
+  for (let i = 0; i < 60; i++) ins.run(70000 + i, new Date(Date.now() - (i + 2) * 86400e3).toISOString(), 110 + (i % 7), 108 + (i % 9), now);
+  const fit = mp.bbFit('NBA');
+  assert.ok(Math.abs(fit.meanTotal - 225) < 5, `NBA mean total ${fit.meanTotal}`);
+  const x = M.normalExtras({ sport: 'basketball', pHome: 0.62, margin: 4, total: 228, homePts: 116, awayPts: 112, fit });
+  for (const k of ['total', 'homePts', 'awayPts']) assert.ok(Math.max(...x.sets[k].p) < M.BAND_MAX, `${k}: ${x.sets[k].labels} ${x.sets[k].p}`);
+  const lo = Number(x.sets.total.labels[0].slice(1));
+  assert.ok(lo > 200 && lo < 225, `lowest total band ${x.sets.total.labels[0]}`);
+  assert.equal(M.bandAlarm(x), null);
+});
+
+test('fix204b: the sanity check flags a band set with 100% in one band and hides that game from visitors', async () => {
+  // the 23 Oct bug: an NBA game with bands around 160 → everything in "175+"
+  const bad = M.normalExtras({ sport: 'basketball', pHome: 0.6, margin: 3, total: 228, homePts: 115.5, awayPts: 112.5, fit: { share: 0.5, kHalf: 1, kOt: 1, meanTotal: 160, sigma: 12, sigmaT: 17, games: 0 } });
+  assert.match(M.bandAlarm(bad) || '', /^total 175\+ (99\.\d|100)%/);
+  // saved through the job: admin-only, with the reason
+  const ko = new Date(Date.now() + 24 * 3600e3).toISOString(), now = new Date().toISOString();
+  db.prepare(`INSERT INTO bb_games (game_id, code, league_id, season, kickoff, status, home_id, home_name, away_id, away_name, updated_at) VALUES (519551, 'ZZ', 99, '2026-2027', ?, 'NS', 1, 'A', 2, 'B', ?)`).run(ko, now);
+  db.prepare(`INSERT INTO bb_predictions (game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at) VALUES (519551, 'ZZ', ?, 'bb-v3', 0.6, 3, 228, 115.5, 112.5, ?)`).run(ko, now);
+  db.prepare(`INSERT OR REPLACE INTO more_pred_fit (sport, league, json, at) VALUES ('basketball', 'ZZ', ?, ?)`).run(JSON.stringify({ share: 0.5, kHalf: 1, kOt: 1, meanTotal: 160, sigma: 12, sigmaT: 17, games: 0 }), now);
+  await mp.saveExtras('basketball');
+  const row = db.prepare(`SELECT admin_only, flag, calc FROM prediction_extras WHERE sport = 'basketball' AND game_id = 519551`).get();
+  assert.equal(row.admin_only, 1);
+  assert.match(row.flag, /175\+/);
+  assert.equal(row.calc, mp.MORE_CALC);
+  db.prepare(`INSERT OR REPLACE INTO more_pred_gate (sport, output, public, games, worst, why, at) VALUES ('basketball', 'ot', 1, 1000, 1, NULL, ?)`).run(now);
+  assert.equal(mp.moreForGame('basketball', 519551, { full: true, admin: false }), null, 'visitors: nothing');
+  const adm = mp.moreForGame('basketball', 519551, { full: true, admin: true });
+  assert.ok(adm.prediction.flag && adm.prediction.adminOnly.includes('ot'));
+  assert.equal(mp.lastSave('basketball').flagged, 1);
+});
+
+test('fix204b: NFL and tennis extras are saved for a game 24 h ahead, under the game id or the unlock id', async () => {
+  const ko = new Date(Date.now() + 24 * 3600e3).toISOString(), now = new Date().toISOString();
+  db.prepare(`INSERT INTO nfl_games (game_id, league, season, kickoff, home_id, home_name, away_id, away_name, status, updated_at) VALUES (24733, 1, 2026, ?, 1, 'A', 2, 'B', 'NS', ?)`).run(ko, now);
+  // the prediction table's copy of the time lags behind (the game was moved): the game's own time counts
+  db.prepare(`INSERT INTO nfl_predictions (game_id, season, kickoff, model, p_home, margin, total, home_pts, away_pts, why, made_at) VALUES (24733, 2026, ?, 'nfl-v1', 0.64, 3.5, 44, 23.75, 20.25, '{}', ?)`)
+    .run(new Date(Date.now() + 20 * 3600e3).toISOString(), now);
+  db.prepare(`INSERT INTO tennis_matches (id, tournament, tour, tier, best_of, scheduled_at, status, p1_id, p1_name, p2_id, p2_name, source, updated_at) VALUES (208177, 'T', 'atp', '250', 3, ?, 'not_started', 1, 'P1', 2, 'P2', 'test', ?)`).run(ko, now);
+  db.prepare(`INSERT INTO tennis_predictions (match_id, model, scheduled_at, p1, why, made_at) VALUES (208177, 'tennis-v1', ?, 0.58, ?, ?)`).run(ko, JSON.stringify({ numbers: { servePoint: [64, 62] } }), now);
+  const saved = await mp.saveExtras();
+  assert.equal(saved.nfl, 1);
+  assert.equal(saved.tennis, 1);
+  const n = db.prepare(`SELECT kickoff FROM prediction_extras WHERE sport = 'nfl' AND game_id = 24733`).get();
+  assert.equal(n.kickoff, ko, 'NFL row under the game\'s own kick-off');
+  assert.equal(mp.gameIdOf('nfl', -(2e9 + 24733)), 24733);
+  assert.equal(mp.gameIdOf('tennis', -(4e9 + 208177)), 208177);
+  assert.equal(mp.gameIdOf('basketball', -519551), 519551);
+  assert.equal(mp.gameIdOf('nfl', 24733), 24733);
+  const nfl = mp.moreForGame('nfl', mp.gameIdOf('nfl', -(2e9 + 24733)), { full: false, admin: true });
+  assert.ok(nfl && nfl.prediction.sets.margin, 'NFL block');
+  assert.ok(mp.moreForGame('tennis', 208177, { full: false, admin: true }).prediction.sets.sets, 'tennis block');
+  // data health: the real counts
+  const h = Object.fromEntries(mp.moreHealth().map(x => [x.sport, x]));
+  assert.equal(h.nfl.predicted, 1); assert.equal(h.nfl.saved, 1); assert.equal(h.nfl.missing, 0);
+  assert.equal(h.tennis.predicted, 1); assert.equal(h.tennis.saved, 1);
+  assert.ok(h.nfl.lastSave && h.nfl.lastSave.saved === 1, 'last save recorded');
+  // nothing new: the next tick leaves them alone
+  assert.equal((await mp.saveExtras('nfl')).nfl, 0);
+  // a game the job has not reached: saved on demand
+  db.prepare(`DELETE FROM prediction_extras WHERE sport = 'tennis' AND game_id = 208177`).run();
+  assert.equal(mp.hasExtras('tennis', 208177), false);
+  assert.equal(await mp.saveOne('tennis', 208177), true);
+  assert.equal(mp.hasExtras('tennis', 208177), true);
+});
+
+test('fix204b: rows made with older maths are made again before the start', async () => {
+  db.prepare(`UPDATE prediction_extras SET calc = NULL WHERE sport = 'nfl' AND game_id = 24733`).run();
+  assert.equal((await mp.saveExtras('nfl')).nfl, 1);
+  assert.equal(db.prepare(`SELECT calc FROM prediction_extras WHERE sport = 'nfl' AND game_id = 24733`).get().calc, mp.MORE_CALC);
+});
