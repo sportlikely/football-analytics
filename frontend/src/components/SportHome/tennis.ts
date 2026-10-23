@@ -5,7 +5,7 @@ import { t as tt } from '../../lib/i18n'
 import { slModel } from '../../lib/modelNames'
 import { useAuth } from '../../lib/auth'
 import { useTennisConfig, useTennisFavorites, useTennisTour, tennisRid, tennisRstatus, tennisHref, surname, roundName, spreadPicks, flagOf, TENNIS_STRONG, type TMatch } from '../../lib/tennis'
-import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
+import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats, recordAside } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult, HTeam } from './types'
 
 /** Tennis's adapter for components/SportHome (fix193): data + labels only — the layout is football's. */
@@ -88,7 +88,7 @@ function useTennisData(): SportHomeData {
     loaded, full, news,
     featured: featured.map(toGame), live: (d?.live || []).map(toGame), soonest: soonest.map(toGame), favorites: favNext.map(toGame), next: next.map(toGame),
     record: {
-      rows: record ? winnerRecordRows(record.bands) : null, aside: tt("last {0} days", { 0: 30 }),
+      rows: record ? winnerRecordRows(record.bands) : null, aside: recordAside(record?.bands),
       note: tt("Picks right, every match counted. Each prediction is saved before the first serve and never edited."),
       link: { to: '/tennis/accuracy', label: tt("See the full record →") },
       empty: { title: tt("Predictions start soon"), text: tt("Every tennis prediction is saved before the first serve and checked after the match, here and in public.") }

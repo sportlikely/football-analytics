@@ -73,11 +73,11 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   common-sense guard (`h2hGuard.ts`). `clubElo.ts` = `elo-euro` for UEFA cups (CL fixtures come from Football-Data.org,
   teams matched to API-Football clubs by name in `matchFdTeam`). `nationalElo.ts` = `elo-intl` for national teams.
   `historyModel.ts` = v2 (hidden), `predictionModel.ts` = v1 (fallback only; should not be visible for big games).
-  `v3Tuner.ts` = full tune, `tracking.ts` = saved predictions + public record, `trial.ts` = leagues "in testing"
-  (out of the public record). `liveChance.ts` = live win chance. `featureModel.ts` = feature model (feat-v1) + v3-mix
+  `v3Tuner.ts` = full tune, `tracking.ts` = saved predictions + public record (every competition counts, fix203)
+  `liveChance.ts` = live win chance. `featureModel.ts` = feature model (feat-v1) + v3-mix
   (shadow until published), `modelDaily.ts` = daily champion / challenger (04:00 UTC) + 07:00 Israel-time report.
 - Basketball: `basketball.ts` (API-Basketball games/box scores, `BB_LEAGUES`), `bbModel.ts` (**bb-v3**: v1 ratings +
-  v2 possession ratings, 50/50 blend, player talent, `BB_TRIAL`), `bbSite.ts` (pages), `bbPlayers.ts`, `bdl.ts`
+  v2 possession ratings, 50/50 blend, player talent), `bbSite.ts` (pages), `bbPlayers.ts`, `bdl.ts`
   (balldontlie: NBA injuries/players), `bbInjuries.ts`, `bbResults.ts` (result checks), `bbLive.ts` (live win chance + projected score), `bbLeagueConfig.ts` /
   `bbLeagueCoverage.ts` (leagues added from Admin → Basketball leagues, code `BB<id>`). `BASKETBALL_PUBLIC=1` opens
   the basketball site to everyone (admins see it before).
@@ -124,8 +124,8 @@ Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colour
   sum, right when the result is inside it; "Strong pick" = 85%+. 1X2 stays tracked as "the hard calls". Basketball: winner.
 - Football v3 top leagues: hit rate ≈ bookmakers' favourite (≈50%), log loss within 0.002 of the closing odds; second
   divisions trail the market by 2–6 points (that's the leagues, not a bug). Strong picks (60%+) ≈ 75% right.
-- 15 leagues added 7 Oct 2026 are "in testing" (`TRIAL_COMPETITIONS`), excluded from the public record.
-- Basketball bb-v3: 68.5–69.3% picks right over 14k test games, well calibrated; BSN in testing.
+- Every competition counts in the public record in every sport (fix203); "in testing" is only an admin label on leagues added from Admin.
+- Basketball bb-v3: 68.5–69.3% picks right over 14k test games, well calibrated; every league (BSN too) counts in the record.
 - Everything tuned is tested out-of-sample; the notes record what was tried and rejected — don't retry those blindly.
 
 ## Planned next (Oct 2026)

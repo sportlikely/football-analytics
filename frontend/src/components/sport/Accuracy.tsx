@@ -140,6 +140,8 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
     )
 
   const rec = raw ? a.toData(raw) : null
+  // fix203: every competition with 5+ settled games, most games first (nothing filtered by size or tier)
+  const leagueRows = rec ? rec.leagues.filter(c => c.n >= 5).sort((x, y) => y.n - x.n) : []
   const h = rec?.headline
 
   return (
@@ -227,7 +229,7 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
             </Card>
           )}
 
-          {access === 'admin' && rec.leagues.length > 0 && (
+          {access === 'admin' && leagueRows.length > 0 && (
             <Card>
               <h2 className="font-display text-xl font-bold text-ink">{t("Our record by competition")} <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-faint">admin only</span></h2>
               <p className="text-sm text-muted mt-1 mb-4">{t("How often each call was right, league by league, in the period you picked.")}</p>
@@ -243,7 +245,7 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rec.leagues.map(c => {
+                    {leagueRows.map(c => {
                       const few = c.n < 20
                       return (
                         <tr key={c.key} className="border-t border-line/50">

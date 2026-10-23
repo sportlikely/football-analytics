@@ -6,7 +6,7 @@ import { errorText } from '../lib/auth'
 /*
  * Admin → Football leagues (Oct 2026): every league API-Football has, by how much data it gives, and the leagues we
  * added from here. Adding a league pulls its fixtures, 3 seasons of history, lineups, injuries, match and player
- * stats; it starts "in testing" (out of the public record) until we switch that off.
+ * stats; it starts "in testing" — an admin label only (fix203: every league counts in the public record).
  */
 type Tier = 'full' | 'good' | 'basic'
 interface ScanLeague {
@@ -135,7 +135,7 @@ export default function LeaguesCard({ sport = 'football' }: { sport?: 'football'
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-1 text-[11px] text-faint">"In testing" = predictions are made and saved, but kept out of the public record and marked "New league · in testing".</p>
+                  <p className="mt-1 text-[11px] text-faint">"In testing" = an admin label only. Every league counts in the public record and every public number.</p>
                 </div>
               )}
 

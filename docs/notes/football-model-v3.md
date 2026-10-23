@@ -2,7 +2,7 @@
 
 Code: `backend/src/services/gridModel.ts` (rows, `CONV`, `buildState`, `scoreMatch`, backtests, sweeps),
 `v3Tuner.ts` (full tune), `h2hGuard.ts` (common-sense check), `squadValues.ts`, `apiFootball.ts` (lineups/injuries/xG),
-`history.ts` (3 seasons of results per group, `GROUPS`), `trial.ts` (leagues in testing).
+`history.ts` (3 seasons of results per group, `GROUPS`), (`trial.ts` removed in fix203: every league counts in the public record).
 Admin endpoints: `/api/model/v3/status`, `/api/backtest/run`, `/api/backtest/sweep`, `/api/model/v3/tune`,
 `/api/model/v3/league-tune`, `/api/model/v3/tuned`, `/api/model/goals-calibration`.
 Rule for every change: accepted only if log loss / Brier improve on games the fit never saw (walk-forward, later seasons).
@@ -84,7 +84,7 @@ Research behind the feature model / v3-mix: `all-data-test-model-oct-2026.md`, `
   Promoted clubs are fine. Ideas: absolute (log) squad scale, League Two / SC2 history for promoted clubs.
 - Row on/off sweeps per country: no single row moves Brier by more than ±1 point except squad value in Germany.
 
-## 15 leagues in testing (7 Oct 2026) — `TRIAL_COMPETITIONS`
+## 15 leagues added 7 Oct 2026 (were "in testing" until fix203; since 23 Oct they count in the public record)
 - 2. Bundesliga AF79, Serie B AF136, LaLiga 2 AF141, Ligue 2 AF62, Scottish Championship AF180, League One AF41, Brazil AF71,
   Argentina AF128, MLS AF253, Liga MX AF262, J1 AF98, Denmark AF119, Poland AF106, Norway AF103, Sweden AF113. Decision:
   keep all, improve the weak ones. Calendar-year leagues use `seasonForDivision` (2026 → "2627").

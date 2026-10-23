@@ -5,7 +5,7 @@ import { t as tt } from '../../lib/i18n'
 import { slModel } from '../../lib/modelNames'
 import { useAuth } from '../../lib/auth'
 import { useNflConfig, useNflFavorites, useNflFilter, NFL_STATUS, weekLabel, nick, nflRid, nflRstatus, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
-import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
+import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats, recordAside } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
 
 /** American football's adapter for components/SportHome (fix141). fix185: NFL and college together (one sport), every
@@ -97,7 +97,7 @@ function useNflData(): SportHomeData {
     loaded, full, news,
     featured: featured.map(toGame), live: (d?.live || []).map(toGame), soonest: soonest.map(toGame), favorites: favNext.map(toGame), next: next.map(toGame),
     record: {
-      rows: record ? winnerRecordRows(record.bands) : null, aside: tt("last {0} days", { 0: 30 }),
+      rows: record ? winnerRecordRows(record.bands) : null, aside: recordAside(record?.bands),
       note: tt("Picks right, every game counted. Each prediction is saved before kick-off and never edited."),
       link: { to: '/american-football/accuracy', label: tt("See the full record →") },
       empty: { title: tt("Predictions start soon"), text: league === '2' ? tt("Once our college football model is live, every prediction is saved before kick-off and checked after the game, here and in public.") : tt("Once our NFL model is live, every prediction is saved before kick-off and checked after the game, here and in public.") }

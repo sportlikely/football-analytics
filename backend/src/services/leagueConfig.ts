@@ -15,7 +15,7 @@ export interface ExtraLeague {
   name: string;
   country: string;
   calendar: boolean; // season played within a calendar year (spring–autumn)
-  trial: boolean; // "New league · in testing" — kept out of the public record
+  trial: boolean; // "in testing": an admin label only (fix203: counted in every public number)
 }
 
 db.exec(`

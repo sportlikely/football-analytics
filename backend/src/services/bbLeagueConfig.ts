@@ -1,7 +1,7 @@
 /**
  * Extra basketball leagues added from the admin panel (Oct 2026) — same idea as the football leagueConfig.ts.
  * Each league gets the code `BB<API-Basketball league id>` and everything the hand-picked 18 get: 5 seasons of games,
- * box scores (team + players), live scores, the model, game/league/team/player pages. It starts "in testing" (BB_TRIAL).
+ * box scores (team + players), live scores, the model, game/league/team/player pages. It starts "in testing" (an admin label only since fix203; it counts in every number).
  *
  * Modules register with onBbExtraLeague(): called now for every saved league and later for each new one.
  */

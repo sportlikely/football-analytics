@@ -1,7 +1,7 @@
 # Basketball — data, leagues, model bb-v3, result checks
 
 Code: `basketball.ts` (API-Basketball sync, `BB_LEAGUES`, box scores, `fixFieldGoals`), `bbModel.ts` (bb-v1 ratings, bb-v2
-possession ratings, blend, player talent, `BB_TRIAL`, backtests, `buildAll`, `predictGame`), `bbSite.ts` (pages, `bbLeagues`),
+possession ratings, blend, player talent, backtests, `buildAll`, `predictGame`), `bbSite.ts` (pages, `bbLeagues`),
 `bbPlayers.ts`, `bdl.ts` (balldontlie NBA), `bbInjuries.ts`, `bbResults.ts`, `bbLive.ts` (live win chance), `bbLeagueConfig.ts` /
 `bbLeagueCoverage.ts` (leagues added from Admin). Frontend `pages/bb/*`, `lib/bb.ts` (`BB_ORDER`, `BB_COUNTRY`). `BASKETBALL_PUBLIC=1` opens the
 site to everyone; before that only admins see it. Launch target: 18 Oct 2026.
@@ -11,8 +11,8 @@ Admin endpoints: `/api/bb/status`, `/api/bb/sync`, `/api/bb/backtest`, `/api/bb/
 ## Leagues (18, 8 Oct 2026; code · API-Basketball id)
 NBA 12 · EuroLeague EL 120 · Liga ACB 117 · Lega Basket Serie A LBA 52 · BSL Turkey 104 · LNB Pro A 2 · BBL Germany 40 ·
 Greek Basket League GBL 45 · LKL 60 · EuroCup EC 194 · Basketball Champions League BCL 202 · ABA 198 · FIBA Europe Cup FEC 201 ·
-NBL Australia 1 · B.League JBL 56 · CBA China 31 · NBB Brazil 26 · BSN Puerto Rico 76 (in testing).
-Left out: NCAA (no box scores), Israeli league (never). Leagues added from Admin get code `BB<id>`, start in testing.
+NBL Australia 1 · B.League JBL 56 · CBA China 31 · NBB Brazil 26 · BSN Puerto Rico 76 (counted in the record since fix203).
+Left out: NCAA (no box scores), Israeli league (never). Leagues added from Admin get code `BB<id>`, start "in testing" (admin label only since fix203).
 Data: 5 seasons per league (`bb_games`, `bb_team_stats`, `bb_player_stats`), live scores once a minute while a game is on
 (`timer` = minutes played in the period). From 2025-26 API-Basketball's "field goals" are 2-pointers only → `fixFieldGoals`
 adds the 3s back by checking against the final score.

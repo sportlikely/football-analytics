@@ -11,7 +11,7 @@ import { bbTeamAnalysis, bbTeamAnalysisTeaser } from './bbTeamAnalysis';
 import { BB_LEAGUES, bbGet } from './basketball';
 import { bbExtraFlag } from './bbLeagueConfig';
 import { fillOvertime, openCheck, resultFix } from './bbResults';
-import { predictGameCached, teamRating, isPreseason, leagueRatings, BB_MODEL, leagueModelInfo, normCdf, normInv, BB_TRIAL, teamTalent, V3 } from './bbModel';
+import { predictGameCached, teamRating, isPreseason, leagueRatings, BB_MODEL, leagueModelInfo, normCdf, normInv, teamTalent, V3 } from './bbModel';
 import { nbaInjuries } from './bbInjuries';
 import { bbSquad, nbaBoxExtras } from './bbPlayers';
 import { personKey } from './bdl';
@@ -73,7 +73,7 @@ function present(c: Core, full: boolean) {
   const showAll = full || state === 'done';
   return {
     id: g.game_id,
-    league: { code: g.code, name: leagueName(g.code), ...(BB_TRIAL.has(g.code) ? { trial: true } : {}) },
+    league: { code: g.code, name: leagueName(g.code) },
     season: g.season,
     round: g.stage || null,
     preseason: isPreseason({ code: g.code, kickoff: g.kickoff }),

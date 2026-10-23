@@ -65,7 +65,7 @@ interface Match {
   group?: string | null
   venue?: string | null
   attendance?: number | null
-  competition: { id: number; name: string; code: string; emblem?: string; trial?: boolean }
+  competition: { id: number; name: string; code: string; emblem?: string }
   season?: { startDate: string; endDate: string }
   homeTeam: Team
   awayTeam: Team
@@ -1012,13 +1012,7 @@ function MatchDetail() {
       srTitle={tabTitle ? `${tabTitle}${m.competition?.name ? ` · ${m.competition.name}` : ''} ${tt("prediction")}` : undefined}
       league={{
         name: m.competition.name, href: `/league/${m.competition.code}`, logo: m.competition.emblem || null, bits: roundBits,
-        star: m.competition.code ? <FavStar size="sm" fav={{ kind: 'league', ref: m.competition.code, code: m.competition.code, name: m.competition.name, img: m.competition.emblem || null }} /> : undefined,
-        badges: m.competition.trial ? (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-draw/15 text-draw"
-            title={tt("We added this league recently. Its predictions are being tested and don’t count in our public record yet.")}>
-            {tt("New league · in testing")}
-          </span>
-        ) : undefined
+        star: m.competition.code ? <FavStar size="sm" fav={{ kind: 'league', ref: m.competition.code, code: m.competition.code, name: m.competition.name, img: m.competition.emblem || null }} /> : undefined
       }}
       date={fmtDate(m.utcDate)}
       home={side(home)}

@@ -35,7 +35,7 @@ export interface BbPrediction {
 export interface BbLiveChance { pHome: number; pAway: number; score: { home: number; away: number }; total: number; left: number }
 export interface BbGame {
   id: number
-  league: { code: string; name: string; trial?: boolean }
+  league: { code: string; name: string }
   season: string
   round: string | null
   preseason: boolean

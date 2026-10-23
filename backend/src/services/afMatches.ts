@@ -9,7 +9,6 @@
  */
 import { withLive } from './liveChance';
 import { cachedPredictions, mainPrediction } from './predCache';
-import { isTrialCompetition } from './trial';
 import logger from '../utils/logger';
 import { markFresh } from './freshness';
 import { freezePredictions } from './tracking';
@@ -55,7 +54,7 @@ export const EXTRA_COMPETITIONS: { id: number; kind: Kind; name?: string }[] = [
   { id: 197, kind: 'league' }, // Greece — Super League 1
   { id: 218, kind: 'league' }, // Austria — Bundesliga
   { id: 207, kind: 'league' }, // Switzerland — Super League
-  // Oct 2026: 15 more leagues, tracked as "new" until v3 has proven itself on each (see services/trial.ts)
+  // Oct 2026: 15 more leagues, counted in the public record like every other league (fix203)
   { id: 79, kind: 'league' }, // Germany — 2. Bundesliga
   { id: 136, kind: 'league' }, // Italy — Serie B
   { id: 141, kind: 'league' }, // Spain — LaLiga 2
@@ -131,7 +130,6 @@ function competitionOf(league: any) {
   return {
     id: AF_OFFSET + league.id,
     code: `AF${league.id}`,
-    ...(isTrialCompetition(`AF${league.id}`) ? { trial: true } : {}),
     name: country && kind === 'league' ? `${league.name} (${country})` : league.name,
     emblem: league.logo,
     type: kind === 'national' ? 'NATIONAL' : kind === 'cup' ? 'CUP' : 'LEAGUE',

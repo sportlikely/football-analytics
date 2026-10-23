@@ -15,7 +15,6 @@ import { db } from '../db';
 import { yieldLoop } from './perf';
 import { winnerBands, winnerCalibration, winnerByConfidence } from '../utils/winnerBands';
 import { injuryLoss } from './bbInjuries';
-import { onBbExtraLeague, onBbExtraTrial } from './bbLeagueConfig';
 
 export const BB_MODEL = 'bb-v3';
 const FINISHED = ['FT', 'AOT'];
@@ -30,15 +29,6 @@ type Team = { o: number; d: number; season: string; games: number; last: number;
 type Pred = { pHome: number; margin: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
 /** fix192: how a team with no games in the league was rated ('other-league' = its rating there, moved to this league's level) */
 export type NewBasis = 'other-league' | 'bottom3';
-
-/**
- * Leagues "in testing" (8 Oct 2026 backtest): the model does not yet beat the simple "home team wins" rate there,
- * so their picks are shown with a badge and kept out of the overall record. Override with BB_TRIAL_LEAGUES=BSN,XYZ (or "none").
- */
-export const BB_TRIAL = new Set((process.env.BB_TRIAL_LEAGUES ?? 'BSN').split(',').map(x => x.trim().toUpperCase()).filter(x => x && x !== 'NONE'));
-// leagues added from the admin panel start in testing; the admin switch moves them in or out of the record
-onBbExtraLeague(l => { if (l.trial) BB_TRIAL.add(l.code); else BB_TRIAL.delete(l.code); });
-onBbExtraTrial((code, trial) => { if (trial) BB_TRIAL.add(code); else BB_TRIAL.delete(code); });
 
 /**
  * bb-v3 (8 Oct 2026 research, 14,308 test games in 18 leagues; log loss 0.5817 → 0.5765, picks 68.5% → 69.2%):
@@ -952,7 +942,7 @@ function scoreOff(rows: { margin: number | null; total: number | null; hs: numbe
   };
 }
 
-/** The public record: every saved prediction of a finished game (pre-season left out). */
+/** The public record: every saved prediction of a finished game in every league (fix203: no "in testing" exclusion; pre-season left out). */
 export function bbRecord(days = 3650, code?: string) {
   const rows = db.prepare(`
     SELECT p.*, g.hs, g.as_, g.home_name, g.away_name, g.home_logo, g.away_logo, g.status
@@ -967,7 +957,7 @@ export function bbRecord(days = 3650, code?: string) {
     const hit = (r.p_home >= 0.5) === (r.hs > r.as_);
     const strong = Math.max(r.p_home, 1 - r.p_home) >= 0.7;
     const lg = by.get(r.code) || (by.set(r.code, { n: 0, hits: 0, strongN: 0, strongHits: 0 }), by.get(r.code)!);
-    for (const b of BB_TRIAL.has(r.code) && !code ? [lg] : [tot, lg]) {
+    for (const b of [tot, lg]) {
       b.n++; if (hit) b.hits++;
       if (strong) { b.strongN++; if (hit) b.strongHits++; }
     }
@@ -996,14 +986,14 @@ export function bbRecord(days = 3650, code?: string) {
     pending,
     since: list.length ? list[list.length - 1].kickoff : null,
     total: { ...tot, hitRate: pct(tot.hits, tot.n), strongHitRate: pct(tot.strongHits, tot.strongN) },
-    // fix141: home "Our record" bars — all picks and 60 / 70 / 80%+ sure (leagues in testing left out, like the total)
-    bands: winnerBands(list.filter(r => code || !BB_TRIAL.has(r.code)).map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))),
+    // fix141: home "Our record" bars — all picks and 60 / 70 / 80%+ sure
+    bands: winnerBands(list.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))),
     // fix152b: the shared Accuracy page (football's layout): calibration and picks by how sure we were
-    calibration: winnerCalibration(list.filter(r => code || !BB_TRIAL.has(r.code)).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))),
-    byConfidence: winnerByConfidence(list.filter(r => code || !BB_TRIAL.has(r.code)).map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))),
-    leagues: [...by.entries()].map(([c, b]) => ({ code: c, trial: BB_TRIAL.has(c), ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(list.filter(r => r.code === c)) })),
-    // fix174: how far the expected margin and the total were off (leagues in testing left out, like the total)
-    scores: scoreOff(list.filter(r => code || !BB_TRIAL.has(r.code))),
+    calibration: winnerCalibration(list.map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))),
+    byConfidence: winnerByConfidence(list.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))),
+    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(list.filter(r => r.code === c)) })),
+    // fix174: how far the expected margin and the total were off
+    scores: scoreOff(list),
     recent: list.slice(0, 50).map(r => ({
       gameId: r.game_id, code: r.code, kickoff: r.kickoff, home: r.home_name, away: r.away_name, homeLogo: r.home_logo, awayLogo: r.away_logo,
       score: [r.hs, r.as_], pick: r.p_home >= 0.5 ? 'H' : 'A', pHome: r.p_home, hit: (r.p_home >= 0.5) === (r.hs > r.as_)

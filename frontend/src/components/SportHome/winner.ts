@@ -58,8 +58,14 @@ export function winnerIntroStats(bands: { min: number; n: number; pct: number | 
   if (!all || !all.n || all.pct === null) return undefined
   const strong = (bands || []).filter(b => b.min >= strongAt && b.n >= 5 && b.pct !== null).sort((a, b) => a.min - b.min)[0]
   return [
-    { value: `${all.pct}%`, label: tt("right · winner picks"), sub: tt("{0} games, last {1} days", { 0: all.n, 1: 30 }) },
+    { value: `${all.pct}%`, label: tt("right · winner picks"), sub: tt("{0} games, last {1} days", { 0: all.n.toLocaleString(), 1: 30 }) },
     ...(strong ? [{ value: `${strong.pct}%`, label: tt("when we're {0}%+ sure", { 0: strong.min }), sub: tt("{0} games", { 0: strong.n }) }] : []),
     ...(cover && cover.value > 0 ? [{ value: String(cover.value), label: cover.label, sub: tt("every game predicted") }] : [])
   ]
+}
+
+/** fix203: the "Our record" card's corner — games counted (every league) and the period. */
+export function recordAside(bands: { min: number; n: number }[] | null | undefined): string {
+  const all = (bands || []).find(b => b.min === 0)
+  return all?.n ? tt("{0} games, last {1} days", { 0: all.n.toLocaleString(), 1: 30 }) : tt("last {0} days", { 0: 30 })
 }

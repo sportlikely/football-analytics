@@ -24,7 +24,6 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { GROUPS, seasonCodes } from './history';
-import { TRIAL_COMPETITIONS } from './trial';
 import { applyStoredTuning } from './gridModel';
 import { v3WindowRun, liveVector, applyVector, isTuning } from './v3Tuner';
 import { clearPredictionCache } from './predCache';
@@ -280,13 +279,11 @@ export async function runModelDaily(force = false): Promise<any> {
 /* ------------------------------------------------------------------ */
 
 function trackedRows(from: string, to: string) {
-  const trial = [...TRIAL_COMPETITIONS];
   return db.prepare(`
     SELECT p.match_id, p.model, p.p_home, p.p_draw, p.p_away, p.odds_home, p.odds_draw, p.odds_away, r.outcome
     FROM predictions p JOIN results r ON r.match_id = p.match_id
     WHERE p.settled = 1 AND p.locked = 1 AND COALESCE(p.backfilled, 0) = 0 AND r.outcome IN ('H','D','A')
-      AND p.model IN ('grid-v3', '${MIX_MODEL}', '${FEAT_MODEL}') AND p.utc_date >= ? AND p.utc_date < ?
-      ${trial.length ? `AND COALESCE(p.competition_code, '') NOT IN (${trial.map(() => '?').join(',')})` : ''}`).all(from, to, ...trial) as any[];
+      AND p.model IN ('grid-v3', '${MIX_MODEL}', '${FEAT_MODEL}') AND p.utc_date >= ? AND p.utc_date < ?`).all(from, to) as any[];
 }
 function periodNumbers(from: string, to: string) {
   const rows = trackedRows(from, to);

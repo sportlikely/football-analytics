@@ -14,7 +14,7 @@
 - Home: featured-match carousel (big games of the next 7 days, `lib/fame.ts`), live box, favorites row, next matches, our
   record (last 30 days), draw picks, latest results, world football news (RSS headlines + link out, no copying).
 - Languages: en + de, es, fr, it, pt, tr. Accessibility statement (English only) and floating accessibility menu.
-- Copy on the record page: "Under 20 games is too few". Leagues in testing show "New league · in testing".
+- Copy on the record page: "Under 20 games is too few". Every league counts in the record (fix203); "in testing" is an admin label only, not shown to visitors.
 
 ## Accounts & security
 - Email + password; email confirmation; two-step (TOTP, `twoFactor.ts`, secrets encrypted with `TOTP_KEY` — never change
@@ -27,7 +27,7 @@
 ## Operations
 - Railway: one service, `DATA_DIR=/data` volume (5 GB), SQLite. Deploy on push to `main`. Variables: `API_FOOTBALL_KEY`
   (API-Football Ultra 75k/day; same key works for API-Basketball Ultra), `BALLDONTLIE_KEY`, `FOOTBALL_DATA_KEY`,
-  `TOTP_KEY`, `BACKUP_KEY`, `BACKUP_S3_*`, `ADMIN_EMAILS`, `TRIAL_COMPETITIONS`, `BB_TRIAL_LEAGUES`, `BASKETBALL_PUBLIC`,
+  `TOTP_KEY`, `BACKUP_KEY`, `BACKUP_S3_*`, `ADMIN_EMAILS`, `BASKETBALL_PUBLIC`,
   `BILLING_TEST_MODE` (remove before launch), `RESEND_*` (email), `ANTHROPIC_API_KEY` (assistant, parked).
 - Backups (`backup.ts`): daily 02:40 UTC `VACUUM INTO` → gzip, last 3 on the volume, encrypted copies to Cloudflare R2
   (30 days). Restore: `node backend/scripts/decrypt-backup.js <file>` with `BACKUP_KEY`, replace the sqlite on the volume,

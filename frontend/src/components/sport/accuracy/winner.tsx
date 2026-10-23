@@ -17,7 +17,7 @@ interface WinnerRecord {
   since: string | null
   total: Rec
   bands?: { min: number; n: number; hits: number; pct: number | null }[]
-  leagues: (Rec & { code: string; trial?: boolean })[]
+  leagues: (Rec & { code: string })[]
   recent: Row[]
   calibration?: AccData['calibration']
   byConfidence?: AccData['byConfidence']
@@ -95,7 +95,6 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
       leagues: d.leagues.map(l => ({
         key: l.code, name: o.leagueName(l.code), href: o.leagueHref?.(l.code) || null, n: l.n, main: l.hitRate,
         cols: [l.strongHitRate ?? null, l.marginOff != null ? (o.scoreWords?.aFmt ? o.scoreWords.aFmt(l.marginOff) : `±${l.marginOff}`) : null, l.totalOff != null ? (o.scoreWords?.bFmt ? o.scoreWords.bFmt(l.totalOff) : `±${l.totalOff}`) : null],
-        note: l.trial ? <span className="shrink-0 text-[10px] font-bold uppercase text-accent" title={t("We added this league recently. Its predictions are being tested and don’t count in our public record yet.")}>{t('in testing')}</span> : null
       })),
       recent: d.recent.map(r => ({
         id: r.gameId, href: o.gameHref(r.gameId), date: r.kickoff, comp: o.leagueName(r.code), compHref: o.leagueHref?.(r.code) || null, home: r.home, away: r.away, score: `${r.score[0]}–${r.score[1]}`,

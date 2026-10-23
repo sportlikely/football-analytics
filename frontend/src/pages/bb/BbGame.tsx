@@ -194,7 +194,6 @@ export default function BbGame() {
         bits: [g.round].filter((x): x is string => !!x),
         badges: <>
           {g.preseason && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-draw/15 text-draw">{t('Pre-season')}</span>}
-          {g.league.trial && <span title={t("We added this league recently. Its predictions are being tested and don’t count in our public record yet.")} className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-draw/15 text-draw">{t("New league · in testing")}</span>}
         </>
       }}
       date={fmtGameDate(g.kickoff)}

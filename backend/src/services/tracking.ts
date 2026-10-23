@@ -3,7 +3,6 @@
  * settle it against the result, and compute accuracy metrics.
  */
 import { MIX_MODEL, FEAT_MODEL, mixLive, mixLiveSince } from './featureModel';
-import { TRIAL_COMPETITIONS } from './trial';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { Prediction } from './predictionModel';
@@ -372,11 +371,7 @@ function settledRowsRaw(days: number, competition?: string, model?: string): Set
   if (competition) {
     where += ' AND p.competition_code = ?';
     args.push(competition);
-  } else if (TRIAL_COMPETITIONS.size) {
-    // leagues still in testing count only when asked for by name (admin), not in the overall record
-    where += ` AND COALESCE(p.competition_code, '') NOT IN (${[...TRIAL_COMPETITIONS].map(() => '?').join(',')})`;
-    args.push(...TRIAL_COMPETITIONS);
-  }
+  } // fix203: every competition counts in the overall record (no "in testing" exclusion)
   if (model) {
     where += ' AND p.model = ?';
     args.push(model);

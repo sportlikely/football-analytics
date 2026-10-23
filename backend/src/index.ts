@@ -1004,7 +1004,7 @@ app.post('/api/admin/extra-leagues/:id(\\d+)/remove', jsonOnly, (req, res) => {
 app.post('/api/admin/extra-leagues/:id(\\d+)/trial', jsonOnly, (req, res) => {
   res.json({ data: setExtraTrial(parseInt(req.params.id, 10), !!req.body?.trial) });
 });
-// The same for basketball (bbLeagueConfig.ts / bbLeagueCoverage.ts): leagues start in testing, sync begins right away
+// The same for basketball (bbLeagueConfig.ts / bbLeagueCoverage.ts): leagues start "in testing" (admin label), sync begins right away
 // NFL data check (fix136, admin only): plan, seasons + coverage, games we hold, sample stats / injuries / standings.
 // About 10 API calls; cached 10 minutes (?refresh=1 runs it again).
 // API-Football today (fix140, admin overview card): quota used / limit, calls by scheduler / page views / admin,

@@ -6,7 +6,7 @@
  */
 import { db } from '../db';
 import { WATCH, watchOf, watchBands, bandOf } from './upsetAlerts';
-import { BB_TRIAL, isPreseason } from './bbModel';
+import { isPreseason } from './bbModel';
 import { MATCH_COLS, MATCH_FROM, MATCH_PUBLIC, shapeMatch, tierLabel } from './tennisSite';
 
 export type WinnerSport = 'basketball' | 'american-football' | 'tennis';
@@ -24,8 +24,8 @@ function bbRows(upcoming: boolean): Row[] {
         FROM bb_predictions p JOIN bb_games g ON g.game_id = p.game_id LEFT JOIN bb_leagues l ON l.code = p.code
         WHERE g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND p.made_at <= p.kickoff
           AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL)`).all()) as any[];
-  // leagues in testing and pre-season games stay out (as in the basketball record)
-  return rows.filter(r => !BB_TRIAL.has(r.code) && !isPreseason({ code: r.code, kickoff: r.kickoff })).map(r => ({
+  // pre-season games stay out (as in the basketball record)
+  return rows.filter(r => !isPreseason({ code: r.code, kickoff: r.kickoff })).map(r => ({
     id: r.game_id, league: r.league || r.code, date: r.kickoff, home: r.home_name, away: r.away_name, homeLogo: r.home_logo || null, awayLogo: r.away_logo || null,
     pHome: r.p_home, hs: r.hs, as_: r.as_, done: r.status === 'FT' || r.status === 'AOT'
   }));

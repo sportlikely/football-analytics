@@ -6,7 +6,7 @@ import { slModel } from '../../lib/modelNames'
 import { useAuth } from '../../lib/auth'
 import { useBbConfig, useBbFavorites, liveLabel, bbRank, type BbGame } from '../../lib/bb'
 import { rid, rstatus, bbShort } from '../../pages/bb/parts'
-import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats } from './winner'
+import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats, recordAside } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
 
 /** Basketball's adapter for components/SportHome (fix141): the data and labels of the basketball home. */
@@ -89,7 +89,7 @@ function useBasketballData(): SportHomeData {
     loaded, full, news,
     featured: featured.map(toGame), live: live.map(toGame), soonest: soonest.map(toGame), favorites: favNext.map(toGame), next: next.map(toGame),
     record: {
-      rows: record ? winnerRecordRows(record.bands) : null, aside: tt("last {0} days", { 0: 30 }),
+      rows: record ? winnerRecordRows(record.bands) : null, aside: recordAside(record?.bands),
       note: tt("Picks right, every game counted. Each prediction is saved before tip-off and never edited."),
       link: { to: '/basketball/accuracy', label: tt("See the full record →") },
       empty: { title: tt("Predictions start soon"), text: tt("The record starts with the first games after launch. Check back after the next game day.") }
