@@ -14,6 +14,8 @@ import logger from '../utils/logger';
 import { schoolName, collegeNick } from './nfl';
 import { db } from '../db';
 import { after, heavy, timed, heavySlicer, yieldLoop } from './perf';
+import { isWeb, isWorker } from './role';
+import { onIpc, sendIpc } from './ipc';
 import { isBlockedSource, JUNK_TITLE, YOUTH_WOMEN, SPAM, BUSINESS, mostlyNonLatin, otherSport, isBlockedDomain, blockDomain } from './newsBlocklist';
 import { isTrustedSource, domainOf } from './newsSources';
 
@@ -870,6 +872,8 @@ function dueTopics(): LeagueTopic[] {
  */
 const searching = new Map<string, Promise<void>>();
 async function searchNow(code: string, sport: Sport): Promise<void> {
+  // fix202: the web process asks the worker (its next visitor gets the stories); it never fetches feeds itself
+  if (isWeb) { sendIpc({ t: 'news:search', code, sport }); return; }
   const key = `${sport}|${code}`;
   if (Date.now() - (searchedAt.get(key) || 0) < SEARCH_EVERY) return;
   const topic = leagueTopics().find(t => t.code === code && t.sport === sport);
@@ -889,6 +893,7 @@ async function searchNow(code: string, sport: Sport): Promise<void> {
   }
   await Promise.race([run, new Promise(r => setTimeout(r, 8000))]);
 }
+if (isWorker) onIpc('news:search', m => void searchNow(String(m.code), m.sport as Sport));
 export const searchFeedsOf = (): Feed[] => dueTopics().map(t => ({ source: 'Google News', url: searchFeed(t.query), league: t.code, sport: t.sport, search: true }));
 const markSearched = (feeds: Feed[]) => { for (const f of feeds) if (f.search && f.league) searchedAt.set(`${f.sport || 'football'}|${f.league}`, Date.now()); };
 
@@ -1032,7 +1037,8 @@ export async function newsFor(opts: { sport?: Sport; limit?: number; league?: st
   const limit = opts.limit || 12;
   const have: any = db.prepare(`SELECT COUNT(*) AS n FROM news_items`).get();
   // fix200: a request never runs the refresh (it is queued; a fresh database shows no news until the first one is in)
-  if (!have.n || !lastRefresh) void refreshNow();
+  // fix202: the web process never refreshes (the worker does, every 15 minutes)
+  if (!isWeb && (!have.n || !lastRefresh)) void refreshNow();
   if (opts.team && opts.team.length) {
     const names = [...new Set(opts.team.map(n => norm(n).trim()).filter(n => n.length >= 3))].sort((a, b) => b.length - a.length);
     if (!names.length) return [];

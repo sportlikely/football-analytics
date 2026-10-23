@@ -12,6 +12,7 @@ import logger from '../utils/logger';
 import { db } from '../db';
 import { buildAll, recordBbPredictions, bumpBbInjuries } from './bbModel';
 import { timed, every, after, perGames } from './perf';
+import { publishState } from './shared';
 import { refreshNbaInjuries, nbaInjuryStatus } from './bbInjuries';
 import { applyResultFixes, checkResults } from './bbResults';
 import { onBbExtraLeague } from './bbLeagueConfig';
@@ -402,7 +403,7 @@ export function startBasketballScheduler() {
   const injuries = async () => {
     const n = await refreshNbaInjuries();
     // NBA only: the injury list touches NBA games, re-saving all 18 leagues every 15 min cost ~1.6 s (fix122)
-    if (n !== null) bumpBbInjuries(); // fix159: cached NBA predictions are recomputed with the new list
+    if (n !== null) { bumpBbInjuries(); publishState('bb:injuries', { at: Date.now() }); } // fix159: cached NBA predictions are recomputed with the new list
     if (n !== null) { try { await timed('bb predictions', () => recordBbPredictions(['NBA'])); } catch (e: any) { logger.warn(`Basketball predictions: ${e.message}`); } }
   };
   after('bb injuries', () => injuries(), 30 * 1000).unref();

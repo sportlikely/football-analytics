@@ -20,6 +20,8 @@
  */
 import { clearPredictionCache } from './predCache';
 import { yieldLoop } from './perf';
+import { runsJobs } from './role';
+import { onState, publishState } from './shared';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { markFresh } from './freshness';
@@ -1008,7 +1010,40 @@ export async function prepareModelV3Async() {
   trendCache.clear();
   markFresh('model', `${built} groups`);
   logger.info(`model v3 state built for ${built} groups`);
+  publishV3();
+  await warmTrends();
   return built;
+}
+
+/*
+ * fix202: the worker builds the group states; the web process reads them (the match and team pages). Each group is its
+ * own key (one at a time to load); 'v3:meta' comes last and makes the web process re-read the stored tuning.
+ */
+function publishV3() {
+  if (!runsJobs) return;
+  for (const [group, v] of liveState) publishState(`v3:g:${group}`, v);
+  publishState('v3:meta', { lastBuiltAt });
+}
+onState('v3:', (key, v) => {
+  if (key.startsWith('v3:g:')) { liveState.set(key.slice(5), v); return; }
+  if (key === 'v3:meta') {
+    lastBuiltAt = v.lastBuiltAt;
+    applyStoredTuning();
+    loadLeagueConv();
+    clearPredictionCache();
+  } else if (key.startsWith('v3:trend:')) trendCache.set(key.slice(9), v);
+});
+/** fix202 (worker): the team pages' trend snapshots of every group, built here (12 h), not on a visitor's request */
+async function warmTrends() {
+  if (!runsJobs) return;
+  for (const group of liveState.keys()) {
+    const c = trendCache.get(group);
+    if (c && Date.now() - c.at < 12 * 3600 * 1000) continue;
+    await yieldLoop();
+    trendSnaps(group);
+    const t = trendCache.get(group);
+    if (t) publishState(`v3:trend:${group}`, t);
+  }
 }
 
 /** Rebuild every group's state as of today (cheap: a few thousand rows per group). */
@@ -1026,6 +1061,8 @@ export function prepareModelV3() {
   trendCache.clear();
   markFresh('model', `${built} groups`);
   logger.info(`model v3 state built for ${built} groups`);
+  publishV3();
+  void warmTrends();
   return built;
 }
 
@@ -1072,6 +1109,8 @@ function trendSnaps(group: string) {
   if (!live) return [];
   const c = trendCache.get(group);
   if (c && Date.now() - c.at < 12 * 3600 * 1000) return c.snaps;
+  // fix202: the web process never rebuilds them (the worker publishes them with the model)
+  if (!runsJobs) return c?.snaps || [];
   const snaps: { date: string; state: GroupState }[] = [];
   for (let back = 6; back >= 1; back--) {
     const date = new Date(Date.now() - back * 30 * DAY).toISOString().slice(0, 10);

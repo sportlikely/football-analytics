@@ -1,4 +1,6 @@
 import { every } from './perf';
+import { isWorker } from './role';
+import { onState, publishState } from './shared';
 /**
  * One live score everywhere (Oct 2026). The match list used Football-Data.org's bulk live feed (every 60 s, often a goal
  * behind) while the match page used FD's single-match call, so the list could say 3-2 and the page 3-3. Every live
@@ -90,3 +92,20 @@ every('live scores cleanup', () => {
   const now = Date.now();
   for (const [id, e] of book) if (now - e.last > KEEP_MS) book.delete(id);
 }, 10 * 60 * 1000).unref();
+
+/*
+ * fix202: the worker polls the live feeds; the web process answers the match pages. After every live tick the worker
+ * publishes its book and the web process merges it (the newer reading per source wins: a match page opened in the web
+ * process can have read Football-Data.org a moment later).
+ */
+export function publishLiveBook() {
+  if (isWorker) publishState('live:book', book);
+}
+onState('live:book', (_k, v: Map<number, { af?: State; fd?: State; last: number }>) => {
+  for (const [id, e] of v) {
+    const cur = book.get(id);
+    if (!cur) { book.set(id, e); continue; }
+    for (const s of ['af', 'fd'] as const) if (e[s] && (!cur[s] || cur[s]!.at < e[s]!.at)) cur[s] = e[s];
+    cur.last = Math.max(cur.last, e.last);
+  }
+});

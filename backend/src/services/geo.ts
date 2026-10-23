@@ -18,6 +18,7 @@ import net from 'net';
 import readline from 'readline';
 import logger from '../utils/logger';
 import { every, after } from './perf';
+import { onState, publishState } from './shared';
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
 const DIR = path.join(DATA_DIR, 'geo');
@@ -33,6 +34,8 @@ let v6s: BigUint64Array | null = null, v6e: BigUint64Array | null = null, v6c: U
 let codes: string[] = [];
 let loadedAt: string | null = null;
 let status = 'not loaded';
+// fix202: the worker loads / downloads the data; the web process (which counts the visitors) takes the finished arrays
+onState('geo', (_k, v) => { ({ v4s, v4e, v4c, v6s, v6e, v6c, codes, loadedAt, status } = v); });
 
 const v4num = (ip: string) => ip.split('.').reduce((a, p) => a * 256 + (parseInt(p, 10) & 255), 0) >>> 0;
 /** first 64 bits of an IPv6 address */
@@ -115,6 +118,7 @@ export async function loadGeo(files: string | string[] = savedFiles(), minV4 = 1
   codes = [...idx.keys()];
   loadedAt = new Date().toISOString();
   status = `${s4.length} IPv4 + ${s6.length} IPv6 ranges`;
+  publishState('geo', { v4s, v4e, v4c, v6s, v6e, v6c, codes, loadedAt, status });
   return { v4: s4.length, v6: s6.length };
 }
 

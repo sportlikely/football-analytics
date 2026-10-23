@@ -39,4 +39,6 @@ COPY frontend/src/locales /app/frontend/src/locales
 COPY docs/changelog.json /app/docs/changelog.json
 RUN mkdir -p /data
 EXPOSE 3001
-CMD ["node", "dist/index.js"]
+# fix202: two processes share the container — the web process (this one, WEB_HEAP_MB) and the worker it starts
+# (WORKER_HEAP_MB, default 1536, set in index.ts). WORKER=0 runs everything in this one process.
+CMD ["sh", "-c", "exec node --max-old-space-size=${WEB_HEAP_MB:-1024} dist/index.js"]

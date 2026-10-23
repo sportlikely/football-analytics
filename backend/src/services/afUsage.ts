@@ -153,10 +153,13 @@ function countVisitorCall(k: VisitorKeys) {
 for (const r of db.prepare(`SELECT kind, n FROM af_usage WHERE day = ?`).all(day) as any[]) counts[r.kind] = r.n;
 for (const r of db.prepare(`SELECT ua, requests, af_calls, blocked FROM af_usage_ua WHERE day = ?`).all(day) as any[])
   agents.set(r.ua, { requests: r.requests, afCalls: r.af_calls, blocked: r.blocked });
+// fix202: the web process and the worker both count: each adds what it counted since its last write (never overwrites)
+let flushedCounts: Record<string, number> = { ...counts };
+let flushedAgents = new Map<string, UaRow>([...agents].map(([ua, a]) => [ua, { ...a }]));
 
 function roll() {
   const d = today();
-  if (d !== day) { flush(); day = d; counts = {}; agents = new Map(); refusedToday = 0; visitorCalls = new Map(); capped = new Map(); fakeToday = 0; }
+  if (d !== day) { flush(); day = d; counts = {}; agents = new Map(); flushedCounts = {}; flushedAgents = new Map(); refusedToday = 0; visitorCalls = new Map(); capped = new Map(); fakeToday = 0; }
   const h = hourNow();
   if (pageHour.h !== h) pageHour = { h, n: 0 };
 }
@@ -221,12 +224,17 @@ export const pageBudgetLeft = () => { roll(); return Math.max(0, Math.min(PER_HO
 function flush() {
   if (!dirty) return;
   dirty = false;
-  const up = db.prepare(`INSERT OR REPLACE INTO af_usage (day, kind, n) VALUES (?, ?, ?)`);
-  const upUa = db.prepare(`INSERT OR REPLACE INTO af_usage_ua (day, ua, requests, af_calls, blocked) VALUES (?, ?, ?, ?, ?)`);
+  const up = db.prepare(`INSERT INTO af_usage (day, kind, n) VALUES (?, ?, ?) ON CONFLICT(day, kind) DO UPDATE SET n = n + excluded.n`);
+  const upUa = db.prepare(`INSERT INTO af_usage_ua (day, ua, requests, af_calls, blocked) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(day, ua) DO UPDATE SET requests = requests + excluded.requests, af_calls = af_calls + excluded.af_calls, blocked = blocked + excluded.blocked`);
   db.exec('BEGIN');
   try {
-    for (const [k, n] of Object.entries(counts)) up.run(day, k, n);
-    for (const [ua, a] of agents) upUa.run(day, ua, a.requests, a.afCalls, a.blocked);
+    for (const [k, n] of Object.entries(counts)) { const dn = n - (flushedCounts[k] || 0); if (dn) up.run(day, k, dn); flushedCounts[k] = n; }
+    for (const [ua, a] of agents) {
+      const f = flushedAgents.get(ua) || { requests: 0, afCalls: 0, blocked: 0 };
+      if (a.requests !== f.requests || a.afCalls !== f.afCalls || a.blocked !== f.blocked) upUa.run(day, ua, a.requests - f.requests, a.afCalls - f.afCalls, a.blocked - f.blocked);
+      flushedAgents.set(ua, { ...a });
+    }
     db.prepare(`DELETE FROM af_usage_ua WHERE day < ?`).run(new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10));
     db.exec('COMMIT');
   } catch { db.exec('ROLLBACK'); }
@@ -236,10 +244,13 @@ every('AF usage flush', flush, 60 * 1000).unref();
 /** Admin overview card "API-Football today". */
 export function afUsageToday() {
   roll();
-  const top = [...agents.entries()]
-    .map(([ua, a]) => ({ ua, ...a }))
-    .sort((x, y) => y.afCalls - x.afCalls || y.requests + y.blocked - (x.requests + x.blocked))
-    .slice(0, 12);
+  // fix202: both processes' numbers (this one's written first)
+  dirty = true;
+  flush();
+  const counts: Record<string, number> = {};
+  for (const r of db.prepare(`SELECT kind, n FROM af_usage WHERE day = ?`).all(day) as any[]) counts[r.kind] = r.n;
+  const top = (db.prepare(`SELECT ua, requests, af_calls AS afCalls, blocked FROM af_usage_ua WHERE day = ? ORDER BY af_calls DESC, requests + blocked DESC LIMIT 12`).all(day) as any[])
+    .map(r => ({ ua: r.ua, requests: r.requests, afCalls: r.afCalls, blocked: r.blocked }));
   return {
     day,
     calls: { scheduler: counts.scheduler || 0, pages: counts.page || 0, admin: counts.admin || 0 },

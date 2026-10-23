@@ -13,6 +13,7 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { yieldLoop } from './perf';
+import { onState, publishState } from './shared';
 import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import { injuryLoss } from './bbInjuries';
 
@@ -556,6 +557,8 @@ async function buildChanged(codes: string[], force: boolean): Promise<{ built: s
   }
   if (!todo.length) return { built: [], skipped: codes.length };
   try { await buildTalent(); } catch (e: any) { logger.warn(`bb-v3 talent: ${e.message}`); }
+  // fix202: the web process gets the player numbers its predictions read (not the per-game history)
+  publishState('bb:talent', { rates: talentState.rates, rosters: talentState.rosters, builtAt: talentState.builtAt });
   await yieldLoop();
   const built: string[] = [];
   for (const { code: c, sig } of todo) {
@@ -564,6 +567,7 @@ async function buildChanged(codes: string[], force: boolean): Promise<{ built: s
       leagueSig.set(c, sig);
       if (m) {
         built.push(c);
+        publishLeague(m);
         logger.info(`${BB_MODEL} ${c}: k=${m.params.k} r=${m.params.r} b2b=${m.params.b2b}, test hit ${(m.test.all as any).hitRate}% over ${(m.test.all as any).games} games`);
       }
     } catch (e: any) {
@@ -573,6 +577,27 @@ async function buildChanged(codes: string[], force: boolean): Promise<{ built: s
   }
   return { built, skipped: codes.length - todo.length };
 }
+
+/*
+ * fix202: the worker builds the leagues; the web process gets each finished model. League / LeagueV2 are classes with
+ * a newcomer function: they go as plain data and come back as instances, the newcomer prior taken from the live models
+ * (livePrior: the same rule the build used).
+ */
+function publishLeague(m: LeagueModel) {
+  publishState(`bb:m:${m.code}`, { ...m, L: { ...m.L, prior: null }, L2: m.L2 ? { ...m.L2, prior: null } : null });
+}
+onState('bb:', (key, v) => {
+  if (key.startsWith('bb:m:')) {
+    const code = key.slice(5);
+    const L = Object.assign(new League(v.L.p), v.L, { prior: (id: number, now: number) => livePrior(code, id, now, false) });
+    const L2 = v.L2 ? Object.assign(new LeagueV2(v.L2.p), v.L2, { prior: (id: number, now: number) => livePrior(code, id, now, true) }) : null;
+    models.set(code, { ...v, L, L2 });
+    modelStamp.set(code, (modelStamp.get(code) || 0) + 1);
+  } else if (key === 'bb:talent') {
+    talentState.rates = v.rates; talentState.rosters = v.rosters; talentState.builtAt = v.builtAt;
+    talentVer++;
+  } else if (key === 'bb:injuries') injuryVer++;
+});
 
 /** Prediction for an upcoming (or live) game from the latest ratings; rest from the schedule before it. */
 /*

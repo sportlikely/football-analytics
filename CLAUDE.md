@@ -62,7 +62,13 @@ is model work, the matching note, in the same commit.
 
 ## Map of the code
 
-Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
+Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
+- Processes (fix202): `index.ts` = the web process (listens, live socket, reads the database, starts and restarts the
+  worker); `worker.ts` + `jobs.ts` = every scheduled job. A new scheduled job goes in `jobs.ts` (or a service's
+  start…Scheduler), never in app.ts / index.ts. Model state the pages read is published by the worker
+  (`publishState` / `onState`, services/shared.ts); a heavy page every visitor opens is a stored page (`definePage`,
+  services/pageCache.ts); live games go through services/liveState.ts. `WORKER=0` = one process. Admin / staff
+  routes are answered by the worker (forwarded). Notes: docs/notes/perf.md (fix202).
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
   `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a
@@ -105,7 +111,7 @@ Backend (`backend/src`, Express + TypeScript, `index.ts` holds every route):
   still decided, not built), `userPicks.ts`
   (users' own picks + personal record), `favorites.ts`, `testers.ts`, `backup.ts`, `clientErrors.ts`, `dataHealth.ts`,
   `dataAudit.ts`, `seo.ts`, `proxyGuard.ts` + `proxyScrapers.ts` (fix199: data-centre / proxy scrapers, rules in docs/notes/security.md).
-- `OPEN_API` in `index.ts` lists the public routes; everything else is admin/staff only.
+- `OPEN_API` in `app.ts` lists the public routes; everything else is admin/staff only (answered by the worker).
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):
 - Shared game-page parts (fix174): `components/sport/game/` LiveChance (live box + swing chart), ModelParts ("how it was calculated"),

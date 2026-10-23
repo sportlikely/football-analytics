@@ -15,6 +15,7 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { yieldLoop, heavySlicer, afterLive, after, every, afterHeavy, everyHeavy, heavy } from './perf';
+import { runsJobs } from './role';
 import {
   footballExtras, fitGoalShrink, fitGoalShrinkTD, shrinkPair, type GoalShrink, normalExtras, tennisExtras, checkSet, calibration, calibrationOk, topIndex, pctSet, normCdf,
   DEFAULT_HT_SHARE, DEFAULT_GOAL_SHRINK, GATE_MIN_N, bandAlarm, marginSpread, teamSd, type GoalModel, type Extras, type LeagueFit, type MoreSport, type PSet, type SetCheck
@@ -77,6 +78,7 @@ const now = () => new Date().toISOString();
 
 const fitCache = new Map<string, any>();
 // fix202: the worker re-fits daily; the web process reads the stored fits again every 30 minutes
+if (!runsJobs) setInterval(() => fitCache.clear(), 30 * 60 * 1000).unref();
 function storeFit(sport: string, league: string, v: any) {
   db.prepare(`INSERT OR REPLACE INTO more_pred_fit (sport, league, json, at) VALUES (?, ?, ?, ?)`).run(sport, league, JSON.stringify(v), now());
   fitCache.set(`${sport}|${league}`, v);

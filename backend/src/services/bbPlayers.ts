@@ -12,6 +12,8 @@ import { nbaKey } from './bbInjuries';
 import { bdlPlayerOf, bdlTeamOf, bdlSeasonNow, bdlContract, personKey } from './bdl';
 import { isCrawlerRequest } from './afUsage';
 import { yieldLoop } from './perf';
+import { runsJobs } from './role';
+import { onState, publishState } from './shared';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_roster (
@@ -333,7 +335,8 @@ let searchCache: { at: number; players: SearchPlayer[]; teams: SearchTeam[] } | 
 const tokensOf = (s: string) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
 
 function searchIndex() {
-  if (searchCache && Date.now() - searchCache.at < 3600000) return searchCache;
+  // fix202: the web process uses the worker's copy (rebuilt there every hour); it builds one only if it never got one
+  if (searchCache && (Date.now() - searchCache.at < 3600000 || !runsJobs)) return searchCache;
   const since = new Date(Date.now() - 2 * 365 * 86400000).toISOString();
   const teams = new Map<number, SearchTeam>();
   for (const g of db.prepare(`SELECT code, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo FROM bb_games WHERE kickoff > ? AND kickoff < ? ORDER BY kickoff`).all(since, new Date(Date.now() + 30 * 86400000).toISOString()) as any[]) {
@@ -356,6 +359,12 @@ function searchIndex() {
   searchCache = { at: Date.now(), players: [...players.values()], teams: [...teams.values()] };
   return searchCache;
 }
+/** fix202 (worker): the basketball search index built again and handed to the web process */
+export function warmBbSearch() {
+  searchCache = null;
+  publishState('bb:search', searchIndex());
+}
+onState('bb:search', (_k, v) => { searchCache = v; });
 
 /** Score a name against the query words (any order: "lebron james" finds "James LeBron"). 0 = no match. */
 function nameScore(tokens: string[], q: string[], full: string) {

@@ -19,6 +19,8 @@ import { isMissingPlayer } from './missingPlayers';
 import { isCrawlerRequest, noProviderCalls } from './afUsage';
 import { teamAnalysis, teamAnalysisTeaser } from './teamAnalysis';
 import { twinDupIds, warmPlayers } from './playerPage';
+import { runsJobs } from './role';
+import { onState, publishState } from './shared';
 
 const AF_OFFSET = 1_000_000_000;
 const TTL = 6 * 3600 * 1000; // search index
@@ -63,7 +65,8 @@ type IndexTeam = { id: number; name: string; norm: string; national: boolean; n:
 let index: { at: number; teams: IndexTeam[] } | null = null;
 
 function teamIndex(): IndexTeam[] {
-  if (index && Date.now() - index.at < TTL) return index.teams;
+  // fix202: the web process uses the worker's copy (rebuilt there every 6 h); it builds one only if it never got one
+  if (index && (Date.now() - index.at < TTL || !runsJobs)) return index.teams;
   const byId = new Map<number, IndexTeam>();
   const add = (id: number, name: string, national: boolean) => {
     if (!id || !name) return;
@@ -111,7 +114,7 @@ let pIndex: { at: number; players: IndexPlayer[] } | null = null;
  * page has been built, so "erling haaland", "haaland" and "e haaland" all find him.
  */
 function playerIndex(): IndexPlayer[] {
-  if (pIndex && Date.now() - pIndex.at < TTL) return pIndex.players;
+  if (pIndex && (Date.now() - pIndex.at < TTL || !runsJobs)) return pIndex.players;
   const best = new Map<number, { name: string; team: number; season: number; minutes: number; position: string | null }>();
   try {
     const rows = db.prepare(`
@@ -140,6 +143,14 @@ function playerIndex(): IndexPlayer[] {
   pIndex = { at: Date.now(), players };
   return players;
 }
+
+/** fix202 (worker): both search indexes built again and handed to the web process (search, team-name lookups) */
+export function warmSearchIndex() {
+  index = null; pIndex = null;
+  teamIndex(); playerIndex();
+  publishState('search:index', { index, pIndex });
+}
+onState('search:index', (_k, v) => { index = v.index; pIndex = v.pIndex; });
 
 /** How well a typed search matches a player's name words (0 = no match). */
 function playerMatch(words: string[], norm: string, needle: string): number {

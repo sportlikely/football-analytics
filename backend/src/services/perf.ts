@@ -9,6 +9,7 @@
 import { PerformanceObserver, performance } from 'node:perf_hooks';
 import { isMainThread } from 'node:worker_threads';
 import logger from '../utils/logger';
+import { isWorker } from './role';
 
 /*
  * fix167: a fully synchronous job finishes BEFORE the stall it caused is noticed (the timer below only runs once the
@@ -73,7 +74,8 @@ if (isMainThread) setInterval(() => {
     stalls.push({ at: new Date(now).toISOString(), ms: lag, job });
     if (stalls.length > 100) stalls.shift();
     // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
-    if (lag > 500) logger.warn(`Event loop blocked ${lag} ms${job ? ` (${job})` : ''}`);
+    // fix202: the worker's own loop is allowed to be busy (no visitor waits for it): its stalls are logged from 2 s
+    if (lag > (isWorker ? 2000 : 500)) logger.warn(`${isWorker ? 'Worker: event' : 'Event'} loop blocked ${lag} ms${job ? ` (${job})` : ''}`);
   }
 }, STEP).unref();
 

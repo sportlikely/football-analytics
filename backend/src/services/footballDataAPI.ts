@@ -13,6 +13,8 @@ import { mixPredictions } from './featureModel';
 import { reportLive } from './liveScores';
 import { predictClubEuro } from './clubElo';
 import { withMarket, oddsFor } from './odds';
+import { runsJobs } from './role';
+import { onState, publishState } from './shared';
 
 // Competitions to load. Override with COMPETITIONS=PL,PD,... in .env
 const DEFAULT_COMPETITIONS = ['PL', 'PD', 'SA', 'BL1', 'FL1', 'CL', 'DED', 'PPL', 'ELC'];
@@ -180,7 +182,8 @@ class FootballDataAPI {
    */
   async getUpcomingMatches(days: number = MAX_DAYS) {
     const safeDays = Math.min(Math.max(days, 1), MAX_DAYS);
-    if (!this.window) {
+    // fix202: the web process never fetches the window itself (the worker publishes it; empty until the first copy)
+    if (!this.window && runsJobs) {
       await this.refreshWindow();
     }
     const cutoff = Date.now() + safeDays * 24 * 60 * 60 * 1000;
@@ -201,6 +204,7 @@ class FootballDataAPI {
         this.windowLoadedAt = Date.now();
         markFresh('fixtures', `${matches.length} matches`);
         await this.refreshStandings();
+        this.publishWindow();
         if (this.onWindowRefreshed) {
           try {
             const withP: any[] = [];
@@ -276,6 +280,23 @@ class FootballDataAPI {
     } finally {
       this.prefetching = false;
     }
+  }
+
+  /** fix202 (worker): the window and the standings for the web process */
+  private publishWindow() {
+    publishState('fd:window', { window: this.window, loadedAt: this.windowLoadedAt, standings: this.standingsByCode });
+  }
+  /** fix202 (web): the worker's copy */
+  applyShared(key: string, v: any) {
+    if (key === 'fd:window') {
+      this.window = v.window;
+      this.windowLoadedAt = v.loadedAt;
+      for (const [code, st] of v.standings as Map<string, StandingsResponse>) {
+        this.standingsByCode.set(code, st);
+        this.setCached(`standings:${code}`, st, 30 * 60 * 1000);
+      }
+      clearPredictionCache();
+    } else if (key === 'fd:live') this.liveLast = v;
   }
 
   get windowAge() {
@@ -451,6 +472,8 @@ class FootballDataAPI {
   async getLiveMatches(fresh = false) {
     const cached = this.getCached<any[]>('live');
     if (cached) return cached;
+    // fix202: the web process shows the worker's last list (never calls the provider for it)
+    if (!runsJobs) return this.liveLast?.data || [];
     if (!fresh && this.liveLast && Date.now() - this.liveLast.at < 5 * 60 * 1000) {
       this.refreshLive().catch(() => undefined);
       return this.liveLast.data;
@@ -477,6 +500,7 @@ class FootballDataAPI {
         const live = [...inPlay, ...paused].filter(m => LIVE_STATUSES.has(m.status));
         this.setCached('live', live, LIVE_CACHE_TTL_MS);
         this.liveLast = { data: live, at: Date.now() };
+        publishState('fd:live', this.liveLast);
         for (const m of live) reportLive(m.id, 'fd', m); // one live score everywhere (liveScores.ts)
         return live;
       } catch (error: any) {
@@ -756,4 +780,6 @@ class FootballDataAPI {
   }
 }
 
-export default new FootballDataAPI();
+const footballDataAPI = new FootballDataAPI();
+onState('fd:', (k, v) => footballDataAPI.applyShared(k, v));
+export default footballDataAPI;

@@ -17,6 +17,7 @@
  */
 import { clearPredictionCache } from './predCache';
 import { yieldLoop, timed, afterHeavy, everyHeavy, afterLive } from './perf';
+import { onState, publishState } from './shared';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { markFresh, markFailed } from './freshness';
@@ -588,8 +589,19 @@ export async function rebuildAfFeaturesAsync(force = false) {
     n += await buildFeatures(g, force);
   }
   featuresBuiltAt = new Date().toISOString();
+  // fix202: the web process gets the features of the games from two days ago on (the ones it predicts)
+  if (n) {
+    const since = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+    publishState('af:features', { at: featuresBuiltAt, features: new Map([...features].filter(([k]) => k.slice(k.lastIndexOf('|') + 1) >= since)) });
+  }
   return n;
 }
+onState('af:features', (_k, v: { at: string; features: Map<string, MatchAvail> }) => {
+  features.clear();
+  for (const [k, f] of v.features) features.set(k, f);
+  featuresBuiltAt = v.at;
+  clearPredictionCache();
+});
 
 /** Availability for a match by football-data.co.uk names and date (±1 day for time zones). */
 export function availabilityFor(group: string, fdHome: string, fdAway: string, date: string): MatchAvail | null {

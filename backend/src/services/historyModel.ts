@@ -7,6 +7,7 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { Prediction } from './predictionModel';
 import { fitDixonColes, fitDixonColesAsync, predictDC, DCParams } from './dixonColes';
+import { onState, publishState } from './shared';
 import { GROUPS, groupForCompetition, loadGroupMatches, buildTeamMap, fdNameFor, ApiTeam, seasonCodes, syncAll } from './history';
 
 export const MODEL_V2 = 'dc-history-v2';
@@ -15,6 +16,13 @@ const FIT_OPTS = { halfLifeDays: 180, ridge: 1.0, sweeps: 40 };
 const params = new Map<string, DCParams>();
 let lastFitAt: string | null = null;
 let lastMapReport: Record<string, { mapped: number; unmatched: string[] }> = {};
+// fix202: fitted in the worker, read by the match pages in the web process
+onState('v2:params', (_k, v: { params: Map<string, DCParams>; lastFitAt: string | null; lastMapReport: typeof lastMapReport }) => {
+  params.clear();
+  for (const [g, p] of v.params) params.set(g, p);
+  lastFitAt = v.lastFitAt;
+  lastMapReport = v.lastMapReport;
+});
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS backtest_runs (
@@ -87,6 +95,7 @@ export async function fitAllGroups(asOf: string = new Date().toISOString().slice
     );
   }
   lastFitAt = new Date().toISOString();
+  publishState('v2:params', { params, lastFitAt, lastMapReport });
   return fitted;
 }
 

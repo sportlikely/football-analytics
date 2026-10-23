@@ -15,6 +15,7 @@ import { Prediction } from './predictionModel';
 import { Meetings, commonSense, type H2H } from './h2hGuard';
 import { nationalValueFor } from './squadValues';
 import { every, after, runSteps, runStepsAsync } from './perf';
+import { onState, publishState } from './shared';
 
 export const MODEL_ELO = 'elo-intl';
 const AF_OFFSET = 1_000_000_000;
@@ -453,6 +454,7 @@ function* buildSteps(): Generator<unknown, { matches: number; teams: number; eng
   natGoalByKind = fitGoalScales(test);
   if (evalStats) { evalStats.goalScaleByKind = natGoalByKind; evalStats.params = NP; }
   lastBuilt = new Date().toISOString();
+  publishState('elo-intl', { ratings, meetings: meetings.dump(), h2hUsed, guardOpt, fit, gridW, engine, evalStats, lastBuilt, popStats, natGoalByKind, NP });
   logger.info(`National model: ${rows.length} matches, ${ratings.size} teams, engine ${engine} (test log loss grid ${gridTest.logLoss} vs elo ${eloTest.logLoss})`);
   return { matches: rows.length, teams: ratings.size, engine };
 }
@@ -553,6 +555,13 @@ function scale(x: number, mean: number, sd: number) {
   return Math.round(Math.max(1, Math.min(10, 5.5 + 2.25 * ((x - mean) / (sd || 1)))) * 10) / 10;
 }
 let popStats: { at: number; s: Record<string, { mean: number; sd: number }> } | null = null;
+// fix202: built in the worker; the web process takes the finished ratings and settings (national-team predictions)
+onState('elo-intl', (_k, v) => {
+  ratings.clear(); for (const [id, r] of v.ratings) ratings.set(id, r);
+  meetings.load(v.meetings);
+  h2hUsed = v.h2hUsed; guardOpt = v.guardOpt; fit = v.fit; gridW = v.gridW; engine = v.engine; evalStats = v.evalStats; lastBuilt = v.lastBuilt;
+  popStats = v.popStats; natGoalByKind = v.natGoalByKind; NP = v.NP;
+});
 function population() {
   if (popStats && Date.now() - popStats.at < 3600_000) return popStats.s;
   const since = new Date(Date.now() - 3 * 365 * 86400000).toISOString().slice(0, 10);

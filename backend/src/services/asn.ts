@@ -16,6 +16,7 @@ import net from 'net';
 import readline from 'readline';
 import logger from '../utils/logger';
 import { every, after } from './perf';
+import { onState, publishState } from './shared';
 
 const DIR = path.join(process.env.DATA_DIR || path.resolve(process.cwd(), 'data'), 'geo');
 const FILE = path.join(DIR, 'dc-ranges.json');
@@ -86,7 +87,10 @@ function use(d: Saved) {
   v6s = BigUint64Array.from(a6.map(r => v6hi(r[0]))); v6e = BigUint64Array.from(a6.map(r => v6hi(r[1]))); v6a = Uint32Array.from(a6.map(r => r[2]));
   names = d.names || {};
   status = `${a4.length} IPv4 + ${a6.length} IPv6 data-centre ranges (iptoasn.com, ${d.at.slice(0, 10)})`;
+  // fix202: the web process (the proxy guard) takes the finished arrays from the worker
+  publishState('asn', { v4s, v4e, v4a, v6s, v6e, v6a, names, status });
 }
+onState('asn', (_k, v) => { ({ v4s, v4e, v4a, v6s, v6e, v6a, names, status } = v); });
 
 function download(url: string, redirects = 3): Promise<NodeJS.ReadableStream> {
   return new Promise((resolve, reject) => {

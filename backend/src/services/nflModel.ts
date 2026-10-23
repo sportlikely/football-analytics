@@ -30,6 +30,8 @@ import { db } from '../db';
 import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import logger from '../utils/logger';
 import { yieldLoop, timed, slicer } from './perf';
+import { runsJobs } from './role';
+import { onState, publishState } from './shared';
 import { teamBox, NflGame } from './nflSite';
 import { rememberFirstPrediction } from './nflGameExtras';
 import { HIDE_OTHER, type LeagueId } from './nfl';
@@ -715,8 +717,31 @@ export async function rebuildLive(league: LeagueId): Promise<void> {
     // fix171: games patched in during the replay were taken by the old ratings: the new ones compare once
     if (gamesCache.get(league)?.games !== games) noteChanged(league, 'all');
     lives.set(league, liveOf(games, params, stored, E));
+    publishLive(league);
   } finally { replaying.delete(league); }
 }
+/*
+ * fix202: the worker replays; the web process gets the finished ratings (the engine without its box-score context)
+ * and joins them to the games and box scores it reads from the database itself (in pages, with yields). From there
+ * the web process only adds newly finished games on top (a few ms), as before; it never replays.
+ */
+function publishLive(league: LeagueId) {
+  const L = lives.get(league);
+  if (!L || !runsJobs) return;
+  const { ctx, ...engine } = L.engine as any;
+  void ctx;
+  publishState(`nfl:live:${league}`, { params: L.params, blend: L.blend, trained: L.trained, builtAt: L.builtAt, finishedCount: L.finishedCount, engine, applied: L.applied, lastT: L.lastT });
+}
+onState('nfl:live:', (key, v) => {
+  const league = (Number(key.slice(9)) === 2 ? 2 : 1) as LeagueId;
+  void (async () => {
+    const games = await loadGamesAsync(league), ctx = await loadCtxAsync(league);
+    const E = Object.assign(new Engine(v.engine.p, ctx, league), v.engine);
+    lives.set(league, { params: v.params, blend: v.blend, trained: v.trained, builtAt: v.builtAt, finishedCount: v.finishedCount, engine: E, games,
+      applied: v.applied, lastT: v.lastT, byId: new Map(games.map(g => [g.id, g])), outOfOrder: false, pending: new Set() });
+    noteChanged(league, 'all'); // games finished since the worker's replay are added on the next request
+  })().catch(e => logger.warn(`${MODEL_OF[league]} ratings from the worker: ${e.message}`));
+});
 /**
  * The current ratings. fix155: built once (full replay); afterwards each newly finished game is added on top (cheap,
  * a few ms), so a live tick never replays ten seasons. A result that arrives out of order (an earlier kick-off than
@@ -728,7 +753,7 @@ function current(league: LeagueId = 1): Live | null {
   const games = peekGames(league);
   const live = games ? lives.get(league) : undefined;
   if (!games || !live) {
-    void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
+    if (runsJobs) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
     return null;
   }
   const ch = takeChanged(league);
@@ -757,7 +782,7 @@ function current(league: LeagueId = 1): Live | null {
     }
     live.finishedCount = live.applied.size;
   }
-  if (live.outOfOrder || Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
+  if (runsJobs && (live.outOfOrder || Date.now() - Date.parse(live.builtAt) > 6 * 3600 * 1000)) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`));
   return live;
 }
 const leagueOfGame = (gameId: number): LeagueId => ((db.prepare(`SELECT league FROM nfl_games WHERE game_id = ?`).get(gameId) as any)?.league === 2 ? 2 : 1);
@@ -948,7 +973,7 @@ export function nflTeamRecord(teamId: number, season: number) {
 export function nflTeamModel(teamId: number) {
   const league = leagueOfTeam(teamId);
   // fix159: a team page never runs the first full replay itself (seconds); it starts the yielding one and shows no tiles
-  if (!lives.has(league)) { void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`)); return null; }
+  if (!lives.has(league)) { if (runsJobs) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`)); return null; }
   const L = current(league);
   if (!L) return null;
   const E = L.engine;
@@ -970,7 +995,7 @@ export function nflTeamModel(teamId: number) {
  *  Empty while the first replay hasn't run (it is started, never awaited, like the team tiles). */
 export function nflRatings(league: LeagueId): Map<number, { elo: number; rank: number }> {
   const out = new Map<number, { elo: number; rank: number }>();
-  if (!lives.has(league)) { void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`)); return out; }
+  if (!lives.has(league)) { if (runsJobs) void timed('nfl ratings', () => rebuildLive(league)).catch(e => logger.warn(`${MODEL_OF[league]} replay: ${e.message}`)); return out; }
   const L = current(league);
   if (!L) return out;
   const done = L.games.filter(g => g.done);

@@ -48,6 +48,8 @@ import { db, Statement } from '../db';
 import logger from '../utils/logger';
 import { winnerBands, winnerByConfidence } from '../utils/winnerBands';
 import { slicer, yieldLoop, timed, heavy, track } from './perf';
+import { isWeb, isWorker } from './role';
+import { onState, publishState } from './shared';
 import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
 
 export const TENNIS_MODEL = 'tennis-v1';
@@ -1614,7 +1616,10 @@ function setSnap(S: RatingsSnap) {
   const m = new Map<number, number>();
   for (let j = 0; j < S.pid.length; j++) if (S.pid[j] > 0) m.set(S.pid[j], j);
   snap = S; snapIdx = m;
+  // fix202: the worker process's snapshot goes to the web process (the player pages read it there)
+  if (isWorker) publishState('tennis:snap', S);
 }
+onState('tennis:snap', (_k, S: RatingsSnap) => setSnap(S));
 /** in-process: the pages' snapshot from the live ratings (after a tick / new results / a replay) */
 function refreshSnap() { if (liveState) setSnap(ratingsSnapshot(liveState)); }
 
@@ -1627,7 +1632,8 @@ let remote: WorkerState | null = null;
 let lastWriteBack: { at: string; writes: number; ms: number } | null = null;
 const waiting = new Map<number, { resolve: (r: Reply) => void; reject: (e: Error) => void }>();
 const workerInfo = () => ({ on: !workerOff && !!worker, off: workerOff, crashes, lastWriteBack });
-const useWorker = () => !IN_WORKER && !workerOff && !!startWorker();
+// fix202: never in the web process (it only reads the snapshot the worker process publishes)
+const useWorker = () => !IN_WORKER && !isWeb && !workerOff && !!startWorker();
 
 function workerFile(): { file: string; execArgv?: string[] } | null {
   const js = path.join(__dirname, '../workers/tennisModelWorker.js');
@@ -1747,7 +1753,7 @@ export const tennisModelTest = {
  * the replay itself.
  */
 export function tennisPlayerModel(pid: number, women: boolean) {
-  if (!useWorker()) { ensureLive(); if (liveState && (!snap || snap.builtAt !== liveState.builtAt || Date.now() - snap.at > 10 * 60 * 1000)) refreshSnap(); }
+  if (!isWeb && !useWorker()) { ensureLive(); if (liveState && (!snap || snap.builtAt !== liveState.builtAt || Date.now() - snap.at > 10 * 60 * 1000)) refreshSnap(); }
   const S = snap;
   if (!S) return null;
   const i = snapIdx.get(pid);

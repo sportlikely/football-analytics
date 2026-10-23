@@ -25,6 +25,7 @@ import { predictNational, isNationalTeam } from './nationalElo';
 import { predictClubEuro, eloEuroMiss } from './clubElo';
 import { onExtraLeague } from './leagueConfig';
 import { every, after, yielder, mapGames, yieldLoop } from './perf';
+import { onState, publishState } from './shared';
 
 export const AF_OFFSET = 1_000_000_000;
 export const isAfMatchId = (id: number) => id >= AF_OFFSET;
@@ -313,6 +314,34 @@ let afLiveRaw = new Map<number, any>();
 let afLiveAt = 0;
 const standingsByCode = new Map<string, any>();
 
+/*
+ * fix202: the worker refreshes the window and polls live=all; the web process gets the window (with the league names
+ * and tables) after each refresh, and after each live tick the live games, our fixtures' raw live rows (the match
+ * page's live overlay) and the window rows the tick changed.
+ */
+function publishWindow() {
+  publishState('af:window', { windowMatches, windowAt, leagueMeta, standings: standingsByCode });
+}
+function publishLive(touched: Iterable<number>) {
+  const ids = new Set(touched);
+  const raw = new Map<number, any>();
+  for (const id of liveById.keys()) { const r = afLiveRaw.get(id - AF_OFFSET); if (r) raw.set(id - AF_OFFSET, r); }
+  publishState('af:live', { liveById, raw, afLiveAt, patch: windowMatches.filter(m => ids.has(m.id)) });
+}
+onState('af:', (key, v) => {
+  if (key === 'af:window') {
+    windowMatches = v.windowMatches; windowAt = v.windowAt;
+    for (const [id, l] of v.leagueMeta) leagueMeta.set(id, l);
+    for (const [code, st] of v.standings) { standingsByCode.set(code, st); cache.set(`standings:${String(code).replace(/^AF/, '')}`, { data: st, expires: Date.now() + 30 * 60 * 1000 }); }
+  } else if (key === 'af:live') {
+    liveById = v.liveById; afLiveRaw = v.raw; afLiveAt = v.afLiveAt;
+    if (v.patch.length) {
+      const byId = new Map<number, any>(v.patch.map((m: any) => [m.id, m]));
+      windowMatches = windowMatches.map(m => byId.get(m.id) || m);
+    }
+  }
+});
+
 export async function currentSeason(leagueId: number): Promise<number | null> {
   return cached(`season:${leagueId}`, 24 * 3600 * 1000, async () => {
     const j = await afGet('/leagues', { id: leagueId, current: 'true' });
@@ -450,6 +479,7 @@ export async function refreshAfWindow() {
   const fixedCodes = new Set(EXTRA_COMPETITIONS.filter(c => c.id !== 10).map(c => `AF${c.id}`));
   const codes = [...new Set(windowMatches.map(m => m.competition.code))].filter(c => fixedCodes.has(c));
   for (const code of codes) await getAfStandings(code).catch(() => null);
+  publishWindow();
   return windowMatches.length;
 }
 
@@ -498,10 +528,12 @@ export async function pollAfLive(force = false) {
     return t <= now + 5 * 60 * 1000 && t >= now - 3 * 3600 * 1000 && !FINAL.includes(m.status);
   });
   if (!maybeLive && !force) {
+    const had = liveById.size;
     liveById = new Map();
     afLiveRaw = new Map();
     const late = overdue(now);
     if (late.length) await confirmStates(late.map(m => m.id));
+    if (had || late.length) publishLive(late.map(m => m.id));
     return [];
   }
   try {
@@ -532,6 +564,7 @@ export async function pollAfLive(force = false) {
     // confirm the final score of games that just ended, and fix any stuck game
     const late = overdue(now).filter(m => !liveIds.has(m.id)).map(m => m.id);
     if (dropped.length || late.length) await confirmStates([...dropped, ...late]);
+    publishLive([...liveIds, ...dropped, ...late]);
     return live;
   } catch (e: any) {
     logger.warn(`AF live poll: ${e.message}`);

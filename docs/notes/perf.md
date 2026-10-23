@@ -121,3 +121,103 @@ no stall naming data health, news, tennis model / tennis ratings; `jobs` shows "
 `/api/admin/tennis-model` → `worker.on: true`.
 
 Result: _to fill in after the check (worstLastHour, stallsLastHour, the top 5 recentStalls)._
+
+## fix202 (23 Oct 2026): background jobs in a worker process; pages never built on a visitor's request
+
+Before (Yarin's `/api/perf`, 23 Oct, 67 min after start, one process): **90 stalls an hour, worst 5.9 s, event-loop max
+8.8 s**, 975 MB. Causes: football live tick (a 5.9 s stall, the job up to 38 s), basketball model rebuild (8.8 s),
+basketball live (1–1.5 s), and pages built on the visitor's request when cold: `/api/basketball/games` 3.8 s,
+`/api/tennis/record` 2.7 s, `/api/draw-alerts` 2.4 s, `/api/nfl/home` 2.0 s (0.3 s cached).
+
+### How it works now
+
+- **Two processes, one container, one SQLite file (WAL, `busy_timeout` 5000).** `index.ts` = the web process: listens
+  at once, answers requests, pushes live games on the socket. It forks `worker.ts` (`--max-old-space-size=WORKER_HEAP_MB`,
+  default 1536; the web process gets `WEB_HEAP_MB`, default 1024, in the Dockerfile) and restarts it when it exits (1 s
+  after a long run, backing off to 1 min when it keeps dying). The worker exits when the web process goes.
+  `WORKER=0` = everything in one process, as before (the jobs module is loaded only then).
+- **Every scheduled job is in `jobs.ts`** (started by the worker): live polls (football, AF, basketball, NFL, tennis),
+  fixtures / results / settling, voiding, odds, line-ups and injuries, model builds and daily tuners, more predictions,
+  news, data health, backups, warmers, sitemaps, hubs, search indexes, highlight look-ups. `services/role.ts` says which
+  process a module runs in (`isWeb`, `isWorker`, `runsJobs`); the web entry never imports `jobs.ts`
+  (`npm run test:fix202` checks the source and what is loaded at run time). The routes moved from `index.ts` to `app.ts`
+  (the same app runs in both processes).
+- **Model state → the web process (`services/shared.ts`).** After each build the worker publishes what the pages read
+  (v8.serialize into `shared_state`, an IPC message; the web process reads that one row and swaps it in; a 30-s
+  version check catches a missed message; on start the web process loads the last copies). Published: football v2
+  params, v3 group states (one key per group) + team-page trend snapshots, club Elo, national Elo, feature-model state
+  (teams, lookups and the fixtures from yesterday on), AF line-up / injury features (games from 2 days ago on), squad
+  values (reload), basketball leagues (League / LeagueV2 go as plain data and come back as instances) + player talent
+  + NBA injury version, NFL ratings (the engine without its box-score context; the web process joins it to the games and
+  box scores it reads itself and only adds newly finished games on top, never replays), tennis ratings snapshot,
+  Football-Data.org window + standings + live list, API-Football window + league names + tables + each live tick's
+  changes, the live-score book, hubs, search indexes (football, basketball), visitor countries and data-centre ranges.
+  On the 10 Oct copy: the biggest v3 group (England) is 1.8 MB and loads in 12 ms; the feature state 4.2 MB, 39 ms;
+  the football search index 2.7 MB, 29 ms.
+- **Live games (`services/liveState.ts`).** The worker's live tick writes one `live_state` row per game (only the ones
+  that changed, `updated_at`), deletes the finished ones and sends the ids; the web process re-reads those rows and
+  pushes them (`matches:live` with the whole list, `match:live` to the changed games' rooms). `/api/matches/live` in
+  the web process is that same list.
+- **Stored pages (`services/pageCache.ts`, table `page_cache`).** Stale-while-revalidate: the worker builds them on
+  start, keeps them fresh (every page has its own `freshMs`; any query a visitor asked for in the last hour is kept
+  fresh too) and stores the ready-made views beside each page (signed out / paid / public …), so a request mostly
+  sends a string. A copy older than `freshMs` is still served while the worker builds the next. A restart serves the
+  last stored copy straight away. Stored: `/api/matches/upcoming` (30 s; rebuilt after each fixture-window refresh),
+  `/api/public/summary`, `/api/public/record`, `/api/public/results`, `/api/draw-alerts`, `/api/basketball/games`
+  (home lists, per access), `/api/basketball/standings/*`, `/api/basketball/record`, `/api/nfl/home` (per access),
+  `/api/nfl/record`, `/api/tennis/home` and `/api/tennis/record` (once tennis is public), `/api/more/*/record`, the
+  sitemaps, and the crawler HTML of every sport's home page in every language. A calendar day picked on the site and
+  members with unlocked games still get the list built for them (reading the published model state). Copies nobody
+  asked for in a week are dropped.
+- **Admin / staff requests go to the worker.** Everything outside the public API (`OPEN_API`) is passed by the web
+  process to the worker's own copy of the app on 127.0.0.1:`WORKER_PORT` (PORT + 1), body and all, with the visitor's
+  address; the worker's port answers only the web process (a key made at every start). So the job state, the
+  backtests and the rebuild buttons stay where the jobs run. Kept in the web process: `/api/perf`, `/api/draw-alerts`,
+  `/api/admin/visitors` (who is online lives there). While the worker restarts, admin requests get a 503.
+- **Visitor requests no longer start background work:** a news request never refreshes (a league with no stories asks
+  the worker to search it), a team page passes its players to the worker's warm-up, a team / ratings page never starts
+  an NFL replay, the tennis player page never starts a model thread.
+- **API-Football usage counters** are written as additions (both processes count; neither overwrites the other).
+- `/api/perf` (web): this process's stalls and jobs, plus `worker` (on, pid, restarts, last exit, memory, its own
+  stalls, the last run of each job, the heavy queue), `pages` (every stored page: age, build time, size, requests) and
+  `shared` (every state taken from the worker: size, load time). Worker log lines carry `"proc":"worker"`; its stalls
+  are logged from 2 s ("Worker: event loop blocked …") since no visitor waits for it.
+
+### Measured locally (10 Oct copy, provider keys blanked, this laptop)
+
+| | Before (one process) | After (web process) |
+| --- | --- | --- |
+| Web process listening after start | the boot plus the schedulers over 2 min | 0.7 s (no model load); the worker starts after |
+| `/api/basketball/games?days=7` / `?days=30&results=1` | built on request (3.8 s on the server) | 3–6 ms, first and second load |
+| `/api/public/summary`, `/record`, `/results` | built on request when cold | 2–4 ms |
+| `/api/draw-alerts`, `/api/nfl/home`, `/api/more/*/record`, `/`, `/de/basketball`, `/sitemap.xml` | built on request | 1–6 ms |
+| 180 page loads (every endpoint above + match / game / team / crawler pages, cold then warm) | — | 0 stalls over 300 ms in the web process |
+| Same predictions in both processes | — | basketball 40 games, club Elo 20, national Elo 20, v3 30, feature model 30: identical (made-up NFL games: identical, in the test) |
+| Memory | 975 MB (server) | web 157 MB, worker 576 MB (local, no provider data) |
+
+Tests: `npm run test:fix202` (the web entry never loads the job modules; a cold web process serves the stored copy
+at once; one process builds in place and serves the old copy while it rebuilds; basketball and NFL predictions equal
+across the processes; the real web + worker pair: a forwarded admin request, the worker's port refuses others, the
+worker leaves with the web process; live rows). Every other suite (fix200–fix206, proxy guard) passes as one process
+(the WORKER=0 path), and the signed-out leak test finds no leak against the split pair.
+
+Not measurable locally: real provider data and traffic (live ticks, the server's slower disk), so the targets are
+checked on the server.
+
+### Check after deploy (pending)
+
+1. Railway logs right after the deploy: "worker <pid>: admin requests on 127.0.0.1:3002"; no "worker exited" lines.
+   The site answers within 10 s of the deploy (the stored pages from before the deploy).
+2. One hour of normal traffic, `/api/perf` (web): `stallsLastHour` < 5, `worstLastHour` < 500 ms; `worker.on` true,
+   `worker.restarts` 0, `worker.jobs` lists the live polls, the model builds and the stored pages; `pages` ages under
+   each page's freshness; `shared` lists the v3 / bb / elo / feat / af / fd / search keys.
+3. First and second load of each endpoint in the targets list < 600 ms (browser network tab, signed out and signed in).
+4. Admin pages (data health, leagues, backups, tennis model …) work as before (the worker answers them).
+5. Memory: the service's memory graph; if the plan is tight, lower `WORKER_HEAP_MB` / `WEB_HEAP_MB` (Railway variables).
+6. If anything is wrong: set `WORKER=0` on Railway (everything back in one process; the stored pages are still used).
+
+Result: _to fill in after the check (web stalls / worst, worker restarts, memory)._
+
+Still built in the web process on a visitor's request (as before, every model now read from the published state):
+match / game / team / player pages and their caches (the provider is called for a page never opened before), the
+visitor's calendar (.ics), favourites and picks, and nfl-v2's recent-game features when nfl-v2 is adopted.

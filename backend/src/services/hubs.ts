@@ -11,6 +11,8 @@ import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
 import { nflPreview } from './nflGameExtras';
 import { slicer, yieldLoop } from './perf';
+import { runsJobs } from './role';
+import { onState, publishState } from './shared';
 
 /** slug = the URL (/predictions/<slug>); old = the fix125 URL, answered with a 301 to the slug (fix134) */
 export type HubSport = 'football' | 'basketball' | 'american-football';
@@ -55,6 +57,7 @@ export const hubRange = (from: string, to: string) => {
 
 const cache = new Map<string, { at: number; hub: Hub }>();
 const refreshing = new Set<string>();
+onState('hub:', (key, v: { at: number; hub: Hub }) => cache.set(key.slice(4), v));
 /**
  * This week's games of a hub with their previews. fix169: kept 15 minutes and then served as it is while a fresh copy is
  * built in the background (a yield between games — "GET /predictions/*" blocked 1.7 s); only a hub never built is
@@ -63,7 +66,8 @@ const refreshing = new Set<string>();
 export function buildHub(h: HubDef): Hub {
   const c = cache.get(h.slug);
   if (c) {
-    if (Date.now() - c.at >= 15 * 60 * 1000) void refreshHub(h);
+    // fix202: the web process serves the worker's copy (warmed every 15 minutes there)
+    if (runsJobs && Date.now() - c.at >= 15 * 60 * 1000) void refreshHub(h);
     return c.hub;
   }
   const g = hubSteps(h);
@@ -121,5 +125,6 @@ function* hubSteps(h: HubDef): Generator<void, Hub> {
   }
   const hub: Hub = { slug: h.slug, code: h.code, sport: h.sport, name: h.name, intro: h.intro, from, to, games, next };
   cache.set(h.slug, { at: Date.now(), hub });
+  publishState(`hub:${h.slug}`, { at: Date.now(), hub });
   return hub;
 }

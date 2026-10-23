@@ -13,6 +13,7 @@ import { similarity, normalizeName } from './history';
 import { Meetings, commonSense, type H2H } from './h2hGuard';
 import { Prediction } from './predictionModel';
 import { every, after, runSteps, runStepsAsync } from './perf';
+import { onState, publishState } from './shared';
 
 export const MODEL_EURO = 'elo-euro';
 const AF_OFFSET = 1_000_000_000;
@@ -74,6 +75,15 @@ export async function syncEuropeanCups(force = false) {
 /* ---------- club squad values (top 15 by current club, from the Transfermarkt player dump) ---------- */
 
 let clubValues: { name: string; tokens: string[]; value: number }[] = [];
+// fix202: built in the worker; the web process takes the finished ratings and settings (UEFA cup predictions)
+onState('elo-euro', (_k, v) => {
+  ratings.clear(); for (const [id, r] of v.ratings) ratings.set(id, r);
+  byNorm.clear(); for (const [n, id] of v.byNorm) byNorm.set(n, id);
+  meetings.load(v.meetings);
+  fdCache.clear(); valueByName.clear(); tokenIndex = null;
+  h2hUsed = v.h2hUsed; guardOpt = v.guardOpt; fit = v.fit; cupW = v.cupW; engine = v.engine; evalStats = v.evalStats; lastBuilt = v.lastBuilt; clubValues = v.clubValues;
+  popStats = null;
+});
 function loadClubValues() {
   const rows = db.prepare(`SELECT club, value_eur FROM squad_players WHERE club IS NOT NULL`).all() as any[];
   const byClub = new Map<string, number[]>();
@@ -439,6 +449,7 @@ function* buildSteps(): Generator<unknown, { matches: number; cupMatches: number
     };
   }
   lastBuilt = new Date().toISOString();
+  publishState('elo-euro', { ratings, byNorm, meetings: meetings.dump(), h2hUsed, guardOpt, fit, cupW, engine, evalStats, lastBuilt, clubValues });
   logger.info(`Club Elo: ${all.length} matches (${cups.length} UEFA cup), ${ratings.size} clubs, engine ${engine}`);
   return { matches: all.length, cupMatches: cups.length, clubs: ratings.size, engine };
 }

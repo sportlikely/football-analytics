@@ -11,7 +11,8 @@ const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
-  defaultMeta: { service: 'bet-to-beat-api' },
+  // fix202: lines from the worker process carry proc: "worker"
+  defaultMeta: { service: 'bet-to-beat-api', ...(process.env.SL_ROLE === 'worker' ? { proc: 'worker' } : {}) },
   transports: isProd
     ? [new winston.transports.Console()]
     : [

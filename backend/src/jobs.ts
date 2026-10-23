@@ -1,0 +1,223 @@
+/**
+ * fix202: every scheduled job of the site, in one place. Started by the worker process (worker.ts), or by the web
+ * process itself when WORKER=0 (the old one-process mode). The web entry (index.ts / app.ts) never imports this file
+ * (scripts/worker-split.test.mjs checks it): live polls, fixtures / results / settling, voiding, odds, line-ups and
+ * injuries, model builds and daily tuners, more predictions, news, data health, backups, warmers, sitemaps and
+ * highlight look-ups all run here.
+ */
+import footballDataAPI from './services/footballDataAPI';
+import logger from './utils/logger';
+import { timed, every, after, inBatches, heavy, mapGames } from './services/perf';
+import { slimForList } from './services/predCache';
+import { withLiveScore, publishLiveBook } from './services/liveScores';
+import { linkCheckTick } from './services/linkCheck';
+import { recordPredictions, settlePending } from './services/tracking';
+import { oddsTick } from './services/odds';
+import {
+  afUpcoming, afWithPredictions, pollAfLive, syncFdLiveFromAf, startAfMatchesScheduler, onAfWindow, withAfOdds, backfillAfOdds, warmMatchExtras
+} from './services/afMatches';
+import { startSquadValuesScheduler } from './services/squadValues';
+import { startClvScheduler } from './services/clv';
+import { startNationalEloScheduler } from './services/nationalElo';
+import { startClubEloScheduler } from './services/clubElo';
+import { startDataAuditScheduler } from './services/dataAudit';
+import { startNewsScheduler } from './services/news';
+import { startBasketballScheduler } from './services/basketball';
+import { startBdlScheduler } from './services/bdl';
+import { startBackups } from './services/backup';
+import { startAsn } from './services/asn';
+import { startTennisScheduler } from './services/tennis';
+import { startTennisModelScheduler } from './services/tennisModel';
+import { startGeo } from './services/geo';
+import { ensureIndexes } from './services/dbIndexes';
+import { warmHubs } from './services/hubs';
+import { startFeatureModelScheduler } from './services/featureModel';
+import { startModelDailyScheduler } from './services/modelDaily';
+import { startNflScheduler, backfillPlayerGames } from './services/nfl';
+import { markFresh, markFailed } from './services/freshness';
+import { startDataHealthScheduler } from './services/dataHealth';
+import { startMorePredictionsScheduler } from './services/morePredictions';
+import { resolveUnsettled, resolveUnsettledOnce, Providers as SettleProviders } from './services/unsettled';
+import { startApiFootballScheduler, rebuildAfFeaturesAsync, afGet, afRemaining } from './services/apiFootball';
+import { prepareModelV3Async } from './services/gridModel';
+import { writeLive, clearLive } from './services/liveState';
+import { startPageWarmer, refreshPages } from './services/pageCache';
+import { warmSearchIndex } from './services/teamPage';
+import { warmBbSearch } from './services/bbPlayers';
+
+let started = false;
+
+/** Start every scheduler (once). The worker calls it right after start; WORKER=0 calls it after listen. */
+export function startJobs() {
+  if (started) return;
+  started = true;
+  clearLive();
+
+  every('link check', linkCheckTick, 3600 * 1000).unref();
+  // fix169: the weekly prediction hubs are rebuilt in the background (visitors and crawlers get the cached copy)
+  every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
+  // fix175: indexes for the crawler pages, built off the main thread
+  after('db indexes', () => ensureIndexes(), 20 * 1000).unref();
+  after('hub warm', () => warmHubs(), 60 * 1000).unref();
+  // fix174: the player → games index for NFL player careers (once, in slices)
+  after('nfl player games', () => backfillPlayerGames().catch(e => logger.warn(`nfl player games: ${e.message}`)), 5 * 60 * 1000).unref();
+  after('link check', () => linkCheckTick(), 10 * 60 * 1000).unref();
+  // fix202: the search indexes (teams, players) for the web process
+  after('search index', () => { warmSearchIndex(); warmBbSearch(); }, 30 * 1000).unref();
+  every('search index', () => warmSearchIndex(), 6 * 3600 * 1000).unref();
+  every('bb search index', () => warmBbSearch(), 3600 * 1000).unref();
+
+  startLivePoll();
+
+  // Save/refresh predictions every time the fixture window is refreshed
+  // fix169: recorded in batches of 25 with yields (fix159 style)
+  footballDataAPI.onWindowRefreshed = matches => {
+    void timed('record predictions (main leagues)', () => inBatches(matches, 25, b => { recordPredictions(b); return []; })).catch(e => logger.warn(`record predictions: ${e.message}`));
+    refreshPages('upcoming');
+  };
+  // Same for API-Football competitions (national teams, UEFA cups, extra leagues)
+  // fix196: in the heavy() queue (one heavy job at a time, never during a live tick), always on the latest window;
+  // 5 matches a batch (25 right after the prediction cache was cleared blocked up to ~1 s)
+  let afWindowLatest: any[] = [];
+  onAfWindow(matches => { afWindowLatest = matches; void heavy('predict more-leagues window', async () => {
+    const matches = afWindowLatest;
+    const withP: any[] = await timed('predict more-leagues window', () => inBatches(matches, 5, b => afWithPredictions(b), { live: true }));
+    await timed('record predictions (more leagues)', () => inBatches(withP, 10, b => { recordPredictions(b); return []; }, { live: true }));
+    refreshPages('upcoming');
+    // then the bookmaker odds for matches starting soon, so every tracked game can be compared with the market
+    // fix169: awaited and batched under a label (the continuation used to run after the label had ended)
+    const ms = await withAfOdds(matches).catch(err => { logger.warn('AF odds for tracking failed', { message: err.message }); return [] as any[]; });
+    if (ms.length) await timed('record predictions (odds)', () => inBatches(ms, 5, b => { recordPredictions(afWithPredictions(b)); return []; }, { live: true }));
+  }).catch(err => logger.warn('AF window predictions failed', { message: err.message })); });
+  // fix167: the schedulers start one after another over the first 2 minutes (each under its own name in /api/perf),
+  // not all at once ("boot (scheduler start)" blocked 11 s on every deploy). The fixture window comes first.
+  const STARTS: [string, () => unknown][] = [
+    // Warm the fixture window now and keep it fresh in the background
+    ['FD window', () => footballDataAPI.startBackgroundRefresh()],
+    // Extra competitions (national teams, Europa/Conference League, Israel, Saudi, more European leagues)
+    ['AF matches', () => startAfMatchesScheduler()],
+    ['basketball', () => startBasketballScheduler()],
+    // NFL games (fix136): every season once, then the current season every 6 h
+    ['nfl', () => startNflScheduler()],
+    // Injuries / suspensions / confirmed lineups (API-Football) for model v3 rows #12 and #13
+    ['API-Football', () => startApiFootballScheduler()],
+    // Squad market values for model v3 (weekly; first attempt after the history sync has team names)
+    // fix169: the async v3 build (the sync one froze the server 1.6 s), awaited inside the 'squad values' label
+    ['squad values', () => startSquadValuesScheduler(async () => { await prepareModelV3Async(); await rebuildAfFeaturesAsync(true); })],
+    ['balldontlie', () => startBdlScheduler()],
+    // Live closing-line value tracking (open price + v3 at 48 h, closing price in the last 35 min)
+    ['clv', () => startClvScheduler()],
+    // National-team Elo from international results since 2014 (API-Football)
+    ['national elo', () => startNationalEloScheduler()],
+    // European club Elo (UEFA cups + domestic results + squad values)
+    ['club elo', () => startClubEloScheduler()],
+    // Feature model + v3-mix (state every 30 min), daily champion / challenger at 04:00 UTC, report at 07:00 Jerusalem
+    ['feature model', () => startFeatureModelScheduler()],
+    ['model daily', () => startModelDailyScheduler()],
+    ['news', () => startNewsScheduler()],
+    ['data audit', () => startDataAuditScheduler()],
+    ['data health', () => startDataHealthScheduler()],
+    // Visitor countries: DB-IP country data, refreshed monthly (services/geo.ts)
+    ['geo', () => startGeo()],
+    // fix183: data-centre networks (iptoasn.com), so the visitor counter leaves out servers
+    ['asn', () => startAsn()],
+    // fix184: tennis data (Live Tennis API Pro, admin only)
+    ['tennis', () => startTennisScheduler()],
+    // fix190: tennis-v1 (admin only): report once the backfill reached 2023-01, weekly re-tune, predictions every 30 min
+    ['tennis model', () => startTennisModelScheduler()],
+    // Daily database backup (services/backup.ts)
+    ['backups', () => startBackups()],
+    // fix204: More predictions — saved before the start, checked after the game; league fits + backtests (the public gates) daily
+    ['more predictions', () => startMorePredictionsScheduler()]
+  ];
+  STARTS.forEach(([label, start], i) => after(`start ${label}`, start, Math.round((i * 120_000) / STARTS.length)));
+  // fix202: the stored pages (match list, records, basketball / NFL / tennis home …): built once the windows and models
+  // had a moment to load, then kept fresh
+  after('stored pages', () => startPageWarmer(), 20 * 1000);
+
+  // Settle finished matches every 10 minutes (first run after 1 minute)
+  // fix200: games past kick-off + 48 h without a final are looked up (by id, then by the two teams) once an hour and
+  // settled, moved or voided (services/unsettled.ts); the stuck ones of 11–19 Oct once right after the deploy
+  const settleProviders: SettleProviders = {
+    afByIds: async ids => { if (afRemaining() < 50) throw new Error('API-Football budget reserve'); return (await afGet('/fixtures', { ids: ids.join('-') })).response || []; },
+    afByTeams: async (home, away, from, to) => { if (afRemaining() < 50) throw new Error('API-Football budget reserve'); return (await afGet('/fixtures/headtohead', { h2h: `${home}-${away}`, from, to })).response || []; },
+    fdRange: (from, to) => footballDataAPI.getMatchesInRange(from, to)
+  };
+  let unsettledAt = 0;
+  const settle = () =>
+    settlePending(
+      (from, to) => footballDataAPI.getMatchesInRange(from, to),
+      async ids => (afRemaining() > 50 ? ((await afGet('/fixtures', { ids: ids.join('-') })).response || []) : [])
+    )
+      .then(async r => {
+        if (Date.now() - unsettledAt > 3600 * 1000) {
+          unsettledAt = Date.now();
+          await resolveUnsettledOnce(settleProviders);
+          const u = await resolveUnsettled(settleProviders, { log: true });
+          if (u.checked) logger.info(`unsettled: ${u.checked} checked · ${u.settled} settled · ${u.moved} moved · ${u.voided} void · ${u.retry} to retry`);
+        }
+        markFresh('results', r ? `${r.settled} settled, ${r.pending} pending` : undefined);
+        if (r?.settled) refreshPages('summary', 'record', 'results');
+        return backfillAfOdds();
+      })
+      .catch(err => { markFailed('results', err); logger.warn('Settle job failed', { message: err.message }); });
+  after('settle picks', settle, 60 * 1000);
+  every('settle picks', settle, parseInt(process.env.SETTLE_INTERVAL_MS || '600000', 10));
+  // Market odds: decide every 10 minutes which competitions deserve a fetch (budget-aware)
+  const odds = () =>
+    footballDataAPI
+      .getUpcomingMatches(30)
+      .then(ms => oddsTick(ms))
+      .then(() => markFresh('odds'))
+      .catch(err => { markFailed('odds', err); logger.warn('Odds job failed', { message: err.message }); });
+  after('odds', odds, 90 * 1000);
+  every('odds', odds, parseInt(process.env.ODDS_TICK_MS || '600000', 10));
+  // Match-page tabs (averages, expected XI, H2H) prepared ahead for the next 48h, every 2 hours
+  const warmExtras = async () => {
+    const fd = await footballDataAPI.getUpcomingMatches(3).catch(() => [] as any[]);
+    await warmMatchExtras([...fd, ...afUpcoming(3)], 48);
+  };
+  after('warm match extras', () => warmExtras().catch(() => undefined), 4 * 60 * 1000);
+  every('warm match extras', () => warmExtras().catch(() => undefined), 2 * 3600 * 1000);
+}
+
+// Push live scores (every 20 s, fix115): Football-Data.org's live list is fetched fresh every 3rd tick (rate limit),
+// the last list is reused in between; API-Football's live=all is polled every tick while any match is live, and each
+// Football-Data.org match shows the fresher of the two readings (liveScores.ts) — the same score as the match page.
+// fix202: the tick writes its list to live_state; the web process pushes it on the socket (liveState.ts).
+function startLivePoll() {
+  const LIVE_POLL_MS = parseInt(process.env.LIVE_POLL_MS || '20000', 10);
+  let livePolling = false;
+  let liveTick = 0;
+  every('live poll', async () => {
+    if (livePolling) return; // a slow poll (API waits) must not overlap the next one
+    livePolling = true;
+    try {
+      // fix155: each part under its own label, so /api/perf names any freeze (football live / AF live / live push)
+      const fresh = liveTick++ % 3 === 0;
+      const fdRaw: any[] = await timed('football live', () => (fresh ? footballDataAPI.getLiveMatches(true) : footballDataAPI.liveSnapshot()));
+      const afLiveNow = await timed('AF live', () => pollAfLive(fdRaw.length > 0));
+      await timed('AF live', () => syncFdLiveFromAf(fdRaw));
+      // fix200: at most 20 games per turn, the rest on the next macrotask (a Saturday has 100+ live games)
+      const live: any[] = await timed('football live', async () => {
+        const fdLive = await mapGames(fdRaw, b => {
+          const withP = footballDataAPI.withPredictions(b.map(withLiveScore));
+          recordPredictions(withP); // locks anything that has kicked off (Football-Data.org matches only)
+          return withP;
+        });
+        const afLive = await mapGames(afLiveNow, b => afWithPredictions(b));
+        return mapGames([...fdLive, ...afLive], b => b.map(slimForList));
+      });
+      await timed('live push', async () => {
+        publishLiveBook();
+        writeLive('football', live);
+      });
+      markFresh('live', `${live.length} live`);
+    } catch (error: any) {
+      logger.warn('Live poll failed', { message: error.message });
+      markFailed('live', error);
+    } finally {
+      livePolling = false;
+    }
+  }, LIVE_POLL_MS);
+}

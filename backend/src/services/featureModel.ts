@@ -18,6 +18,8 @@
  */
 import logger from '../utils/logger';
 import { timed, every, runSteps, runStepsAsync, slicer, heavy } from './perf';
+import { runsJobs } from './role';
+import { onState, publishState } from './shared';
 import { db } from '../db';
 import { groupForCompetition, fdNameFor } from './history';
 import { playerKey } from './squadValues';
@@ -331,10 +333,24 @@ function* buildFeatureSteps(): Generator<unknown, FeatState> {
 }
 
 export function featureState(maxAgeMs = 30 * 60 * 1000): FeatState {
-  if (!STATE || Date.now() - STATE.builtAt > maxAgeMs) STATE = buildFeatures();
+  if (!STATE || Date.now() - STATE.builtAt > maxAgeMs) { STATE = buildFeatures(); publishFeatureState(STATE); }
   return STATE;
 }
 export const dropFeatureState = () => { STATE = null; };
+/*
+ * fix202: the worker builds the state; the web process gets the part its predictions read — every team and division,
+ * the squad / player lookups, and only the fixtures (with their line-ups and injuries) from yesterday on (the training
+ * rows and the old fixtures stay in the worker).
+ */
+function publishFeatureState(st: FeatState) {
+  if (!runsJobs) return;
+  const since = new Date(Date.now() - 86400000).toISOString();
+  const fixtures = new Map<number, Fx>();
+  for (const [id, f] of st.fixtures) if (f.kickoff >= since || UPCOMING.has(String(f.status))) fixtures.set(id, f);
+  const pick = <V>(m: Map<number, V>) => { const out = new Map<number, V>(); for (const id of fixtures.keys()) { const v = m.get(id); if (v) out.set(id, v); } return out; };
+  publishState('feat:state', { ...st, rows: [], fixtures, look: { ...st.look, starters: pick(st.look.starters), injuries: pick(st.look.injuries) } });
+}
+onState('feat:state', (_k, v: FeatState) => { STATE = v; ACTIVE = null; });
 /** Request path: never builds (a few seconds of work) — the scheduler keeps the state fresh every 30 minutes. */
 function liveFeatureState(): FeatState | null { return STATE; }
 /**
@@ -365,6 +381,7 @@ export function startFeatureModelScheduler() {
       if (STATE && sig === stateSig && Date.now() - STATE.builtAt < STATE_MAX_AGE_MS) return;
       STATE = await runStepsAsync(buildFeatureSteps(), 30, { live: true });
       stateSig = sig;
+      publishFeatureState(STATE);
     } catch (e: any) { logger.warn(`feature state: ${e.message}`); }
   }));
   // first run 7 min after boot: never on top of the basketball tick (45 s after boot, then every 30 min)
@@ -560,8 +577,11 @@ export function predictWindow(st: FeatState, m: FittedModel, from: string, to: s
 /* ------------------------------------------------------------------ */
 
 let ACTIVE: { id: number; model: FittedModel; cutoff: string } | null = null;
+let activeAt = 0;
 export function activeFeatureModel() {
-  if (ACTIVE) return ACTIVE;
+  // fix202: the web process looks again every 5 minutes (the worker fits and activates new models)
+  if (ACTIVE && (runsJobs || Date.now() - activeAt < 5 * 60 * 1000)) return ACTIVE;
+  activeAt = Date.now();
   const r: any = db.prepare(`SELECT id, json, cutoff FROM feature_model WHERE active = 1 ORDER BY id DESC LIMIT 1`).get();
   if (r) { try { ACTIVE = { id: r.id, model: JSON.parse(r.json), cutoff: r.cutoff }; } catch { ACTIVE = null; } }
   return ACTIVE;

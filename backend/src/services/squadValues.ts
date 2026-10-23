@@ -18,6 +18,7 @@ import logger from '../utils/logger';
 import { GROUPS, ALIASES, similarity } from './history';
 import { clubValueAt, syncClubValueHistory, historyClubs, historyVersion } from './squadHistory';
 import { every, after, slicer } from './perf';
+import { onState, publishState } from './shared';
 
 const SOURCE_URL =
   process.env.SQUAD_VALUES_URL || 'https://pub-e682421888d945d684bcae8890b0ec20.r2.dev/data/players.csv.gz';
@@ -274,6 +275,8 @@ function loadCache() {
   lastFetchedAt = s?.fetched_at || null;
 }
 loadCache();
+// fix202: the worker syncs; the web process reads the new values from the database when told
+onState('squad:synced', () => loadCache());
 
 /** Squad value for a football-data.co.uk team name, in EUR (top-15 sum), or null. */
 export function squadValueFor(group: string, fdName: string): { total: number; top: number; club: string } | null {
@@ -442,6 +445,7 @@ export async function syncSquadValues(force = false): Promise<{ clubs: number; m
       throw err;
     }
     loadCache();
+    publishState('squad:synced', { at: Date.now() });
     lastError = null;
     logger.info(`Squad values synced: ${clubs.size} clubs, ${mapped} mapped to history names`);
     return { clubs: clubs.size, mapped };

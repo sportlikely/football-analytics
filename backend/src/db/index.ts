@@ -41,6 +41,8 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 
 export const db: Database = DB_READ_ONLY ? new sqlite.DatabaseSync(DB_FILE, { readOnly: true }) : new sqlite.DatabaseSync(DB_FILE);
 if (!DB_READ_ONLY) db.exec('PRAGMA journal_mode = WAL');
+// fix202: the web process and the worker process write the same file: a writer waits up to 5 s for the other's lock
+db.exec('PRAGMA busy_timeout = 5000');
 db.exec('PRAGMA foreign_keys = ON');
 
 db.exec(`

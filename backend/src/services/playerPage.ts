@@ -15,6 +15,8 @@ import { afGet, afRemaining, afConfigured } from './apiFootball';
 import { pageBudgetLeft, isCrawlerRequest, noProviderCalls, outsideRequest } from './afUsage';
 import { resolveAfTeamId, competitionName, teamNameOf } from './teamPage';
 import { everyHeavy, yieldLoop } from './perf';
+import { isWeb, isWorker } from './role';
+import { onIpc, sendIpc } from './ipc';
 
 const AF_OFFSET = 1_000_000_000;
 // fix166: 24 h (was 12 h); 3 h while his club has played in the last 24 h (the provider's numbers catch up)
@@ -577,8 +579,11 @@ function seasonDataPage(pid: number) {
  * only while the daily data budget is comfortable), so the first visit to a player page is instant instead of ~15 s.
  */
 const warmQueue = new Set<number>();
+if (isWorker) onIpc('players:warm', m => warmPlayers(Array.isArray(m.ids) ? (m.ids as number[]).filter(Number.isFinite) : []));
 let warmTimer: NodeJS.Timeout | null = null;
 export function warmPlayers(ids: number[]) {
+  // fix202: the warm-up is the worker's job (the web process only passes the ids on)
+  if (isWeb) { if (ids.length) sendIpc({ t: 'players:warm', ids: ids.slice(0, 200) }); return; }
   for (const id of ids) {
     const pid = id >= AF_OFFSET ? id - AF_OFFSET : id;
     if (!pid || cache.has(pid)) continue;

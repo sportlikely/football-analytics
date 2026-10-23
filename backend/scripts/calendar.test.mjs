@@ -92,7 +92,7 @@ test('locking follows the site: free sees links, unlocked and Pro see the number
   const pm = ics(premium);
   assert.match(ev(pm, 'fb-101'), /See our prediction: https:\/\/sportlikely\.com\/match\/101/);
   assert.doesNotMatch(ev(pm, 'fb-101'), /61%/);
-  assert.match(ev(pm, 'bb-900'), /SL Basketball 3\.0: Los Angeles Lakers 64% · Boston Celtics 36%/);
+  assert.match(ev(pm, 'bb-900'), /SL Basketball 3.1: Los Angeles Lakers 64% · Boston Celtics 36%/);
   // Free with this game unlocked: the numbers; the basketball game (not unlocked): the link
   const fr = ics(free);
   assert.match(ev(fr, 'fb-101'), /Arsenal 61%/);

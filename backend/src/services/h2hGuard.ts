@@ -9,6 +9,9 @@ export interface H2H { n: number; share: number; x: number }
 export class Meetings {
   private map = new Map<string, { date: string; home: number; w: number }[]>();
   clear() { this.map.clear(); }
+  /** fix202: the meetings as plain data (published by the worker) and back */
+  dump() { return this.map; }
+  load(m: Map<string, { date: string; home: number; w: number }[]>) { this.map = m; }
   private key(a: number, b: number) { return a < b ? `${a}|${b}` : `${b}|${a}`; }
   /** w = result from the home side's view: 1 win, 0.5 draw, 0 loss. */
   add(home: number, away: number, date: string, w: number) {

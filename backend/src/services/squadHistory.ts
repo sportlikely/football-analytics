@@ -12,6 +12,7 @@
 import { gunzip } from 'zlib';
 import { promisify } from 'util';
 import { slicer } from './perf';
+import { onState, publishState } from './shared';
 const gunzipAsync = promisify(gunzip);
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -47,6 +48,8 @@ function load() {
   }
 }
 load();
+// fix202: synced in the worker; the web process reloads from the database when told
+onState('squad:history', () => load());
 
 /** Squad value (top-15 sum, EUR) of a Transfermarkt club as known at the start of date's month; null if unknown. */
 export function clubValueAt(club: string, date: string): number | null {
@@ -183,6 +186,7 @@ export async function syncClubValueHistory(competitions: string[], force = false
     throw e;
   }
   load();
+  publishState('squad:history', { at: Date.now() });
   logger.info(`Club value history: ${rows} club-months (${clubName.size} clubs, ${months.length} months)`);
   return { clubs: clubName.size, months: months.length, rows };
 }
