@@ -14,6 +14,7 @@
     "test:fix203": "tsc && node --no-warnings --test --test-force-exit scripts/trial-record.test.mjs",
     "test:fix200": "tsc && node --no-warnings --test --test-force-exit scripts/void-rules.test.ts scripts/data-health-store.test.ts scripts/unsettled.test.mjs scripts/tennis-worker.test.mjs",
     "test:fix205": "tsc && node --no-warnings --test --test-force-exit scripts/calendar.test.mjs",
+    "test:fix204": "tsc && node --no-warnings --test --test-force-exit scripts/more-predictions.test.mjs",
     "test:fix206": "tsc && node --no-warnings --test --test-force-exit scripts/how-it-works.test.mjs",
     "lint": "eslint src/**/*.ts",
     "migrate": "ts-node src/database/migrations.ts"

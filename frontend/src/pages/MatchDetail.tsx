@@ -22,6 +22,7 @@ import RowLink from '../components/sport/RowLink'
 import { tNodes } from '../lib/tNodes'
 import { slModel } from '../lib/modelNames'
 import { ModelName } from '../components/sport/game/ModelName'
+import MorePredictions from '../components/sport/game/MorePredictions'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
 const CompCode = createContext<string | undefined>(undefined)
@@ -815,6 +816,9 @@ function MatchDetail() {
                   <p className="text-sm text-faint">{(m as any).unpredicted === 'few-games' ? tt("Not predicted (team without enough games)") : tt("No prediction available for this match yet.")}</p>
                 )}
               </Section>
+
+              {/* fix204: more predictions from the same score grid (locked like the prediction) */}
+              <MorePredictions sport="football" id={m.id} rid={m.id} status={m.status} home={home.shortName || home.name} away={away.shortName || away.name} />
 
               <YourPicks sport="fb" gameId={m.id} home={home.shortName || home.name} away={away.shortName || away.name} />
               <GameNews home={{ team: home.name, short: home.shortName }} away={{ team: away.name, short: away.shortName }} />

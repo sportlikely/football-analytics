@@ -28,6 +28,7 @@ import { missingPredictions } from './missingPredictions';
 import { tennisDataCheck } from './tennis';
 import { bbStandingsCheck } from './bbSite';
 import { voidedThisMonth } from './unsettled';
+import { moreHealth } from './morePredictions';
 import { createHealthStore, NOT_YET } from '../utils/healthStore';
 
 type Level = 'ok' | 'warn' | 'fail';
@@ -160,6 +161,22 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     });
   } catch (e: any) {
     checks.push({ id: 'tennis-data', label: 'Tennis: each match once, predicted, up to date', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
+  await slice();
+  // fix204: More predictions — one line per sport: games of the next 48 h with a prediction but no extras, finished games
+  // without a check after 24 h (target zero)
+  try {
+    const NAME: Record<string, string> = { football: 'Football', basketball: 'Basketball', nfl: 'American football', tennis: 'Tennis' };
+    for (const m of moreHealth()) {
+      const bad = m.missing + m.unchecked;
+      checks.push({
+        id: `more-predictions-${m.sport}`, label: `${NAME[m.sport]}: More predictions saved and settled`, level: bad ? 'warn' : 'ok',
+        detail: bad ? `${m.missing} game(s) of the next 48 h without them · ${m.unchecked} finished game(s) not checked after 24 h` : 'Every game of the next 48 h has them, every finished game is checked',
+        items: [...m.missingIds.map(id => `not saved: ${id}`), ...m.uncheckedIds.map(id => `not checked: ${id}`)]
+      });
+    }
+  } catch (e: any) {
+    checks.push({ id: 'more-predictions', label: 'More predictions saved and settled', level: 'warn', detail: `Check failed: ${e.message}` });
   }
   await slice();
   // fix201: basketball tables — one line per league; a table whose rows are not unique teams, or a team in two tables

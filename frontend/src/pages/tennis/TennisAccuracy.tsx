@@ -9,6 +9,7 @@ const GROUP: Record<string, string> = { slam: 'Grand Slams', atp: 'ATP', wta: 'W
 const a = winnerAccuracy({
   title: t('Tennis accuracy'),
   model: 'tennis',
+  more: 'tennis',
   intro: t('Every pick is saved before the first serve and checked after the match. Nothing is removed. Walkovers and cancelled matches are not counted.'),
   url: '/tennis/accuracy',
   gameHref: id => `/tennis/match/${id}`,

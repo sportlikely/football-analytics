@@ -9,6 +9,7 @@ import { slModelOf } from '../../lib/modelNames'
 import { tennisRid, tennisRstatus, tennisHref, tennisPlayerFav, tennisTournamentFav, surname, roundName, flagOf, tierLabel, surfaceName, setsText, TENNIS_STRONG, type TMatch, type TPred } from '../../lib/tennis'
 import { Skeleton } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
+import MorePredictions from '../../components/sport/game/MorePredictions'
 import GamePage, { useGameTab, GameNews, Section, fmtGameDate, fmtGameTime, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
@@ -97,6 +98,8 @@ export default function TennisMatch() {
             noPrediction={m.state === 'upcoming' ? t('Our prediction for this match is saved in the 48 hours before the first serve.') : t('No prediction for this match.')}
           />
           {p && !p.locked && sets.length > 0 && <SetsCard m={m} p={p} />}
+          {/* fix204: more predictions from the same chain (locked like the prediction) */}
+          <MorePredictions sport="tennis" id={m.id} rid={tennisRid(m)} status={tennisRstatus(m)} home={m.home.name} away={m.away.name} />
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} title="Match preview" />}
           <GameNews home={{ sport: 'tennis', playerId: m.home.id ?? undefined }} away={{ sport: 'tennis', playerId: m.away.id ?? undefined }} title={t('News about both players')} />
         </>

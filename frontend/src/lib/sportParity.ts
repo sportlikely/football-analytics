@@ -50,6 +50,9 @@ export const PARITY = [
   { key: 'game.stats', label: 'Game stats', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'game.morePredictions', label: 'More predictions block under the prediction (fix204)', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'record.morePredictions', label: 'More predictions section on the record page (fix204)', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'seo.crawler.moreSentence', label: 'Crawler game page: one More predictions sentence (fix204)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.modelName', label: 'Public model name + version line under the prediction (ModelName, fix191)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.howItWorks', label: 'How-it-works link under the prediction + the how-it-works page of the sport (fix206)', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- team page ---------- */

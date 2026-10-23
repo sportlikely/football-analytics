@@ -6,6 +6,7 @@
  */
 import { db } from '../db';
 import { slModel } from '../utils/modelNames';
+import { moreSentence } from './morePredictions';
 import { tennisPublic, tennisMatchesBetween, tennisMatch, tennisPlayer, tennisTournament, tennisRankings, tennisWriteup, tierLabel, levelRank, type TMatch } from './tennisSite';
 import type { Lang } from './seoText';
 
@@ -172,6 +173,8 @@ export function tennisSeoPage(path: string, lang: Lang): TennisSeo | null {
       body: `${nav}<h1>${esc(fill(w.matchH1, x.home.name, x.away.name))}</h1><p><a href="${L(`/tennis/tournament/${x.tournament.key}`)}">${esc(x.tournament.name)}</a> · ${esc(tierLabel(x.tournament.tier, x.tour))}${x.round ? ` · ${esc(x.round)}` : ''}${x.tournament.surface ? ` · ${esc(x.tournament.surface)}` : ''} · ${esc(day(x.start, lang))} · ${slModel('tennis')}</p>`
         + (x.state === 'done' && x.score ? `<p>${x.score.sets.map(s => `${s[0]}-${s[1]}`).join(' ')}</p>` : '')
         + (pv ? `<section><h2>${esc(w.preview)}</h2><p>${esc(pv)}</p></section>` : '')
+        // fix204: the most likely set score (when that output is public), in the page's language
+        + (() => { try { const t = moreSentence('tennis', x.id, lang); return t ? `<p>${esc(t)}</p>` : ''; } catch { return ''; } })()
         + (d.form.home.length || d.form.away.length ? `<h2>${esc(w.form)}</h2>${formList(x.home.name, d.form.home)}${formList(x.away.name, d.form.away)}` : '')
         + `<h2>${esc(w.meetings)}</h2>${d.h2h.list.length ? list(d.h2h.list.slice(0, 8)) : `<p>${esc(w.firstMeeting)}</p>`}`
         + `<ul>${[x.home, x.away].filter(s => s.id).map(s => `<li><a href="${L(`/tennis/player/${s.id}`)}">${esc(s.name)}</a></li>`).join('')}</ul>`,

@@ -164,6 +164,9 @@ const pendingStmt = db.prepare(
 );
 // fix200: a void game keeps its reason (admin: /api/admin/voided)
 if (!(db.prepare(`PRAGMA table_info(results)`).all() as any[]).some(c => c.name === 'reason')) db.exec(`ALTER TABLE results ADD COLUMN reason TEXT`);
+// fix204: the half-time score (More predictions: half-time and HT/FT are checked against it)
+if (!(db.prepare(`PRAGMA table_info(results)`).all() as any[]).some(c => c.name === 'ht_home')) db.exec(`ALTER TABLE results ADD COLUMN ht_home INTEGER; ALTER TABLE results ADD COLUMN ht_away INTEGER`);
+const setHalfTime = db.prepare(`UPDATE results SET ht_home = ?, ht_away = ? WHERE match_id = ?`);
 const insertResult = db.prepare(
   `INSERT OR REPLACE INTO results (match_id, status, home_goals, away_goals, outcome, settled_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?)`
 );
@@ -176,7 +179,8 @@ const MAX_PENDING_DAYS = 21; // give up on a result after 3 weeks (void)
 const RESCHEDULE_STATUSES = new Set(['POSTPONED', 'SUSPENDED']);
 
 /** Normalised result from either source. status: FINISHED | VOID | RESCHEDULE | OPEN */
-interface ResultRow { id: number; status: 'FINISHED' | 'VOID' | 'RESCHEDULE' | 'OPEN'; raw: string; h: number | null; a: number | null }
+interface ResultRow { id: number; status: 'FINISHED' | 'VOID' | 'RESCHEDULE' | 'OPEN'; raw: string; h: number | null; a: number | null; ht?: [number, number] | null }
+const htOf = (s: any): [number, number] | null => (s && Number.isFinite(Number(s.home)) && Number.isFinite(Number(s.away)) && s.home !== null && s.away !== null ? [Number(s.home), Number(s.away)] : null);
 
 /** Football-Data.org match → result. 1X2 is settled on the 90-minute score (regularTime after extra time / penalties). */
 function fdResult(m: any): ResultRow {
@@ -184,7 +188,7 @@ function fdResult(m: any): ResultRow {
     const s = m.score?.duration && m.score.duration !== 'REGULAR' && m.score.regularTime ? m.score.regularTime : m.score?.fullTime;
     const h = s?.home, a = s?.away;
     if (h === null || h === undefined || a === null || a === undefined) return { id: m.id, status: 'OPEN', raw: m.status, h: null, a: null };
-    return { id: m.id, status: 'FINISHED', raw: m.status, h, a };
+    return { id: m.id, status: 'FINISHED', raw: m.status, h, a, ht: htOf(m.score?.halfTime) };
   }
   if (m.status === 'CANCELLED') return { id: m.id, status: 'VOID', raw: m.status, h: null, a: null };
   if (RESCHEDULE_STATUSES.has(m.status)) return { id: m.id, status: 'RESCHEDULE', raw: m.status, h: null, a: null };
@@ -200,7 +204,7 @@ export function afResult(f: any): ResultRow {
   if (['FT', 'AET', 'PEN'].includes(st)) {
     const h = f.score?.fulltime?.home ?? f.goals?.home, a = f.score?.fulltime?.away ?? f.goals?.away;
     if (h === null || h === undefined || a === null || a === undefined) return { id, status: 'OPEN', raw: st, h: null, a: null };
-    return { id, status: 'FINISHED', raw: 'FINISHED', h, a };
+    return { id, status: 'FINISHED', raw: 'FINISHED', h, a, ht: htOf(f.score?.halftime) };
   }
   if (['AWD', 'WO', 'CANC', 'ABD'].includes(st)) return { id, status: 'VOID', raw: st, h: null, a: null };
   if (['PST', 'SUSP', 'INT', 'TBD'].includes(st)) return { id, status: 'RESCHEDULE', raw: st, h: null, a: null };
@@ -273,6 +277,7 @@ export async function settlePending(
       if (r.status === 'FINISHED') {
         const outcome: Outcome = r.h! > r.a! ? 'H' : r.h! < r.a! ? 'A' : 'D';
         insertResult.run(r.id, r.raw, r.h, r.a, outcome, now, null);
+        if (r.ht) setHalfTime.run(r.ht[0], r.ht[1], r.id);
         markSettled.run(now, r.id);
         settled++;
       } else if (r.status === 'VOID') {
@@ -328,7 +333,7 @@ export interface SettledRow {
 const MAIN_PRIORITY = ['grid-v3', 'elo-intl', 'elo-euro', 'dc-history-v2', 'poisson-dc-v1'];
 // v3-mix counts as the main league model only for games from the day it went live (before that it was a shadow);
 // feat-v1 never does
-const mainRank = (m: string, date?: string) => {
+export const mainRank = (m: string, date?: string) => {
   if (m === MIX_MODEL) { const since = mixLive() ? mixLiveSince() : ''; return since && date && date >= since ? -1 : 99; }
   if (m === FEAT_MODEL) return 99;
   const i = MAIN_PRIORITY.indexOf(m); return i < 0 ? 99 : i;

@@ -7,6 +7,8 @@ import { errorText, useAuth } from '../../lib/auth'
 import { t, LOCALE } from '../../lib/i18n'
 import { ModelName } from './game/ModelName'
 import type { ModelSport } from '../../lib/modelNames'
+import MoreRecord from './accuracy/MoreRecord'
+import type { MoreSport } from './game/MorePredictions'
 
 /**
  * Accuracy / "Our record" (football's record page, shared by every sport since fix152b): period chips, the headline
@@ -54,6 +56,8 @@ export interface AccuracyAdapter {
   /** columns of the latest games table after Match / Score */
   recentCols: string[]
   footnote: string
+  /** fix204: the sport's "More predictions" record */
+  more: MoreSport
   /** admins: the detailed statistics page (football) */
   detailed?: () => ReactNode
 }
@@ -309,6 +313,8 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
           </Card>
 
           {rec.after}
+
+          <MoreRecord sport={a.more} />
 
           <p className="text-xs text-faint">{a.footnote}</p>
         </>

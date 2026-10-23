@@ -10,6 +10,7 @@ import { slModelOf } from '../../lib/modelNames'
 import { NFL_STATUS, weekLabel, nick, nflTeamFav, nflRid, nflRstatus, setNflLeague, nflBase, nflLeagueName, nflModelOf, nflStrongAt, type NflGame as Game, type NflSide, type NflPred, type StandRow } from '../../lib/nfl'
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
+import MorePredictions from '../../components/sport/game/MorePredictions'
 import YourPicks from '../../components/YourPicks'
 import { newerWinnerLive } from '../../lib/liveState'
 import { StatBars, LeagueSwitch, StandTable } from './parts'
@@ -117,6 +118,8 @@ export default function NflGame() {
             howCalc={p && p.why && !p.locked ? <NflModelParts g={g} p={p} injuries={d.injuries} /> : undefined}
             noPrediction={g.state === 'upcoming' ? t('Our prediction for this game is saved in the week of the game, before kick-off.') : t('No prediction for this game.')}
           />
+          {/* fix204: more predictions from the same model (locked like the prediction) */}
+          <MorePredictions sport="nfl" id={g.id} rid={nflRid(g)} status={nflRstatus(g)} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />
           {d.beforeAfter && <ChangeCard g={g} x={d.beforeAfter} />}
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
           {d.starters && (d.starters.home.length > 0 || d.starters.away.length > 0) && <Starters g={g} data={d.starters} />}

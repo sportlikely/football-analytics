@@ -108,6 +108,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth, startDataHealthScheduler } from './services/dataHealth';
+import { moreForGame, moreRecord, moreHealth, gateList, backtestReports, runBacktests, moreDaily, MORE_SPORTS, startMorePredictionsScheduler } from './services/morePredictions';
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders } from './services/unsettled';
 import { startApiFootballScheduler, afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
@@ -412,7 +413,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -651,6 +652,7 @@ app.post('/api/favorites/remove', jsonOnly, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Sign in required' });
   res.json({ data: removeFavorite(req.user.id, req.body?.kind, req.body?.ref) });
 });
+
 // fix205: calendar subscription (services/calendar.ts). The signed-in user's private link (made the first time,
 // ?lang= = the site language the file's words follow); "Reset link" makes a new one and the old stops at once.
 const calSite = (req: express.Request) => (CANONICAL_HOST ? `https://${CANONICAL_HOST}` : `${req.protocol}://${req.get('host')}`);
@@ -1091,6 +1093,29 @@ app.get('/api/admin/tennis/sample', (req, res) => {
 // fix190: tennis-v1 (admin only): the walk-forward report (per tour / surface, baselines, sets and totals, market
 // benchmark), the live settings and the progress. ?rebuild=1 rebuilds the report (minutes, background), ?retune=1 the
 // live settings only.
+// fix204: "More predictions" — one game's block (locked like the prediction: free users get { model, locked } and the
+// list of outputs; finished games open for everyone), a sport's record, and the admin view (gates, backtests, health)
+const MORE_RID: Record<string, (id: number) => number> = { football: id => id, basketball: id => -id, nfl: id => nflRid(id), tennis: id => tennisRid(id) };
+app.get('/api/more/:sport(football|basketball|nfl|tennis)/record', (req, res) => {
+  try { res.json({ data: moreRecord(req.params.sport as any, req.access === 'admin') }); } catch (e) { sendError(res, e, 'Failed to load the record'); }
+});
+app.get('/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', (req, res) => {
+  try {
+    const sport = req.params.sport as any, id = parseInt(req.params.id, 10);
+    res.set('Cache-Control', 'no-store');
+    res.json({ data: moreForGame(sport, id, { full: fullOne(req, MORE_RID[sport](id)), admin: req.access === 'admin' }) });
+  } catch (e) { sendError(res, e, 'Failed to load more predictions'); }
+});
+app.get('/api/admin/more-predictions', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: { gates: gateList(), backtests: backtestReports(), health: moreHealth() } }); } catch (e) { sendError(res, e, 'Failed'); }
+});
+// runs in the background (football + basketball about a minute, tennis a few); ?sport= one sport, ?refit=1 league fits first
+app.post('/api/admin/more-predictions/backtest', (req, res) => {
+  const sport = MORE_SPORTS.includes(String(req.query.sport) as any) ? (String(req.query.sport) as any) : undefined;
+  void (req.query.refit === '1' ? moreDaily(true) : runBacktests(sport)).catch(e => logger.warn(`more backtest: ${e.message}`));
+  res.json({ data: { started: true, sport: sport || 'all' } });
+});
 app.get('/api/admin/tennis-model', (req, res) => {
   res.set('Cache-Control', 'no-store');
   // fix194: in the heavy-job queue like the scheduled ticks
@@ -3684,7 +3709,9 @@ server.listen(PORT, () => {
     // fix190: tennis-v1 (admin only): report once the backfill reached 2023-01, weekly re-tune, predictions every 30 min
     ['tennis model', () => startTennisModelScheduler()],
     // Daily database backup (services/backup.ts)
-    ['backups', () => startBackups()]
+    ['backups', () => startBackups()],
+    // fix204: More predictions — saved before the start, checked after the game; league fits + backtests (the public gates) daily
+    ['more predictions', () => startMorePredictionsScheduler()]
   ];
   STARTS.forEach(([label, start], i) => after(`start ${label}`, start, Math.round((i * 120_000) / STARTS.length)));
   // Settle finished matches every 10 minutes (first run after 1 minute)

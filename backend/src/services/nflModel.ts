@@ -576,6 +576,8 @@ export async function buildReport(league: LeagueId = 1): Promise<Report> {
   const testSeasons = seasons.filter(s => finished.filter(g => g.season === s).length >= 30).slice(-5).filter(s => s !== seasons[0]);
   const per: any[] = [];
   const all = { ab: [] as Row[], d: [] as Row[], elo: [] as Row[] };
+  // fix204: every test game's pre-game numbers (both versions; the kept one is chosen below), for the More predictions backtest
+  const wf: { id: number; pAB: number; pD: number; mAB: number; mD: number; total: number }[] = [];
   const base = { home: { hit: 0, n: 0, ll: 0 }, record: { hit: 0, n: 0 } };
   for (const S of testSeasons) {
     const start = Math.min(...finished.filter(g => g.season === S).map(g => g.t));
@@ -597,6 +599,7 @@ export async function buildReport(league: LeagueId = 1): Promise<Report> {
       const x = featOf(pr);
       const pd = bl && x ? blendP(bl, x) : pr.p;
       d.push({ ...r, p: pd, mHat: bl && x ? marginFromP(pd) : r.mHat });
+      wf.push({ id: pr.g.id, pAB: pr.p, pD: pd, mAB: r.mHat, mD: bl && x ? marginFromP(pd) : r.mHat, total: pr.total });
       // baselines
       if (r.y !== 0.5) {
         base.home.n++; if (r.y === 1) base.home.hit++;
@@ -620,6 +623,7 @@ export async function buildReport(league: LeagueId = 1): Promise<Report> {
   }
   const llAB = all.ab.length ? logLossOf(all.ab) : null, llD = all.d.length ? logLossOf(all.d) : null;
   const useD = llAB !== null && llD !== null && Number.isFinite(llD) && Number.isFinite(llAB) && llD < llAB - 0.0005;
+  try { sync(`more-wf-${league}`, wf.map(w => [w.id, Math.round((useD ? w.pD : w.pAB) * 10000) / 10000, Math.round((useD ? w.mD : w.mAB) * 10) / 10, Math.round(w.total * 10) / 10])); } catch { /* optional */ }
   logger.info(`${MODEL} total: A+B LL ${llAB === null ? '–' : llAB.toFixed(4)}, with efficiency ${llD === null ? '–' : llD.toFixed(4)} → ${useD ? 'efficiency blend (D) kept' : 'A+B kept'}`);
   const r1 = (x: number) => Math.round(x * 10) / 10;
   const report: Report = {
@@ -650,6 +654,11 @@ interface Live {
 const lives = new Map<LeagueId, Live>();
 const sync = (key: string, v: unknown) => db.prepare(`INSERT OR REPLACE INTO nfl_sync (key, at, detail) VALUES (?, ?, ?)`).run(key, new Date().toISOString(), JSON.stringify(v));
 const readSync = (key: string): any => { const r = db.prepare(`SELECT detail FROM nfl_sync WHERE key = ?`).get(key) as any; try { return r ? JSON.parse(r.detail) : null; } catch { return null; } };
+/** fix204: the walk-forward test games of the last report: [game id, home win chance, margin, total] */
+export function nflWalkForward(league: LeagueId): [number, number, number, number][] {
+  const v = readSync(`more-wf-${league}`);
+  return Array.isArray(v) ? v : [];
+}
 
 /** Re-tune on every finished season (+ the walk-forward report), then replay. Weekly (Tuesday) or when nothing is stored. */
 export async function retrain(league: LeagueId = 1): Promise<Report> {

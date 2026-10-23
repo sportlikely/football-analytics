@@ -1845,5 +1845,50 @@ export function tennisServeChances(servePoint: [number, number] | null | undefin
   return rescale(pa, pb, bo === 5 ? 5 : 3, rule, Math.min(0.995, Math.max(0.005, p1)));
 }
 
+/**
+ * fix204 "More predictions": the chain's own distributions — set scores, first set, total games — and the chance that
+ * no set reaches a tie-break (the same chain with the tie-break outcomes left out; a match tiebreak counts as one).
+ */
+export function tennisExtrasDist(pa: number, pb: number, bo: number, rule: number) {
+  const d = matchDist(pa, pb, bo, rule, true);
+  const need = bo === 5 ? 3 : 2;
+  let cur = new Map<number, number>([[0, 0.5], [1, 0.5]]);
+  let noTb = 0;
+  while (cur.size) {
+    const next = new Map<number, number>();
+    for (const [key, p] of cur) {
+      const af = key & 1, sa = (key >> 1) & 7, sb = key >> 4;
+      const kind = sa === need - 1 && sb === need - 1 ? rule : 0;
+      if (kind === 2) continue;
+      const sd = setDist(pa, pb, af === 1, kind);
+      for (let o = 0; o < 14; o++) {
+        if (o === 6 || o === 13 || !sd[o]) continue;
+        const aw = o < 7, q = p * sd[o];
+        const nsa = sa + (aw ? 1 : 0), nsb = sb + (aw ? 0 : 1), naf = (SET_OUT[o][0] + SET_OUT[o][1]) % 2 === 1 ? 1 - af : af;
+        if (nsa === need || nsb === need) { noTb += q; continue; }
+        const nk = naf + (nsa << 1) + (nsb << 4);
+        next.set(nk, (next.get(nk) || 0) + q);
+      }
+    }
+    cur = next;
+  }
+  return { sets: d.sets, first: d.first, games: d.games!, noTb };
+}
+/** the deciding-set rule outside the model's replay (no per-event history here): Slams since 2022 → 10-point tiebreak */
+export const tennisRuleFor = (tier: string | null, at: string | null) => (/slam/i.test(String(tier || '')) && Date.parse(at || '') >= SLAM_TB10 ? 1 : 0);
+/**
+ * fix204 backtest: the point model's serve chances of every finished tour match (not retired) before it was played,
+ * with the live settings (walk-forward ratings; the settings themselves were tuned on the whole history).
+ */
+export async function tennisExtrasWalkForward(fromMonth = 0): Promise<{ id: number; t: number; pa: number; pb: number; bo: number; rule: number; cat: string }[]> {
+  const st: Settings | null = store.get('settings');
+  const { c, R } = await loadData();
+  const out: { id: number; t: number; pa: number; pb: number; bo: number; rule: number; cat: string }[] = [];
+  await replayB(R, st?.b || B_DEFAULT, c.reg.size + 10, (i, pr) => {
+    if (TESTED(R.cat[i]) && !R.ret[i] && R.win[i] && R.sets[i]) out.push({ id: R.id[i], t: R.t[i], pa: pr.pa, pb: pr.pb, bo: R.bo[i], rule: R.rule[i], cat: CAT_NAME[R.cat[i]] });
+  }, fromMonth);
+  return out;
+}
+
 /* for the local test script */
 export const tennisModelInternals = { gameP, tbP, setDist, matchDist, winFast, rescale, gamesSummary, classify, preStartPrice, loadData, replayA, replayB, fitRankMap, A_DEFAULT, B_DEFAULT, RM_DEFAULT, FEng };

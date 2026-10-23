@@ -6,6 +6,7 @@ import { winnerAccuracy } from '../../components/sport/accuracy/winner'
 const a = winnerAccuracy({
   title: t('American football accuracy'),
   model: 'american-football',
+  more: 'nfl',
   intro: t('Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. Strong picks: 70%+ in the NFL, 75%+ in college football.'),
   url: '/nfl/accuracy',
   gameHref: id => `/american-football/game/${id}`,

@@ -9,6 +9,9 @@ import { bbPreview } from './bbPreview';
 import { nflCurrentSeason, schoolName, HIDE_OTHER } from './nfl';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame as nflGameRaw, nflStandings, nflTeam as nflTeamRaw, nflPlayer as nflPlayerRaw, leagueOfTeamId, type NflGame } from './nflSite';
 import { nflPreview } from './nflGameExtras';
+import { moreSentence } from './morePredictions';
+// fix204: one sentence from More predictions on the crawler game page (all languages), only for public outputs
+const moreP = (sport: 'football' | 'basketball' | 'nfl', id: number, lang: string) => { try { const t = moreSentence(sport, id, lang); return t ? `<p>${esc(t)}</p>` : ''; } catch { return ''; } };
 import { listGuides, getGuide } from './guides';
 import { howItWorksSeo, hiwPublic, HIW_PATH } from './howItWorks';
 import { tennisMatchesBetween, levelRank, tierLabel, playedBefore, headToHead } from './tennisSite';
@@ -372,7 +375,7 @@ export function seoPage(rawPath: string): SeoInfo {
         const absences = (out.home?.length || out.away?.length)
           ? `<h2>${ui(lang, 'absences')}</h2><ul>${out.home?.length ? `<li>${esc(x.home)}: ${esc(out.home.join(', '))}</li>` : ''}${out.away?.length ? `<li>${esc(x.away)}: ${esc(out.away.join(', '))}</li>` : ''}</ul>` : '';
         return page(title, desc,
-          `<h1>${esc(name)} ${esc(pk.prediction)}</h1><p>${esc(x.comp || '')} · ${esc(when)} · ${slModel('football')}</p>${pv ? `<section><h2>${ui(lang, 'matchPreview')}</h2><p>${esc(pv.text)}</p></section>` : ''}`
+          `<h1>${esc(name)} ${esc(pk.prediction)}</h1><p>${esc(x.comp || '')} · ${esc(when)} · ${slModel('football')}</p>${pv ? `<section><h2>${ui(lang, 'matchPreview')}</h2><p>${esc(pv.text)}</p></section>` : ''}${moreP('football', x.id, lang)}`
           + (fh.length || fa.length ? `<h2>${ui(lang, 'recentForm')}</h2>${fbFormList(lang, x.home, x.homeId!, fh)}${fbFormList(lang, x.away, x.awayId!, fa)}` : '')
           + (h2.length ? `<h2>${ui(lang, 'lastMeetings')}</h2><ul>${h2.map(g => fbScoreLine(lang, g)).join('')}</ul>` : '')
           + (tbl ? `<h2>${ui(lang, 'table')}</h2><p>${esc(x.home)}: ${tbl.home} · ${esc(x.away)}: ${tbl.away}</p>` : '')
@@ -505,7 +508,7 @@ export function seoPage(rawPath: string): SeoInfo {
         return page(title, desc,
           `${nflNav}<h1>${esc(g.home.name)} vs ${esc(g.away.name)}</h1><p>${LN} ${esc(wk)} · ${esc(when)}${g.venue ? ` · ${esc(g.venue)}` : ''}</p>${g.score ? `<p>Final score ${g.score.home}–${g.score.away}</p>` : ''}`
           + `<p>${esc(g.home.name)} last 5: ${form('home') || '–'} · ${esc(g.away.name)} last 5: ${form('away') || '–'}.</p>`
-          + (() => { const w = nflPreview(g.id); return w ? `<h2>Preview</h2><p>${esc(w)}</p>` : ''; })()
+          + (() => { const w = nflPreview(g.id); return w ? `<h2>Preview</h2><p>${esc(w)}</p>` : ''; })() + moreP('nfl', g.id, 'en')
           + (d.h2h.length ? `<h2>Last meetings</h2>${nflList(d.h2h)}` : '')
           + `<ul><li><a href="/american-football/team/${g.home.id}">${esc(g.home.name)}</a></li><li><a href="/american-football/team/${g.away.id}">${esc(g.away.name)}</a></li><li><a href="${g.league === 2 ? '/american-football/college' : '/american-football'}/league">${LN} standings</a></li></ul>`,
           { ...extra, jsonld: [sportsEvent(`${g.home.name} vs ${g.away.name}`, g.kickoff, g.home.name, g.away.name, `${SITE}/american-football/game/${g.id}`, LN, 'American Football', desc)] });
@@ -574,7 +577,7 @@ export function seoPage(rawPath: string): SeoInfo {
             ], pk.bbFill, pk.bbTails);
           const pv = lang === 'en' ? bbPreview(g.id) : null;
           const v = page(`${name} ${lang === 'en' ? 'prediction & preview' : pk.previewTitle} · ${lg} · ${titleDate(g.date, lang)} | ${BRAND}`, desc,
-            `<h1>${esc(name)} ${esc(pk.prediction)}</h1><p>${esc(lg)} · ${esc(longDate(g.date, lang))} · ${slModel('basketball')}</p>${pv ? `<section><h2>${ui(lang, 'gamePreview')}</h2><p>${esc(pv)}</p></section>` : ''}`
+            `<h1>${esc(name)} ${esc(pk.prediction)}</h1><p>${esc(lg)} · ${esc(longDate(g.date, lang))} · ${slModel('basketball')}</p>${pv ? `<section><h2>${ui(lang, 'gamePreview')}</h2><p>${esc(pv)}</p></section>` : ''}${moreP('basketball', g.id, lang)}`
             + (rh.n && ra.n ? `<p>${ui(lang, 'season')}: ${esc(g.home)} ${rh.w}-${rh.l} · ${esc(g.away)} ${ra.w}-${ra.l}</p>` : '')
             + (fh.length || fa.length ? `<h2>${ui(lang, 'recentForm')}</h2>${bbFormList(lang, g.home, g.homeId, fh)}${bbFormList(lang, g.away, g.awayId, fa)}` : '')
             + (h2.length ? `<h2>${ui(lang, 'lastMeetings')}</h2><ul>${h2.map(x => bbScoreLine(lang, x)).join('')}</ul>` : '')

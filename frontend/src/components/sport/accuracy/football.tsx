@@ -42,6 +42,7 @@ const ou = (x: { pick: boolean; hit: boolean } | null | undefined) =>
 export const footballAccuracy: AccuracyAdapter = {
   title: t("Our record"),
   model: 'football',
+  more: 'football',
   intro: t("Every prediction is saved before kick-off and checked after the final whistle. Wins and losses stay here, nothing is edited."),
   url: '/public/record',
   calibrationText: t("Every chance we gave, for every result of every match (home win, draw and away win), grouped by the number we said. If our numbers are honest, the dots sit on the dashed line."),
