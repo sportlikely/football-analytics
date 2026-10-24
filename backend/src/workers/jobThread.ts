@@ -11,6 +11,8 @@ async function run(): Promise<unknown> {
   if (job === 'bb model') return (await import('../services/bbModel')).buildLeaguesHere(args[0] as string[]);
   if (job === 'national elo') return (await import('../services/nationalElo')).buildNationalEloHere();
   if (job === 'sitemap') { const seo = await import('../services/seo'); return seo.SITEMAPS[args[0] as string]?.() ?? null; }
+  // fix212: one player photo's crop (sharp) — the buffer comes back as a plain byte array
+  if (job === 'photo crop') { const r = await (await import('../services/playerPhotos')).faceSquare(Buffer.from(args[0] as Uint8Array)); return r ? { ...r, data: new Uint8Array(r.data) } : null; }
   if (job === 'more backtest') return (await import('../services/morePredictions')).moreBacktestHere(args[0] as any, args[1], args[2] as any);
   throw new Error(`unknown thread job ${job}`);
 }

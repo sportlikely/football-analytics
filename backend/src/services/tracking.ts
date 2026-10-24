@@ -4,6 +4,7 @@
  */
 import { MIX_MODEL, FEAT_MODEL, mixLive, mixLiveSince } from './featureModel';
 import { db } from '../db';
+import { afSettledUnchecked, checkFdFinal, noteAfSettled } from './fdReconcile';
 import logger from '../utils/logger';
 import { Prediction } from './predictionModel';
 import { doubleChance, dcHit, DC_STRONG, type DC } from '../utils/doubleChance';
@@ -179,7 +180,9 @@ const MAX_PENDING_DAYS = 21; // give up on a result after 3 weeks (void)
 const RESCHEDULE_STATUSES = new Set(['POSTPONED', 'SUSPENDED']);
 
 /** Normalised result from either source. status: FINISHED | VOID | RESCHEDULE | OPEN */
-interface ResultRow { id: number; status: 'FINISHED' | 'VOID' | 'RESCHEDULE' | 'OPEN'; raw: string; h: number | null; a: number | null; ht?: [number, number] | null }
+interface ResultRow { id: number; status: 'FINISHED' | 'VOID' | 'RESCHEDULE' | 'OPEN'; raw: string; h: number | null; a: number | null; ht?: [number, number] | null; viaAf?: boolean }
+/** fix212: kick-off + 2 h 20 (the expected end + 20 min) without a Football-Data final → API-Football's */
+export const AF_FALLBACK_MS = 140 * 60 * 1000;
 const htOf = (s: any): [number, number] | null => (s && Number.isFinite(Number(s.home)) && Number.isFinite(Number(s.away)) && s.home !== null && s.away !== null ? [Number(s.home), Number(s.away)] : null);
 
 /** Football-Data.org match → result. 1X2 is settled on the 90-minute score (regularTime after extra time / penalties). */
@@ -221,14 +224,18 @@ let settling = false;
  */
 export async function settlePending(
   fetchRange: (dateFrom: string, dateTo: string) => Promise<any[]>,
-  fetchAf?: (fixtureIds: number[]) => Promise<any[]>
+  fetchAf?: (fixtureIds: number[]) => Promise<any[]>,
+  /** fix212: the API-Football fixture of a Football-Data.org match (stored link), for the fallback below */
+  afIdOf?: (fdMatchId: number) => { fid: number; swapped: boolean } | null
 ) {
   if (settling) return { settled: 0, pending: 0, skipped: true };
   settling = true;
   try {
     const cutoff = new Date(Date.now() - SETTLE_AFTER_MS).toISOString();
     const pending: { match_id: number; utc_date: string }[] = pendingStmt.all(cutoff);
-    if (!pending.length) return { settled: 0, pending: 0 };
+    // fix212: FD games settled from API-Football whose own final has not been compared yet (last 7 days): fetched too
+    const toCheck = afSettledUnchecked().map(r => r.match_id);
+    if (!pending.length && !toCheck.length) return { settled: 0, pending: 0 };
     const now = new Date().toISOString();
     const giveUp = new Date(Date.now() - MAX_PENDING_DAYS * 86400000).toISOString();
     let settled = 0;
@@ -244,11 +251,13 @@ export async function settlePending(
     const fdPending = live.filter(p => p.match_id < AF_ID_OFFSET);
     const afPending = live.filter(p => p.match_id >= AF_ID_OFFSET);
     const results: ResultRow[] = [];
+    const checkDates = toCheck.length ? (db.prepare(`SELECT DISTINCT match_id, utc_date FROM predictions WHERE match_id IN (${toCheck.map(() => '?').join(',')})`).all(...toCheck) as { match_id: number; utc_date: string }[]) : [];
+    const fdRange = [...fdPending, ...checkDates].sort((a, b) => a.utc_date.localeCompare(b.utc_date));
 
-    if (fdPending.length) {
+    if (fdRange.length) {
       const day = (d: Date) => d.toISOString().slice(0, 10);
-      let from = new Date(new Date(fdPending[0].utc_date).getTime() - 24 * 3600 * 1000);
-      const end = new Date(new Date(fdPending[fdPending.length - 1].utc_date).getTime() + 24 * 3600 * 1000);
+      let from = new Date(new Date(fdRange[0].utc_date).getTime() - 24 * 3600 * 1000);
+      const end = new Date(new Date(fdRange[fdRange.length - 1].utc_date).getTime() + 24 * 3600 * 1000);
       while (from <= end) {
         const to = new Date(Math.min(from.getTime() + 9 * 24 * 3600 * 1000, end.getTime()));
         try {
@@ -271,12 +280,39 @@ export async function settlePending(
       }
     }
 
+    // fix212: Football-Data's final for a game we settled from API-Football: confirmed, or a mismatch (data health)
+    if (toCheck.length) {
+      const want = new Set(toCheck);
+      for (const r of results) if (want.has(r.id) && r.status === 'FINISHED' && r.h !== null && r.a !== null) checkFdFinal(r.id, r.h, r.a);
+    }
+    // fix212: FD games with no final from Football-Data 20 min after the expected end (kick-off + 2 h 20): API-Football's
+    // final through the stored link (same outcome rules; the result row says so, and FD's own final is compared later)
+    const gotFd = new Set(results.filter(r => r.status !== 'OPEN').map(r => r.id));
+    const afFallbackAt = new Date(Date.now() - AF_FALLBACK_MS).toISOString();
+    const viaAf = afIdOf && fetchAf ? fdPending.filter(p => p.utc_date <= afFallbackAt && !gotFd.has(p.match_id)).map(p => ({ id: p.match_id, link: afIdOf(p.match_id) })).filter(x => x.link && !x.link.swapped) as { id: number; link: { fid: number } }[] : [];
+    if (viaAf.length && fetchAf) {
+      const byFid = new Map(viaAf.map(x => [x.link.fid, x.id]));
+      for (let i = 0; i < viaAf.length; i += 20) {
+        try {
+          for (const f of await fetchAf(viaAf.slice(i, i + 20).map(x => x.link.fid))) {
+            const fdId = byFid.get(f?.fixture?.id);
+            if (!fdId) continue;
+            const r = afResult(f);
+            if (r.status === 'FINISHED' && r.h !== null && r.a !== null) { results.push({ ...r, id: fdId, raw: 'FINISHED', viaAf: true }); noteAfSettled(fdId, r.h, r.a); }
+          }
+        } catch (error: any) {
+          logger.warn('Settle (Football-Data game from API-Football) failed', { message: error.message });
+          break;
+        }
+      }
+    }
+
     const ids = new Set(live.map(p => p.match_id));
     for (const r of results) {
       if (!ids.has(r.id)) continue;
       if (r.status === 'FINISHED') {
         const outcome: Outcome = r.h! > r.a! ? 'H' : r.h! < r.a! ? 'A' : 'D';
-        insertResult.run(r.id, r.raw, r.h, r.a, outcome, now, null);
+        insertResult.run(r.id, r.raw, r.h, r.a, outcome, now, r.viaAf ? 'settled from API-Football (Football-Data had no final)' : null);
         if (r.ht) setHalfTime.run(r.ht[0], r.ht[1], r.id);
         markSettled.run(now, r.id);
         settled++;

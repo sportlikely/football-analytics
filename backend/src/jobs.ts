@@ -16,7 +16,8 @@ import { recordPredictions, settlePending } from './services/tracking';
 import { oddsTick } from './services/odds';
 import {
   afUpcoming, afWithPredictions, pollAfLive, syncFdLiveFromAf, startAfMatchesScheduler, onAfWindow, withAfOdds, backfillAfOdds, warmMatchExtras
-} from './services/afMatches';
+, afIdOfFd } from './services/afMatches';
+import { fdMatchesNeedingAf } from './services/fdReconcile';
 import { startSquadValuesScheduler } from './services/squadValues';
 import { startClvScheduler } from './services/clv';
 import { startNationalEloScheduler } from './services/nationalElo';
@@ -162,7 +163,8 @@ export function startJobs() {
   const settle = () =>
     settlePending(
       (from, to) => footballDataAPI.getMatchesInRange(from, to),
-      async ids => (afRemaining() > 50 ? ((await afGet('/fixtures', { ids: ids.join('-') })).response || []) : [])
+      async ids => (afRemaining() > 50 ? ((await afGet('/fixtures', { ids: ids.join('-') })).response || []) : []),
+      id => afIdOfFd(id) // fix212: FD games without a final 20 min after the expected end are settled from API-Football
     )
       .then(async r => {
         if (Date.now() - unsettledAt > 3600 * 1000) {
@@ -245,8 +247,11 @@ function startLivePoll() {
       // fix155: each part under its own label, so /api/perf names any freeze (football live / AF live / live push)
       const fresh = liveTick++ % 3 === 0;
       const fdRaw: any[] = await timed('football live', () => (fresh ? footballDataAPI.getLiveMatches(true) : footballDataAPI.liveSnapshot()));
-      const afLiveNow = await timed('AF live', () => pollAfLive(fdRaw.length > 0));
-      await timed('AF live', () => syncFdLiveFromAf(fdRaw));
+      // fix212: the window's matches FD is behind on (past kick-off and still TIMED, stale, or FD frozen) are live for
+      // API-Football's purposes: they keep live=all polled and get its reading every tick
+      const due = fdMatchesNeedingAf(await footballDataAPI.getUpcomingMatches(2).catch(() => [] as any[]));
+      const afLiveNow = await timed('AF live', () => pollAfLive(fdRaw.length > 0 || due.length > 0));
+      await timed('AF live', () => syncFdLiveFromAf(fdRaw, due));
       // fix200: at most 20 games per turn, the rest on the next macrotask (a Saturday has 100+ live games)
       const live: any[] = await timed('football live', async () => {
         const fdLive = await mapGames(fdRaw, b => {

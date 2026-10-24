@@ -963,6 +963,25 @@ const fdToAf = new Map<number, number | null>(); // FD match id → AF fixture i
 /** fix162: when a "not found" was stored (it is retried after 20 min); home/away swapped at API-Football */
 const fdToAfMissAt = new Map<number, number>();
 const fdToAfSwap = new Set<number>();
+// fix212: the links are kept (a restart or a new worker must not look every game up again while FD is frozen)
+db.exec(`CREATE TABLE IF NOT EXISTS fd_af_links (fd_id INTEGER PRIMARY KEY, af_id INTEGER NOT NULL, swapped INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL)`);
+try {
+  for (const r of db.prepare(`SELECT fd_id, af_id, swapped FROM fd_af_links WHERE at >= ?`).all(new Date(Date.now() - 30 * 86400000).toISOString()) as any[]) {
+    fdToAf.set(r.fd_id, r.af_id);
+    if (r.swapped) fdToAfSwap.add(r.fd_id);
+  }
+} catch { /* fresh database */ }
+const storeLink = db.prepare(`INSERT OR REPLACE INTO fd_af_links (fd_id, af_id, swapped, at) VALUES (?, ?, ?, ?)`);
+/** fix212: the stored link of a Football-Data.org match (no lookup), for settling and the data-health items */
+export function afIdOfFd(fdId: number): { fid: number; swapped: boolean } | null {
+  const v = fdToAf.get(fdId);
+  return v ? { fid: v, swapped: fdToAfSwap.has(fdId) } : null;
+}
+/** fix212: API-Football's last live=all reading of a fixture (FD-shaped) and when it was fetched */
+export function afLiveReading(fid: number): { match: any; at: number } | null {
+  const raw = afLiveRaw.get(fid);
+  return raw ? { match: toFdMatch(raw), at: afLiveAt } : null;
+}
 
 function nameKey(s: string) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ')
@@ -1076,6 +1095,7 @@ async function afFixtureForFd(match: any): Promise<number | null> {
     }
   }
   fdToAf.set(match.id, found);
+  if (found !== null) { try { storeLink.run(match.id, found, fdToAfSwap.has(match.id) ? 1 : 0, new Date().toISOString()); } catch { /* read-only copy */ } }
   if (found === null) { fdToAfMissAt.set(match.id, Date.now()); logger.info(`AF fixture for FD ${match.id} (${match.competition?.code} ${match.homeTeam?.name} – ${match.awayTeam?.name}, ${match.utcDate}): not found`); }
   return found;
 }
@@ -1109,11 +1129,13 @@ function logLiveStats(match: any, fid: number, raw: any, n: number) {
  * Football-Data.org live matches: report API-Football's reading of each (liveScores.ts) — from the last live=all answer,
  * or, when the fixture has just left it (ended), from /fixtures?id= (cached 45 s, only with ≥ 200 calls left today).
  */
-export async function syncFdLiveFromAf(fdMatches: any[]) {
+export async function syncFdLiveFromAf(fdMatches: any[], due: any[] = []) {
   if (!afConfigured()) return;
   let n = 0;
-  for (const m of fdMatches) {
-    if (!['IN_PLAY', 'PAUSED'].includes(m?.status)) continue;
+  // fix212: + the window's matches FD is behind on (past kick-off and still TIMED, or stale while they should be on)
+  const seen = new Set<number>();
+  const list = [...fdMatches.filter(m => ['IN_PLAY', 'PAUSED'].includes(m?.status)), ...due].filter(m => m && !seen.has(m.id) && seen.add(m.id));
+  for (const m of list) {
     if (++n % 20 === 0) await yieldLoop(); // fix200: 20 games per turn
     try {
       const fid = await afFixtureForFd(m);

@@ -22,7 +22,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, DB_READ_ONLY } from '../db';
 import logger from '../utils/logger';
-import { yieldLoop } from './perf';
+import { yieldLoop, yieldEvery } from './perf';
+import { threadJobsOn, inThread } from './threadJob';
 
 export type PhotoSport = 'tennis' | 'basketball';
 export const PHOTO_SPORTS: PhotoSport[] = ['tennis', 'basketball'];
@@ -300,7 +301,9 @@ export async function photoFor(ours: Ours & { id: number }): Promise<{ status: s
   const img = await get(info.thumb);
   const buf = Buffer.from(await img.arrayBuffer());
   if (buf.length > 8e6) { save(sport, id, ours.name, { ...base, status: 'none', reason: `${d.reason}; image too large` }); return { status: 'none', reason: 'too large' }; }
-  const sq = await faceSquare(buf).catch(e => { logger.warn(`player photos: crop ${sport} ${id}: ${e?.message || e}`); return null; });
+  // fix212: the crop (sharp: decode, face box, resize, WebP) runs in a job thread — the worker's loop stays free
+  const sq = await (threadJobsOn() ? inThread<{ data: Buffer; mime: string; ext: string } | null>('photo crop', [buf]).then(r => (r && (r as any).data ? { ...r, data: Buffer.from((r as any).data) } : r)) : faceSquare(buf))
+    .catch(e => { logger.warn(`player photos: crop ${sport} ${id}: ${e?.message || e}`); return null; });
   const out = sq || { data: buf, mime: info.mime, ext: info.mime === 'image/png' ? 'png' : 'jpg' };
   const name = `${id}-${crypto.createHash('sha1').update(info.file).digest('hex').slice(0, 10)}.${out.ext}`;
   fs.mkdirSync(path.join(PHOTO_DIR, sport), { recursive: true });
@@ -381,20 +384,30 @@ function queue(limit: number) {
 /* ---------------- job ---------------- */
 
 const run = { at: null as string | null, done: 0, ok: 0, review: 0, none: 0, errors: 0, lastError: null as string | null, running: false };
-/** a batch of players (PHOTO_BATCH, default 30); stops on the first 429 */
+/**
+ * a batch of players (PHOTO_BATCH, default 30); stops on the first 429. fix212: the batch goes in slices of at most 20
+ * players, the loop yields after every player (and whenever 50 ms have passed), the image work is in a thread: the
+ * run was one 12-second turn ("player photos + web writes" stall).
+ */
+export const PHOTO_SLICE = 20;
 export async function photosTick(limit = Number(process.env.PHOTO_BATCH) || 30) {
   if (run.running || process.env.PLAYER_PHOTOS === '0') return;
   run.running = true;
   try {
     const list = queue(limit);
-    for (const p of list) {
-      try {
-        const r = await photoFor(p);
-        run.done++;
-        if (r.status === 'ok') run.ok++; else if (r.status === 'review') run.review++; else run.none++;
-      } catch (e: any) {
-        run.errors++; run.lastError = `${p.sport} ${p.id} ${p.name}: ${e?.message || e}`;
-        if (/429/.test(String(e?.message))) { logger.warn(`player photos: ${run.lastError} — paused until the next run`); break; }
+    const step = yieldEvery(1, 50);
+    let stop = false;
+    for (let i = 0; i < list.length && !stop; i += PHOTO_SLICE) {
+      for (const p of list.slice(i, i + PHOTO_SLICE)) {
+        try {
+          const r = await photoFor(p);
+          run.done++;
+          if (r.status === 'ok') run.ok++; else if (r.status === 'review') run.review++; else run.none++;
+        } catch (e: any) {
+          run.errors++; run.lastError = `${p.sport} ${p.id} ${p.name}: ${e?.message || e}`;
+          if (/429/.test(String(e?.message))) { logger.warn(`player photos: ${run.lastError} — paused until the next run`); stop = true; break; }
+        }
+        await step();
       }
       await yieldLoop();
     }

@@ -33,7 +33,13 @@ function useData(): GamesData {
     }
     load(true)
     axios.get(`${API_URL}/public/results`, { params: { days: 30, limit: 40 } }).then(r => !off && setResults(r.data.data?.rows || [])).catch(() => !off && setResults([]))
-    const timer = setInterval(() => load(false), 5 * 60 * 1000)
+    // fix212: every 60 s while open, and again the moment the tab is back in front or the page comes out of the
+    // back / forward cache (iPhone Safari): a game that ended while the phone was in a pocket never keeps its old row
+    const timer = setInterval(() => load(false), 60 * 1000)
+    const onVisible = () => { if (document.visibilityState === 'visible') load(false) }
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) load(false) }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onShow)
     // live scores: keep a prediction this user already unlocked (the live feed carries the pick only)
     const onLive = (payload: { data: Match[] }) => {
       const live = new Map(payload.data.map(m => [m.id, m]))
@@ -41,7 +47,7 @@ function useData(): GamesData {
       setMatches(prev => prev.map(m => { const n = live.get(m.id); if (!n) return m; return n.prediction?.locked && m.prediction && !m.prediction.locked ? { ...n, prediction: m.prediction } : n }))
     }
     socket.on('matches:live', onLive)
-    return () => { off = true; clearInterval(timer); socket.off('matches:live', onLive) }
+    return () => { off = true; clearInterval(timer); socket.off('matches:live', onLive); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pageshow', onShow) }
   }, [])
 
   return useMemo(() => {

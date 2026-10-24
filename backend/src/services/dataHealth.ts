@@ -35,6 +35,9 @@ import { BB_MAJOR } from './basketball';
 import { scorersHealth } from './scorersCheck';
 import { perfChecks } from './perfChecks';
 import { photoHealth } from './playerPhotos';
+import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount } from './fdReconcile';
+import { bestLive } from './liveScores';
+import { afIdOfFd } from './afMatches';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -106,18 +109,26 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
 
   await slice();
   // ---------- 2. validity ----------
-  // games stuck as live, or never started, long after kick-off
+  // games stuck as live, or never started, after kick-off. fix212: a fail (not a warning) from 30 min after kick-off
+  // — the window already carries the freshest source per match (API-Football when Football-Data is behind), so a
+  // game still "not started" here is wrong on the site; the items say which source the shown status came from
   const stuck = matches.filter(m => {
     const t = new Date(m.utcDate).getTime();
     if (FINAL.includes(m.status)) return false;
     if (LIVE.includes(m.status)) return t < now - 3 * 3600 * 1000;
-    return t < now - 150 * MIN && t > now - 3 * 86400000;
+    return t < now - 30 * MIN && t > now - 3 * 86400000;
   });
   await slice();
+  const sourceOf = (m: any) => {
+    const b = m.id < 1_000_000_000 ? bestLive(m.id) : null;
+    if (b) return b.source === 'af' ? 'API-Football' : 'Football-Data';
+    if (m.id >= 1_000_000_000) return 'API-Football';
+    return afIdOfFd(m.id) ? 'Football-Data (API-Football twin linked, no reading)' : 'Football-Data (no API-Football twin)';
+  };
   checks.push({
-    id: 'stuck', label: 'Games with an up-to-date status', level: stuck.length ? 'warn' : 'ok',
-    detail: stuck.length ? `${stuck.length} game(s) still shown as live or not started long after kick-off (re-checked automatically)` : 'Every game past kick-off has a live or final status',
-    items: stuck.slice(0, 15).map(m => `${gameName(m)} · ${m.status}${m.minute ? ` ${m.minute}'` : ''}`)
+    id: 'stuck', label: 'Games with an up-to-date status', level: stuck.length ? 'fail' : 'ok',
+    detail: stuck.length ? `${stuck.length} game(s) still shown as live or not started 30+ min after kick-off${fdFreeze().frozen ? ' · Football-Data frozen, statuses from API-Football' : ''}` : `Every game past kick-off has a live or final status${fdFreeze().frozen ? ' (Football-Data frozen: from API-Football)' : ''}`,
+    items: stuck.slice(0, 15).map(m => `${gameName(m)} · ${m.status}${m.minute ? ` ${m.minute}'` : ''} · source: ${sourceOf(m)}${m.lastUpdated ? ` · FD lastUpdated ${String(m.lastUpdated).slice(11, 16)} UTC` : ''}`)
   });
   const overdueAf = afOverdue();
   if (overdueAf.length) {
@@ -125,6 +136,23 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     c.items = [...(c.items || []), ...overdueAf.filter(o => !stuck.some(s => s.id === o.id)).slice(0, 10).map(o => `${o.home} – ${o.away} (${o.competition}) · ${o.status}`)];
   }
 
+  // fix212: the Football-Data feed moving (lastUpdated advancing while games are on), and the results we had to settle
+  // from API-Football — with the ones Football-Data later disagreed on
+  const fz = fdFreeze();
+  checks.push({
+    id: 'fd-moving', label: 'Football-Data feed moving', level: fz.frozen ? 'fail' : 'ok',
+    detail: fz.frozen ? `${frozenText(fz)} — statuses, minutes and scores of its matches come from API-Football until it moves` : `Newest match update ${fz.newest ? `${israelTime(fz.newest)} (Israel time)` : 'not seen yet'}${fz.recoveredAt ? ` · recovered ${israelTime(fz.recoveredAt)}` : ''}`
+  });
+  try {
+    const mm = resultMismatches();
+    const n = afSettledCount(7);
+    checks.push({
+      id: 'result-sources', label: 'Results agree between the two providers', level: mm.length ? 'warn' : 'ok',
+      detail: mm.length ? `${mm.length} result(s) where Football-Data's final differs from the API-Football final we settled on` : `${n} game(s) settled from API-Football in 7 days (Football-Data had no final 20 min after the end); no disagreement`,
+      items: mm.map(x => `match ${x.match_id}: API-Football ${x.af}, Football-Data ${x.fd} (${x.at.slice(0, 16).replace('T', ' ')} UTC)`)
+    });
+  } catch { /* table missing */ }
+  await slice();
   // finished without a score
   const noScore = matches.filter(m => m.status === 'FINISHED' && (m.score?.fullTime?.home === null || m.score?.fullTime?.home === undefined));
   await slice();

@@ -10,7 +10,8 @@ import { predictFromStandings, Prediction, StandingsResponse } from './predictio
 import { predictV2, prepareModelV2 } from './historyModel';
 import { predictV3, prepareModelV3, prepareModelV3Async } from './gridModel';
 import { mixPredictions } from './featureModel';
-import { reportLive } from './liveScores';
+import { reportLive, withLiveScore } from './liveScores';
+import { reconcileFdWindow, freezeCheck, applyFreezeCheck, frozenText, fdFrozen } from './fdReconcile';
 import { predictClubEuro } from './clubElo';
 import { withMarket, oddsFor } from './odds';
 import { runsJobs } from './role';
@@ -187,8 +188,12 @@ class FootballDataAPI {
       await this.refreshWindow();
     }
     const cutoff = Date.now() + safeDays * 24 * 60 * 60 * 1000;
-    return (this.window || []).filter(m => new Date(m.utcDate).getTime() <= cutoff);
+    // fix212: every reader of the window (lists, calendar, favourites, Draws, SEO pages, data health) gets the freshest
+    // status per match — API-Football's when Football-Data.org is behind or frozen (liveScores.ts, fdReconcile.ts)
+    return (this.window || []).filter(m => new Date(m.utcDate).getTime() <= cutoff).map(withLiveScore);
   }
+  /** fix212: the last freeze check of the window (what changed since the refresh before) */
+  private fdPrev: { newest: number; idsKey: string } | null = null;
 
   /** Load the full MAX_DAYS window from the API. Keeps the old data if it fails. */
   async refreshWindow() {
@@ -202,7 +207,15 @@ class FootballDataAPI {
         }
         this.window = matches;
         this.windowLoadedAt = Date.now();
-        markFresh('fixtures', `${matches.length} matches`);
+        // fix212: FD answering 200 with the same data is not fresh — the freeze detector decides, and the matches FD
+        // is behind on get API-Football's reading before anyone reads the window
+        const now = Date.now();
+        const fz = freezeCheck(matches, now, this.fdPrev);
+        this.fdPrev = { newest: fz.newest, idsKey: fz.idsKey };
+        applyFreezeCheck(fz, now);
+        if (fdFrozen()) markFailed('fixtures', frozenText());
+        else markFresh('fixtures', `${matches.length} matches${fz.changed ? '' : ' · unchanged (no games on)'}`);
+        try { await reconcileFdWindow(matches, now); } catch (e: any) { logger.warn(`FD reconcile failed: ${e?.message || e}`); }
         await this.refreshStandings();
         this.publishWindow();
         if (this.onWindowRefreshed) {
