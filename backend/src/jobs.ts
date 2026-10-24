@@ -47,6 +47,7 @@ import { db } from './db';
 import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
+import { photosTick } from './services/playerPhotos';
 
 let started = false;
 
@@ -77,6 +78,9 @@ export function startJobs() {
   // fix209: "Scorers shown" — every live / finished game of the last 48 h names its scorers (and fetches them again)
   after('scorers check', () => scorersCheckTick(), 3 * 60 * 1000).unref();
   every('scorers check', () => scorersCheckTick(), 5 * 60 * 1000).unref();
+  // fix211: player photos (tennis + basketball) from Wikidata / Commons, a small batch every 20 min (PLAYER_PHOTOS=0 = off)
+  after('player photos', () => photosTick(), 4 * 60 * 1000).unref();
+  every('player photos', () => photosTick(), 20 * 60 * 1000).unref();
 
   startLivePoll();
 

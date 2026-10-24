@@ -27,6 +27,7 @@ import Highlights from '../../components/sport/game/Highlights'
 import MorePredictions from '../../components/sport/game/MorePredictions'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { basketballScorers } from '../../lib/scorers'
+import PlayerPhoto from '../../components/sport/PlayerPhoto'
 
 export interface Avg {
   games: number; won: number; lost: number; pointsFor: number; pointsAgainst: number
@@ -37,7 +38,7 @@ export interface Avg {
 export interface Brief { id: number; kickoff: string; league: string; home: boolean; opponent: string; opponentLogo: string | null; score: string | null; result: 'W' | 'L' | 'T' | null }
 /** fix174: NFL + college use the same tab — backToBack = a short week, offBye / bye = the bye week */
 export interface Sched { restDays: number | null; backToBack: boolean; games7: number; away7: number; nextIn: number | null; recent: Brief[]; upcoming: Brief[]; offBye?: boolean; bye?: string | null }
-interface BoxPlayer { id: number; name: string; short?: string; starter: boolean; minutes: number | null; points: number | null; fgm: number | null; fga: number | null; tpm: number | null; tpa: number | null; ftm: number | null; fta: number | null; rebounds: number | null; assists: number | null; steals?: number | null; blocks?: number | null; turnovers?: number | null; plusMinus?: number | null }
+interface BoxPlayer { id: number; name: string; short?: string; photo?: string | null; starter: boolean; minutes: number | null; points: number | null; fgm: number | null; fga: number | null; tpm: number | null; tpa: number | null; ftm: number | null; fta: number | null; rebounds: number | null; assists: number | null; steals?: number | null; blocks?: number | null; turnovers?: number | null; plusMinus?: number | null }
 interface BoxSide { team: any; players: BoxPlayer[]; top?: BoxPlayer | null }
 interface Detail {
   game: Game
@@ -470,7 +471,7 @@ function BoxTab({ d }: { d: Detail }) {
           <tbody>
             {played.map(pl => (
               <tr key={pl.id} className="border-t border-line/40 align-top">
-                <td className="py-1 font-sans text-ink whitespace-nowrap"><Link to={`/basketball/player/${pl.id}`} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
+                <td className="py-1 font-sans text-ink whitespace-nowrap">{pl.photo && <PlayerPhoto src={pl.photo} name={pl.name} size={18} className="mr-1.5 align-middle" />}<Link to={`/basketball/player/${pl.id}`} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
                 <td className="text-right px-1 text-muted">{pl.minutes !== null ? Math.round(pl.minutes) : '–'}</td>
                 <td className="text-right px-1 text-ink font-bold">{pl.points ?? '–'}</td>
                 <td className="text-right px-1 text-muted"><Shot m={pl.fgm} a={pl.fga} /></td>

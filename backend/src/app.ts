@@ -98,6 +98,7 @@ import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerMode
 import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch as tennisMatchB, tennisRecord, levelRank, tennisTournament as tennisTournamentB, tennisPlayer as tennisPlayerB, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { geoCredit, countryOf } from './services/geo';
 import { bbGameFacts as bbGameFactsB, bbGameSeo, bbGamePath, bbFactsFreshMs } from './services/seo';
+import { photoFile, photoCredits, photosAdmin, adminPhotoFile, approvePhoto, rejectPhoto, removePhoto, unblockPhoto, photosTick, type PhotoSport } from './services/playerPhotos';
 import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, todayGroups as todayGroupsB, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
 import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
@@ -464,7 +465,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -1129,6 +1130,32 @@ app.get('/api/admin/tennis-probe', async (_req, res) => {
 app.get('/api/admin/tennis/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: tennisStatus() }); } catch (e) { sendError(res, e, 'Tennis status failed'); }
+});
+// fix211: player photos — matches to review (low confidence), recent photos, blocks; approve / reject / remove / unblock
+app.get('/api/admin/player-photos', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: photosAdmin() }); } catch (e) { sendError(res, e, 'Player photos failed'); }
+});
+app.get('/api/admin/player-photos/file/:sport(tennis|basketball)/:file', (req, res) => {
+  const f = adminPhotoFile(req.params.sport, req.params.file);
+  if (!f) return res.status(404).end();
+  res.set('Cache-Control', 'no-store').type(path.extname(f)).sendFile(f);
+});
+app.post('/api/admin/player-photos/:sport(tennis|basketball)/:id(\d+)/:action(approve|reject|remove)', jsonOnly, (req, res) => {
+  const sport = req.params.sport as PhotoSport, id = Number(req.params.id);
+  const reason = String(req.body?.reason || '').slice(0, 200) || 'removed by admin';
+  const ok = req.params.action === 'approve' ? approvePhoto(sport, id) : req.params.action === 'reject' ? rejectPhoto(sport, id) : removePhoto(sport, id, reason);
+  if (ok) logger.info(`player photos: ${req.params.action} ${sport} ${id} by ${req.user?.email || 'admin'}`);
+  res.json({ data: { ok } });
+});
+app.post('/api/admin/player-photos/unblock', jsonOnly, (req, res) => {
+  const key = String(req.body?.key || '');
+  if (!/^(tennis|basketball):\d+$|^file:.+|^wd:Q\d+$/.test(key)) return res.status(400).json({ error: 'Unknown key' });
+  res.json({ data: { ok: unblockPhoto(key) } });
+});
+app.post('/api/admin/player-photos/run', jsonOnly, (_req, res) => {
+  void photosTick().catch(e => logger.warn(`player photos: ${e.message}`));
+  res.json({ data: { started: true } });
 });
 // fix195: duplicates, fixture ids, matches without a prediction (48 h), stale matches, names to check — target zero
 // fix200: voided games (reason) and the games waiting for another lookup (rules: utils/voidRules.ts)
@@ -2431,6 +2458,20 @@ app.get('/api/public/results', async (req, res) => {
 // Home page proof block: our record over 30 days (all games) and the strong-pick record (a stored page, 10 min)
 // Privacy page: which country data is in use (DB-IP, CC BY 4.0 — or iptoasn.com when that one is loaded)
 app.get('/api/public/geo-source', (_req, res) => res.json({ data: geoCredit() }));
+// fix211: player photos (Wikidata / Commons, free licences) — the files from our own storage (a year's cache: the file
+// name changes with the photo), the credits list for /credits; a removed photo is deleted at once (404 → initials)
+app.get('/media/players/:sport(tennis|basketball)/:file', (req, res) => {
+  const f = photoFile(req.params.sport, req.params.file);
+  if (!f) return res.status(404).set('Cache-Control', 'no-store').end();
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  res.type(path.extname(f)).sendFile(f);
+});
+app.get('/api/public/photo-credits', (req, res) => {
+  // a sport before its launch (BASKETBALL_PUBLIC / TENNIS_PUBLIC) only for admins, like its pages
+  const admin = req.access === 'admin';
+  try { res.set('Cache-Control', admin ? 'private, no-store' : 'public, max-age=600').json({ data: photoCredits().filter(r => admin || (r.sport === 'tennis' ? tennisPublic() : bbPublic())) }); }
+  catch (e) { sendError(res, e, 'Photo credits failed'); }
+});
 
 definePage({ name: 'summary', freshMs: 10 * 60 * 1000, warm: [{}], variants: VIEWS_PLAIN, build: async () => { await preloadSettled(30); return buildSummary(); } });
 app.get('/api/public/summary', async (req, res) => {

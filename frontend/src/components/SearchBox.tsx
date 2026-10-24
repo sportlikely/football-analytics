@@ -4,13 +4,14 @@ import { sportOfPath } from '../lib/sports'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { t as tt, LOCALE } from '../lib/i18n'
+import PlayerPhoto from './sport/PlayerPhoto'
 
 interface TeamHit { id: number; name: string; logo: string; national: boolean }
 interface CompHit { code: string; name: string; emblem: string | null; country: string | null }
 interface PlayerHit { id: number; name: string; position: string | null; team: string | null; teamLogo: string; country?: string | null }
 interface BbHits {
   teams: { id: number; name: string; logo: string | null; league: string }[]
-  players: { id: number; name: string; team: string; teamLogo: string | null; league: string; position: string | null }[]
+  players: { id: number; name: string; team: string; teamLogo: string | null; photo?: string | null; league: string; position: string | null }[]
   leagues: { code: string; name: string; country: string; logo: string | null }[]
   games: { id: number; kickoff: string; status: string | null; league: string; home: string; away: string }[]
 }
@@ -107,7 +108,8 @@ export default function SearchBox({ compact = false, onDone }: { compact?: boole
       {hits.players.length > 0 && <div className="label px-3 pt-2 pb-1">{tt("Players")}</div>}
       {hits.players.map(p => (
         <Link key={`bp${p.id}`} to={`${base}/player/${p.id}`} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
-          <span className="w-6 h-6 rounded-full bg-surface2 grid place-items-center text-[10px] font-bold text-muted flex-shrink-0">{p.name.split(' ').map(w => w[0]).slice(0, 2).join('')}</span>
+          {/* fix211: the player's photo (tennis, basketball) — initials when there is none or it fails */}
+          <PlayerPhoto src={p.photo} name={p.name} size={24} />
           <span className="text-sm font-semibold text-ink truncate">{p.name}</span>
           <span className="ml-auto flex items-center gap-1.5 text-[11px] text-faint min-w-0">
             {p.teamLogo && <img src={p.teamLogo} alt="" width={14} height={14} className="w-3.5 h-3.5 object-contain flex-shrink-0" />}

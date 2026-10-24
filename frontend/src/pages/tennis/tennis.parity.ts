@@ -38,6 +38,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'team.miniTable', // the ranking around the player
     'team.news',
     'player.stats', // serve / return numbers (Player analysis)
+    'player.photo', // fix211: Commons photo + credit (TennisPlayer), also match header, rows, rankings, search
     'player.career', // titles in our data
     'player.injuries', // stoppages
     'league.table', // tournament: the draw

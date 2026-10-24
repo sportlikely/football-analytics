@@ -14,6 +14,7 @@ import { isCrawlerRequest } from './afUsage';
 import { yieldLoop, yieldEvery } from './perf';
 import { runsJobs } from './role';
 import { onState, publishState } from './shared';
+import { photoUrl, photoCredit } from './playerPhotos';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_roster (
@@ -136,6 +137,9 @@ function injuryOf(teamName: string, name: string) {
   return x ? { status: x.status, comment: x.comment, reported: x.reported } : null;
 }
 
+/** fix211: the player's photo (Wikidata / Commons) and its credit, or null (the page shows the jersey number / initials) */
+const photoOf = (id: number) => ({ photo: photoUrl('basketball', id), photoCredit: photoCredit('basketball', id) });
+
 export async function bbPlayer(id: number) {
   const rows = db.prepare(`
     SELECT ps.*, g.kickoff, g.code, g.season, g.status, g.home_id, g.away_id, g.home_name, g.away_name, g.home_logo, g.away_logo, g.hs, g.as_
@@ -151,7 +155,7 @@ export async function bbPlayer(id: number) {
     const team = { id: ros.team_id, name: ros.home_id === ros.team_id ? ros.home_name : ros.away_name, logo: ros.home_id === ros.team_id ? ros.home_logo : ros.away_logo };
     const isNbaR = ros.code === 'NBA';
     const b = isNbaR ? bdlPlayerOf(ros.name, team.name) : null;
-    return { player: { id, name: displayName(ros.name, b), team, league: { code: ros.code, name: leagueName(ros.code) } }, bio: rosterBio, current: null, seasons: [], form: [], log: [], nba: b ? await nbaPart(b, team.name, ros.name) : null };
+    return { player: { id, name: displayName(ros.name, b), team, league: { code: ros.code, name: leagueName(ros.code) }, ...photoOf(id) }, bio: rosterBio, current: null, seasons: [], form: [], log: [], nba: b ? await nbaPart(b, team.name, ros.name) : null };
   }
   const last = rows[0];
   const teamOf = (r: any) => (r.team_id === r.home_id ? { id: r.home_id, name: r.home_name, logo: r.home_logo } : { id: r.away_id, name: r.away_name, logo: r.away_logo });
@@ -206,7 +210,7 @@ export async function bbPlayer(id: number) {
   // the team he is on now (roster) if it differs from his last game's team (a transfer)
   const nowTeam = ros && ros.team_id !== team.id ? { id: ros.team_id, name: ros.home_id === ros.team_id ? ros.home_name : ros.away_name, logo: ros.home_id === ros.team_id ? ros.home_logo : ros.away_logo } : team;
   return {
-    player: { id, name: displayName(last.name, bdl), team: nowTeam?.name ? nowTeam : team, league: { code: ros?.code || last.code, name: leagueName(ros?.code || last.code) } },
+    player: { id, name: displayName(last.name, bdl), team: nowTeam?.name ? nowTeam : team, league: { code: ros?.code || last.code, name: leagueName(ros?.code || last.code) }, ...photoOf(id) },
     bio: rosterBio,
     current: seasons[0] || null,
     seasons,
@@ -258,7 +262,7 @@ export async function bbSquad(teamId: number, teamName: string, code: string, se
     const name = displayName(nameRaw, bdl);
     return {
       id: pid, name, number: r?.number ?? bdl?.jersey ?? null, position: bdl?.position || r?.position || null, country: r?.country ?? bdl?.country ?? null, age: r?.age ?? null,
-      injury: injured.get(personKey(name)) || null,
+      injury: injured.get(personKey(name)) || null, photo: photoUrl('basketball', pid),
       statsFrom: cur.length ? 'current' : lastSeason ? { season: lastSeason, league: use[0]?.code || null } : null,
       gp: s.gp, starts: s.starts, min: s.min, pts: s.pts, reb: s.reb, ast: s.ast, fgPct: s.fgPct, tpPct: s.tpPct,
       pie: line?.pie ?? null, usg: line?.usg ?? null, net: line?.net ?? null
@@ -401,7 +405,7 @@ export function bbSearch(qRaw: string) {
   const teams = rank(idx.teams, 6).map(t => ({ id: t.id, name: t.name, logo: t.logo, league: t.code }));
   const players = rank(idx.players, 6).map(p => {
     const b = p.code === 'NBA' ? bdlPlayerOf(p.name, p.team) : null;
-    return { id: p.id, name: displayName(p.name, b), team: p.team, teamLogo: p.logo, league: p.code, position: b?.position || null };
+    return { id: p.id, name: displayName(p.name, b), team: p.team, teamLogo: p.logo, photo: photoUrl('basketball', p.id), league: p.code, position: b?.position || null };
   });
   const leagues = BB_LEAGUES.filter(l => {
     const toks = tokensOf(`${l.name} ${l.code} ${l.country}`);

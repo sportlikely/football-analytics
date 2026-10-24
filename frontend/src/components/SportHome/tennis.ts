@@ -12,7 +12,7 @@ import type { SportAdapter, SportHomeData, HGame, HNews, HResult, HTeam } from '
 
 /** "Vienna · R16" / "Australian Open · Final" */
 export const compOf = (m: TMatch) => [m.tournament.name, roundName(m)].filter(Boolean).join(' · ')
-const side = (s: TMatch['home']): HTeam => ({ id: s.id ?? s.name, name: s.name, short: surname(s), logo: null, flag: flagOf(s.country) || null, rank: s.rank, href: tennisHref.player(s.id) || '/tennis' })
+const side = (s: TMatch['home']): HTeam => ({ id: s.id ?? s.name, name: s.name, short: surname(s), logo: s.logo || null, flag: flagOf(s.country) || null, rank: s.rank, href: tennisHref.player(s.id) || '/tennis' })
 /** "Set 2" while a set is on, the sets won as the score */
 const liveLabel = (m: TMatch) => (m.score ? tt('Set {0}', { 0: Math.min(m.bestOf, m.score.won[0] + m.score.won[1] + 1) }) : tt('LIVE'))
 
@@ -31,8 +31,8 @@ export function toResult(m: TMatch): HResult {
   const pick = p && p.pick ? p.pick : null
   return {
     id: m.id, href: tennisHref.match(m.id), competition: compOf(m), date: m.start,
-    home: { name: m.home.name, logo: null, score: m.score ? m.score.won[0] : '', won: m.winner === 1 },
-    away: { name: m.away.name, logo: null, score: m.score ? m.score.won[1] : '', won: m.winner === 2 },
+    home: { name: m.home.name, logo: m.home.logo || null, score: m.score ? m.score.won[0] : '', won: m.winner === 1 },
+    away: { name: m.away.name, logo: m.away.logo || null, score: m.score ? m.score.won[1] : '', won: m.winner === 2 },
     pick: pick ? { words: surname(pick === 'H' ? m.home : m.away), pct: null, strong: false } : null,
     hit: p?.hit ?? null
   }

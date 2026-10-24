@@ -16,6 +16,7 @@ import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveCha
 import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts'
 import GamePreview from '../../components/sport/game/GamePreview'
 import Highlights from '../../components/sport/game/Highlights'
+import PlayerPhoto from '../../components/sport/PlayerPhoto'
 import { PlayerName, SurfaceTag, FormList, DrawTab, type Played, type DrawRound } from './parts'
 
 interface SR { matches: number; servicePointsWon: number | null; returnPointsWon: number | null; holdPct: number | null; breakPct: number | null; bpSaved: number | null; bpConverted: number | null; tiebreaksWon: number | null; tiebreaks: number }
@@ -72,7 +73,8 @@ export default function TennisMatch() {
   const live = m.state === 'live', done = m.state === 'done'
   const hs = surname(m.home), as = surname(m.away)
   const side = (s: TMatch['home']) => ({
-    name: s.name, logo: <span className="text-5xl sm:text-6xl leading-none" aria-hidden>{flagOf(s.country) || '🎾'}</span>, href: tennisHref.player(s.id) || '/tennis',
+    // fix211: the player's photo (flag as a badge); none: the flag as before
+    name: s.name, logo: s.logo ? <PlayerPhoto src={s.logo} name={s.name} flag={flagOf(s.country)} size={72} /> : <span className="text-5xl sm:text-6xl leading-none" aria-hidden>{flagOf(s.country) || '🎾'}</span>, href: tennisHref.player(s.id) || '/tennis',
     title: t('{0}: player page', { 0: s.name }), linkLabel: t('Player page →'), star: s.id ? <FavStar fav={tennisPlayerFav(s)} size="sm" /> : undefined,
     sub: s.rank ? t('World No. {0}', { 0: s.rank }) : null
   })

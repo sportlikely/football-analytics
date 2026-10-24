@@ -2402,5 +2402,14 @@
  "Goal confirmed": "Gol onaylandı",
  "Hide scorers": "Golcüleri gizle",
  "Show scorers": "Golcüleri göster",
- "No scorers yet": "Henüz golcü yok"
+ "No scorers yet": "Henüz golcü yok",
+ "Photo: {0}, {1}": "Fotoğraf: {0}, {1}",
+ "Photo: {0}": "Fotoğraf: {0}",
+ "Photo credits": "Fotoğraf kaynakları",
+ "Player photos come from Wikimedia Commons under free licences (CC0, public domain, CC BY, CC BY-SA). Each one is shown only on that player's own information and does not mean the player supports SportLikely.": "Oyuncu fotoğrafları özgür lisanslarla (CC0, kamu malı, CC BY, CC BY-SA) Wikimedia Commons’tan gelir. Her fotoğraf yalnızca o oyuncunun kendi bilgilerinde gösterilir ve oyuncunun SportLikely’yi desteklediği anlamına gelmez.",
+ "Is one of these photos yours, or of you, and you want it removed?": "Bu fotoğraflardan biri sizin mi ya da sizi mi gösteriyor ve kaldırılmasını mı istiyorsunuz?",
+ "and we will take it down the same day.": "ve aynı gün kaldıralım.",
+ "Search a player or author": "Oyuncu veya yazar ara",
+ "No player photos yet.": "Henüz oyuncu fotoğrafı yok.",
+ "Wikimedia Commons": "Wikimedia Commons"
 }

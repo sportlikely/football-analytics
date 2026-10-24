@@ -16,6 +16,8 @@ import { tournamentPlace, countryName } from '../utils/tennisPlaces';
 import { ROUND_ORDER, normRound, roundEn } from '../utils/tennisRounds';
 export { ROUND_ORDER, normRound, roundEn };
 
+import { photoUrl, photoCredit } from './playerPhotos';
+
 export const tennisPublic = () => process.env.TENNIS_PUBLIC === '1';
 /** Reveal / unlock ids of tennis matches (their own negative range: football > 0, basketball -id, NFL -(2e9 + id)) */
 export const tennisRid = (id: number) => -(4e9 + id);
@@ -26,7 +28,7 @@ const { classify } = tennisModelInternals;
 
 export type TennisTour = 'atp' | 'wta' | 'challenger' | 'itf';
 /** fix195: `name` = the full name (tennis_players), `short` = the real surname for tight rows */
-export interface TSide { id: number | null; name: string; short: string; country: string | null; rank: number | null; logo: null }
+export interface TSide { id: number | null; name: string; short: string; country: string | null; rank: number | null; logo: string | null }
 export interface TScore { sets: [number, number][]; won: [number, number]; points: [string, string] | null; server: 1 | 2 | null }
 export interface TMatch {
   id: number; tour: TennisTour; cat: string; women: boolean
@@ -133,8 +135,8 @@ export function shapeMatch(r: any): TMatch | null {
     },
     round: roundEn(code), roundCode: code, qualifying: quali || (!!code && code.startsWith('Q')), bestOf: r.best_of === 5 ? 5 : 3,
     start: r.scheduled_at, status: r.status || 'upcoming', state,
-    home: { id: r.p1_id ?? null, name: n1, short: shortName(n1, r.f1 && r.l1 ? r.l1 : null), country: r.c1 || null, rank: r.r1 ?? null, logo: null },
-    away: { id: r.p2_id ?? null, name: n2, short: shortName(n2, r.f2 && r.l2 ? r.l2 : null), country: r.c2 || null, rank: r.r2 ?? null, logo: null },
+    home: { id: r.p1_id ?? null, name: n1, short: shortName(n1, r.f1 && r.l1 ? r.l1 : null), country: r.c1 || null, rank: r.r1 ?? null, logo: photoUrl('tennis', r.p1_id) },
+    away: { id: r.p2_id ?? null, name: n2, short: shortName(n2, r.f2 && r.l2 ? r.l2 : null), country: r.c2 || null, rank: r.r2 ?? null, logo: photoUrl('tennis', r.p2_id) },
     score: scoreOf(r, state), winner: r.winner === 1 || r.winner === 2 ? r.winner : null, outcome: r.outcome || null, rid: tennisRid(r.id)
   };
 }
@@ -652,7 +654,9 @@ export function tennisPlayer(pid: number, full: boolean | ((rid: number) => bool
   const age = p.dob ? Math.floor((Date.now() - Date.parse(p.dob)) / (365.2425 * DAY)) : null;
   const analysis = playerAnalysis(pid, women);
   return {
-    player: { id: p.id, name: fullName(p.name, p.first_name, p.last_name), country: p.country || null, countryName: countryName(p.country), hand: p.hand || null, dob: p.dob || null, age: age && age > 10 && age < 60 ? age : null, height: p.height || null, tour: women ? 'wta' : 'atp', women, rank, points },
+    player: { id: p.id, name: fullName(p.name, p.first_name, p.last_name), country: p.country || null, countryName: countryName(p.country), hand: p.hand || null, dob: p.dob || null, age: age && age > 10 && age < 60 ? age : null, height: p.height || null, tour: women ? 'wta' : 'atp', women, rank, points,
+      // fix211: the photo (Wikidata / Commons) with its credit, or null (initials + flag)
+      photo: photoUrl('tennis', p.id), photoCredit: photoCredit('tennis', p.id) },
     rankTrend: trend.map(r => ({ date: r.date, rank: r.rank })),
     season: { year, won: thisYear.filter(x => x.won).length, lost: thisYear.filter(x => !x.won).length },
     form: recent.slice(0, 10).reverse().map(x => (x.won ? 'W' : 'L')),
@@ -676,7 +680,7 @@ export function tennisRankings(tour: 'atp' | 'wta', n = 200) {
     .all(...(prev ? [prev] : []), tour, d, n) as any[];
   return {
     tour, date: d, previous: prev,
-    rows: rows.map(r => ({ rank: r.rank, id: r.player_id || null, name: r.pname || r.player_name || '', country: r.country || null, points: r.points ?? null, move: r.prev ? r.prev - r.rank : null, isNew: !!prev && !r.prev }))
+    rows: rows.map(r => ({ rank: r.rank, id: r.player_id || null, name: r.pname || r.player_name || '', country: r.country || null, points: r.points ?? null, move: r.prev ? r.prev - r.rank : null, isNew: !!prev && !r.prev, photo: photoUrl('tennis', r.player_id) }))
   };
 }
 
@@ -688,7 +692,7 @@ export function tennisSearch(q: string, admin: boolean) {
   const like = `%${term}%`, start = `${term}%`, word = `% ${term}%`;
   const players = (db.prepare(`SELECT p.id, p.name, p.country, COALESCE(${rankSql('p')}, p.ranking) AS rank, p.tour FROM tennis_players p
     WHERE p.name LIKE ? AND COALESCE(p.tour, '') <> 'itf' ORDER BY (p.name LIKE ? OR p.name LIKE ?) DESC, (rank IS NULL), rank, p.name LIMIT 8`).all(like, start, word) as any[])
-    .map(p => ({ id: p.id, name: p.name, team: p.country || '', teamLogo: null, league: p.tour === 'wta' ? 'WTA' : 'ATP', position: p.rank ? `#${p.rank}` : null }));
+    .map(p => ({ id: p.id, name: p.name, team: p.country || '', teamLogo: null, photo: photoUrl('tennis', p.id), league: p.tour === 'wta' ? 'WTA' : 'ATP', position: p.rank ? `#${p.rank}` : null }));
   const seen = new Set<string>();
   const leagues: { code: string; name: string; country: string; logo: null }[] = [];
   for (const r of db.prepare(`SELECT tournament, tour, tier, MAX(scheduled_at) AS at FROM tennis_matches WHERE tournament LIKE ? AND source <> 'archive' AND scheduled_at >= ?

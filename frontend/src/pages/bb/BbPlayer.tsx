@@ -8,6 +8,7 @@ import { Card, Skeleton, TeamLogo } from './parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
 import { FavStar } from '../../lib/favorites'
 import { bbPlayerFav } from '../../lib/bb'
+import type { PhotoCreditT } from '../../components/sport/PlayerPhoto'
 
 interface Side { id: number; name: string; logo: string | null }
 interface SeasonRow { code: string; league: string; season: string; team: Side; gp: number; starts: number; min: number | null; pts: number | null; reb: number | null; ast: number | null; fgPct: number | null; tpPct: number | null; ftPct: number | null; tpm: number | null }
@@ -24,7 +25,7 @@ interface NbaLine {
   ranks: Record<string, number | null>
 }
 interface PlayerData {
-  player: { id: number; name: string; team: Side; league: { code: string; name: string } }
+  player: { id: number; name: string; team: Side; league: { code: string; name: string }; photo?: string | null; photoCredit?: PhotoCreditT | null }
   bio?: { number: string | null; country: string | null; position: string | null; age: number | null } | null
   current: SeasonRow | null
   seasons: SeasonRow[]
@@ -67,7 +68,8 @@ export default function BbPlayer() {
       {/* header: football's player header (fix152d) */}
       <PlayerHeader
         name={d.player.name}
-        photo={null}
+        photo={d.player.photo || null}
+        credit={d.player.photoCredit}
         noPhoto={jersey ? <span className="font-display text-4xl font-extrabold text-ink num">{jersey}</span> : <TeamLogo team={d.player.team} size={56} />}
         teamBadge={<TeamLogo team={d.player.team} size={28} />}
         star={<FavStar label fav={bbPlayerFav(d.player, d.player.team)} />}

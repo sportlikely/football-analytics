@@ -21,7 +21,8 @@
     "test:fix202": "tsc && node --no-warnings --test --test-force-exit scripts/worker-split.test.mjs",
     "test:fix208": "tsc && node --no-warnings --test --test-force-exit scripts/live-box.test.mjs",
     "test:fix209": "tsc && node --no-warnings --test --test-force-exit scripts/scorers.test.mjs",
-    "test:fix210": "tsc && node --no-warnings --test --test-force-exit scripts/no-web-compute.test.mjs"
+    "test:fix210": "tsc && node --no-warnings --test --test-force-exit scripts/no-web-compute.test.mjs",
+    "test:fix211": "tsc && node --no-warnings --test --test-force-exit scripts/player-photos.test.mjs"
   },
   "keywords": [
     "football",
@@ -32,31 +33,32 @@
   "author": "Yarin Boker",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "socket.io": "^4.7.2",
-    "pg": "^8.11.3",
-    "typeorm": "^0.3.17",
     "axios": "^1.6.2",
-    "bull": "^4.11.5",
-    "redis": "^4.6.11",
-    "jsonwebtoken": "^8.5.1",
     "bcryptjs": "^2.4.3",
-    "dotenv": "^16.3.1",
+    "bull": "^4.11.5",
     "cors": "^2.8.5",
-    "helmet": "^7.1.0",
-    "winston": "^3.11.0",
+    "date-fns": "^2.30.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "express-validator": "^7.0.0",
-    "date-fns": "^2.30.0"
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^8.5.1",
+    "pg": "^8.11.3",
+    "redis": "^4.6.11",
+    "sharp": "0.33.5",
+    "socket.io": "^4.7.2",
+    "typeorm": "^0.3.17",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.6",
-    "@types/bcryptjs": "^2.4.6",
-    "typescript": "^5.3.3",
-    "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",
-    "eslint": "^8.56.0"
+    "eslint": "^8.56.0",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
   }
 }

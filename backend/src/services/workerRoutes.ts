@@ -88,6 +88,7 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   { path: '/api/public/record', sport: 'football', by: 'stored', sample: '/api/public/record' },
   { path: '/api/public/results', sport: 'football', by: 'stored', sample: '/api/public/results' },
   { path: '/api/public/geo-source', sport: 'all', by: 'web', sample: '/api/public/geo-source' },
+  { path: '/api/public/photo-credits', sport: 'all', by: 'web', sample: '/api/public/photo-credits' }, // fix211: a cached list
   { path: '/api/public/summary', sport: 'football', by: 'stored', sample: '/api/public/summary' },
   { path: '/api/more/:sport(football|basketball|nfl|tennis)/record', sport: 'all', by: 'stored', sample: '/api/more/basketball/record' },
   { path: '/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/more/nfl/1' },

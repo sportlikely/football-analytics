@@ -41,6 +41,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'team.fixtures',
     'team.news',
     'player.stats',
+    'player.photo', // the provider's player image (NflPlayer)
     'league.table',
     'league.leaders',
     'league.favoriteStar',

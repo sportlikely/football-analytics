@@ -2402,5 +2402,14 @@
  "Goal confirmed": "Gol confermato",
  "Hide scorers": "Nascondi i marcatori",
  "Show scorers": "Mostra i marcatori",
- "No scorers yet": "Ancora nessun marcatore"
+ "No scorers yet": "Ancora nessun marcatore",
+ "Photo: {0}, {1}": "Foto: {0}, {1}",
+ "Photo: {0}": "Foto: {0}",
+ "Photo credits": "Crediti fotografici",
+ "Player photos come from Wikimedia Commons under free licences (CC0, public domain, CC BY, CC BY-SA). Each one is shown only on that player's own information and does not mean the player supports SportLikely.": "Le foto dei giocatori provengono da Wikimedia Commons con licenze libere (CC0, pubblico dominio, CC BY, CC BY-SA). Ognuna appare solo nelle informazioni di quel giocatore e non significa che il giocatore sostenga SportLikely.",
+ "Is one of these photos yours, or of you, and you want it removed?": "Una di queste foto è tua, o ti ritrae, e vuoi che venga rimossa?",
+ "and we will take it down the same day.": "e la rimuoveremo il giorno stesso.",
+ "Search a player or author": "Cerca un giocatore o un autore",
+ "No player photos yet.": "Ancora nessuna foto dei giocatori.",
+ "Wikimedia Commons": "Wikimedia Commons"
 }

@@ -15,7 +15,7 @@ import { useFavorites, type Favorite } from './favorites'
 export type TennisTour = 'atp' | 'wta' | 'challenger' | 'itf'
 export interface TennisConfig { public: boolean; open: boolean; tours: TennisTour[] }
 /** fix195: `name` = the full name, `short` = the real surname (from the server) */
-export interface TSide { id: number | null; name: string; short?: string; country: string | null; rank: number | null; logo: null }
+export interface TSide { id: number | null; name: string; short?: string; country: string | null; rank: number | null; logo: string | null }
 export interface TScore { sets: [number, number][]; won: [number, number]; points: [string, string] | null; server: 1 | 2 | null }
 export interface TPred {
   locked: boolean

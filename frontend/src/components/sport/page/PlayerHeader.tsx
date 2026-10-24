@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { PhotoCredit, type PhotoCreditT } from '../PlayerPhoto'
 
 /**
  * The player page header (football's, shared by every sport since fix152d): photo (or the shirt number) with the
@@ -9,6 +10,8 @@ import { Link } from 'react-router-dom'
 export interface PlayerHeaderProps {
   name: string
   photo: string | null
+  /** fix211: author + licence of a Commons photo (tennis, basketball), shown under it and linked to the file */
+  credit?: PhotoCreditT | null
   /** shown instead of a photo (basketball: the jersey number) */
   noPhoto?: ReactNode
   teamBadge?: ReactNode
@@ -29,17 +32,23 @@ function nameSize(name: string) {
 }
 
 export default function PlayerHeader(p: PlayerHeaderProps) {
+  // a photo that fails to load falls back to noPhoto (never a broken image)
+  const [broken, setBroken] = useState<string | null>(null)
+  const photo = p.photo && broken !== p.photo ? p.photo : null
   return (
     <section className="card relative overflow-hidden p-5 sm:p-7">
       <div className="pointer-events-none absolute inset-0 opacity-[0.12]" style={{ background: 'radial-gradient(600px 240px at 12% 0%, rgb(var(--accent)), transparent 70%)' }} />
       <div className="relative flex flex-wrap items-center gap-5 sm:gap-7">
-        <div className="relative flex-shrink-0">
-          <div className={`${p.photo ? 'photo-duo ' : ''}w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden ring-2 ring-line bg-surface2 grid place-items-center`}>
-            {p.photo ? <img src={p.photo} alt={p.name} className="w-full h-full object-cover" /> : p.noPhoto}
+        <div className="flex-shrink-0">
+          <div className="relative">
+            <div className={`${photo ? 'photo-duo ' : ''}w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden ring-2 ring-line bg-surface2 grid place-items-center`}>
+              {photo ? <img src={photo} alt={p.name} onError={() => setBroken(photo)} className="w-full h-full object-cover" /> : p.noPhoto}
+            </div>
+            {p.teamBadge && (
+              <span className="absolute -bottom-2 -right-2 w-10 h-10 rounded-full bg-white grid place-items-center ring-2 ring-surface shadow-card overflow-hidden">{p.teamBadge}</span>
+            )}
           </div>
-          {p.teamBadge && (
-            <span className="absolute -bottom-2 -right-2 w-10 h-10 rounded-full bg-white grid place-items-center ring-2 ring-surface shadow-card overflow-hidden">{p.teamBadge}</span>
-          )}
+          {photo && p.credit && <div className="mt-3 w-24 sm:w-28"><PhotoCredit credit={p.credit} /></div>}
         </div>
         <div className="min-w-[160px] flex-1 space-y-2">
           {p.chips.length > 0 && <div className="flex flex-wrap items-center gap-2 text-xs text-faint">{p.chips.map((c, i) => <span key={i} className="contents">{c}</span>)}</div>}

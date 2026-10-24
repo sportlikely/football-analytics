@@ -70,6 +70,7 @@ export const PARITY = [
   /* ---------- player page ---------- */
   { key: 'player.stats', label: 'Player stats', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'player.career', label: 'Career', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'player.photo', label: 'Player photo in the header, initials / number when there is none (football + NFL: the data provider; basketball + tennis: Wikimedia Commons, free licences, credited under the photo and on /credits, fix211)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'player.injuries', label: 'Injury history', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- league page ---------- */
   { key: 'league.table', label: 'Table', football: true, basketball: true, nfl: true, tennis: true },

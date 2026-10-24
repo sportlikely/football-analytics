@@ -19,6 +19,7 @@ import { bdlPlayerOf, personKey } from './bdl';
 import { bbLiveFor, periodLen, bbLiveCurve } from './bbLive';
 import { bbProbableLineup, bbBeforeAfter } from './bbLineups';
 import { groupStandings, standingsIssues, type StandGroup } from '../utils/bbStandingsGroups';
+import { photoUrl } from './playerPhotos';
 
 export const bbPublic = () => process.env.BASKETBALL_PUBLIC === '1';
 
@@ -358,7 +359,7 @@ export async function bbGame(id: number, full: boolean) {
           // NBA live: the name as people write it ("Norman Powell", not the provider's "Powell Norman"); short = the surname
           const bd = boxLive && g.code === 'NBA' ? bdlPlayerOf(p.name, teamName) : null;
           const name = x?.name || (bd ? `${bd.first} ${bd.last}`.trim() : p.name);
-          return { id: p.player_id, name, short: bd?.last || shortName(name), starter: !!p.starter, minutes: p.minutes, points: p.pts, fgm: p.fgm, fga: p.fga, tpm: p.tpm, tpa: p.tpa, ftm: p.ftm, fta: p.fta, rebounds: p.reb, assists: p.ast,
+          return { id: p.player_id, name, short: bd?.last || shortName(name), photo: photoUrl('basketball', p.player_id), starter: !!p.starter, minutes: p.minutes, points: p.pts, fgm: p.fgm, fga: p.fga, tpm: p.tpm, tpa: p.tpa, ftm: p.ftm, fta: p.fta, rebounds: p.reb, assists: p.ast,
             ...(x ? { steals: x.stl, blocks: x.blk, turnovers: x.tov, plusMinus: x.plusMinus } : live || {}) };
         }));
         return { team: ts.find(t => t.team_id === teamId) || null, players: [...players.played, ...players.bench], top: topScorer(players.played) };

@@ -3,6 +3,36 @@
  "entries": [
   {
    "date": "2026-10-24",
+   "sport": "basketball",
+   "kind": "site",
+   "version": "3.1",
+   "text": {
+    "en": "Player photos on basketball player pages, in the box score and in search, from Wikimedia Commons under free licences. The photographer and licence are named under each photo and on the new Photo credits page.",
+    "es": "Fotos de los jugadores en las páginas de jugador de baloncesto, en las estadísticas del partido y en la búsqueda, de Wikimedia Commons con licencias libres. El autor y la licencia aparecen bajo cada foto y en la nueva página de créditos de las fotos.",
+    "pt": "Fotos dos jogadores nas páginas de jogador de basquete, nas estatísticas do jogo e na pesquisa, do Wikimedia Commons com licenças livres. O autor e a licença aparecem sob cada foto e na nova página de créditos das fotos.",
+    "de": "Spielerfotos auf den Basketball-Spielerseiten, im Boxscore und in der Suche, von Wikimedia Commons unter freien Lizenzen. Urheber und Lizenz stehen unter jedem Foto und auf der neuen Seite mit den Bildnachweisen.",
+    "fr": "Des photos des joueurs sur les pages joueur de basket, dans la feuille de match et dans la recherche, issues de Wikimedia Commons sous licences libres. L’auteur et la licence sont indiqués sous chaque photo et sur la nouvelle page des crédits photo.",
+    "it": "Foto dei giocatori nelle pagine giocatore del basket, nel tabellino e nella ricerca, da Wikimedia Commons con licenze libere. Autore e licenza sono indicati sotto ogni foto e nella nuova pagina dei crediti fotografici.",
+    "tr": "Basketbol oyuncu sayfalarında, maç istatistiklerinde ve aramada Wikimedia Commons’tan özgür lisanslı oyuncu fotoğrafları. Fotoğrafçı ve lisans her fotoğrafın altında ve yeni fotoğraf kaynakları sayfasında yazılı."
+   }
+  },
+  {
+   "date": "2026-10-24",
+   "sport": "tennis",
+   "kind": "site",
+   "version": "1.0",
+   "text": {
+    "en": "Player photos in tennis: on the match page, in the match lists, rankings, search and on each player page, from Wikimedia Commons under free licences, with the photographer and licence named.",
+    "es": "Fotos de los jugadores en el tenis: en la página del partido, en las listas, la clasificación, la búsqueda y la página de cada jugador, de Wikimedia Commons con licencias libres, con el autor y la licencia indicados.",
+    "pt": "Fotos dos jogadores no tênis: na página da partida, nas listas, no ranking, na pesquisa e na página de cada jogador, do Wikimedia Commons com licenças livres, com o autor e a licença indicados.",
+    "de": "Spielerfotos im Tennis: auf der Matchseite, in den Listen, der Weltrangliste, der Suche und auf jeder Spielerseite, von Wikimedia Commons unter freien Lizenzen, mit Urheber und Lizenz.",
+    "fr": "Des photos des joueurs au tennis : sur la page du match, dans les listes, le classement, la recherche et la page de chaque joueur, issues de Wikimedia Commons sous licences libres, avec l’auteur et la licence indiqués.",
+    "it": "Foto dei giocatori nel tennis: nella pagina della partita, negli elenchi, nella classifica, nella ricerca e nella pagina di ogni giocatore, da Wikimedia Commons con licenze libere, con autore e licenza indicati.",
+    "tr": "Teniste oyuncu fotoğrafları: maç sayfasında, listelerde, sıralamada, aramada ve her oyuncunun sayfasında, Wikimedia Commons’tan özgür lisanslarla, fotoğrafçı ve lisans belirtilerek."
+   }
+  },
+  {
+   "date": "2026-10-24",
    "sport": "all",
    "kind": "site",
    "version": null,

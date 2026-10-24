@@ -34,6 +34,7 @@ import { LATE_MS } from '../utils/liveBox';
 import { BB_MAJOR } from './basketball';
 import { scorersHealth } from './scorersCheck';
 import { perfChecks } from './perfChecks';
+import { photoHealth } from './playerPhotos';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -347,6 +348,9 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
       });
     }
   } catch { /* no report yet */ }
+
+  // fix211: player photos — coverage (tennis top 100 / 500, basketball squads); fail when one is shown without its credit
+  try { checks.push(photoHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts
   try { checks.push(...perfChecks(now)); } catch (e: any) { logger.warn(`perf checks: ${e?.message || e}`); }

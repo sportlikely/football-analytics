@@ -37,6 +37,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'team.miniTable',
     'team.news',
     'player.stats',
+    'player.photo', // API-Football photo (Player.tsx)
     'player.career',
     'player.injuries',
     'league.table',

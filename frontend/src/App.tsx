@@ -82,6 +82,7 @@ const Guide = page(() => import('./pages/Guide'))
 const LeagueHub = page(() => import('./pages/LeagueHub'))
 const HowItWorks = page(() => import('./components/sport/HowItWorks'))
 const Changelog = page(() => import('./pages/Changelog'))
+const Credits = page(() => import('./pages/Credits'))
 const GuideIndex = page(() => import('./pages/Guide').then(m => ({ default: m.GuideIndex })))
 const BbHome = page(() => import('./pages/bb/BbHome'))
 const BbGames = page(() => import('./pages/bb/BbGames'))
@@ -636,6 +637,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/match\//, tt('Match')],
   [/^\/accuracy/, tt('Accuracy')],
   [/^\/changelog/, tt('Changelog')],
+  [/^\/credits/, tt('Photo credits')],
   [/^\/draw-alerts/, tt('Draw picks')],
   [/^\/upset-watch/, tt('Upset watch')],
   [/^\/past/, tt('Past seasons')],
@@ -742,6 +744,7 @@ function Shell() {
             {/* fix206: how our models work (every sport) + the changelog */}
             <Route path="/how-it-works" element={<HowItWorks sport="football" />} />
             <Route path="/changelog" element={<Changelog />} />
+            <Route path="/credits" element={<Credits />} />
             <Route path="/guides" element={<GuideIndex />} />
             <Route path="/guides/:slug" element={<Guide />} />
             <Route path="/favorites" element={<Favorites />} />
@@ -805,6 +808,7 @@ function Shell() {
             <Link to="/terms" className="hover:text-ink">{tt("Terms")}</Link>
             <Link to="/privacy" className="hover:text-ink">{tt("Privacy")}</Link>
             <Link to="/accessibility" className="hover:text-ink">{tt("Accessibility")}</Link>
+            <Link to="/credits" className="hover:text-ink">{tt("Photo credits")}</Link>
             <Link to="/premium" className="hover:text-ink">{tt("Premium")}</Link>
             <Link to="/contact" className="hover:text-ink">{tt("Contact us")}</Link>
             <FooterNfl />
