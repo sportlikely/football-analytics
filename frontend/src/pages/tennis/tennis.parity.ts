@@ -23,6 +23,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.events', // the set-by-set table
     'game.stats', // Serve & return
     'game.livePlayerStats', // fix208: live point stats from the tape
+    'game.scorers', // fix209: set scores under the score + the set table by player with the game score while live (TennisMatch)
     'game.highlights',
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204

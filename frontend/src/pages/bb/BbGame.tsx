@@ -26,6 +26,7 @@ import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 import MorePredictions from '../../components/sport/game/MorePredictions'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
+import { basketballScorers } from '../../lib/scorers'
 
 export interface Avg {
   games: number; won: number; lost: number; pointsFor: number; pointsAgainst: number
@@ -217,14 +218,10 @@ export default function BbGame() {
       }}
       scoreSub={(() => {
         const ht = live || done ? halfTimeOf(g.quarters) : null
-        // fix208: each team's top scorer while the game is on ("Haliburton 18 pts"), from the live box score
-        const top = live && d.box ? [d.box.home.top, d.box.away.top] : null
-        if (!ht && !(top && (top[0] || top[1]))) return undefined
-        return <>
-          {ht && <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div>}
-          {top && (top[0] || top[1]) && <TopScorers home={top[0] || null} away={top[1] || null} />}
-        </>
+        return ht ? <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div> : undefined
       })()}
+      // fix208 / fix209: each team's top scorer under it, live and final ("Haliburton 28"), from the box score
+      scorers={(live || done) && d.box ? { lines: basketballScorers({ home: d.box.home.top || null, away: d.box.away.top || null }), playerHref: pid => href.bbPlayer(pid) } : null}
       statusNote={g.state === 'off' ? (
         <p className="mt-2 max-w-[260px] mx-auto text-[11px] text-muted">
           {/CANC|ABD/.test(g.status) ? t('This game was cancelled. It does not count in our record.') : t('This game was postponed. Our prediction stays until the new date.')}
@@ -431,10 +428,6 @@ function InjuriesCard({ d }: { d: Detail }) {
 }
 
 /** fix208: under the live score, each team's top scorer by surname ("Haliburton 18 pts") */
-function TopScorers({ home, away }: { home: BoxPlayer | null; away: BoxPlayer | null }) {
-  const one = (p: BoxPlayer | null) => (p ? <Link to={`/basketball/player/${p.id}`} className="hover:text-accent truncate">{p.short || p.name} <span className="num font-bold text-ink">{p.points}</span> {t('pts')}</Link> : <span>–</span>)
-  return <div className="mt-1 text-[11px] text-muted flex items-center justify-center gap-2 whitespace-nowrap max-w-full">{one(home)}<span className="text-faint">·</span>{one(away)}</div>
-}
 
 /** made/attempts with the % under it */
 function Shot({ m, a }: { m: number | null; a: number | null }) {

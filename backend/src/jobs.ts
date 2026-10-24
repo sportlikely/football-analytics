@@ -10,6 +10,7 @@ import logger from './utils/logger';
 import { timed, every, after, inBatches, heavy, mapGames } from './services/perf';
 import { slimForList } from './services/predCache';
 import { withLiveScore, publishLiveBook } from './services/liveScores';
+import { scorersCheckTick } from './services/scorersCheck';
 import { linkCheckTick } from './services/linkCheck';
 import { recordPredictions, settlePending } from './services/tracking';
 import { oddsTick } from './services/odds';
@@ -66,6 +67,9 @@ export function startJobs() {
   after('search index', () => { warmSearchIndex(); warmBbSearch(); }, 30 * 1000).unref();
   every('search index', () => warmSearchIndex(), 6 * 3600 * 1000).unref();
   every('bb search index', () => warmBbSearch(), 3600 * 1000).unref();
+  // fix209: "Scorers shown" — every live / finished game of the last 48 h names its scorers (and fetches them again)
+  after('scorers check', () => scorersCheckTick(), 3 * 60 * 1000).unref();
+  every('scorers check', () => scorersCheckTick(), 5 * 60 * 1000).unref();
 
   startLivePoll();
 

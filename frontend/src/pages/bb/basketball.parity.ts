@@ -23,6 +23,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.events',
     'game.stats',
     'game.livePlayerStats', // fix208: live box score (LiveBox)
+    'game.scorers', // fix209: each team's top scorer under the score (basketballScorers), live and final; the row arrow
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204
     'game.howItWorks', // fix206: "How does this work?" in ModelName + the sport's how-it-works page (components/sport/HowItWorks)

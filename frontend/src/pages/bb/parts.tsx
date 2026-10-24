@@ -7,6 +7,7 @@ import { LeagueBar } from '../../components/LeagueSidebar'
 import { BB_STATUS, BB_COUNTRY, liveLabel, bbRank, timeOf, useBbFavorites, type BbGame, type BbSide } from '../../lib/bb'
 import { useStuck, stuckBg } from '../../lib/useStuck'
 import { LiveChancePanel } from '../../components/sport/game/LiveChance'
+import { ScorersToggle, RowScorersLine, useScorersOpen } from '../../components/sport/RowScorers'
 
 /** Shared pieces of the basketball pages — the same look as the football pages. */
 
@@ -86,8 +87,11 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
   const roll = justRevealed(rid(g))
   const won = (side: 'H' | 'A') => done && g.score ? (side === 'H' ? g.score.home > g.score.away : g.score.away > g.score.home) : false
   const favWhy = useBbFavorites().reasons(g)
+  // fix209: a live / finished row opens with its arrow to each team's top scorer
+  const [scOpen, scToggle] = useScorersOpen()
 
   return (
+    <div>
     <Link to={`/basketball/game/${g.id}#prediction`} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
       {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       {/* time / status */}
@@ -185,9 +189,12 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
         {done && p?.hit !== null && p?.hit !== undefined && (
           <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold ${p.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`} title={p.hit ? t('Hit') : t('Miss')}>{p.hit ? '✓' : '✗'}</span>
         )}
+        {(isLive || done) && <ScorersToggle open={scOpen} onToggle={scToggle} />}
       </div>
       )}
     </Link>
+      {scOpen && <RowScorersLine href={`/basketball/game/${g.id}`} live={isLive} homeName={g.home.name} awayName={g.away.name} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+    </div>
   )
 }
 

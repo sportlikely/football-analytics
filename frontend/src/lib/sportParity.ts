@@ -49,6 +49,7 @@ export const PARITY = [
   { key: 'game.events', label: 'Events / quarter strip', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.stats', label: 'Game stats', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.livePlayerStats', label: 'Live player stats during the game (fix208: basketball box score / NFL player lines refreshed live; football: live line-ups + events; tennis: live point stats)', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'game.scorers', label: 'Scorers under the score, live and final, and in a list row opened with its arrow (fix209: football goals / own goals / penalties / red cards, basketball top scorer, NFL scoring plays, tennis set scores + the game score while live)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.morePredictions', label: 'More predictions block under the prediction (fix204)', football: true, basketball: true, nfl: true, tennis: true },

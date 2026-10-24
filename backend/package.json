@@ -19,7 +19,8 @@
     "lint": "eslint src/**/*.ts",
     "migrate": "ts-node src/database/migrations.ts",
     "test:fix202": "tsc && node --no-warnings --test --test-force-exit scripts/worker-split.test.mjs",
-    "test:fix208": "tsc && node --no-warnings --test --test-force-exit scripts/live-box.test.mjs"
+    "test:fix208": "tsc && node --no-warnings --test --test-force-exit scripts/live-box.test.mjs",
+    "test:fix209": "tsc && node --no-warnings --test --test-force-exit scripts/scorers.test.mjs"
   },
   "keywords": [
     "football",

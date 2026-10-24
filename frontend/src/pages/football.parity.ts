@@ -21,6 +21,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.events',
     'game.stats',
     'game.livePlayerStats', // fix208: live line-ups + events (as before)
+    'game.scorers', // fix209: GamePage scorers (lib/scorers footballScorers) + GameRow / ResultsCard arrow
     'game.highlights',
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204

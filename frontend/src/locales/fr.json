@@ -2385,5 +2385,22 @@
  "LIVE · updated {0} min ago": "EN DIRECT · mis à jour il y a {0} min",
  "Team totals": "Total de l’équipe",
  "Bench, not yet played": "Banc, pas encore entrés",
- "Did not play": "N’ont pas joué"
+ "Did not play": "N’ont pas joué",
+ "Assist: {0}": "Passe décisive : {0}",
+ "for {0}": "pour {0}",
+ "VAR": "VAR",
+ "Missed penalty": "Penalty manqué",
+ "Penalty": "Penalty",
+ "Own goal": "But contre son camp",
+ "Yellow card": "Carton jaune",
+ "Substitution": "Remplacement",
+ "Second yellow": "Second carton jaune",
+ "Goal disallowed": "But refusé",
+ "Penalty confirmed": "Penalty confirmé",
+ "Penalty cancelled": "Penalty annulé",
+ "Red card after review": "Carton rouge après visionnage",
+ "Goal confirmed": "But confirmé",
+ "Hide scorers": "Masquer les buteurs",
+ "Show scorers": "Voir les buteurs",
+ "No scorers yet": "Pas encore de buteurs"
 }

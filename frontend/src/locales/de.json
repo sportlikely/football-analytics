@@ -2385,5 +2385,22 @@
  "LIVE · updated {0} min ago": "LIVE · vor {0} Min. aktualisiert",
  "Team totals": "Team gesamt",
  "Bench, not yet played": "Bank, noch nicht eingesetzt",
- "Did not play": "Nicht eingesetzt"
+ "Did not play": "Nicht eingesetzt",
+ "Assist: {0}": "Vorlage: {0}",
+ "for {0}": "für {0}",
+ "VAR": "VAR",
+ "Missed penalty": "Elfmeter verschossen",
+ "Penalty": "Elfmeter",
+ "Own goal": "Eigentor",
+ "Yellow card": "Gelbe Karte",
+ "Substitution": "Wechsel",
+ "Second yellow": "Gelb-Rot",
+ "Goal disallowed": "Tor aberkannt",
+ "Penalty confirmed": "Elfmeter bestätigt",
+ "Penalty cancelled": "Elfmeter zurückgenommen",
+ "Red card after review": "Rote Karte nach Überprüfung",
+ "Goal confirmed": "Tor bestätigt",
+ "Hide scorers": "Torschützen ausblenden",
+ "Show scorers": "Torschützen zeigen",
+ "No scorers yet": "Noch keine Torschützen"
 }

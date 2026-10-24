@@ -489,6 +489,16 @@ function storeEvents(gameId: number, list: any[]) {
   db.prepare(`INSERT OR REPLACE INTO nfl_events (game_id, json, updated_at) VALUES (?, ?, ?)`).run(gameId, JSON.stringify(rows), new Date().toISOString());
 }
 
+/** fix209: the scoring plays of one game again (live: when its score changed; data health: plays missing 10+ min). */
+export async function nflRefetchEvents(gameId: number): Promise<number | null> {
+  if (!KEY() || !budgetAllows(remainingDay, limitDay, 1)) return null;
+  const list = (await nfl('/games/events', { id: gameId })).response || [];
+  storeEvents(gameId, list);
+  return Array.isArray(list) ? list.length : 0;
+}
+// fix209: the score each live game had when its scoring plays were last fetched
+const eventsAtScore = new Map<number, string>();
+
 /** Team + player statistics of one finished game (2 calls; the current season also its scoring plays, 1 more). */
 export async function syncBoxScore(gameId: number): Promise<boolean> {
   const teams = (await nfl('/games/statistics/teams', { id: gameId })).response || [];
@@ -555,12 +565,15 @@ export async function nflLiveBoxTick(now = Date.now()): Promise<number> {
   if (liveBoxBusy || !KEY()) return 0;
   liveBoxBusy = true;
   try {
-    const rows = db.prepare(`SELECT g.game_id, g.league, (SELECT MAX(updated_at) FROM nfl_player_stats_live p WHERE p.game_id = g.game_id) AS at
+    const rows = db.prepare(`SELECT g.game_id, g.league, g.home_pts, g.away_pts, (SELECT MAX(updated_at) FROM nfl_player_stats_live p WHERE p.game_id = g.game_id) AS at
       FROM nfl_games g WHERE g.status IN (${LIVE_STATUS.map(() => '?').join(',')}) AND g.kickoff > ?`).all(...LIVE_STATUS, new Date(now - 8 * 3600 * 1000).toISOString()) as any[];
     const due = dueGames(rows.map(r => ({ id: r.game_id, major: r.league === 1, lastAt: r.at ?? null })), gameViews('nfl', now), now).slice(0, 40);
     if (!due.length) return 0;
+    // fix209: the scoring plays of a due game whose score changed since its last fetch (the header's scoring plays)
+    const scoreOf = new Map(rows.map(r => [r.game_id as number, `${r.home_pts ?? 0}-${r.away_pts ?? 0}`]));
+    const plays = due.filter(id => scoreOf.get(id) !== '0-0' && eventsAtScore.get(id) !== scoreOf.get(id));
     liveBox.ticks++;
-    if (!budgetAllows(remainingDay, limitDay, due.length)) { liveBox.skippedBudget++; return 0; }
+    if (!budgetAllows(remainingDay, limitDay, due.length + plays.length)) { liveBox.skippedBudget++; return 0; }
     let n = 0;
     for (const id of due) {
       try {
@@ -570,6 +583,10 @@ export async function nflLiveBoxTick(now = Date.now()): Promise<number> {
       } catch (e: any) { liveBox.lastError = `${id}: ${e.message}`; }
       if (n % 5 === 4) await yieldLoop();
     }
+    for (const id of plays) {
+      try { if ((await nflRefetchEvents(id)) !== null) { liveBox.calls++; eventsAtScore.set(id, scoreOf.get(id)!); } } catch (e: any) { liveBox.lastError = `${id} events: ${e.message}`; }
+    }
+    if (eventsAtScore.size > 500) eventsAtScore.clear();
     liveBox.games += n;
     liveBox.lastAt = Date.now();
     return n;

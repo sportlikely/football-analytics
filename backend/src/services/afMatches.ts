@@ -231,11 +231,16 @@ function toFdMatchFull(f: any) {
       m[side].statistics = out;
     }
   }
-  const goals: any[] = [], bookings: any[] = [], subs: any[] = [];
+  const goals: any[] = [], bookings: any[] = [], subs: any[] = [], vars: any[] = [], missed: any[] = [];
   for (const e of f.events || []) {
     const minute = e.time?.elapsed ?? 0;
     const extra = e.time?.extra ?? null;
-    if (e.type === 'Goal' && !/missed/i.test(e.detail || '')) {
+    // fix209: VAR decisions and missed penalties for the events list
+    if (e.type === 'Var') {
+      vars.push({ minute, injuryTime: extra, team: team(e.team), player: e.player?.name ? { id: AF_OFFSET + (e.player.id || 0), name: e.player.name } : null, detail: e.detail || '' });
+    } else if (e.type === 'Goal' && /missed/i.test(e.detail || '')) {
+      if (e.player?.name) missed.push({ minute, injuryTime: extra, team: team(e.team), player: { id: AF_OFFSET + (e.player.id || 0), name: e.player.name } });
+    } else if (e.type === 'Goal') {
       goals.push({
         minute, injuryTime: extra,
         type: /own/i.test(e.detail) ? 'OWN' : /penalty/i.test(e.detail) ? 'PENALTY' : 'REGULAR',
@@ -259,6 +264,8 @@ function toFdMatchFull(f: any) {
   m.goals = goals;
   m.bookings = bookings;
   m.substitutions = subs;
+  m.varEvents = vars;
+  m.missedPens = missed;
   return m;
 }
 
@@ -1125,7 +1132,37 @@ export async function syncFdLiveFromAf(fdMatches: any[]) {
  * Live statistics (possession, shots, xG, corners…), lineups and minute for a Football-Data.org match,
  * from the matching API-Football fixture. Only around the match (1 h before kick-off onwards).
  */
-export async function afExtrasForFd(match: any): Promise<{ home: any; away: any; minute: number | null } | null> {
+/**
+ * fix209: an API-Football match's events (goals, cards, substitutions, VAR, missed penalties) moved onto a
+ * Football-Data.org match: each event's team becomes the FD team of the same side (swapped fixtures the other way).
+ */
+export function eventsOnFd(af: any, match: any, swapped: boolean) {
+  const fdOf = (t: any) => {
+    const home = t?.id === af.homeTeam?.id;
+    const fd = (home !== swapped) ? match.homeTeam : match.awayTeam;
+    return { id: fd.id, name: fd.name };
+  };
+  const move = (list: any[] | undefined) => (list || []).map(e => ({ ...e, team: fdOf(e.team) }));
+  return { goals: move(af.goals), bookings: move(af.bookings), substitutions: move(af.substitutions), varEvents: move(af.varEvents), missedPens: move(af.missedPens) };
+}
+
+/** fix209: the full fixtures (events included) of up to 20 API-Football ids per call, by fixture id. */
+export async function afFixturesFull(fixtureIds: number[]): Promise<Map<number, any>> {
+  const out = new Map<number, any>();
+  for (let i = 0; i < fixtureIds.length; i += 20) {
+    const chunk = fixtureIds.slice(i, i + 20);
+    const resp = (await afGet('/fixtures', { ids: chunk.join('-') })).response || [];
+    for (const raw of resp) if (raw?.fixture?.id) out.set(raw.fixture.id, toFdMatchFull(raw));
+  }
+  return out;
+}
+/** fix209: the API-Football fixture of a Football-Data.org match (null when none) and whether its sides are swapped. */
+export async function afTwinOfFd(match: any): Promise<{ fid: number; swapped: boolean } | null> {
+  const fid = await afFixtureForFd(match);
+  return fid ? { fid, swapped: fdToAfSwap.has(match.id) } : null;
+}
+
+export async function afExtrasForFd(match: any): Promise<{ home: any; away: any; minute: number | null; events: ReturnType<typeof eventsOnFd> } | null> {
   if (!afConfigured()) return null;
   const ko = new Date(match.utcDate).getTime();
   if (!Number.isFinite(ko) || Date.now() < ko - 75 * 60 * 1000) return null;
@@ -1144,7 +1181,8 @@ export async function afExtrasForFd(match: any): Promise<{ home: any; away: any;
   const m = toFdMatchFull(await withStatsAndLineups(raw));
   const pick = (t: any) => ({ statistics: t.statistics || null, formation: t.formation || null, lineup: t.lineup || [], bench: t.bench || [], coach: t.coach || null });
   if (live) logLiveStats(match, fid, raw, Object.keys(m.homeTeam?.statistics || {}).length);
-  return swapped ? { home: pick(m.awayTeam), away: pick(m.homeTeam), minute: m.minute ?? null } : { home: pick(m.homeTeam), away: pick(m.awayTeam), minute: m.minute ?? null };
+  const events = eventsOnFd(m, match, swapped);
+  return swapped ? { home: pick(m.awayTeam), away: pick(m.homeTeam), minute: m.minute ?? null, events } : { home: pick(m.homeTeam), away: pick(m.awayTeam), minute: m.minute ?? null, events };
 }
 
 

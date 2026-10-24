@@ -7,6 +7,7 @@ import { DcHelp, EvenChip, isEvenGame } from '../DcPick'
 import { Crest, Lock } from '../SportHome/parts'
 import type { HPred } from '../SportHome/types'
 import type { SGame } from './types'
+import { ScorersToggle, RowScorersLine, scorersSource, useScorersOpen } from './RowScorers'
 
 /**
  * fix152 — the one list row of every sport (football's MatchRow, fix127): time / live · both teams · the result cells
@@ -87,7 +88,11 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
   const roll = g.reveal ? justRevealed(g.reveal.id) : false
   const full = p.kind === 'full' && !covered ? p : null
   const onSide = (k: 'H' | 'A') => !!full?.cells.find(c => c.key === k)?.on
+  // fix209: a live / finished row opens with its arrow to the scorers line (collapsed by default)
+  const [scOpen, scToggle] = useScorersOpen()
+  const scorable = (isLive || done) && !!scorersSource(g.href)
   return (
+    <div>
     <Link to={`${g.href}${p.kind !== 'none' ? '#prediction' : ''}`} state={g.linkState} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
       {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
@@ -168,7 +173,10 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
         {done && typeof g.hit === 'boolean' && (
           <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold ${g.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`} title={g.hit ? tt("Hit") : tt("Miss")}>{g.hit ? '✓' : '✗'}</span>
         )}
+        {scorable && <ScorersToggle open={scOpen} onToggle={scToggle} />}
       </div>
     </Link>
+      {scOpen && <RowScorersLine href={g.href} live={isLive} homeName={g.home.short} awayName={g.away.short} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+    </div>
   )
 }

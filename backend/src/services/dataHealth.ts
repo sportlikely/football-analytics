@@ -32,6 +32,7 @@ import { moreHealth } from './morePredictions';
 import { createHealthStore, NOT_YET } from '../utils/healthStore';
 import { LATE_MS } from '../utils/liveBox';
 import { BB_MAJOR } from './basketball';
+import { scorersHealth } from './scorersCheck';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -224,6 +225,18 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     });
   } catch (e: any) {
     checks.push({ id: 'live-box', label: 'Live box scores', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
+  // fix209: every live / finished game of the last 48 h shows its scorers (football goals with a name, basketball top
+  // scorer once a box score exists, NFL scoring plays when a side has points); a gap older than 10 min is listed
+  try {
+    const sc = scorersHealth();
+    checks.push({
+      id: 'scorers', label: 'Scorers shown', level: sc.late.length ? 'warn' : 'ok',
+      detail: sc.lastRun === null && !sc.checked ? 'Starting up (first check a few minutes after start)' : sc.late.length ? `${sc.late.length} of ${sc.checked} game(s) with goals / points but no scorer for 10+ min (fetched again automatically)` : `${sc.checked} game(s) checked, every scorer shown`,
+      items: sc.late.slice(0, 20)
+    });
+  } catch (e: any) {
+    checks.push({ id: 'scorers', label: 'Scorers shown', level: 'warn', detail: `Check failed: ${e.message}` });
   }
   // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason
   const OLD = new Set(['poisson-dc-v1', 'dc-history-v2']);

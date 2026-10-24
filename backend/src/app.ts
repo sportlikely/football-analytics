@@ -2,6 +2,8 @@ import express from 'express';
 import { joinWaitlist, waitlistStats } from './services/waitlist';
 import { slimForList, clearPredictionCache } from './services/predCache';
 import { withLiveScore, liveBookStatus } from './services/liveScores';
+import { goalEventsOverlay, noteServedScorers, scorersComplete } from './services/scorersCheck';
+import { betterGoals } from './utils/scorers';
 import { runLinkCheck, lastLinkCheck } from './services/linkCheck';
 import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
@@ -1670,6 +1672,18 @@ app.get('/api/highlights/status', (_req, res) => {
   res.json({ data: highlightsStatus(), timestamp: new Date().toISOString() });
 });
 
+/** fix209: API-Football's events on a Football-Data.org match: its goals when they name more of the score, its cards
+ *  when FD has none, VAR decisions and missed penalties (FD has neither). */
+function withAfEvents(m: any, ev: any) {
+  if (!ev) return;
+  const goals = betterGoals(m, ev.goals);
+  if (goals !== (m.goals || [])) m.goals = goals;
+  if (!(m.bookings?.length) && ev.bookings?.length) m.bookings = ev.bookings;
+  if (!(m.substitutions?.length) && ev.substitutions?.length) m.substitutions = ev.substitutions;
+  if (ev.varEvents?.length) m.varEvents = ev.varEvents;
+  if (ev.missedPens?.length) m.missedPens = ev.missedPens;
+}
+
 /** Everything for the match page (match, events, lineups, stats, h2h, prediction, live chance, preview). */
 async function buildMatchDetails(id: number): Promise<any> {
   const details: any = isAfMatchId(id) ? await getAfMatchDetails(id) : await footballDataAPI.getMatchDetails(id);
@@ -1692,6 +1706,7 @@ async function buildMatchDetails(id: number): Promise<any> {
         }
         if ((m.minute === null || m.minute === undefined) && x.minute !== null) m.minute = x.minute;
         if (m.homeTeam.lineup?.length) details.probableLineups = null;
+        withAfEvents(m, x.events);
       }
     } catch (e: any) {
       logger.warn('Live extras failed', { id, message: e.message });
@@ -1728,7 +1743,8 @@ const detailsTtl = (d: any) => (LIVE_ST.has(String(d?.match?.status)) ? 60 * 100
 function liveNow(id: number, data: any) {
   const m0 = data?.match;
   if (!m0) return data;
-  const m = isAfMatchId(id) ? afLiveOverlay(m0) : withLiveScore(m0);
+  // fix209: the scorers check's events when they name more goals than the copy we hold (a goal named after it was built)
+  const m = goalEventsOverlay(isAfMatchId(id) ? afLiveOverlay(m0) : withLiveScore(m0));
   if (m === m0) return data;
   const out = { ...data, match: m };
   if (data.prediction) {
@@ -1751,6 +1767,7 @@ async function lightRefresh(prev: any) {
       if (!(cur.lineup?.length) && t.lineup.length) { cur.lineup = t.lineup; cur.bench = t.bench; cur.formation = cur.formation || t.formation; cur.coach = cur.coach?.name ? cur.coach : t.coach; }
     }
     if (x.minute !== null) m.minute = x.minute;
+    withAfEvents(m, x.events);
   }
   return { ...prev, match: m };
 }
@@ -1818,7 +1835,9 @@ function queueDetails(id: number) {
 function storeDetails(id: number, data: any, startedAt: number) {
   const cur = detailsCache.get(id);
   if (cur && cur.at > startedAt) return; // a newer copy is already there (a late refresh never overwrites it)
-  const settled = isSettled(data);
+  // fix209: a finished page whose goals are not all named is not stored for good (rebuilt every 5 min until they are)
+  const settled = isSettled(data) && scorersComplete(data?.match);
+  noteServedScorers(data?.match);
   if (settled && !data?.partial) {
     try { db.prepare(`INSERT OR REPLACE INTO match_details_store (match_id, json, built_at) VALUES (?, ?, ?)`).run(id, JSON.stringify(data), new Date().toISOString()); } catch (e: any) { logger.warn(`details store ${id}: ${e.message}`); }
   }
@@ -1862,7 +1881,7 @@ app.get('/api/matches/:id(\\d+)/details', async (req, res) => {
     const kept = storedDetails(id);
     if (kept) {
       detailsCache.set(id, { at: Date.now(), ttl: Infinity, data: kept, refreshing: false, startedAt: 0 });
-      return res.json({ data: kept, timestamp: new Date().toISOString(), cached: true });
+      return res.json({ data: liveNow(id, kept), timestamp: new Date().toISOString(), cached: true });
     }
     try {
       const details = await withTimeoutMs(buildOnce(id), 8 * 1000);
@@ -1880,6 +1899,27 @@ app.get('/api/matches/:id(\\d+)/details', async (req, res) => {
     if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.json({ data: null, pending: true, message: 'More details soon' });
     sendError(res, error, 'Failed to fetch match details');
   }
+});
+
+/**
+ * fix209 — a list row opened with its arrow: the match's goals and cards only (the row builds the scorers line), from
+ * the copy the match page holds or keeps, else the scorers check's events. Never a provider call: a match we hold
+ * nothing for is queued for a build ("pending", the row asks again).
+ */
+app.get('/api/matches/:id(\\d+)/scorers', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const hit = detailsCache.get(id);
+    const data = hit ? liveNow(id, hit.data) : (() => { const k = storedDetails(id); return k ? liveNow(id, k) : null; })();
+    let m: any = data?.match || null;
+    if (!m) {
+      const off = offlineDetails(id);
+      if (off) m = liveNow(id, off).match;
+      if (!m?.goals?.length) queueDetails(id);
+    } else if (hit && Date.now() - hit.at > hit.ttl) startRefresh(id, hit);
+    if (!m) return res.json({ data: null, pending: true });
+    res.json({ data: { id, status: m.status, homeTeam: { id: m.homeTeam?.id }, awayTeam: { id: m.awayTeam?.id }, score: { fullTime: m.score?.fullTime || { home: null, away: null } }, goals: m.goals || [], bookings: (m.bookings || []).filter((b: any) => b.card !== 'YELLOW') } });
+  } catch (error: any) { sendError(res, error, 'Failed to fetch scorers'); }
 });
 
 /**
@@ -2719,9 +2759,18 @@ app.get('/api/nfl/game/:id(\\d+)', (req, res) => {
       starters: g.state === 'done' ? null : { home: nflStarters(g.home.id, g.season), away: nflStarters(g.away.id, g.season) },
       beforeAfter: open ? nflBeforeAfter(g, p) : null,
       writeup: nflPreview(g.id, qbNames),
-      events: g.state === 'done' ? nflEvents(g.id) : null
+      events: g.state !== 'upcoming' ? nflEvents(g.id) : null // fix209: live too (the header's scoring plays)
     } });
   } catch (e) { sendError(res, e, 'Failed to load game'); }
+});
+// fix209: a list row opened with its arrow — the scoring plays
+app.get('/api/nfl/game/:id(\\d+)/scorers', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const g = db.prepare(`SELECT home_id, away_id FROM nfl_games WHERE game_id = ?`).get(id) as any;
+    if (!g) return res.status(404).json({ error: 'Game not found' });
+    res.json({ data: { homeId: g.home_id, awayId: g.away_id, plays: nflEvents(id) || [] } });
+  } catch (error: any) { sendError(res, error, 'Failed to fetch scorers'); }
 });
 // fix174: official highlights (YouTube, the league's / teams' own channels) for a finished NFL or college game
 app.get('/api/nfl/game/:id(\\d+)/highlights', async (req, res) => {
@@ -2732,6 +2781,21 @@ app.get('/api/nfl/game/:id(\\d+)/highlights', async (req, res) => {
     const nickOf = (s: string) => (r.league === 2 ? s : String(s || '').split(/\s+/).pop() || s);
     res.json({ data: await highlightsFor({ id: 4_000_000_000 + id, status: 'FINISHED', utcDate: r.kickoff, homeTeam: { name: r.home_name, shortName: nickOf(r.home_name) }, awayTeam: { name: r.away_name, shortName: nickOf(r.away_name) } }) });
   } catch (e) { sendError(res, e, 'Failed to fetch highlights'); }
+});
+// fix209: a list row opened with its arrow — each team's top scorer (final box score, else the live one)
+app.get('/api/basketball/game/:id(\\d+)/scorers', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const g = db.prepare(`SELECT home_id, away_id FROM bb_games WHERE game_id = ?`).get(id) as any;
+    if (!g) return res.status(404).json({ error: 'Game not found' });
+    let rows = db.prepare(`SELECT team_id, player_id, name, pts FROM bb_player_stats WHERE game_id = ?`).all(id) as any[];
+    if (!rows.length) rows = db.prepare(`SELECT team_id, player_id, name, pts FROM bb_player_stats_live WHERE game_id = ?`).all(id) as any[];
+    const top = (team: number) => {
+      const r = rows.filter(x => x.team_id === team && x.name).sort((a, b) => (b.pts ?? 0) - (a.pts ?? 0))[0];
+      return r ? { id: r.player_id, name: r.name, points: r.pts ?? 0 } : null;
+    };
+    res.json({ data: { home: top(g.home_id), away: top(g.away_id) } });
+  } catch (error: any) { sendError(res, error, 'Failed to fetch scorers'); }
 });
 app.get('/api/basketball/game/:id(\\d+)/highlights', async (req, res) => {
   try {

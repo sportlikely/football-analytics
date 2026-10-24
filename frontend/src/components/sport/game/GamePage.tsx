@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { t, LOCALE } from '../../../lib/i18n'
 import StickyBar from '../../StickyBar'
 import { useNews, NewsRows, type NewsItem } from '../../NewsList'
+import { hasScorerLine, type ScorerLines } from '../../../lib/scorers'
+import { HeaderScorers } from './ScoreLines'
 
 /**
  * The game page (football's match page, shared by every sport since fix152c): back link, the hero (competition ·
@@ -25,6 +27,9 @@ export interface GamePageProps {
   time: string
   /** under the score (football: half-time) */
   scoreSub?: ReactNode
+  /** fix209: under both teams, live and final (football: goals + red cards; basketball: top scorer; NFL: scoring
+   *  plays). null / empty = no line (an upcoming game). Built with lib/scorers.ts; checked by npm run parity. */
+  scorers?: { lines: ScorerLines; playerHref?: (id: number) => string | null } | null
   status: { kind: 'live' | 'done' | 'halted' | 'upcoming'; text: string }
   statusNote?: ReactNode
   /** colour of the pick's glow ('--home' / '--away' / '--draw') */
@@ -163,6 +168,7 @@ export default function GamePage(p: GamePageProps) {
           </div>
           <TeamHero s={p.away} align="left" />
         </div>
+        {p.scorers && hasScorerLine(p.scorers.lines) && <HeaderScorers lines={p.scorers.lines} playerHref={p.scorers.playerHref} />}
 
         {p.footer && <div className="relative mt-6 pt-4 border-t border-line/60">{p.footer}</div>}
       </div>

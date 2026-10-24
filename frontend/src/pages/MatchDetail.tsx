@@ -23,6 +23,7 @@ import { tNodes } from '../lib/tNodes'
 import { slModel } from '../lib/modelNames'
 import { ModelName } from '../components/sport/game/ModelName'
 import MorePredictions from '../components/sport/game/MorePredictions'
+import { footballScorers } from '../lib/scorers'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
 const CompCode = createContext<string | undefined>(undefined)
@@ -78,6 +79,9 @@ interface Match {
   goals?: Goal[]
   bookings?: Booking[]
   substitutions?: Substitution[]
+  /** fix209: VAR decisions and missed penalties (API-Football events; none from Football-Data.org) */
+  varEvents?: { minute: number; injuryTime?: number | null; team: { id: number; name: string }; player?: { id: number; name: string } | null; detail: string }[]
+  missedPens?: { minute: number; injuryTime?: number | null; team: { id: number; name: string }; player: { id: number; name: string } }[]
   referees?: { id: number; name: string; type?: string; nationality?: string }[]
 }
 
@@ -430,14 +434,27 @@ function MatchDetail() {
   const hasOfficialLineups = details
     ? (details.match.homeTeam.lineup?.length || 0) > 0 || (details.match.awayTeam.lineup?.length || 0) > 0
     : false
+  // fix209: the score went up over the socket before the provider named the scorer → "Goal 52'" in the header, and the
+  // details are fetched again 20 s and 60 s later so the name fills in without a reload
+  const seenScore = useRef<{ id: number; home: number; away: number } | null>(null)
+  const pendingGoals = useRef<{ id: number; home: number[]; away: number[] }>({ id: matchId, home: [], away: [] })
+  if (pendingGoals.current.id !== matchId) pendingGoals.current = { id: matchId, home: [], away: [] }
   useEffect(() => {
     if (!matchId) return
+    const refetch: ReturnType<typeof setTimeout>[] = []
     // rooms belong to one connection: subscribe again after every (re)connect
     const subscribe = () => socket.emit('subscribe_match', matchId)
     subscribe()
     socket.on('connect', subscribe)
     const onLive = (m: Match) => {
       if (m.id !== matchId) return
+      const ft = m.score?.fullTime, was = seenScore.current
+      if (ft && was && was.id === matchId) {
+        let up = false
+        for (const s of ['home', 'away'] as const) for (let k = (ft[s] ?? 0) - was[s]; k > 0; k--) { pendingGoals.current[s].push(m.minute ?? 0); up = true }
+        if (up) refetch.push(setTimeout(() => load(false), 20 * 1000), setTimeout(() => load(false), 60 * 1000))
+      }
+      if (ft) seenScore.current = { id: matchId, home: ft.home ?? 0, away: ft.away ?? 0 }
       // Only take the live fields — the slim live payload has no lineups/stats/events
       setDetails(prev =>
         prev
@@ -458,6 +475,7 @@ function MatchDetail() {
       socket.off('connect', subscribe)
       socket.off('match:live', onLive)
       if (timer) clearInterval(timer)
+      refetch.forEach(clearTimeout)
     }
   }, [matchId, isLive, isDone, hasOfficialLineups, Math.floor((kickoff - Date.now()) / (30 * 60 * 1000))])
 
@@ -508,7 +526,7 @@ function MatchDetail() {
         kind: g.type === 'OWN' ? 'own' : g.type === 'PENALTY' ? 'pen' : 'goal',
         teamId: g.team.id,
         text: g.scorer.name + (g.type === 'PENALTY' ? tt(" (pen)") : g.type === 'OWN' ? ' (og)' : ''),
-        sub: g.assist ? `assist: ${g.assist.name}` : undefined,
+        sub: g.assist ? tt('Assist: {0}', { 0: g.assist.name }) : undefined,
         href: g.type === 'OWN' ? null : pHref(g.scorer, g.team.id)
       })
     )
@@ -523,8 +541,14 @@ function MatchDetail() {
         teamId: s.team.id,
         text: s.playerIn.name,
         href: pHref(s.playerIn, s.team.id),
-        sub: `for ${s.playerOut.name}`
+        sub: tt('for {0}', { 0: s.playerOut.name })
       })
+    )
+    ;(m.varEvents || []).forEach(v =>
+      list.push({ minute: v.minute, extra: v.injuryTime || 0, kind: 'var', teamId: v.team.id, text: v.player?.name ? `${tt('VAR')}: ${v.player.name}` : tt('VAR'), sub: varText(v.detail), href: v.player ? pHref(v.player, v.team.id) : null })
+    )
+    ;(m.missedPens || []).forEach(x =>
+      list.push({ minute: x.minute, extra: x.injuryTime || 0, kind: 'missed', teamId: x.team.id, text: x.player.name, sub: tt('Missed penalty'), href: pHref(x.player, x.team.id) })
     )
     return list.sort((a, b) => a.minute - b.minute || a.extra - b.extra)
   }, [details])
@@ -598,6 +622,7 @@ function MatchDetail() {
     )
 
   const m = tickedMinute(details.match, reading.current.at)
+  seenScore.current = { id: matchId, home: m.score.fullTime.home ?? 0, away: m.score.fullTime.away ?? 0 }
   const home = m.homeTeam
   const away = m.awayTeam
   const live = LIVE.has(m.status)
@@ -666,6 +691,40 @@ function MatchDetail() {
     m.stage && m.stage !== 'REGULAR_SEASON' ? m.stage.replace(/_/g, ' ').toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/ - /g, ' · ') : null,
     m.group ? m.group.replace(/_/g, ' ') : null
   ].filter((x): x is string => !!x)
+  // fix209: one icon per event type, the home team on the left and the away team on the right (named above the list)
+  const eventsBlock = events.length > 0 ? (
+    <Section title={tt("Match events")}>
+      <div className="grid grid-cols-[1fr_56px_1fr] items-center pb-2 mb-1 border-b border-line/60 text-xs font-semibold">
+        <span className="flex items-center justify-end gap-1.5 pr-3 min-w-0"><span className="truncate text-home">{tname(home)}</span>{home.crest && <img src={home.crest} alt="" className="w-4 h-4 object-contain shrink-0" />}</span>
+        <span className="text-center text-[10px] text-faint">{tt('Min')}</span>
+        <span className="flex items-center gap-1.5 pl-3 min-w-0">{away.crest && <img src={away.crest} alt="" className="w-4 h-4 object-contain shrink-0" />}<span className="truncate text-away">{tname(away)}</span></span>
+      </div>
+      <ol className="relative">
+        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-line/70 -translate-x-1/2" />
+        {events.map((e, i) => {
+          const isHome = e.teamId === home.id
+          return (
+            <li key={i} className="relative grid grid-cols-[1fr_56px_1fr] items-center py-1.5 text-sm">
+              <div className={isHome ? 'text-right pr-3' : ''}>
+                {isHome && <EventText e={e} align="right" />}
+              </div>
+              <div className="flex items-center justify-center">
+                <span className="num text-[11px] text-faint bg-surface px-1.5 py-0.5 rounded-md border border-line/60">
+                  {e.minute}'{e.extra ? `+${e.extra}` : ''}
+                </span>
+              </div>
+              <div className={!isHome ? 'pl-3' : ''}>{!isHome && <EventText e={e} align="left" />}</div>
+            </li>
+          )
+        })}
+      </ol>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-faint">
+        {[['goal', tt('Goal')], ['pen', tt('Penalty')], ['own', tt('Own goal')], ['missed', tt('Missed penalty')], ['yellow', tt('Yellow card')], ['red', tt('Red card')], ['sub', tt('Substitution')], ['var', tt('VAR')]]
+          .filter(([k]) => events.some(e => e.kind === k || (k === 'red' && e.kind === 'yellow_red')))
+          .map(([k, label]) => <span key={k} className="inline-flex items-center gap-1.5"><EventIcon kind={k} />{label}</span>)}
+      </div>
+    </Section>
+  ) : null
   const RENDER: Record<TabId, () => ReactNode> = {
     prediction: () => (
       <>
@@ -833,6 +892,8 @@ function MatchDetail() {
     highlights: () => <Highlights url={`${API_URL}/matches/${matchId}/highlights`} />,
     stats: () => (
       <>
+              {/* fix209: while the game is on, the events come first (above the numbers) */}
+              {live && eventsBlock}
               {live && (
                 <Section title={tt("Live stats")} note={m.minute ? tt("{0}'{1} · updates every minute", { 0: m.minute, 1: m.injuryTime ? `+${m.injuryTime}` : '' }) : tt("updates every minute")}>
                   {statKeys.length > 0 && homeStats && awayStats ? (
@@ -846,30 +907,7 @@ function MatchDetail() {
                   )}
                 </Section>
               )}
-              {/* Events */}
-              {events.length > 0 && (
-                <Section title={tt("Match events")}>
-                  <ol className="relative">
-                    <div className="absolute left-1/2 top-0 bottom-0 w-px bg-line/70 -translate-x-1/2" />
-                    {events.map((e, i) => {
-                      const isHome = e.teamId === home.id
-                      return (
-                        <li key={i} className={`relative grid grid-cols-[1fr_56px_1fr] items-center py-1.5 text-sm ${isHome ? '' : ''}`}>
-                          <div className={`${isHome ? 'text-right pr-3' : ''}`}>
-                            {isHome && <EventText e={e} align="right" />}
-                          </div>
-                          <div className="flex items-center justify-center">
-                            <span className="num text-[11px] text-faint bg-surface px-1.5 py-0.5 rounded-md border border-line/60">
-                              {e.minute}'{e.extra ? `+${e.extra}` : ''}
-                            </span>
-                          </div>
-                          <div className={`${!isHome ? 'pl-3' : ''}`}>{!isHome && <EventText e={e} align="left" />}</div>
-                        </li>
-                      )
-                    })}
-                  </ol>
-                </Section>
-              )}
+              {!live && eventsBlock}
               {/* Statistics */}
               {!live && statKeys.length > 0 && homeStats && awayStats && (
                 <Section title={tt("Statistics")}>
@@ -999,6 +1037,13 @@ function MatchDetail() {
           )
     )
   }
+  // fix209: the header's player links (scorers and red cards), the same pages as the events list
+  const scorerHref = new Map<number, string>()
+  for (const x of [...(m.goals || []).map(g => ({ pl: g.scorer, team: g.team.id })), ...(m.bookings || []).map(b => ({ pl: b.player, team: b.team.id }))]) {
+    const team = x.team === home.id ? home : x.team === away.id ? away : null
+    const h = team && x.pl?.id ? playerHref(x.pl, team, m.competition?.code) : null
+    if (h) scorerHref.set(x.pl.id, h)
+  }
   const side = (team: Team) => ({
     name: team.shortName || team.name,
     logo: <HeroLogo src={team.crest} />,
@@ -1023,6 +1068,7 @@ function MatchDetail() {
       away={side(away)}
       score={showScore ? { home: ft.home ?? 0, away: ft.away ?? 0 } : null}
       time={fmtTime(m.utcDate)}
+      scorers={showScore ? { lines: footballScorers(m, pendingGoals.current), playerHref: id => scorerHref.get(id) || null } : null}
       scoreSub={showScore && ht && ht.home !== null && (done || m.status === 'PAUSED' || (m.minute ?? 0) > 45) ? (
         <div className="num text-xs text-faint mt-1">{tt("HT")}{' '}{ht.home}–{ht.away}</div>
       ) : undefined}
@@ -1398,20 +1444,36 @@ function EventText({ e, align }: { e: { kind: string; text: string; sub?: string
       {align === 'left' && <EventIcon kind={e.kind} />}
       <span className="min-w-0">
         <NameLink to={e.href} className="text-ink font-medium">{e.text}</NameLink>
-        {e.sub && <span className="block text-[11px] text-faint">{e.sub}</span>}
+        {e.sub && <span className="block text-[10px] leading-tight text-faint">{e.sub}</span>}
       </span>
       {align === 'right' && <EventIcon kind={e.kind} />}
     </div>
   )
 }
 
+/** fix209: one icon per event type (goal, penalty, own goal, missed penalty, cards, substitution, VAR) */
 function EventIcon({ kind }: { kind: string }) {
-  if (kind === 'goal' || kind === 'pen' || kind === 'own')
-    return <span className={`text-base leading-none ${kind === 'own' ? 'opacity-50' : ''}`}>⚽</span>
-  if (kind === 'yellow') return <span className="inline-block w-3 h-4 rounded-[2px] bg-draw" />
-  if (kind === 'red') return <span className="inline-block w-3 h-4 rounded-[2px] bg-live" />
-  if (kind === 'yellow_red') return <span className="inline-block w-3 h-4 rounded-[2px] bg-gradient-to-b from-draw to-live" />
-  return <span className="text-faint text-sm">⇄</span>
+  const box = 'inline-grid place-items-center w-4 h-4 shrink-0 leading-none'
+  if (kind === 'goal') return <span className={`${box} text-[13px]`} title={tt('Goal')}>⚽</span>
+  if (kind === 'pen') return <span className={`${box} relative text-[13px]`} title={tt('Penalty')}>⚽<span className="absolute -right-1.5 -bottom-1 text-[8px] font-extrabold text-ink">P</span></span>
+  if (kind === 'own') return <span className={`${box} relative text-[13px]`} title={tt('Own goal')}><span className="opacity-60">⚽</span><span className="absolute -right-2 -bottom-1 text-[8px] font-extrabold text-loss">OG</span></span>
+  if (kind === 'missed') return <span className={`${box} relative text-[13px]`} title={tt('Missed penalty')}><span className="opacity-40">⚽</span><span className="absolute inset-0 grid place-items-center text-loss text-[14px] font-extrabold">✕</span></span>
+  if (kind === 'yellow') return <span className={box} title={tt('Yellow card')}><span className="w-2.5 h-3.5 rounded-[2px] bg-draw" /></span>
+  if (kind === 'red') return <span className={box} title={tt('Red card')}><span className="w-2.5 h-3.5 rounded-[2px] bg-live" /></span>
+  if (kind === 'yellow_red') return <span className={box} title={tt('Second yellow')}><span className="w-2.5 h-3.5 rounded-[2px] bg-gradient-to-b from-draw to-live" /></span>
+  if (kind === 'var') return <span className={`${box} w-auto px-1 rounded border border-line text-[8px] font-extrabold text-muted`} title={tt('VAR')}>VAR</span>
+  return <span className={`${box} text-accent text-sm font-bold`} title={tt('Substitution')}>⇄</span>
+}
+
+/** API-Football's VAR detail in plain words */
+function varText(detail: string) {
+  const d = (detail || '').toLowerCase()
+  if (/goal cancel|goal disallow/.test(d)) return tt('Goal disallowed')
+  if (/penalty confirm/.test(d)) return tt('Penalty confirmed')
+  if (/penalty cancel/.test(d)) return tt('Penalty cancelled')
+  if (/card upgrade|red card/.test(d)) return tt('Red card after review')
+  if (/goal confirm/.test(d)) return tt('Goal confirmed')
+  return detail || undefined
 }
 
 /* ---------- shared look of the match tabs (same style as the basketball game page) ---------- */

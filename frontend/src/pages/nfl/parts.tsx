@@ -7,6 +7,7 @@ import { t, LOCALE } from '../../lib/i18n'
 import { NFL_STATUS, timeOf, nick, record, useNflFavorites, nflRid, nflRstatus, type NflGame, type StandRow, type Standings } from '../../lib/nfl'
 import { SectionTitle, TeamLogo, dayTitle, BbPickBlock, LockIcon } from '../bb/parts'
 import { useReveal, justRevealed } from '../../lib/reveal'
+import { ScorersToggle, RowScorersLine, useScorersOpen } from '../../components/sport/RowScorers'
 
 /** Shared pieces of the NFL pages (fix137) — the same look as basketball's and football's. */
 
@@ -63,7 +64,10 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
   const roll = justRevealed(nflRid(g))
   const won = (side: 'H' | 'A') => (done && g.score ? (side === 'H' ? g.score.home > g.score.away : g.score.away > g.score.home) : false)
   const favWhy = useNflFavorites().reasons(g)
+  // fix209: a live / finished row opens with its arrow to the scoring plays
+  const [scOpen, scToggle] = useScorersOpen()
   return (
+    <div>
     <Link to={`/american-football/game/${g.id}${p ? '#prediction' : ''}`} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
       {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
@@ -139,8 +143,11 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
         {done && p && typeof p.hit === 'boolean' && (
           <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold ${p.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`} title={p.hit ? t('Hit') : t('Miss')}>{p.hit ? '✓' : '✗'}</span>
         )}
+        {(isLive || done) && <ScorersToggle open={scOpen} onToggle={scToggle} />}
       </div>
     </Link>
+      {scOpen && <RowScorersLine href={`/american-football/game/${g.id}`} live={isLive} homeName={nick(g.home.name, g.league)} awayName={nick(g.away.name, g.league)} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+    </div>
   )
 }
 

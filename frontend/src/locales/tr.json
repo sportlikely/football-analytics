@@ -2385,5 +2385,22 @@
  "LIVE · updated {0} min ago": "CANLI · {0} dk önce güncellendi",
  "Team totals": "Takım toplamı",
  "Bench, not yet played": "Yedek, henüz oynamadı",
- "Did not play": "Oynamadı"
+ "Did not play": "Oynamadı",
+ "Assist: {0}": "Asist: {0}",
+ "for {0}": "{0} yerine",
+ "VAR": "VAR",
+ "Missed penalty": "Kaçan penaltı",
+ "Penalty": "Penaltı",
+ "Own goal": "Kendi kalesine gol",
+ "Yellow card": "Sarı kart",
+ "Substitution": "Oyuncu değişikliği",
+ "Second yellow": "İkinci sarı",
+ "Goal disallowed": "Gol iptal",
+ "Penalty confirmed": "Penaltı onaylandı",
+ "Penalty cancelled": "Penaltı iptal",
+ "Red card after review": "İnceleme sonrası kırmızı kart",
+ "Goal confirmed": "Gol onaylandı",
+ "Hide scorers": "Golcüleri gizle",
+ "Show scorers": "Golcüleri göster",
+ "No scorers yet": "Henüz golcü yok"
 }

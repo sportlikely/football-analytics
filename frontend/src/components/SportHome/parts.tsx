@@ -8,6 +8,7 @@ import { DcHelp } from '../DcPick'
 import RecordLink from '../RecordLink'
 import { NewsPic, isPhoto } from '../NewsList'
 import type { HGame, HTeam, HPick, HNews, HRecord, HSpecial, HResults, SportAdapter } from './types'
+import { ScorersToggle, RowScorersLine, scorersSource, useScorersOpen } from '../sport/RowScorers'
 
 /** Shared pieces of the sport home page (fix141) — the football home's look, for every sport. */
 
@@ -557,8 +558,21 @@ export function ResultsCard({ r }: { r: HResults }) {
         <p className="px-1 text-xs text-faint">{tt("No finished games in the last {0} days.", { 0: r.days })}</p>
       ) : (
         <ul className="space-y-1 max-h-[340px] overflow-y-auto overscroll-contain pr-1">
-          {rows.map(x => (
-            <li key={x.id}>
+          {rows.map(x => <ResultItem key={x.id} x={x} side={side} />)}
+        </ul>
+      )}
+      {r.link && rows && rows.length > 0 && <RecordLink to={r.link.to} className="block px-1 pt-2 text-[11px] font-semibold text-muted hover:text-ink">{r.link.label}</RecordLink>}
+    </div>
+  )
+}
+type HResult = NonNullable<HResults['rows']>[number]
+
+/** One finished game of "Latest results"; fix209: its arrow opens the scorers line. */
+function ResultItem({ x, side }: { x: HResult; side: (s: HResult['home']) => ReactNode }) {
+  const [scOpen, scToggle] = useScorersOpen()
+  const scorable = !!scorersSource(x.href)
+  return (
+            <li>
               <Link to={x.href} className="block rounded-xl px-2 py-2 hover:bg-surface2 transition-colors">
                 <div className="flex items-center justify-between gap-2 text-[10px] text-faint mb-1">
                   <span className="truncate">{x.competition}</span>
@@ -574,18 +588,16 @@ export function ResultsCard({ r }: { r: HResults }) {
                       <span className="font-semibold text-ink/85 truncate">{x.pick.words}</span>
                     </span>
                   ) : <span />}
-                  {x.hit !== null && <span className={`flex-shrink-0 font-extrabold ${x.hit ? 'text-win' : 'text-loss'}`} aria-label={x.hit ? tt("Right") : tt("Wrong")}>{x.hit ? '✓' : '✗'}</span>}
+                  <span className="flex items-center gap-1.5 flex-shrink-0">
+                    {x.hit !== null && <span className={`font-extrabold ${x.hit ? 'text-win' : 'text-loss'}`} aria-label={x.hit ? tt("Right") : tt("Wrong")}>{x.hit ? '✓' : '✗'}</span>}
+                    {scorable && <ScorersToggle open={scOpen} onToggle={scToggle} />}
+                  </span>
                 </div>
               </Link>
+              {scOpen && <RowScorersLine href={x.href} live={false} homeName={x.home.name} awayName={x.away.name} className="px-2 pb-2" />}
             </li>
-          ))}
-        </ul>
-      )}
-      {r.link && rows && rows.length > 0 && <RecordLink to={r.link.to} className="block px-1 pt-2 text-[11px] font-semibold text-muted hover:text-ink">{r.link.label}</RecordLink>}
-    </div>
   )
 }
-type HResult = NonNullable<HResults['rows']>[number]
 
 /* ---------- news ---------- */
 

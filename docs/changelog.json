@@ -3,6 +3,21 @@
  "entries": [
   {
    "date": "2026-10-24",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "Who scored, right under the score: football goals in minute order with own goals, penalties and red cards, the top scorer of each basketball team, and the scoring plays in American football, live and after the final whistle. Tap the arrow on a finished or live game in any list to see the same line.",
+    "es": "Quién marcó, justo bajo el marcador: los goles de fútbol por minuto, con goles en propia puerta, penaltis y tarjetas rojas, el máximo anotador de cada equipo de baloncesto y las jugadas de anotación en el fútbol americano, en vivo y al final. Toca la flecha de un partido en vivo o terminado en cualquier lista para ver la misma línea.",
+    "pt": "Quem marcou, logo abaixo do placar: os gols de futebol por minuto, com gols contra, pênaltis e cartões vermelhos, o cestinha de cada equipa de basquete e as jogadas de pontuação no futebol americano, ao vivo e no fim. Toque na seta de um jogo ao vivo ou terminado em qualquer lista para ver a mesma linha.",
+    "de": "Wer getroffen hat, direkt unter dem Spielstand: Fußballtore nach Minute mit Eigentoren, Elfmetern und Roten Karten, der beste Werfer jedes Basketballteams und die Scoring-Spielzüge im American Football, live und nach dem Abpfiff. Tippe in jeder Liste auf den Pfeil eines laufenden oder beendeten Spiels, um dieselbe Zeile zu sehen.",
+    "fr": "Qui a marqué, juste sous le score : les buts de football dans l’ordre des minutes, avec les buts contre son camp, les penalties et les cartons rouges, le meilleur marqueur de chaque équipe de basket et les actions de score au football américain, en direct et après le coup de sifflet final. Touchez la flèche d’un match en direct ou terminé dans n’importe quelle liste pour voir la même ligne.",
+    "it": "Chi ha segnato, proprio sotto il punteggio: i gol del calcio in ordine di minuto, con autogol, rigori e cartellini rossi, il miglior marcatore di ogni squadra di basket e le azioni da punti nel football americano, in diretta e a fine partita. Tocca la freccia di una partita in corso o finita in qualsiasi elenco per vedere la stessa riga.",
+    "tr": "Kim attı, skorun hemen altında: futbolda dakika sırasıyla goller (kendi kalesine goller, penaltılar ve kırmızı kartlarla), her basketbol takımının en skoreri ve Amerikan futbolunda sayı getiren oyunlar, canlı ve maç bitince. Herhangi bir listede canlı ya da bitmiş bir maçın okuna dokunarak aynı satırı görebilirsiniz."
+   }
+  },
+  {
+   "date": "2026-10-24",
    "sport": "basketball",
    "kind": "site",
    "version": "3.1",

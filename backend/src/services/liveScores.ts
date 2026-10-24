@@ -76,6 +76,13 @@ export function withLiveScore<T extends { id: number; status?: string; score?: a
   return { ...match, status: b.status, minute: b.minute, injuryTime: b.injuryTime, score };
 }
 
+/** fix209: every match in the book with its best reading (the scorers check: live and just finished games). */
+export function liveBookIds(): { id: number; status: string; home: number; away: number }[] {
+  const out: { id: number; status: string; home: number; away: number }[] = [];
+  for (const id of book.keys()) { const b = bestLive(id); if (b) out.push({ id, status: b.status, home: b.home, away: b.away }); }
+  return out;
+}
+
 /** Admin: every match in the book with both readings and the one shown. */
 export function liveBookStatus() {
   const now = Date.now();

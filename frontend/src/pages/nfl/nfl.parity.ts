@@ -28,6 +28,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.events',
     'game.stats',
     'game.livePlayerStats', // fix208: live player lines in the Players tab (LiveBox)
+    'game.scorers', // fix209: the scoring plays under the score (nflScorers, games/events live too); the row arrow
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204
     'game.howItWorks', // fix206: "How does this work?" in ModelName + the sport's how-it-works page (components/sport/HowItWorks)

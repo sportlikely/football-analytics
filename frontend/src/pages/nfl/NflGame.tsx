@@ -24,6 +24,7 @@ import Highlights from '../../components/sport/game/Highlights'
 import GamePreview from '../../components/sport/game/GamePreview'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { RestTab } from '../bb/GameTabs'
+import { nflScorers } from '../../lib/scorers'
 import type { Sched } from '../bb/BbGame'
 
 type Box = {
@@ -169,6 +170,8 @@ export default function NflGame() {
         text: NFL_STATUS[g.status] || (g.state === 'upcoming' ? t('KICK-OFF') : g.status)
       }}
       scoreSub={(() => { const ht = live || done ? halfTimeOf(g.quarters) : null; return ht ? <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div> : undefined })()}
+      // fix209: the scoring plays under each team ("TD Kelce 12' Q2"), live and final (games/events)
+      scorers={(live || done) && plays ? { lines: nflScorers(plays, g.home.id, g.away.id), playerHref: pid => href.nflPlayer(pid) } : null}
       statusNote={g.state === 'off' ? (
         <p className="mt-2 max-w-[260px] mx-auto text-[11px] text-muted">
           {/CANC/.test(g.status) ? t('This game was cancelled. It does not count in our record.') : t('This game was postponed. Our prediction stays until the new date.')}
