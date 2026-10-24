@@ -2379,5 +2379,11 @@
  "Challenger": "Challenger",
  "Winning margin: {0}": "Galibiyet farkı: {0}",
  "by {0}": "{0} farkla",
- "{0} wins instead": "{0} kazanır"
+ "{0} wins instead": "{0} kazanır",
+ "LIVE · updated just now": "CANLI · az önce güncellendi",
+ "LIVE · updated {0} s ago": "CANLI · {0} sn önce güncellendi",
+ "LIVE · updated {0} min ago": "CANLI · {0} dk önce güncellendi",
+ "Team totals": "Takım toplamı",
+ "Bench, not yet played": "Yedek, henüz oynamadı",
+ "Did not play": "Oynamadı"
 }

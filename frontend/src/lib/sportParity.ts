@@ -48,6 +48,7 @@ export const PARITY = [
   { key: 'game.swingChart', label: 'Win-chance swing chart', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.events', label: 'Events / quarter strip', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.stats', label: 'Game stats', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'game.livePlayerStats', label: 'Live player stats during the game (fix208: basketball box score / NFL player lines refreshed live; football: live line-ups + events; tennis: live point stats)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.morePredictions', label: 'More predictions block under the prediction (fix204)', football: true, basketball: true, nfl: true, tennis: true },

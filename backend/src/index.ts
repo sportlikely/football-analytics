@@ -23,6 +23,7 @@ import { setJob } from './services/perf';
 import { isWeb } from './services/role';
 import { attachWorker } from './services/ipc';
 import { onLive, loadLiveRows } from './services/liveState';
+import { noteGameView, onBox } from './services/gameViews';
 import { loadNewerStates } from './services/shared';
 import { WORKER_PORT } from './services/forward';
 import { workerState, type WorkerReport } from './services/workerHealth';
@@ -69,6 +70,18 @@ io.on('connection', socket => {
     socket.leave(`match:${matchId}:${tier}`);
   });
 
+  // fix208: a basketball / American-football game page (its live box score); one game room at a time
+  socket.on('subscribe_game', (m: { sport?: string; id?: number }) => {
+    const sport = m?.sport === 'nfl' ? 'nfl' : m?.sport === 'bb' ? 'bb' : null, id = Number(m?.id);
+    if (!sport || !Number.isInteger(id) || id <= 0) return;
+    for (const room of socket.rooms) if (room.startsWith('game:') && room !== `game:${sport}:${id}`) socket.leave(room);
+    socket.join(`game:${sport}:${id}`);
+    noteGameView(sport, id);
+  });
+  socket.on('unsubscribe_game', (m: { sport?: string; id?: number }) => {
+    socket.leave(`game:${m?.sport === 'nfl' ? 'nfl' : 'bb'}:${Number(m?.id)}`);
+  });
+
   socket.on('disconnect', reason => {
     logger.info(`Client disconnected: ${socket.id} (${reason})`);
   });
@@ -88,6 +101,16 @@ onLive((sport, all, changed) => {
     io.to(`match:${m.id}:teaser`).emit('match:live', teaseDeep({ m }).m);
   }
 });
+
+// fix208: a game's live box score was stored — one message to the pages that have it open (they reload the box score)
+onBox((sport, id, at) => { io.to(`game:${sport}:${id}`).emit(`${sport}Box`, { id, at }); });
+// pages left open count as watched (the worker fetches their box score every 60 s): the rooms are swept every minute
+setInterval(() => {
+  for (const [room, members] of io.sockets.adapter.rooms) {
+    const m = /^game:(bb|nfl):(\d+)$/.exec(room);
+    if (m && members.size) noteGameView(m[1] as 'bb' | 'nfl', Number(m[2]));
+  }
+}, 60 * 1000).unref();
 
 /* ---------- the worker process ---------- */
 

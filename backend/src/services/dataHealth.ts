@@ -30,8 +30,24 @@ import { bbStandingsCheck } from './bbSite';
 import { voidedThisMonth } from './unsettled';
 import { moreHealth } from './morePredictions';
 import { createHealthStore, NOT_YET } from '../utils/healthStore';
+import { LATE_MS } from '../utils/liveBox';
+import { BB_MAJOR } from './basketball';
 
 type Level = 'ok' | 'warn' | 'fail';
+
+/** fix208: the live games the box-score job must keep fresh (big leagues), and the ones late by more than 5 minutes */
+export function liveBoxCheck(now = Date.now()): { tracked: number; late: string[] } {
+  const started = new Date(now - 8 * MIN).toISOString(), since = new Date(now - 6 * 60 * MIN).toISOString(), lateAt = now - LATE_MS;
+  const bb = db.prepare(`SELECT g.game_id AS id, g.code AS league, g.home_name AS home, g.away_name AS away,
+      (SELECT MAX(updated_at) FROM bb_player_stats_live p WHERE p.game_id = g.game_id) AS at
+    FROM bb_games g WHERE g.status IN ('Q1','Q2','Q3','Q4','OT','BT','HT') AND g.code IN (${[...BB_MAJOR].map(() => '?').join(',')}) AND g.kickoff BETWEEN ? AND ?`).all(...BB_MAJOR, since, started) as any[];
+  const nfl = db.prepare(`SELECT g.game_id AS id, 'NFL' AS league, g.home_name AS home, g.away_name AS away,
+      (SELECT MAX(updated_at) FROM nfl_player_stats_live p WHERE p.game_id = g.game_id) AS at
+    FROM nfl_games g WHERE g.status IN ('Q1','Q2','Q3','Q4','OT','HT') AND g.league = 1 AND g.kickoff BETWEEN ? AND ?`).all(since, started) as any[];
+  const all = [...bb, ...nfl];
+  const late = all.filter(r => !r.at || r.at < lateAt).map(r => `${r.league} ${r.home} – ${r.away} (${r.id}): ${r.at ? `last update ${Math.round((now - r.at) / MIN)} min ago` : 'no box score yet'}`);
+  return { tracked: all.length, late };
+}
 export interface Check { id: string; label: string; level: Level; detail: string; items?: string[] }
 
 const MIN = 60 * 1000;
@@ -197,6 +213,18 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     checks.push({ id: 'bb-standings', label: 'Basketball tables: each team once per table level', level: 'warn', detail: `Check failed: ${e.message}` });
   }
   await slice();
+  // fix208: live box scores — every NBA / EuroLeague / NFL game on for 8+ minutes has a box-score update in the last 5
+  // minutes (target 0 during NBA hours); other leagues are fetched only while someone has the page open, so not counted
+  try {
+    const lb = liveBoxCheck();
+    checks.push({
+      id: 'live-box', label: 'Live box scores', level: lb.late.length ? 'warn' : 'ok',
+      detail: lb.tracked ? (lb.late.length ? `${lb.late.length} of ${lb.tracked} live game(s) without a box-score update in the last 5 min` : `${lb.tracked} live game(s), all updated in the last 5 min`) : 'No NBA / EuroLeague / NFL game on right now',
+      items: lb.late.slice(0, 15)
+    });
+  } catch (e: any) {
+    checks.push({ id: 'live-box', label: 'Live box scores', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
   // fix182: games of a league / cup we predict that fell back to the old table model (v1 / v2), with the reason
   const OLD = new Set(['poisson-dc-v1', 'dc-history-v2']);
   const fallback = matches.filter(m => !FINAL.includes(m.status) && m.prediction && OLD.has(m.prediction.model) && new Date(m.utcDate).getTime() < now + 30 * 86400000);

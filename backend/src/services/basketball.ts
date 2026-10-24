@@ -18,6 +18,9 @@ import { applyResultFixes, checkResults } from './bbResults';
 import { onBbExtraLeague } from './bbLeagueConfig';
 import { assertProviderCallAllowed } from './afUsage';
 import { cleanName } from './sponsorNames';
+import { boxUpdated, gameViews } from './gameViews';
+import { dueGames, budgetAllows, chunks } from '../utils/liveBox';
+import { nbaLiveExtras } from './bdl';
 
 const BASE = 'https://v1.basketball.api-sports.io';
 const KEY = () => process.env.API_BASKETBALL_KEY || process.env.API_FOOTBALL_KEY || '';
@@ -97,6 +100,23 @@ try { db.exec(`ALTER TABLE bb_games ADD COLUMN timer INTEGER`); } catch { /* col
 try { db.exec(`ALTER TABLE bb_games ADD COLUMN stats INTEGER NOT NULL DEFAULT 0`); } catch { /* column exists */ }
 // field goals checked against the score? 0 = not yet, 1 = fine, 2 = corrected (see fixFieldGoals)
 try { db.exec(`ALTER TABLE bb_team_stats ADD COLUMN fg_checked INTEGER NOT NULL DEFAULT 0`); } catch { /* column exists */ }
+// fix208: live box scores, apart from the final ones (the model, player averages and injuries read bb_team_stats /
+// bb_player_stats as finished games): same columns + when they were fetched; NBA extras from balldontlie's live feed.
+// The final fetch (syncBoxScores, or the live job once the game is over) deletes a game's live rows.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS bb_team_stats_live (
+    game_id INTEGER NOT NULL, team_id INTEGER NOT NULL,
+    fgm INTEGER, fga INTEGER, tpm INTEGER, tpa INTEGER, ftm INTEGER, fta INTEGER,
+    reb INTEGER, oreb INTEGER, dreb INTEGER, ast INTEGER, stl INTEGER, blk INTEGER, tov INTEGER, pf INTEGER,
+    updated_at INTEGER NOT NULL, PRIMARY KEY (game_id, team_id)
+  );
+  CREATE TABLE IF NOT EXISTS bb_player_stats_live (
+    game_id INTEGER NOT NULL, team_id INTEGER NOT NULL, player_id INTEGER NOT NULL, name TEXT,
+    starter INTEGER, minutes REAL, pts INTEGER, fgm INTEGER, fga INTEGER, tpm INTEGER, tpa INTEGER, ftm INTEGER, fta INTEGER,
+    reb INTEGER, ast INTEGER, stl INTEGER, blk INTEGER, tov INTEGER, pm INTEGER,
+    updated_at INTEGER NOT NULL, PRIMARY KEY (game_id, player_id)
+  );
+`);
 
 /**
  * API-Basketball changed its box scores during 2025-26: "field goals" became 2-point field goals only (3-pointers
@@ -292,50 +312,168 @@ const mins = (m: any) => {
 };
 
 /**
+ * Store one batch of box scores (the /games/statistics/teams and /players responses). `live` = the live tables (with
+ * the time; a game's player lines are rewritten each time); otherwise the final tables, the game marked (1 stored,
+ * 2 the provider has none) and its live rows deleted (fix208: the final rows replace the live ones, nothing twice).
+ * Returns the games that had numbers.
+ */
+export function storeBoxRows(ids: number[], teams: any[], players: any[], live: boolean, opts: { now?: number; markMissing?: boolean } = {}): Set<number> {
+  const sfx = live ? '_live' : '';
+  const insT = db.prepare(`INSERT OR REPLACE INTO bb_team_stats${sfx} (game_id, team_id, fgm, fga, tpm, tpa, ftm, fta, reb, oreb, dreb, ast, stl, blk, tov, pf${live ? ', updated_at' : ''})
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${live ? ', ?' : ''})`);
+  const insP = db.prepare(`INSERT OR REPLACE INTO bb_player_stats${sfx} (game_id, team_id, player_id, name, starter, minutes, pts, fgm, fga, tpm, tpa, ftm, fta, reb, ast${live ? ', updated_at' : ''})
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${live ? ', ?' : ''})`);
+  const mark = db.prepare(`UPDATE bb_games SET stats = ? WHERE game_id = ?`);
+  const dropT = db.prepare(`DELETE FROM bb_team_stats_live WHERE game_id = ?`), dropP = db.prepare(`DELETE FROM bb_player_stats_live WHERE game_id = ?`);
+  const got = new Set<number>();
+  const extra = live ? [opts.now ?? Date.now()] : [];
+  db.exec('BEGIN');
+  try {
+    if (live) {
+      // a player the provider took off its list (a line corrected) must not stay from the last fetch
+      const fresh = new Set<number>((players || []).map(r => Number(r.game?.id)).filter(Boolean));
+      for (const gid of fresh) dropP.run(gid);
+    }
+    for (const r of teams || []) {
+      const gid = r.game?.id, tid = r.team?.id;
+      if (!gid || !tid) continue;
+      got.add(gid);
+      insT.run(gid, tid, num(r.field_goals?.total), num(r.field_goals?.attempts), num(r.threepoint_goals?.total), num(r.threepoint_goals?.attempts),
+        num(r.freethrows_goals?.total), num(r.freethrows_goals?.attempts), num(r.rebounds?.total), num(r.rebounds?.offence ?? r.rebounds?.offense ?? r.rebounds?.offensive), num(r.rebounds?.defense ?? r.rebounds?.defence ?? r.rebounds?.defensive),
+        num(r.assists), num(r.steals), num(r.blocks), num(r.turnovers), num(r.personal_fouls), ...extra);
+    }
+    for (const r of players || []) {
+      const gid = r.game?.id, pid = r.player?.id;
+      if (!gid || !pid) continue;
+      got.add(gid);
+      insP.run(gid, r.team?.id || 0, pid, r.player?.name || null, r.type === 'starters' ? 1 : 0, mins(r.minutes), num(r.points),
+        num(r.field_goals?.total), num(r.field_goals?.attempts), num(r.threepoint_goals?.total), num(r.threepoint_goals?.attempts),
+        num(r.freethrows_goals?.total), num(r.freethrows_goals?.attempts), num(r.rebounds?.total), num(r.assists), ...extra);
+    }
+    // markMissing false (the live job's fetch right after the final buzzer): a game the provider has no numbers for yet
+    // keeps its live rows; the 30-minute pass asks again
+    if (!live) for (const id of ids) { if (!got.has(id) && opts.markMissing === false) continue; mark.run(got.has(id) ? 1 : 2, id); dropT.run(id); dropP.run(id); }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  if (live) fixLiveFieldGoals([...got]);
+  return got;
+}
+
+/**
  * Box scores (team and player stats) of finished games, 20 games per request, newest first.
  * `maxBatches` keeps one pass bounded; the next pass continues where this one stopped.
  */
 async function syncBoxScores(maxBatches = 400) {
   const todo = db.prepare(`SELECT game_id FROM bb_games WHERE status IN ('FT','AOT') AND stats = 0 ORDER BY kickoff DESC LIMIT ?`).all(maxBatches * 20) as any[];
-  const insT = db.prepare(`INSERT OR REPLACE INTO bb_team_stats (game_id, team_id, fgm, fga, tpm, tpa, ftm, fta, reb, oreb, dreb, ast, stl, blk, tov, pf)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const insP = db.prepare(`INSERT OR REPLACE INTO bb_player_stats (game_id, team_id, player_id, name, starter, minutes, pts, fgm, fga, tpm, tpa, ftm, fta, reb, ast)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const mark = db.prepare(`UPDATE bb_games SET stats = ? WHERE game_id = ?`);
   let games = 0;
   for (let i = 0; i < todo.length; i += 20) {
     const ids = todo.slice(i, i + 20).map(r => r.game_id);
     const [t, p] = [await bb('/games/statistics/teams', { ids: ids.join('-') }), await bb('/games/statistics/players', { ids: ids.join('-') })];
-    const got = new Set<number>();
-    db.exec('BEGIN');
-    try {
-      for (const r of t.response || []) {
-        const gid = r.game?.id, tid = r.team?.id;
-        if (!gid || !tid) continue;
-        got.add(gid);
-        insT.run(gid, tid, num(r.field_goals?.total), num(r.field_goals?.attempts), num(r.threepoint_goals?.total), num(r.threepoint_goals?.attempts),
-          num(r.freethrows_goals?.total), num(r.freethrows_goals?.attempts), num(r.rebounds?.total), num(r.rebounds?.offence ?? r.rebounds?.offense ?? r.rebounds?.offensive), num(r.rebounds?.defense ?? r.rebounds?.defence ?? r.rebounds?.defensive),
-          num(r.assists), num(r.steals), num(r.blocks), num(r.turnovers), num(r.personal_fouls));
-      }
-      for (const r of p.response || []) {
-        const gid = r.game?.id, pid = r.player?.id;
-        if (!gid || !pid) continue;
-        insP.run(gid, r.team?.id || 0, pid, r.player?.name || null, r.type === 'starters' ? 1 : 0, mins(r.minutes), num(r.points),
-          num(r.field_goals?.total), num(r.field_goals?.attempts), num(r.threepoint_goals?.total), num(r.threepoint_goals?.attempts),
-          num(r.freethrows_goals?.total), num(r.freethrows_goals?.attempts), num(r.rebounds?.total), num(r.assists));
-      }
-      for (const id of ids) mark.run(got.has(id) ? 1 : 2, id);
-      db.exec('COMMIT');
-    } catch (e) {
-      db.exec('ROLLBACK');
-      throw e;
-    }
+    storeBoxRows(ids, t.response || [], p.response || [], false);
     games += ids.length;
   }
   if (games) logger.info(`API-Basketball: box scores for ${games} games`);
   fixFieldGoals();
   return games;
 }
+
+/**
+ * fix208: the 2025-26 field-goal change (fixFieldGoals) on live lines, checked against the current score on every
+ * fetch (the live rows are rewritten each time, so there is nothing to remember).
+ */
+function fixLiveFieldGoals(ids: number[]) {
+  if (!ids.length) return;
+  const rows = db.prepare(`SELECT t.game_id, t.team_id, t.fgm, t.tpm, t.ftm, g.home_id, g.hs, g.as_ FROM bb_team_stats_live t JOIN bb_games g ON g.game_id = t.game_id
+    WHERE t.game_id IN (${ids.map(() => '?').join(',')}) AND g.hs IS NOT NULL AND t.fgm IS NOT NULL`).all(...ids) as any[];
+  const fixT = db.prepare(`UPDATE bb_team_stats_live SET fgm = fgm + COALESCE(tpm, 0), fga = fga + COALESCE(tpa, 0) WHERE game_id = ? AND team_id = ?`);
+  const fixP = db.prepare(`UPDATE bb_player_stats_live SET fgm = COALESCE(fgm, 0) + COALESCE(tpm, 0), fga = COALESCE(fga, 0) + COALESCE(tpa, 0) WHERE game_id = ? AND team_id = ?`);
+  for (const r of rows) {
+    const score = r.team_id === r.home_id ? r.hs : r.as_;
+    const tpm = r.tpm || 0, ftm = r.ftm || 0;
+    if (tpm > 0 && Math.abs(2 * r.fgm + 3 * tpm + ftm - score) < Math.abs(2 * r.fgm + tpm + ftm - score)) { fixT.run(r.game_id, r.team_id); fixP.run(r.game_id, r.team_id); }
+  }
+}
+
+/* ---------- fix208: live box scores ---------- */
+
+const LIVE_ST = ['Q1', 'Q2', 'Q3', 'Q4', 'OT', 'BT', 'HT'];
+/** fetched every 3 minutes even when no one has the page open */
+export const BB_MAJOR = new Set(['NBA', 'EL']);
+const liveBox = { calls: 0, ticks: 0, skippedBudget: 0, games: 0, lastAt: 0, lastError: null as string | null, nbaExtras: null as string | null };
+let liveBoxBusy = false;
+
+/**
+ * Every 60 s: the live games that are due (utils/liveBox.ts: watched 60 s, NBA / EuroLeague 3 min, others only while
+ * watched), 20 per request pair; games that ended with live rows still stored get their final box score in the same
+ * pass. Skipped when the day's quota is near its reserve (the bb() client counts every call and reads the quota left).
+ */
+export async function bbLiveBoxTick(now = Date.now()): Promise<number> {
+  if (liveBoxBusy || !KEY()) return 0;
+  liveBoxBusy = true;
+  try {
+    const rows = db.prepare(`SELECT g.game_id, g.code, (SELECT MAX(updated_at) FROM bb_player_stats_live p WHERE p.game_id = g.game_id) AS at
+      FROM bb_games g WHERE g.status IN (${LIVE_ST.map(() => '?').join(',')}) AND g.kickoff > ?`).all(...LIVE_ST, new Date(now - 6 * 3600 * 1000).toISOString()) as any[];
+    const due = dueGames(rows.map(r => ({ id: r.game_id, major: BB_MAJOR.has(r.code), lastAt: r.at ?? null })), gameViews('bb', now), now);
+    const ended = (db.prepare(`SELECT DISTINCT p.game_id FROM bb_player_stats_live p JOIN bb_games g ON g.game_id = p.game_id WHERE g.status IN ('FT','AOT') AND g.stats = 0`).all() as any[]).map(r => r.game_id as number);
+    if (!due.length && !ended.length) return 0;
+    liveBox.ticks++;
+    const batches = [...chunks(ended, 20).map(ids => ({ ids, live: false })), ...chunks(due, 20).map(ids => ({ ids, live: true }))];
+    if (!budgetAllows(remainingDay, limitDay, batches.length * 2)) { liveBox.skippedBudget++; return 0; }
+    let n = 0;
+    for (const b of batches) {
+      const t = await bb('/games/statistics/teams', { ids: b.ids.join('-') });
+      const p = await bb('/games/statistics/players', { ids: b.ids.join('-') });
+      liveBox.calls += 2;
+      const got = storeBoxRows(b.ids, t.response || [], p.response || [], b.live, { markMissing: false });
+      if (!b.live) fixFieldGoals();
+      if (b.live) await nbaExtras([...got]);
+      for (const id of got) boxUpdated('bb', id);
+      n += b.live ? got.size : 0;
+    }
+    liveBox.games += n;
+    liveBox.lastAt = Date.now();
+    liveBox.lastError = null;
+    return n;
+  } catch (e: any) {
+    liveBox.lastError = e.message;
+    logger.warn(`API-Basketball live box scores: ${e.message}`);
+    return 0;
+  } finally {
+    liveBoxBusy = false;
+  }
+}
+
+/** NBA: steals, blocks, turnovers and plus-minus from balldontlie's live box scores (skipped quietly when it has none) */
+async function nbaExtras(ids: number[]) {
+  if (!ids.length) return;
+  const nba = db.prepare(`SELECT game_id, home_name, away_name FROM bb_games WHERE code = 'NBA' AND game_id IN (${ids.map(() => '?').join(',')})`).all(...ids) as any[];
+  if (!nba.length) return;
+  try {
+    const r = await nbaLiveExtras(nba.map(g => ({ id: g.game_id, home: g.home_name, away: g.away_name })));
+    liveBox.nbaExtras = r.note;
+    if (!r.byGame.size) return;
+    const up = db.prepare(`UPDATE bb_player_stats_live SET stl = ?, blk = ?, tov = ?, pm = ? WHERE game_id = ? AND player_id = ?`);
+    const list = db.prepare(`SELECT player_id, name FROM bb_player_stats_live WHERE game_id = ?`);
+    db.exec('BEGIN');
+    try {
+      for (const [gid, byName] of r.byGame) {
+        for (const pl of list.all(gid) as any[]) {
+          const x = byName(pl.name);
+          if (x) up.run(x.stl, x.blk, x.tov, x.pm, gid, pl.player_id);
+        }
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  } catch (e: any) {
+    liveBox.nbaExtras = `error: ${e.message}`;
+  }
+}
+
+/** admin / data health: the live box-score job */
+export const bbLiveBoxStatus = () => ({ ...liveBox, watched: gameViews('bb').size });
 
 /** Past seasons once (a finished season never changes), the current season every 30 minutes. */
 let ticking = false;
@@ -399,6 +537,8 @@ export function startBasketballScheduler() {
   after('bb sync', () => bbTick(), 45 * 1000).unref();
   every('bb sync', () => void bbTick(), 30 * 60 * 1000).unref();
   setInterval(() => void timed('bb live', () => liveTick()), 60 * 1000).unref(); // fix155: named in /api/perf
+  // fix208: live box scores, 20 s after the scores (a game that just ended is already FT)
+  setTimeout(() => setInterval(() => void timed('bb live box', () => bbLiveBoxTick()), 60 * 1000).unref(), 20 * 1000).unref();
   // NBA injury list every 15 minutes; the coming games' predictions are re-saved with it (until tip-off)
   const injuries = async () => {
     const n = await refreshNbaInjuries();
@@ -426,7 +566,7 @@ export async function bbStatus() {
     SELECT code, season, COUNT(*) AS games, SUM(CASE WHEN status IN ('FT','AOT') THEN 1 ELSE 0 END) AS finished,
       SUM(CASE WHEN stats = 1 THEN 1 ELSE 0 END) AS boxScores, SUM(CASE WHEN stats = 2 THEN 1 ELSE 0 END) AS noBoxScore, MIN(kickoff) AS first, MAX(kickoff) AS last
     FROM bb_games GROUP BY code, season ORDER BY code, season`).all();
-  return { account, limitDay, remainingDay, callsThisBoot: calls, lastError, nbaInjuries: nbaInjuryStatus(), leagues: leagues.map(l => ({ ...l, seasons: JSON.parse(l.seasons) })), games };
+  return { account, limitDay, remainingDay, callsThisBoot: calls, lastError, liveBox: bbLiveBoxStatus(), nbaInjuries: nbaInjuryStatus(), leagues: leagues.map(l => ({ ...l, seasons: JSON.parse(l.seasons) })), games };
 }
 
 /** Admin: start a sync pass now (runs in the background; box scores can take a few minutes). */

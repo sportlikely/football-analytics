@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
@@ -25,6 +25,7 @@ import { SwingChart } from '../../components/sport/game/LiveChance'
 import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 import MorePredictions from '../../components/sport/game/MorePredictions'
+import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 
 export interface Avg {
   games: number; won: number; lost: number; pointsFor: number; pointsAgainst: number
@@ -35,8 +36,8 @@ export interface Avg {
 export interface Brief { id: number; kickoff: string; league: string; home: boolean; opponent: string; opponentLogo: string | null; score: string | null; result: 'W' | 'L' | 'T' | null }
 /** fix174: NFL + college use the same tab — backToBack = a short week, offBye / bye = the bye week */
 export interface Sched { restDays: number | null; backToBack: boolean; games7: number; away7: number; nextIn: number | null; recent: Brief[]; upcoming: Brief[]; offBye?: boolean; bye?: string | null }
-interface BoxPlayer { id: number; name: string; starter: boolean; minutes: number | null; points: number | null; fgm: number | null; fga: number | null; tpm: number | null; tpa: number | null; ftm: number | null; fta: number | null; rebounds: number | null; assists: number | null; steals?: number | null; blocks?: number | null; turnovers?: number | null; plusMinus?: number | null }
-interface BoxSide { team: any; players: BoxPlayer[] }
+interface BoxPlayer { id: number; name: string; short?: string; starter: boolean; minutes: number | null; points: number | null; fgm: number | null; fga: number | null; tpm: number | null; tpa: number | null; ftm: number | null; fta: number | null; rebounds: number | null; assists: number | null; steals?: number | null; blocks?: number | null; turnovers?: number | null; plusMinus?: number | null }
+interface BoxSide { team: any; players: BoxPlayer[]; top?: BoxPlayer | null }
 interface Detail {
   game: Game
   why: { kind: 'strength' | 'home' | 'b2b' | 'b2bBoth' | 'injuries' | 'attack' | 'talent'; side: 'H' | 'A'; points: number }[]
@@ -46,6 +47,8 @@ interface Detail {
   schedule: { home: Sched; away: Sched }
   h2h: H2H[]
   box: { home: BoxSide; away: BoxSide } | null
+  /** fix208: set while the box score is the live one (time of the last fetch) */
+  boxLive?: { at: number } | null
   standings: Standings | null
   preview?: { home: PreviewSide; away: PreviewSide; h2h: { games: number; homeWins: number; awayWins: number } }
   markets?: Markets | null
@@ -89,6 +92,7 @@ export default function BbGame() {
   const [d, setD] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tab, pickTab] = useGameTab(TABS, { injuries: 'players' })
+  const reload = useRef<() => void>(() => undefined)
 
   useEffect(() => {
     let cancelled = false
@@ -97,11 +101,14 @@ export default function BbGame() {
       axios.get(`${API_URL}/basketball/game/${id}`)
         .then(r => { if (!cancelled) setD(prev => (prev && prev.game.id === r.data.data?.game?.id ? { ...r.data.data, game: newerWinnerLive(prev.game, r.data.data.game) } : r.data.data)) }) // fix165: never backwards
         .catch(e => { if (!cancelled) setError(e?.response?.status === 404 ? t('Game not found') : t('Could not load the game')) })
+    reload.current = load
     load()
     const iv = setInterval(load, 60000)
     window.addEventListener(GAME_RELOAD, load) // fix144: a free pick opened this game
     return () => { cancelled = true; clearInterval(iv); window.removeEventListener(GAME_RELOAD, load) }
   }, [id, access])
+  // fix208: the live box score — the page reloads its data when a new one is stored
+  useLiveBox('bb', d?.game.id ?? null, d?.game.state === 'live' || !!d?.boxLive, () => reload.current())
   useEffect(() => {
     if (d) document.title = t('{0} · SportLikely', { 0: `${d.game.home.name} vs ${d.game.away.name}` })
   }, [d?.game.id])
@@ -155,7 +162,7 @@ export default function BbGame() {
         </>
       )
     },
-    ...(d.box ? [{ id: 'box', label: t('Box score'), short: t('Box'), hint: live ? t('Live player stats') : t('Every player: points, shooting, rebounds, assists'), live, render: () => <BoxTab d={d} /> }] : []),
+    ...(d.box ? [{ id: 'box', label: t('Box score'), short: t('Box'), hint: live ? t('Live player stats') : t('Every player: points, shooting, rebounds, assists'), live: live || !!d.boxLive, render: () => <BoxTab d={d} /> }] : []),
     { id: 'stats', label: t('Statistics'), short: t('Stats'), hint: t('Averages from the last 10 games'), render: () => <StatsTab g={g} home={d.stats.home} away={d.stats.away} /> },
     {
       id: 'players', label: d.injuries ? t('Players & injuries') : t('Players'), short: t('Players'), hint: d.injuries ? t('Key players and the NBA injury reports') : t('Each team’s key players this season'),
@@ -208,7 +215,16 @@ export default function BbGame() {
         kind: live ? 'live' : done ? 'done' : g.state === 'off' ? 'halted' : 'upcoming',
         text: live ? liveLabel(g) : done ? (BB_STATUS[g.status] || t('Final')) : g.state === 'off' ? (BB_STATUS[g.status] || g.status) : t('TIP-OFF')
       }}
-      scoreSub={(() => { const ht = live || done ? halfTimeOf(g.quarters) : null; return ht ? <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div> : undefined })()}
+      scoreSub={(() => {
+        const ht = live || done ? halfTimeOf(g.quarters) : null
+        // fix208: each team's top scorer while the game is on ("Haliburton 18 pts"), from the live box score
+        const top = live && d.box ? [d.box.home.top, d.box.away.top] : null
+        if (!ht && !(top && (top[0] || top[1]))) return undefined
+        return <>
+          {ht && <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div>}
+          {top && (top[0] || top[1]) && <TopScorers home={top[0] || null} away={top[1] || null} />}
+        </>
+      })()}
       statusNote={g.state === 'off' ? (
         <p className="mt-2 max-w-[260px] mx-auto text-[11px] text-muted">
           {/CANC|ABD/.test(g.status) ? t('This game was cancelled. It does not count in our record.') : t('This game was postponed. Our prediction stays until the new date.')}
@@ -414,10 +430,33 @@ function InjuriesCard({ d }: { d: Detail }) {
   )
 }
 
+/** fix208: under the live score, each team's top scorer by surname ("Haliburton 18 pts") */
+function TopScorers({ home, away }: { home: BoxPlayer | null; away: BoxPlayer | null }) {
+  const one = (p: BoxPlayer | null) => (p ? <Link to={`/basketball/player/${p.id}`} className="hover:text-accent truncate">{p.short || p.name} <span className="num font-bold text-ink">{p.points}</span> {t('pts')}</Link> : <span>–</span>)
+  return <div className="mt-1 text-[11px] text-muted flex items-center justify-center gap-2 whitespace-nowrap max-w-full">{one(home)}<span className="text-faint">·</span>{one(away)}</div>
+}
+
+/** made/attempts with the % under it */
+function Shot({ m, a }: { m: number | null; a: number | null }) {
+  const made = m ?? 0, att = a ?? 0
+  return <>{made}/{att}{att > 0 && <span className="block text-[10px] text-faint">{Math.round((made / att) * 100)}%</span>}</>
+}
+
 function BoxTab({ d }: { d: Detail }) {
   const g = d.game
-  const side = (team: Game['home'], s: BoxSide) => {
+  const live = g.state === 'live'
+  const side = (team: Game['home'], s: BoxSide, score: number | null) => {
     const more = s.players.some(p => p.plusMinus !== undefined && p.plusMinus !== null)
+    // fix208: starters first, then by points (the server's order); no minutes yet = bench
+    const played = s.players.filter(p => p.starter || (p.minutes ?? 0) > 0)
+    const bench = s.players.filter(p => !p.starter && !((p.minutes ?? 0) > 0))
+    const sum = (k: keyof BoxPlayer) => played.reduce((x, p) => x + (Number(p[k]) || 0), 0)
+    const tm = s.team
+    const tot = {
+      points: score ?? sum('points'), fgm: tm?.fgm ?? sum('fgm'), fga: tm?.fga ?? sum('fga'), tpm: tm?.tpm ?? sum('tpm'), tpa: tm?.tpa ?? sum('tpa'),
+      ftm: tm?.ftm ?? sum('ftm'), fta: tm?.fta ?? sum('fta'), rebounds: tm?.reb ?? sum('rebounds'), assists: tm?.ast ?? sum('assists'),
+      steals: tm?.stl ?? sum('steals'), blocks: tm?.blk ?? sum('blocks'), turnovers: tm?.tov ?? sum('turnovers')
+    }
     return (
     <Card title={<NameLink to={href.bbTeam(team.id)}>{team.name}</NameLink>}>
       <div className="overflow-x-auto">
@@ -436,14 +475,14 @@ function BoxTab({ d }: { d: Detail }) {
             </tr>
           </thead>
           <tbody>
-            {s.players.map(pl => (
-              <tr key={pl.id} className="border-t border-line/40">
+            {played.map(pl => (
+              <tr key={pl.id} className="border-t border-line/40 align-top">
                 <td className="py-1 font-sans text-ink whitespace-nowrap"><Link to={`/basketball/player/${pl.id}`} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
                 <td className="text-right px-1 text-muted">{pl.minutes !== null ? Math.round(pl.minutes) : '–'}</td>
                 <td className="text-right px-1 text-ink font-bold">{pl.points ?? '–'}</td>
-                <td className="text-right px-1 text-muted">{pl.fgm ?? 0}/{pl.fga ?? 0}</td>
-                <td className="text-right px-1 text-muted">{pl.tpm ?? 0}/{pl.tpa ?? 0}</td>
-                <td className="text-right px-1 text-muted">{pl.ftm ?? 0}/{pl.fta ?? 0}</td>
+                <td className="text-right px-1 text-muted"><Shot m={pl.fgm} a={pl.fga} /></td>
+                <td className="text-right px-1 text-muted"><Shot m={pl.tpm} a={pl.tpa} /></td>
+                <td className="text-right px-1 text-muted"><Shot m={pl.ftm} a={pl.fta} /></td>
                 <td className="text-right px-1 text-muted">{pl.rebounds ?? '–'}</td>
                 <td className="text-right px-1 text-muted">{pl.assists ?? '–'}</td>
                 {more && <>
@@ -454,17 +493,39 @@ function BoxTab({ d }: { d: Detail }) {
                 </>}
               </tr>
             ))}
+            {played.length > 0 && (
+              <tr className="border-t-2 border-line align-top font-bold">
+                <td className="py-1 font-sans text-ink">{t('Team totals')}</td>
+                <td />
+                <td className="text-right px-1 text-ink">{tot.points}</td>
+                <td className="text-right px-1 text-ink"><Shot m={tot.fgm} a={tot.fga} /></td>
+                <td className="text-right px-1 text-ink"><Shot m={tot.tpm} a={tot.tpa} /></td>
+                <td className="text-right px-1 text-ink"><Shot m={tot.ftm} a={tot.fta} /></td>
+                <td className="text-right px-1 text-ink">{tot.rebounds}</td>
+                <td className="text-right px-1 text-ink">{tot.assists}</td>
+                {more && <><td className="text-right px-1 text-ink">{tot.steals}</td><td className="text-right px-1 text-ink">{tot.blocks}</td><td className="text-right px-1 text-ink">{tot.turnovers}</td><td /></>}
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
+      {bench.length > 0 && (
+        <p className="mt-3 text-xs text-faint">
+          <span className="font-semibold text-muted">{live ? t('Bench, not yet played') : t('Did not play')}:</span>{' '}
+          {bench.map((pl, i) => <span key={pl.id}>{i > 0 && ', '}<Link to={`/basketball/player/${pl.id}`} className="hover:text-accent">{pl.name}</Link></span>)}
+        </p>
+      )}
     </Card>
     )
   }
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      {side(g.home, d.box!.home)}
-      {side(g.away, d.box!.away)}
-    </div>
+    <>
+      {d.boxLive && <div className="mb-3 text-right"><LiveBoxLabel at={d.boxLive.at} /></div>}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {side(g.home, d.box!.home, g.score?.home ?? null)}
+        {side(g.away, d.box!.away, g.score?.away ?? null)}
+      </div>
+    </>
   )
 }
 

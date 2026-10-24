@@ -14,7 +14,8 @@ import { fillOvertime, openCheck, resultFix } from './bbResults';
 import { predictGameCached, teamRating, isPreseason, leagueRatings, BB_MODEL, leagueModelInfo, normCdf, normInv, teamTalent, V3 } from './bbModel';
 import { nbaInjuries } from './bbInjuries';
 import { bbSquad, nbaBoxExtras } from './bbPlayers';
-import { personKey } from './bdl';
+import { boxOrder, topScorer, shortName } from '../utils/liveBox';
+import { bdlPlayerOf, personKey } from './bdl';
 import { bbLiveFor, periodLen, bbLiveCurve } from './bbLive';
 import { bbProbableLineup, bbBeforeAfter } from './bbLineups';
 import { groupStandings, standingsIssues, type StandGroup } from '../utils/bbStandingsGroups';
@@ -335,23 +336,34 @@ export async function bbGame(id: number, full: boolean) {
   await mark('prediction');
   const h2h = db.prepare(`${SELECT} WHERE ((home_id = ? AND away_id = ?) OR (home_id = ? AND away_id = ?)) AND status IN ('FT','AOT') AND kickoff < ? ORDER BY kickoff DESC LIMIT 10`)
     .all(g.home_id, g.away_id, g.away_id, g.home_id, g.kickoff) as Row[];
-  // box score (finished or live games)
-  let box: any = null;
+  // box score (finished or live games). fix208: the final rows once stored, the live rows until then (fetched every
+  // 1–3 minutes while the game is on: basketball.ts bbLiveBoxTick), with the time of the last fetch
+  let box: any = null, boxLive: { at: number } | null = null;
   if (game.state !== 'upcoming') {
-    const ts = db.prepare(`SELECT * FROM bb_team_stats WHERE game_id = ?`).all(id) as any[];
-    const ps = db.prepare(`SELECT * FROM bb_player_stats WHERE game_id = ? ORDER BY starter DESC, minutes DESC`).all(id) as any[];
+    let ts = db.prepare(`SELECT * FROM bb_team_stats WHERE game_id = ?`).all(id) as any[];
+    let ps = db.prepare(`SELECT * FROM bb_player_stats WHERE game_id = ?`).all(id) as any[];
+    if (!ts.length && !ps.length) {
+      ts = db.prepare(`SELECT * FROM bb_team_stats_live WHERE game_id = ?`).all(id) as any[];
+      ps = db.prepare(`SELECT * FROM bb_player_stats_live WHERE game_id = ?`).all(id) as any[];
+      const at = Math.max(0, ...ts.map(r => r.updated_at || 0), ...ps.map(r => r.updated_at || 0));
+      if (at) boxLive = { at };
+    }
     if (ts.length || ps.length) {
-      // NBA: steals, blocks, turnovers and plus-minus from balldontlie (names as people write them)
-      const ex = g.code === 'NBA' ? nbaBoxExtras(g.kickoff, g.home_name, g.away_name) : null;
-      const side = (teamId: number) => ({
-        team: ts.find(t => t.team_id === teamId) || null,
-        players: ps.filter(p => p.team_id === teamId).map(p => {
+      // NBA: steals, blocks, turnovers and plus-minus from balldontlie (names as people write them); live: its live feed
+      const ex = g.code === 'NBA' && !boxLive ? nbaBoxExtras(g.kickoff, g.home_name, g.away_name) : null;
+      const side = (teamId: number, teamName: string) => {
+        const players = boxOrder(ps.filter(p => p.team_id === teamId).map(p => {
           const x = ex?.get(personKey(p.name));
-          return { id: p.player_id, name: x?.name || p.name, starter: !!p.starter, minutes: p.minutes, points: p.pts, fgm: p.fgm, fga: p.fga, tpm: p.tpm, tpa: p.tpa, ftm: p.ftm, fta: p.fta, rebounds: p.reb, assists: p.ast,
-            ...(x ? { steals: x.stl, blocks: x.blk, turnovers: x.tov, plusMinus: x.plusMinus } : {}) };
-        })
-      });
-      box = { home: side(g.home_id), away: side(g.away_id) };
+          const live = boxLive && (p.stl != null || p.blk != null || p.tov != null || p.pm != null) ? { steals: p.stl, blocks: p.blk, turnovers: p.tov, plusMinus: p.pm } : null;
+          // NBA live: the name as people write it ("Norman Powell", not the provider's "Powell Norman"); short = the surname
+          const bd = boxLive && g.code === 'NBA' ? bdlPlayerOf(p.name, teamName) : null;
+          const name = x?.name || (bd ? `${bd.first} ${bd.last}`.trim() : p.name);
+          return { id: p.player_id, name, short: bd?.last || shortName(name), starter: !!p.starter, minutes: p.minutes, points: p.pts, fgm: p.fgm, fga: p.fga, tpm: p.tpm, tpa: p.tpa, ftm: p.ftm, fta: p.fta, rebounds: p.reb, assists: p.ast,
+            ...(x ? { steals: x.stl, blocks: x.blk, turnovers: x.tov, plusMinus: x.plusMinus } : live || {}) };
+        }));
+        return { team: ts.find(t => t.team_id === teamId) || null, players: [...players.played, ...players.bench], top: topScorer(players.played) };
+      };
+      box = { home: side(g.home_id, g.home_name), away: side(g.away_id, g.away_name) };
     }
   }
   await mark('h2h + box');
@@ -411,6 +423,7 @@ export async function bbGame(id: number, full: boolean) {
     injuries,
     h2h: h2h.map(x => ({ id: x.game_id, kickoff: x.kickoff, home: x.home_name, away: x.away_name, homeId: x.home_id, score: [x.hs, x.as_], league: x.code })),
     box,
+    boxLive, // fix208: { at } while the box score is the live one
     standings,
     markets: mk,
     lineups: lineups && (lineups.home || lineups.away) ? lineups : null,

@@ -2379,5 +2379,11 @@
  "Challenger": "Challenger",
  "Winning margin: {0}": "Siegvorsprung: {0}",
  "by {0}": "mit {0}",
- "{0} wins instead": "{0} gewinnt stattdessen"
+ "{0} wins instead": "{0} gewinnt stattdessen",
+ "LIVE · updated just now": "LIVE · gerade aktualisiert",
+ "LIVE · updated {0} s ago": "LIVE · vor {0} s aktualisiert",
+ "LIVE · updated {0} min ago": "LIVE · vor {0} Min. aktualisiert",
+ "Team totals": "Team gesamt",
+ "Bench, not yet played": "Bank, noch nicht eingesetzt",
+ "Did not play": "Nicht eingesetzt"
 }

@@ -20,6 +20,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.swingChart',
     'game.events',
     'game.stats',
+    'game.livePlayerStats', // fix208: live line-ups + events (as before)
     'game.highlights',
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204

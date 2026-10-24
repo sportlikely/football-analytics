@@ -128,6 +128,7 @@ import {
 } from './services/auth';
 import { playerDataStatus, teamPlayers } from './services/playerData';
 import { MODEL_V3, modelV3Status, runBacktestV3, runBacktestV3All, backtestProgressV3, prepareModelV3, CONV, sweepV3, autoVariants, parseCompactVariants, sweepProgress, backfillV3, setRelOverride, SweepVariant, tuneLeaguesV3, leagueTuneProgress, leagueConvStatus, clearLeagueConv, tunedStatus, clearTuning, applyStoredTuning, prepareModelV3Async } from './services/gridModel';
+import { noteGameView } from './services/gameViews';
 
 const isDev = (process.env.NODE_ENV || 'development') !== 'production';
 
@@ -2705,6 +2706,7 @@ app.get('/api/nfl/game/:id(\\d+)', (req, res) => {
   try {
     const d = nflGame(parseInt(req.params.id, 10), nflAdmin(req));
     if (!d) return res.status(404).json({ error: 'Game not found' });
+    if (d.game.state === 'live') noteGameView('nfl', d.game.id); // fix208: open pages get the live player stats every 60 s
     const game = withNflPrediction(d.game, fullOne(req, nflRid(d.game.id)));
     // fix174: football's game-page parts — live win chance + swing chart (numbers unlocked), schedule & rest, the
     // division / conference table, likely starters, before vs after, the written preview, scoring plays
@@ -2994,6 +2996,7 @@ const bbGameTtl = (data: any) => {
 app.get('/api/basketball/game/:id(\\d+)', async (req, res) => {
   try {
     const gid = parseInt(req.params.id, 10);
+    noteGameView('bb', gid); // fix208: open pages get the live box score every 60 s (only live games are fetched)
     const full = fullOne(req, -gid);
     const key = `${gid}|${full ? 1 : 0}`;
     const hit = bbGameCache.get(key);

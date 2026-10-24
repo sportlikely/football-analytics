@@ -269,7 +269,13 @@ export function nflGame(id: number, admin: boolean) {
   const h2h = (db.prepare(`SELECT ${GAME_COLS} FROM nfl_games WHERE ((home_id = ? AND away_id = ?) OR (home_id = ? AND away_id = ?)) AND kickoff < ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL ORDER BY kickoff DESC LIMIT 10`)
     .all(g.home.id, g.away.id, g.away.id, g.home.id, g.kickoff) as any[]).map(shapeGame);
   const ts = new Map((db.prepare(`SELECT team_id, json FROM nfl_team_stats WHERE game_id = ?`).all(id) as any[]).map(x => [x.team_id, parseJson(x.json)]));
-  const ps = new Map((db.prepare(`SELECT team_id, json FROM nfl_player_stats WHERE game_id = ?`).all(id) as any[]).map(x => [x.team_id, x.json]));
+  let ps = new Map((db.prepare(`SELECT team_id, json FROM nfl_player_stats WHERE game_id = ?`).all(id) as any[]).map(x => [x.team_id, x.json]));
+  // fix208: until the final box score, the live player lines (fetched every 1–3 minutes during the game), with their time
+  let playersLive: { at: number } | null = null;
+  if (!ps.size && g.state !== 'upcoming') {
+    const live = db.prepare(`SELECT team_id, json, updated_at FROM nfl_player_stats_live WHERE game_id = ?`).all(id) as any[];
+    if (live.length) { ps = new Map(live.map(x => [x.team_id, x.json])); playersLive = { at: Math.max(...live.map(x => x.updated_at || 0)) }; }
+  }
   const inj = (teamId: number) => db.prepare(`SELECT player_id AS id, player_name AS name, image, status, description, date FROM nfl_injuries WHERE team_id = ? ORDER BY status, player_name`).all(teamId);
   return {
     game: g,
@@ -277,6 +283,7 @@ export function nflGame(id: number, admin: boolean) {
     h2h,
     teamStats: ts.size ? { home: teamBox(ts.get(g.home.id)), away: teamBox(ts.get(g.away.id)) } : null,
     players: ps.size ? { home: playerGroups(ps.get(g.home.id) ?? null), away: playerGroups(ps.get(g.away.id) ?? null) } : null,
+    playersLive,
     injuries: g.state === 'done' ? null : { home: inj(g.home.id), away: inj(g.away.id) },
     prediction: null // fix139: filled in by the route (withNflPrediction)
   };

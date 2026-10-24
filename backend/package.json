@@ -18,7 +18,8 @@
     "test:fix206": "tsc && node --no-warnings --test --test-force-exit scripts/how-it-works.test.mjs",
     "lint": "eslint src/**/*.ts",
     "migrate": "ts-node src/database/migrations.ts",
-    "test:fix202": "tsc && node --no-warnings --test --test-force-exit scripts/worker-split.test.mjs"
+    "test:fix202": "tsc && node --no-warnings --test --test-force-exit scripts/worker-split.test.mjs",
+    "test:fix208": "tsc && node --no-warnings --test --test-force-exit scripts/live-box.test.mjs"
   },
   "keywords": [
     "football",

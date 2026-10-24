@@ -62,6 +62,8 @@ export function levelOf(conference: string | null, division: string | null = nul
 }
 /** Games of FBS + FCS teams only: college lists leave out games with a Division II / III / other team (fix143). */
 import { isFbsName } from './collegeFbs';
+import { boxUpdated, gameViews } from './gameViews';
+import { dueGames, budgetAllows } from '../utils/liveBox';
 export const HIDE_OTHER = `AND home_id NOT IN (SELECT team_id FROM nfl_teams WHERE level = 'other') AND away_id NOT IN (SELECT team_id FROM nfl_teams WHERE level = 'other')`;
 
 /**
@@ -501,6 +503,7 @@ export async function syncBoxScore(gameId: number): Promise<boolean> {
     for (const t of players) { const tid = num(t?.team?.id); if (tid) { const json = JSON.stringify(t.groups || []); db.prepare(`INSERT OR REPLACE INTO nfl_player_stats (game_id, team_id, json) VALUES (?, ?, ?)`).run(gameId, tid, json); indexPlayers(gameId, tid, json); } }
     // 1 = stored, 2 = the provider has none for this game (don't ask again)
     db.prepare(`UPDATE nfl_games SET stats = ? WHERE game_id = ?`).run(teams.length || players.length ? 1 : 2, gameId);
+    if (teams.length || players.length) db.prepare(`DELETE FROM nfl_player_stats_live WHERE game_id = ?`).run(gameId); // fix208: the final lines replace the live ones
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   return teams.length > 0;
@@ -523,6 +526,56 @@ export async function nflBoxScores(max = 150): Promise<number> {
   }
   return n;
 }
+
+/* ---------- fix208: live player stats ---------- */
+
+// apart from nfl_player_stats (the model, leaders and player pages read it as finished games); deleted by the final box score
+db.exec(`CREATE TABLE IF NOT EXISTS nfl_player_stats_live (game_id INTEGER NOT NULL, team_id INTEGER NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (game_id, team_id))`);
+const liveBox = { calls: 0, ticks: 0, skippedBudget: 0, games: 0, lastAt: 0, lastError: null as string | null };
+let liveBoxBusy = false;
+
+/** Store one game's live player lines (the /games/statistics/players response); true when there were any. */
+export function storeLivePlayers(gameId: number, list: any[], now = Date.now()): boolean {
+  const rows = (Array.isArray(list) ? list : []).filter(t => num(t?.team?.id));
+  if (!rows.length) return false;
+  const up = db.prepare(`INSERT OR REPLACE INTO nfl_player_stats_live (game_id, team_id, json, updated_at) VALUES (?, ?, ?, ?)`);
+  db.exec('BEGIN');
+  try {
+    for (const t of rows) up.run(gameId, num(t.team.id), JSON.stringify(t.groups || []), now);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return true;
+}
+
+/**
+ * Every 60 s: passing / rushing / receiving lines of the live games that are due (utils/liveBox.ts: watched 60 s,
+ * NFL 3 min, college only while watched), one call per game. Skipped when the day's quota is near its reserve.
+ */
+export async function nflLiveBoxTick(now = Date.now()): Promise<number> {
+  if (liveBoxBusy || !KEY()) return 0;
+  liveBoxBusy = true;
+  try {
+    const rows = db.prepare(`SELECT g.game_id, g.league, (SELECT MAX(updated_at) FROM nfl_player_stats_live p WHERE p.game_id = g.game_id) AS at
+      FROM nfl_games g WHERE g.status IN (${LIVE_STATUS.map(() => '?').join(',')}) AND g.kickoff > ?`).all(...LIVE_STATUS, new Date(now - 8 * 3600 * 1000).toISOString()) as any[];
+    const due = dueGames(rows.map(r => ({ id: r.game_id, major: r.league === 1, lastAt: r.at ?? null })), gameViews('nfl', now), now).slice(0, 40);
+    if (!due.length) return 0;
+    liveBox.ticks++;
+    if (!budgetAllows(remainingDay, limitDay, due.length)) { liveBox.skippedBudget++; return 0; }
+    let n = 0;
+    for (const id of due) {
+      try {
+        const list = (await nfl('/games/statistics/players', { id })).response || [];
+        liveBox.calls++;
+        if (storeLivePlayers(id, list)) { n++; boxUpdated('nfl', id); }
+      } catch (e: any) { liveBox.lastError = `${id}: ${e.message}`; }
+      if (n % 5 === 4) await yieldLoop();
+    }
+    liveBox.games += n;
+    liveBox.lastAt = Date.now();
+    return n;
+  } finally { liveBoxBusy = false; }
+}
+export const nflLiveBoxStatus = () => ({ ...liveBox, watched: gameViews('nfl').size });
 
 /* ---------- teams, standings, injuries, rosters ---------- */
 
@@ -675,6 +728,8 @@ export function startNflScheduler() {
     for (const id of ended) if (budget() >= 2) { try { await syncBoxScore(id); } catch (e: any) { logger.warn(`NFL box score ${id}: ${e.message}`); } await yieldLoop(); }
     if (ended.length) { const { saveNflPredictions } = await import('./nflModel'); await yieldLoop(); await timed('nfl live predictions', () => saveNflPredictions()); }
   }).catch(e => logger.warn(`NFL live: ${e.message}`)), 30 * 1000).unref();
+  // fix208: live player stats (the box score's player lines during the game)
+  setTimeout(() => setInterval(() => void timed('nfl live box', () => nflLiveBoxTick()).catch(e => logger.warn(`NFL live box: ${e.message}`)), 60 * 1000).unref(), 25 * 1000).unref();
   // fix155: the live ratings are built in the background (with yields) instead of on the first request
   // fix171: a 10 s pause between the leagues, so the two builds never run back to back
   setTimeout(() => void (async () => {
@@ -686,7 +741,7 @@ export function startNflScheduler() {
   })().catch(e => logger.warn(`NFL ratings: ${e.message}`)), 60 * 1000).unref();
 }
 
-export const nflClientStatus = () => ({ callsThisBoot, remainingDay, limitDay, lastError });
+export const nflClientStatus = () => ({ callsThisBoot, remainingDay, limitDay, lastError, liveBox: nflLiveBoxStatus() });
 
 /* ---------- admin probe ---------- */
 

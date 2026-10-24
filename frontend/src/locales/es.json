@@ -2379,5 +2379,11 @@
  "Challenger": "Challenger",
  "Winning margin: {0}": "Margen de victoria: {0}",
  "by {0}": "por {0}",
- "{0} wins instead": "Gana {0}"
+ "{0} wins instead": "Gana {0}",
+ "LIVE · updated just now": "EN VIVO · actualizado ahora",
+ "LIVE · updated {0} s ago": "EN VIVO · actualizado hace {0} s",
+ "LIVE · updated {0} min ago": "EN VIVO · actualizado hace {0} min",
+ "Team totals": "Total del equipo",
+ "Bench, not yet played": "Banquillo, aún sin jugar",
+ "Did not play": "No jugaron"
 }

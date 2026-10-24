@@ -22,6 +22,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.swingChart',
     'game.events', // the set-by-set table
     'game.stats', // Serve & return
+    'game.livePlayerStats', // fix208: live point stats from the tape
     'game.highlights',
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204

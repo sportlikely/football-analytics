@@ -318,3 +318,49 @@ export async function bdlContract(playerId: number) {
   db.prepare(`INSERT OR REPLACE INTO bdl_contracts (player_id, data, updated_at) VALUES (?, ?, ?)`).run(playerId, data ? JSON.stringify(data) : null, new Date().toISOString());
   return data;
 }
+
+/* ---------- fix208: live box-score extras ---------- */
+
+export type NbaLiveLine = { stl: number | null; blk: number | null; tov: number | null; pm: number | null };
+let liveCache: { at: number; data: any[] } | null = null;
+let liveOffUntil = 0;
+let liveNote: string | null = null;
+const n0 = (x: any) => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x)) ? null : Number(x));
+
+/**
+ * Steals, blocks, turnovers and plus-minus of live NBA games from balldontlie's live box scores (/v1/box_scores/live,
+ * one call for every game on, kept 50 s). Matched to our games by the two teams and to our players by name. When the
+ * plan or the endpoint doesn't give it (401 / 403 / 404), it is left alone for 6 hours and the page shows API-Basketball's
+ * numbers only. Per game: a lookup by our player's name.
+ */
+export async function nbaLiveExtras(games: { id: number; home: string; away: string }[]): Promise<{ note: string | null; byGame: Map<number, (name: string) => NbaLiveLine | null> }> {
+  const byGame = new Map<number, (name: string) => NbaLiveLine | null>();
+  if (!process.env.BALLDONTLIE_KEY || Date.now() < liveOffUntil) return { note: liveNote, byGame };
+  if (!liveCache || Date.now() - liveCache.at > 50 * 1000) {
+    try {
+      const j = await get('/v1/box_scores/live');
+      liveCache = { at: Date.now(), data: Array.isArray(j?.data) ? j.data : [] };
+      liveNote = `ok: ${liveCache.data.length} live game(s)`;
+    } catch (e: any) {
+      if (/HTTP (401|403|404)/.test(e.message)) { liveOffUntil = Date.now() + 6 * 3600 * 1000; liveNote = `not available (${e.message}); next try in 6 h`; }
+      else liveNote = `error: ${e.message}`;
+      return { note: liveNote, byGame };
+    }
+  }
+  for (const g of games) {
+    const h = bdlTeamOf(g.home), a = bdlTeamOf(g.away);
+    if (!h || !a) continue;
+    const box = liveCache.data.find(x => x?.home_team?.id === h && x?.visitor_team?.id === a);
+    if (!box) continue;
+    const lines = new Map<string, NbaLiveLine>();
+    for (const side of [box.home_team, box.visitor_team]) {
+      for (const x of side?.players || []) {
+        const p = x?.player || {};
+        const key = personKey(`${p.first_name || ''} ${p.last_name || ''}`);
+        if (key) lines.set(key, { stl: n0(x.stl), blk: n0(x.blk), tov: n0(x.turnover ?? x.turnovers), pm: n0(x.plus_minus ?? x.pm) });
+      }
+    }
+    if (lines.size) byGame.set(g.id, name => lines.get(personKey(name)) ?? null);
+  }
+  return { note: liveNote, byGame };
+}

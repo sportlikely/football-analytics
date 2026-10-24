@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
@@ -22,6 +22,7 @@ import NewsChange from '../../components/sport/game/NewsChange'
 import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 import GamePreview from '../../components/sport/game/GamePreview'
+import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { RestTab } from '../bb/GameTabs'
 import type { Sched } from '../bb/BbGame'
 
@@ -42,7 +43,7 @@ interface BeforeAfter {
 }
 interface Data {
   game: Game; form: { home: FormRow[]; away: FormRow[] }; h2h: Game[]; teamStats: { home: Box | null; away: Box | null } | null
-  players: { home: Groups; away: Groups } | null; injuries: { home: Injury[]; away: Injury[] } | null; prediction: NflPred | null
+  players: { home: Groups; away: Groups } | null; playersLive?: { at: number } | null; injuries: { home: Injury[]; away: Injury[] } | null; prediction: NflPred | null
   // fix174
   live?: { now: { pHome: number; pAway: number; score: { home: number; away: number }; total: number } | null; curve: { t: number; p: number }[] } | null
   schedule?: { home: Sched; away: Sched }
@@ -66,16 +67,20 @@ export default function NflGame() {
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
   const [tab, pickTab] = useGameTab(TABS, { overview: 'h2h', injuries: 'players', standings: 'table', video: 'highlights' })
+  const reload = useRef<() => void>(() => undefined)
   useEffect(() => {
     setD(null); setMissing(false)
     const load = () => axios.get(`${API_URL}/nfl/game/${id}`)
       .then(r => setD(prev => (prev && prev.game.id === r.data.data?.game?.id ? { ...r.data.data, game: newerWinnerLive(prev.game, r.data.data.game) } : r.data.data))) // fix165: never backwards
       .catch(e => { if (e?.response?.status === 404) setMissing(true) })
+    reload.current = load
     load()
     const iv = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30 * 1000)
     window.addEventListener(GAME_RELOAD, load) // fix144: a free pick opened this game
     return () => { clearInterval(iv); window.removeEventListener(GAME_RELOAD, load) }
   }, [id])
+  // fix208: live player stats — the page reloads its data when a new box score is stored
+  useLiveBox('nfl', d?.game.id ?? null, d?.game.state === 'live' || !!d?.playersLive, () => reload.current())
   // the same title search engines get (seo.ts): "Chiefs vs Bills · NFL Week 7 | SportLikely"
   // fix142: college titles use the school names ("Alabama vs Georgia · College football Week 7")
   useEffect(() => {
@@ -130,12 +135,14 @@ export default function NflGame() {
     },
     ...(d.teamStats ? [{ id: 'stats', label: t('Statistics'), short: t('Stats'), hint: live ? t('Live team stats') : t('Yards, downs, red zone and turnovers'), live, render: () => <TeamStats g={g} home={d.teamStats!.home} away={d.teamStats!.away} /> }] : []),
     ...(hasPlayers ? [{
-      id: 'players', label: d.injuries ? t('Players & injuries') : t('Players'), short: t('Players'), hint: d.injuries ? t('Likely starters, player stats and the injury reports') : t('Passing, rushing, receiving and defense'),
+      id: 'players', label: d.injuries ? t('Players & injuries') : t('Players'), short: t('Players'), hint: d.playersLive ? t('Live player stats') : d.injuries ? t('Likely starters, player stats and the injury reports') : t('Passing, rushing, receiving and defense'), live: !!d.playersLive,
+      // fix208: during the game the live player lines come first
       render: () => (
         <>
+          {d.playersLive && d.players && <Players g={g} data={d.players} at={d.playersLive.at} />}
           {d.starters && <Starters g={g} data={d.starters} />}
           {d.injuries && <Injuries g={g} data={d.injuries} />}
-          {d.players && <Players g={g} data={d.players} />}
+          {!d.playersLive && d.players && <Players g={g} data={d.players} />}
         </>
       )
     }] : []),
@@ -460,7 +467,7 @@ function TeamStats({ g, home, away }: { g: Game; home: Box | null; away: Box | n
 const PLAYER_GROUPS: { re: RegExp; label: string }[] = [
   { re: /^passing$/i, label: 'Passing' }, { re: /^rushing$/i, label: 'Rushing' }, { re: /^receiving$/i, label: 'Receiving' }, { re: /defens/i, label: 'Defense' }
 ]
-function Players({ g, data }: { g: Game; data: { home: Groups; away: Groups } }) {
+function Players({ g, data, at }: { g: Game; data: { home: Groups; away: Groups }; at?: number }) {
   return (
     <>
       {PLAYER_GROUPS.map(pg => {
@@ -471,7 +478,7 @@ function Players({ g, data }: { g: Game; data: { home: Groups; away: Groups } })
         if (!rows.length) return null
         const cols = [...new Set(rows.flatMap(r => Object.keys(r.stats)))].slice(0, 7)
         return (
-          <Card key={pg.label} title={t(pg.label)}>
+          <Card key={pg.label} title={t(pg.label)} action={at ? <LiveBoxLabel at={at} /> : undefined}>
             <div className="overflow-x-auto -mx-1">
               <table className="w-full text-sm min-w-[520px]">
                 <thead><tr className="text-[10px] uppercase tracking-wide text-faint"><th className="text-left font-semibold py-1 px-1">{t('Player')}</th>{cols.map(c => <th key={c} className="text-right font-semibold py-1 px-1">{c}</th>)}</tr></thead>

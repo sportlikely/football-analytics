@@ -2,6 +2,36 @@
  "_about": "fix206: the public changelog at /changelog (backend/src/services/howItWorks.ts). Newest first. One or two plain sentences for visitors (no internal fixes, no odds, no betting words), in all seven languages. sport: football | basketball | american-football | tennis | all. kind: model | site. version: the sport's model version at the time (shown as 'SL Basketball 3.0'), null for 'all'. Entries of a sport before its launch are shown to admins only.",
  "entries": [
   {
+   "date": "2026-10-24",
+   "sport": "basketball",
+   "kind": "site",
+   "version": "3.1",
+   "text": {
+    "en": "Live box scores: during a game the Box score tab now fills in as it is played (points, shooting, rebounds, assists for every player, with team totals), and the top scorer of each team shows under the score.",
+    "es": "Estadísticas en vivo: durante el partido, la pestaña de estadísticas se completa mientras se juega (puntos, tiros, rebotes y asistencias de cada jugador, con los totales del equipo), y el máximo anotador de cada equipo aparece bajo el marcador.",
+    "pt": "Estatísticas ao vivo: durante o jogo, a aba de estatísticas é preenchida enquanto se joga (pontos, arremessos, rebotes e assistências de cada jogador, com os totais da equipa), e o cestinha de cada equipa aparece sob o placar.",
+    "de": "Live-Boxscore: Während des Spiels füllt sich der Boxscore laufend (Punkte, Würfe, Rebounds und Assists jedes Spielers, mit Teamsummen), und der beste Werfer jedes Teams steht unter dem Spielstand.",
+    "fr": "Feuille de match en direct : pendant le match, l’onglet de la feuille de match se remplit au fil du jeu (points, tirs, rebonds et passes de chaque joueur, avec les totaux de l’équipe), et le meilleur marqueur de chaque équipe s’affiche sous le score.",
+    "it": "Tabellino in diretta: durante la partita il tabellino si riempie man mano (punti, tiri, rimbalzi e assist di ogni giocatore, con i totali di squadra), e il miglior marcatore di ogni squadra compare sotto il punteggio.",
+    "tr": "Canlı maç istatistikleri: Maç sırasında istatistik sekmesi oynandıkça doluyor (her oyuncunun sayı, şut, ribaund ve asistleri, takım toplamlarıyla) ve her takımın en skoreri skorun altında görünüyor."
+   }
+  },
+  {
+   "date": "2026-10-24",
+   "sport": "american-football",
+   "kind": "site",
+   "version": "1.0",
+   "text": {
+    "en": "Live player stats: during a game the Players tab shows passing, rushing and receiving lines as the game goes on.",
+    "es": "Estadísticas de jugadores en vivo: durante el partido, la pestaña de jugadores muestra pases, carreras y recepciones a medida que avanza el juego.",
+    "pt": "Estatísticas de jogadores ao vivo: durante o jogo, a aba de jogadores mostra passes, corridas e recepções à medida que o jogo avança.",
+    "de": "Live-Spielerstatistiken: Während des Spiels zeigt der Spieler-Tab Pässe, Läufe und gefangene Bälle laufend an.",
+    "fr": "Statistiques des joueurs en direct : pendant le match, l’onglet joueurs montre passes, courses et réceptions au fil du jeu.",
+    "it": "Statistiche dei giocatori in diretta: durante la partita la scheda giocatori mostra passaggi, corse e ricezioni man mano che si gioca.",
+    "tr": "Canlı oyuncu istatistikleri: Maç sırasında oyuncular sekmesi pas, koşu ve top yakalama istatistiklerini maç ilerledikçe gösteriyor."
+   }
+  },
+  {
    "date": "2026-10-23",
    "sport": "basketball",
    "kind": "model",
