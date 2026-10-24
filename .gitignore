@@ -50,3 +50,6 @@ backend/data/
 
 # investor presentation (kept out of the repo)
 presentation/
+
+# fix213: layout check screenshots
+frontend/test-output/

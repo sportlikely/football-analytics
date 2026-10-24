@@ -30,6 +30,8 @@ export interface NflGame {
   venue: string | null
   /** fix142: 1 = NFL, 2 = college */
   league?: NflLeague
+  /** fix213: the quarter clock while live ("8:42") */
+  clock?: string | null
   /** fix139: our saved prediction (null = none yet). Locked = free / signed-out viewer, game not finished. */
   prediction?: NflPred | null
 }

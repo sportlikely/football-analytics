@@ -177,7 +177,7 @@ type SidebarProps = Parameters<typeof LeagueSidebar>[0]
  * Phones and small tablets (below lg): the games come first. A live strip (when games are on), a row of chips
  * (all, favorites, pinned leagues) and a "Leagues" button that opens the full menu as a bottom sheet.
  */
-export function MobileLeagueBar({ side, live, liveCount, chips = true }: { side: SidebarProps; live?: ReactNode[]; liveCount?: number; chips?: boolean }) {
+export function MobileLeagueBar({ side, live, liveCount, chips = true, liveMore }: { side: SidebarProps; live?: ReactNode[]; liveCount?: number; chips?: boolean; liveMore?: ReactNode }) {
   const [sheet, setSheet] = useState(false)
   const byCode = new Map(side.leagues.map(l => [l.code, l]))
   const pins = side.pinned.map(c => byCode.get(c)).filter(Boolean) as SideLeague[]
@@ -187,7 +187,7 @@ export function MobileLeagueBar({ side, live, liveCount, chips = true }: { side:
   return (
     <div className="lg:hidden -mx-4 sm:-mx-6 mb-5">
       {!!liveCount && live && live.length > 0 && (
-        <div className="mb-3">
+        <div className="mb-3" data-testid="live-strip">
           <div className="flex items-center gap-2 px-4 sm:px-6 mb-2">
             <span className="w-2 h-2 rounded-full bg-live animate-pulseDot" />
             <span className="font-display font-bold text-ink">{t('Live')}</span>
@@ -195,6 +195,8 @@ export function MobileLeagueBar({ side, live, liveCount, chips = true }: { side:
           </div>
           <div className="flex gap-2 overflow-x-auto no-scrollbar px-4 sm:px-6 pb-1">
             {live.map((n, i) => <div key={i} className="shrink-0 w-56 card p-1.5">{n}</div>)}
+            {/* fix213: the first few, then "Show all N live" */}
+            {liveMore && <div className="shrink-0 w-36 card p-1.5">{liveMore}</div>}
           </div>
         </div>
       )}

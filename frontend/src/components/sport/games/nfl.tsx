@@ -15,7 +15,8 @@ import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 const leagueOf = (l: NflLeague): SLeague => {
   const code = l === 2 ? 'NCAA' : 'NFL', name = nflLeagueName(l)
   const fav: Favorite = { kind: 'nfl-league', ref: code, code, name, img: null }
-  return { code, name, logo: null, country: 'us', rank: 0, href: `${nflBase(l)}/league`, fav }
+  // fix213: NFL first, college second (sidebar, Live box); the address keeps its words (?league=nfl / college)
+  return { code, name, logo: null, country: 'us', rank: l === 2 ? 1 : 0, href: `${nflBase(l)}/league`, fav, param: l === 2 ? 'college' : 'nfl' }
 }
 /** Primetime: Thursday / Sunday / Monday night games start 00:00–03:59 UTC (8:15 pm Eastern). */
 const primetime = (g: NflGame) => new Date(g.kickoff).getUTCHours() < 4
@@ -33,7 +34,8 @@ function useData(): GamesData {
     setGames(null); setResults(null)
     const load = () => {
       const now = Date.now()
-      axios.get(`${API_URL}/nfl/games`, { params: { from: new Date(now - 6 * 3600e3).toISOString(), to: new Date(now + 30 * 86400e3).toISOString(), league } })
+      // fix213: both leagues always (the page filters, the sidebar counts each league's games)
+      axios.get(`${API_URL}/nfl/games`, { params: { from: new Date(now - 6 * 3600e3).toISOString(), to: new Date(now + 30 * 86400e3).toISOString(), league: 'all' } })
         .then(r => { if (!off) { setGames(r.data.data.games || []); setError(null) } }).catch(e => !off && setError(e?.message || 'error'))
       axios.get(`${API_URL}/nfl/home`, { params: { league } }).then(r => !off && setResults(r.data.data?.results || [])).catch(() => !off && setResults([]))
     }
@@ -43,16 +45,19 @@ function useData(): GamesData {
   }, [access, league])
 
   return useMemo(() => {
-    // fix185: both leagues mixed by time (each game in its own league); the filter chips choose one
-    const shown = (league === '2' ? [2] : league === '1' ? [1] : [1, 2]) as NflLeague[]
-    const lgs = new Map(shown.map(l => [l, leagueOf(l)]))
+    // fix185: both leagues mixed by time (each game in its own league); fix213: the left column / phone chips choose one
+    const lgs = new Map(([1, 2] as NflLeague[]).map(l => [l, leagueOf(l)]))
     const listOut: SGame[] = (games || []).filter(g => g.state === 'upcoming' || g.state === 'live').map(g => {
       const lg = lgs.get(g.league === 2 ? 2 : 1) || leagueOf(g.league === 2 ? 2 : 1)
       const p = g.prediction
       const open = !!p && !p.locked && typeof p.pHome === 'number'
       // Spotlight: primetime first, then the closer the game
       const weight = open ? (primetime(g) ? 1.5 : 1) + (1 - Math.abs(p!.pHome! - 50) / 50) : 0
-      return { ...toGame(g), state: g.state as SGame['state'], league: lg, favWhy: favs.reasons(g).map(f => f.name), weight, chips: open ? winnerChips(p) : [] }
+      const h = toGame(g)
+      // fix213: the live win chance in the Live box (basketball's "Now: Chiefs 71%")
+      let note: SGame['note'] = null
+      if (g.state === 'live' && p?.live) { const k = p.live.pHome >= p.live.pAway ? 'H' : 'A'; note = { text: `${tt("Now")}: ${k === 'H' ? h.home.short : h.away.short} ${Math.round(k === 'H' ? p.live.pHome : p.live.pAway)}%`, tone: 'live' } }
+      return { ...h, state: g.state as SGame['state'], league: lg, favWhy: favs.reasons(g).map(f => f.name), weight, chips: open ? winnerChips(p) : [], note }
     })
     return {
       loading: games === null, error, games: listOut, leagues: [...lgs.values()],
@@ -73,9 +78,8 @@ export function useNflGames(): GamesAdapter {
     noLive: tt("No games in play right now."),
     defaultPinned: ['NFL', 'NCAA'],
     favoritesHref: '/american-football/favorites',
-    top: <NflLeagueChips />,
-    // fix183b: two leagues and the filter chips above already choose: no league list
-    noLeagueList: true,
+    // fix213: desktop chooses the league in the left column like every sport; phones keep the All · NFL · College chips
+    mobileFilter: <NflLeagueChips />,
     // fix174: one league chosen in the chips → its standings on the right (football's league panel)
     sidePanel: filter === 'all' ? null : <NflLeaguePanel league={filter} />,
     useData

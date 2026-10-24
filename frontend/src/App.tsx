@@ -196,7 +196,8 @@ function Logo() {
   return (
     <Link to={home} className="flex items-center gap-2.5 group shrink-0 whitespace-nowrap" aria-label={tt("SportLikely home")}>
       <LogoMark />
-      <span className="hidden min-[380px]:inline-flex lg:hidden 2xl:inline-flex items-center" aria-hidden>
+      {/* fix213: the wordmark from 430 px (at 390 px it pushed "Sign in" off a phone screen) */}
+      <span className="hidden min-[430px]:inline-flex lg:hidden 2xl:inline-flex items-center" aria-hidden>
         <img src="/wordmark-dark.png" alt="" className="hidden dark:block h-[22px] w-auto" />
         <img src="/wordmark-light.png" alt="" className="block dark:hidden h-[22px] w-auto" />
       </span>

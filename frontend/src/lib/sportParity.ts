@@ -30,7 +30,7 @@ export const PARITY = [
   { key: 'games.liveBox', label: 'Live box on the games list', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'games.spotlight', label: 'Spotlight', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'games.leaguePanel', label: 'League panel', football: true, basketball: true, nfl: true, tennis: true },
-  { key: 'games.leagueList', label: 'League list on the games page (All leagues / My favorites / Pinned / My teams)', football: true, basketball: true, nfl: 'na: only two leagues; the NFL / College switch replaces it', tennis: true },
+  { key: 'games.leagueList', label: 'League list on the games page (All leagues / My favorites / Pinned / My teams)', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- game page ---------- */
   { key: 'game.prediction', label: 'Prediction', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.why', label: 'Why we think so', football: true, basketball: true, nfl: true, tennis: true },

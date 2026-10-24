@@ -16,11 +16,6 @@ export const PARITY_REPORT: ParityReport = {
  "todo": [],
  "na": [
   {
-   "key": "games.leagueList",
-   "sport": "nfl",
-   "reason": "only two leagues; the NFL / College switch replaces it"
-  },
-  {
    "key": "game.beforeAfter",
    "sport": "tennis",
    "reason": "no line-up or injury news moves a tennis prediction (it only updates from new results until the first serve)"

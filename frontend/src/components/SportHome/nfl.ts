@@ -18,13 +18,16 @@ const lgOf = (g: NflGame): NflLeague => g.league || 1
 // fix185: "NFL · Week 7" / "College · Week 8"
 const compOf = (g: NflGame) => `${lgOf(g) === 2 ? tt('College') : 'NFL'} · ${weekLabel(g.weekKey, lgOf(g))}`
 
+/** fix213: "Q3 8:42" / "Half-time" / "OT 2:10" while live */
+export const nflClock = (g: NflGame) => { const q = NFL_STATUS[g.status] || tt('LIVE'); return g.clock && g.status !== 'HT' ? `${q} ${g.clock.replace(/^0(\d)/, '$1')}` : q }
+
 export function toGame(g: NflGame): HGame {
   const lg = lgOf(g)
   const team = (s: NflGame['home']) => ({ id: s.id, name: s.name, short: nick(s.name, lg), logo: s.logo, href: `/american-football/team/${s.id}` })
   return {
     id: g.id, href: `/american-football/game/${g.id}`, reveal: { id: nflRid(g), status: nflRstatus(g) }, kickoff: g.kickoff,
     competition: { name: compOf(g), href: lg === 2 ? '/american-football/college/league' : '/american-football/league' }, home: team(g.home), away: team(g.away),
-    live: g.state === 'live' ? { label: NFL_STATUS[g.status] || tt('LIVE'), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
+    live: g.state === 'live' ? { label: nflClock(g), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
     pred: winnerPred(g.prediction, nick(g.home.name, lg), nick(g.away.name, lg), nflStrongAt(lg))
   }
 }

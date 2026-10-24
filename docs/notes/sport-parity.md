@@ -7,7 +7,6 @@
 
 | Block | Sport | Why |
 |---|---|---|
-| League list on the games page (games.leagueList, fix183b) | NFL + college | Only two leagues; the NFL / College switch at the top chooses between them. The page has no left league panel (Live box stays, above the games); favourite teams stay reachable from the Favorites tab in the header. Yarin asked for this (19 Oct). |
 | League logo | NFL + college | The provider's NFL and college league images are its 'image not available' placeholder (the same 29 KB file for both); we have no licensed mark. The pages show no logo rather than the placeholder. |
 
 ## Tennis (fix193c, 20 Oct 2026) — 'na' for Yarin to approve

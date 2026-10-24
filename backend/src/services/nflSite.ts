@@ -26,6 +26,8 @@ export interface NflGame {
   id: number; season: number; week: string | null; weekKey: string; stage: string | null; kickoff: string; status: string;
   state: 'upcoming' | 'live' | 'done' | 'off'; home: NflSide; away: NflSide; score: { home: number; away: number } | null;
   quarters: { home: (number | null)[]; away: (number | null)[] } | null; venue: string | null; league: LeagueId
+  /** fix213: the quarter clock while live ("8:42"), null otherwise */
+  clock?: string | null
 }
 
 /**
@@ -54,11 +56,12 @@ export function shapeGame(r: any): NflGame {
     away: { id: r.away_id, name: nameOf(r.away_id, r.away_name), logo: logoOf(r.away_id, r.away_logo) },
     score: r.home_pts != null && r.away_pts != null && state !== 'upcoming' ? { home: r.home_pts, away: r.away_pts } : null,
     quarters: Array.isArray(q) && q.length === 2 ? { home: q[0], away: q[1] } : null,
-    venue: r.venue || null, league: r.league === 2 ? 2 : 1
+    venue: r.venue || null, league: r.league === 2 ? 2 : 1,
+    clock: state === 'live' && r.clock != null && String(r.clock).trim() !== '' ? String(r.clock).trim() : null
   };
 }
 
-export const GAME_COLS = `game_id, season, week, stage, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo, status, home_pts, away_pts, quarters, venue, league`;
+export const GAME_COLS = `game_id, season, week, stage, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo, status, home_pts, away_pts, quarters, venue, league, clock`;
 export const leagueOfTeamId = (id: number): LeagueId => ((db.prepare(`SELECT league FROM nfl_teams WHERE team_id = ?`).get(id) as any)?.league === 2 ? 2 : 1);
 
 /** Seasons we hold (admins see all; everyone else only the current one). */

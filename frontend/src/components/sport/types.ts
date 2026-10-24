@@ -23,6 +23,8 @@ export interface SLeague {
   /** league page (null = none) */
   href: string | null
   fav: Favorite
+  /** fix213: the league's word in the address (?league=college), when it isn't the code */
+  param?: string
 }
 
 /** A side chip after the result cells (football: Over 2.5 / Both score; basketball + NFL: Margin / Total pts). */
@@ -69,9 +71,9 @@ export interface GamesAdapter {
   favoritesHref: string
   /** a league's panel on the right when one league is chosen (table, results …); none = no panel */
   leaguePanel?: (code: string) => ReactNode
-  /** fix183b: no league list (left panel, phone league chips): a sport whose leagues have their own switch (American
-   *  football: NFL | College). The Live box stays; the games list takes the width. */
-  noLeagueList?: boolean
+  /** fix213: the sport's own league switch on phones (American football: All · NFL · College), in place of the phone
+   *  league chips. Desktop keeps the left column (Live box, leagues, Latest results) like every sport. */
+  mobileFilter?: ReactNode
   /** fix185: a panel on the right chosen by the adapter itself (American football: the filtered league's standings) */
   sidePanel?: ReactNode
   /** the switcher above the title (American football: NFL | College) */

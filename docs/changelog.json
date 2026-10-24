@@ -2,6 +2,21 @@
  "_about": "fix206: the public changelog at /changelog (backend/src/services/howItWorks.ts). Newest first. One or two plain sentences for visitors (no internal fixes, no odds, no betting words), in all seven languages. sport: football | basketball | american-football | tennis | all. kind: model | site. version: the sport's model version at the time (shown as 'SL Basketball 3.0'), null for 'all'. Entries of a sport before its launch are shown to admins only.",
  "entries": [
   {
+   "date": "2026-10-25",
+   "sport": "american-football",
+   "kind": "site",
+   "version": "1.0",
+   "text": {
+    "en": "The American football games page now looks like every other sport: live games sit in a compact box on the left, grouped by league, with the clock and our live win chance, and \"Show all\" opens the full live list.",
+    "es": "La página de partidos de fútbol americano ahora se ve como la de los demás deportes: los partidos en directo están en un recuadro a la izquierda, agrupados por liga, con el reloj y nuestra probabilidad de victoria en directo, y \"Ver todos\" abre la lista completa.",
+    "pt": "A página de jogos de futebol americano agora é igual à dos outros esportes: os jogos ao vivo ficam num quadro à esquerda, agrupados por liga, com o relógio e a nossa chance de vitória ao vivo, e \"Ver todos\" abre a lista completa.",
+    "de": "Die Spielseite im American Football sieht jetzt aus wie bei jeder anderen Sportart: Live-Spiele stehen in einer kompakten Box links, nach Liga gruppiert, mit Spielzeit und unserer Live-Siegchance; \"Alle zeigen\" öffnet die ganze Live-Liste.",
+    "fr": "La page des matchs de football américain ressemble désormais à celle des autres sports : les matchs en direct sont dans un encadré à gauche, groupés par ligue, avec le chrono et notre chance de victoire en direct, et « Voir tout » ouvre la liste complète.",
+    "it": "La pagina delle partite di football americano ora è come quella degli altri sport: le partite live sono in un riquadro a sinistra, raggruppate per lega, con il cronometro e la nostra probabilità di vittoria live, e \"Mostra tutte\" apre l’elenco completo.",
+    "tr": "Amerikan futbolu maçlar sayfası artık diğer sporlarla aynı: canlı maçlar solda, lige göre gruplanmış küçük bir kutuda, süre ve canlı kazanma şansımızla birlikte; \"Tümünü göster\" canlı listenin tamamını açar."
+   }
+  },
+  {
    "date": "2026-10-24",
    "sport": "basketball",
    "kind": "site",
