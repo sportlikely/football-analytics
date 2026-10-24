@@ -42,7 +42,9 @@ import { resolveUnsettled, resolveUnsettledOnce, Providers as SettleProviders } 
 import { startApiFootballScheduler, rebuildAfFeaturesAsync, afGet, afRemaining } from './services/apiFootball';
 import { prepareModelV3Async } from './services/gridModel';
 import { writeLive, clearLive } from './services/liveState';
-import { startPageWarmer, refreshPages } from './services/pageCache';
+import { startPageWarmer, refreshPages, storePage, storedAt } from './services/pageCache';
+import { db } from './db';
+import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
 
@@ -68,6 +70,10 @@ export function startJobs() {
   afterHeavy('search index', async () => { await warmSearchIndex(); await warmBbSearch(); }, 30 * 1000).unref();
   everyHeavy('search index', () => warmSearchIndex(), 6 * 3600 * 1000).unref();
   everyHeavy('bb search index', () => warmBbSearch(), 3600 * 1000).unref();
+  // fix210b: every finished basketball game page of the current and last season stored ahead (search engines read old
+  // games ~1,300 an hour): the web process then only writes the text of the language asked for
+  afterHeavy('bb game pages', () => prebuildBbGamePages(), 10 * 60 * 1000).unref();
+  everyHeavy('bb game pages', () => prebuildBbGamePages(), 6 * 3600 * 1000).unref();
   // fix209: "Scorers shown" — every live / finished game of the last 48 h names its scorers (and fetches them again)
   after('scorers check', () => scorersCheckTick(), 3 * 60 * 1000).unref();
   every('scorers check', () => scorersCheckTick(), 5 * 60 * 1000).unref();
@@ -184,6 +190,40 @@ export function startJobs() {
   };
   after('warm match extras', () => warmExtras().catch(() => undefined), 4 * 60 * 1000);
   every('warm match extras', () => warmExtras().catch(() => undefined), 2 * 3600 * 1000);
+}
+
+/**
+ * fix210b: the stored data of every finished basketball game of each league's two latest seasons ('bb-game-facts',
+ * app.ts), built when missing or when it was built in the game's first 2 days (box scores and checks still coming in).
+ * Game ids read 500 at a time; a yield every 50 games / 100 ms and while a live tick runs; each page written when built.
+ */
+export async function prebuildBbGamePages(): Promise<{ checked: number; built: number }> {
+  const step = yieldEvery(50, 100, { live: true });
+  const seasons = new Map<string, string[]>();
+  for (const r of db.prepare(`SELECT DISTINCT code, season FROM bb_games WHERE status IN ('FT','AOT')`).all() as any[]) {
+    const l = seasons.get(r.code) || [];
+    l.push(String(r.season));
+    seasons.set(r.code, l);
+  }
+  const page = db.prepare(`SELECT game_id, kickoff FROM bb_games WHERE code = ? AND season = ? AND status IN ('FT','AOT') AND game_id > ? ORDER BY game_id LIMIT 500`);
+  let checked = 0, built = 0;
+  for (const [code, list] of seasons) {
+    for (const season of list.sort().slice(-2)) {
+      for (let after = 0; ;) {
+        const rows = page.all(code, season, after) as { game_id: number; kickoff: string }[];
+        if (!rows.length) break;
+        after = rows[rows.length - 1].game_id;
+        for (const g of rows) {
+          checked++;
+          const at = storedAt('bb-game-facts', { id: g.game_id }), settled = Date.parse(g.kickoff) + 2 * 86400000;
+          if (!at || (at < settled && Date.now() > settled)) { await storePage('bb-game-facts', { id: g.game_id }); built++; }
+          await step();
+        }
+      }
+    }
+  }
+  if (built) logger.info(`bb game pages: ${built} built, ${checked} finished games checked`);
+  return { checked, built };
 }
 
 // Push live scores (every 20 s, fix115): Football-Data.org's live list is fetched fresh every 3rd tick (rate limit),

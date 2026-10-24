@@ -138,7 +138,8 @@ function startWorker() {
   const child = fork(file, [], {
     env: { ...process.env, SL_ROLE: 'worker', SL_INTERNAL_KEY: INTERNAL_KEY, WORKER_PORT: String(WORKER_PORT) },
     execArgv,
-    stdio: ['inherit', 'inherit', 'pipe', 'ipc']
+    stdio: ['inherit', 'inherit', 'pipe', 'ipc'],
+    serialization: 'advanced' // fix210b: the web process's queued writes carry Buffers (deferredWrites.ts)
   });
   const tail: string[] = [];
   let partial = '';
@@ -182,7 +183,15 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
+/*
+ * fix210b: the web process loads the model state the worker left (and the live list) BEFORE it listens: on 24 Oct the
+ * first requests after a deploy waited behind the state loads (6.8 s "state load nfl", 3.1 s "state load squad").
+ * Railway keeps the old instance serving until /api/health answers, so nobody waits for this.
+ */
+const ready: Promise<void> = isWeb
+  ? (async () => { setJob('start: state load'); try { loadLiveRows(); await loadNewerStates(); } finally { setJob(null); } })()
+  : Promise.resolve();
+ready.catch(e => logger.warn(`start: state load: ${e?.message || e}`)).finally(() => server.listen(PORT, () => {
   setJob('boot (scheduler start)'); setImmediate(() => setJob(null)); // fix165: the sync start-up work is named in /api/perf
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
@@ -190,13 +199,11 @@ server.listen(PORT, () => {
   if (isWeb) {
     // fix202: serve straight away from the stored pages and the model state the worker left; then start the worker
     workerState.enabled = true;
-    loadLiveRows();
-    setTimeout(() => { void loadNewerStates(); }, 1000).unref();
     startWorker();
   } else {
     // WORKER=0: every job in this process (the scheduler module is only loaded here)
     void import('./jobs').then(j => j.startJobs()).catch(e => logger.error(`jobs: ${e?.message || e}`));
   }
-});
+}));
 
 export { app, io };

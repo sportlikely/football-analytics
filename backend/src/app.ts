@@ -26,7 +26,7 @@ console.log('API Key:', process.env.FOOTBALL_DATA_API_KEY ? '✅ SET' : '❌ NOT
 
 // Import after env is loaded
 import footballDataAPI from './services/footballDataAPI';
-import { recordPredictions, settlePending, accuracy, recentSettled, trackingStatus, computeMetrics, publicRecord } from './services/tracking';
+import { recordPredictions, settlePending, accuracy, recentSettled, trackingStatus, computeMetrics, publicRecord, preloadSettled } from './services/tracking';
 import { historyStatus, teamMapStatus, GROUPS, syncAll, syncH2HArchive, h2hArchiveStatus, syncHalfTimes } from './services/history';
 import { withLive, liveHalfTimeTest } from './services/liveChance';
 import { backtestUpsets, upsetWatchReport, upsetWatchBacktest } from './services/upsetAlerts';
@@ -59,7 +59,7 @@ import {
 import { buildNationalElo, syncNationalHistory, nationalEloStatus, nationalGoalsSensitivity, tuneNational, nationalTuneStatus } from './services/nationalElo';
 import { buildClubElo, syncEuropeanCups, clubEloStatus, clubValueReport } from './services/clubElo';
 import { nationalValueSearch, historyMatchReport } from './services/squadValues';
-import { drawAlertsReport, drawFactorTest } from './services/drawAlerts';
+import { drawAlertsReportAsync, drawPicksCount, drawFactorTest } from './services/drawAlerts';
 import { teamPage as teamPageB, searchTeams, searchPlayers, searchPlayersRemote as searchPlayersRemoteB, resolveAfTeamId, setTeamOverride, teamOverrides } from './services/teamPage';
 import { playerPage as playerPageB, findPlayer as findPlayerB } from './services/playerPage';
 import { unlockStatus, unlockMatch, unlockedIds, isFinished, testCheckout, PLANS, billingTestMode, unlockStats, REFUND_DAYS, FREE_WEEKLY_UNLOCKS, packsFor, buyPack, addCredits, creditBalance, creditEvents, PICK_PRICE, PACK_SIZES } from './services/billing';
@@ -80,6 +80,8 @@ import { db } from './db';
 import { liveList, liveAt } from './services/liveState';
 import { isWeb, isWorker, ROLE } from './services/role';
 import { workerRoutes, workerRoutesStatus } from './services/workerRoutes';
+import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
+import { deferredStatus } from './services/deferredWrites';
 import { builder, webBuilds } from './services/builders';
 import { workerHealth, memorySizing } from './services/workerHealth';
 import { perfHours } from './services/perfHistory';
@@ -95,6 +97,7 @@ import { tennisProbe, tennisStatus, tennisSample, tennisDataCheck, tennisMovedId
 import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
 import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch as tennisMatchB, tennisRecord, levelRank, tennisTournament as tennisTournamentB, tennisPlayer as tennisPlayerB, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { geoCredit, countryOf } from './services/geo';
+import { bbGameFacts as bbGameFactsB, bbGameSeo, bbGamePath, bbFactsFreshMs } from './services/seo';
 import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, todayGroups as todayGroupsB, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
 import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
@@ -117,7 +120,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth } from './services/dataHealth';
-import { moreForGame as moreForGameB, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, runBacktests, moreDaily, MORE_SPORTS, gameIdOf, hasExtras, saveOne as saveOneB } from './services/morePredictions';
+import { moreForGame as moreForGameB, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, moreBacktestNow, MORE_SPORTS, gameIdOf, hasExtras, saveOne as saveOneB } from './services/morePredictions';
 /*
  * fix210: the page builders — the web process never runs one (its routes pass these requests to the worker:
  * services/workerRoutes.ts); with SL_STRICT_WEB=1 (scripts/no-web-compute.test.mjs) a call in the web process throws
@@ -134,6 +137,7 @@ const tennisMatch = builder('tennis match page', tennisMatchB);
 const tennisTournament = builder('tennis tournament page', tennisTournamentB);
 const tennisPlayer = builder('tennis player page', tennisPlayerB);
 const seoPage = builder('crawler page', seoPageB);
+const bbGameFacts = builder('basketball game facts (crawler page)', bbGameFactsB);
 const todayGroups = builder('today lists', todayGroupsB);
 const nflGame = builder('NFL game page', nflGameB);
 const nflTeam = builder('NFL team page', nflTeamB);
@@ -202,6 +206,8 @@ app.use((req, res, next) => {
 const WEB_ONLY_API = /^\/api\/(perf|draw-alerts|admin\/visitors)$/;
 if (isWeb) app.use('/api', (req, res, next) => {
   const p = req.originalUrl.split('?')[0];
+  // fix210b: a browser's error report is written by the worker (the web process writes nothing but sign-in / account)
+  if (p === '/api/client-error') return forwardToWorker(req, res);
   if (OPEN_API.test(p) || WEB_ONLY_API.test(p)) return next();
   forwardToWorker(req, res);
 });
@@ -1173,7 +1179,7 @@ app.get('/api/admin/more-predictions', (req, res) => {
 // runs in the background in the heavy queue (football + basketball a few minutes, tennis more); ?sport= one sport, ?refit=1 league fits first
 app.post('/api/admin/more-predictions/backtest', (req, res) => {
   const sport = MORE_SPORTS.includes(String(req.query.sport) as any) ? (String(req.query.sport) as any) : undefined;
-  void heavy('more predictions backtest', async () => { await (req.query.refit === '1' ? moreDaily(true) : runBacktests(sport)); }).catch(e => logger.warn(`more backtest: ${e.message}`));
+  void heavy('more predictions backtest', async () => { await moreBacktestNow(sport, req.query.refit === '1'); }).catch(e => logger.warn(`more backtest: ${e.message}`)); // fix210b: in the job thread
   res.json({ data: { started: true, sport: sport || 'all' } });
 });
 app.get('/api/admin/tennis-model', (req, res) => {
@@ -2375,7 +2381,8 @@ app.get('/api/news', async (req, res) => {
 // fix202: stored pages (built in the worker every 5 minutes and after results are settled)
 definePage({
   name: 'record', freshMs: 5 * 60 * 1000, warm: [{ days: 30 }],
-  build: q => ({ data: publicRecord(Number(q.days) || 30, q.competition || undefined), timestamp: new Date().toISOString() }),
+  // fix210b: the settled games read a day at a time first (preloadSettled), then counted from that copy
+  build: async q => { await preloadSettled(Number(q.days) || 30, q.competition || undefined); return { data: publicRecord(Number(q.days) || 30, q.competition || undefined), timestamp: new Date().toISOString() }; },
   // the per-competition table is admin-only for now (Yarin, 10 Oct 2026): small samples look bad in public
   variants: { public: b => jsonText(stripMarket({ ...b, data: { ...b.data, byCompetition: [] } })) }
 });
@@ -2394,13 +2401,16 @@ app.get('/api/public/record', async (req, res) => {
 const hideResultP = (b: any) => ({ ...b, data: { ...b.data, rows: b.data.rows.map((r: any) => ({ ...r, p: null, dc: r.dc ? { ...r.dc, p: null } : null })) } });
 definePage({
   name: 'results', freshMs: 5 * 60 * 1000, warm: [{ days: 30, limit: 50 }],
-  build: q => {
+  build: async q => {
     const days = Number(q.days) || 30, limit = Number(q.limit) || 50, competition = q.competition || undefined;
+    await preloadSettled(days, competition); // fix210b: one paged read, the three counts below share it
     const rows = recentSettled(days, competition, limit, 'main').map((r: any) => {
       const { odds, confidence, model, ...rest } = r;
       return rest;
     });
+    await yieldLoop();
     const main: any = accuracy(days, competition, 'main');
+    await yieldLoop();
     // fix120: hitRate = double chance (our recommended pick); hardHitRate = the 1X2 result
     const dcRec: any = publicRecord(days, competition, 0).doubleChance;
     return { data: { rows, record: { days, n: dcRec.n || main.settled, hitRate: dcRec.v3 ?? null, hardHitRate: main.model?.hitRate ?? null } }, timestamp: new Date().toISOString() };
@@ -2422,7 +2432,7 @@ app.get('/api/public/results', async (req, res) => {
 // Privacy page: which country data is in use (DB-IP, CC BY 4.0 — or iptoasn.com when that one is loaded)
 app.get('/api/public/geo-source', (_req, res) => res.json({ data: geoCredit() }));
 
-definePage({ name: 'summary', freshMs: 10 * 60 * 1000, warm: [{}], variants: VIEWS_PLAIN, build: () => buildSummary() });
+definePage({ name: 'summary', freshMs: 10 * 60 * 1000, warm: [{}], variants: VIEWS_PLAIN, build: async () => { await preloadSettled(30); return buildSummary(); } });
 app.get('/api/public/summary', async (req, res) => {
   try { await sendStored(req, res, 'summary', {}, plainView(req)); } catch (error: any) { sendError(res, error, 'Summary failed'); }
 });
@@ -2431,10 +2441,8 @@ function buildSummary() {
   // fix120: "picks right" = our double-chance pick; the 1X2 result stays as the hard call
   const rec: any = publicRecord(30);
   let draws: any = null;
-  try {
-    const d: any = drawAlertsReport();
-    draws = { picks: (d.picks || []).length };
-  } catch { /* backtests not loaded */ }
+  // fix210b: the number of draw picks only (was the whole draw report, backtests included)
+  try { draws = { picks: drawPicksCount() }; } catch { /* backtests not loaded */ }
   return {
     data: {
       days: 30,
@@ -3313,7 +3321,7 @@ app.get('/api/admin/link-check', async (req, res) => {
 app.get('/api/perf', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   // fix210: + memory sizing, the 24-h history of both processes, the worker routes and any page the web process built
-  res.json({ data: { process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker: workerHealth(), pages: pageCacheStatus(), pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), shared: sharedStatus() }, timestamp: new Date().toISOString() });
+  res.json({ data: { process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker: workerHealth(), pages: pageCacheStatus(), pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), threadJobs: threadJobStatus(), shared: sharedStatus() }, timestamp: new Date().toISOString() });
 });
 
 app.get('/api/af/status', async (_req, res) => {
@@ -3526,7 +3534,7 @@ app.get('/api/upset-watch', (_req, res) => {
 // fix202: a stored page (2.4 s to build): built in the worker every 10 minutes
 definePage({
   name: 'draw-alerts', freshMs: 10 * 60 * 1000, warm: [{}],
-  build: () => ({ data: drawAlertsReport(), timestamp: new Date().toISOString() }),
+  build: async () => ({ data: await drawAlertsReportAsync(), timestamp: new Date().toISOString() }), // fix210b: in slices
   // visitors: our own draw picks and draw facts only (the value-alert machinery stays for admins)
   variants: { public: (b: any) => jsonText(stripMarket({ ...b, data: { picks: b.data.picks, likely: b.data.likely, leagues: b.data.leagues, teams: b.data.teams } })) }
 });
@@ -3667,7 +3675,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   app.get('/fonts/:file', fontRoute);
   warmFonts();
   // fix202: the sitemaps are stored pages, built in the worker every hour
-  definePage({ name: 'sitemap', freshMs: 3600 * 1000, warm: ['sitemap.xml', ...Object.keys(SITEMAPS)].map(file => ({ file })), build: q => (q.file === 'sitemap.xml' ? sitemapXml() : SITEMAPS[q.file]?.() ?? null) });
+  // fix210b: the big ones (teams, players, leagues, basketball, NFL, tennis: season-long GROUP BYs, up to 4.8 s of blocked
+  // worker) are built in a job thread; football reads the fixture window in this process's memory
+  definePage({ name: 'sitemap', freshMs: 3600 * 1000, warm: ['sitemap.xml', ...Object.keys(SITEMAPS)].map(file => ({ file })),
+    build: q => (q.file === 'sitemap.xml' ? sitemapXml() : !SITEMAPS[q.file] ? null : q.file !== 'sitemap-football.xml' && threadJobsOn() ? inThread<string | null>('sitemap', [q.file]) : SITEMAPS[q.file]()) });
   const sitemapOf = async (file: string) => { const s = await getPage('sitemap', { file }); if (typeof s?.body !== 'string') throw new Error('not built yet'); return s.body; };
   app.get('/sitemap.xml', async (_req, res) => {
     try { res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(await sitemapOf('sitemap.xml')); }
@@ -3691,7 +3702,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   definePage({ name: 'seo', freshMs: 10 * 60 * 1000, warm: SEO_HOMES.map(p => ({ path: p })), build: q => seoPage(q.path) });
   // fix210: every other page's head tags + content (every language: /fr/* was 4 s on the web process) — built by the
   // worker when first asked for, then served stored (10 min fresh; kept 2 days); the web process never builds one
-  const SEO_WAIT_MS = Number(process.env.SEO_WAIT_MS) || 4000;
+  const SEO_WAIT_MS = Number(process.env.SEO_WAIT_MS) || 3000;
+  // fix210b: a basketball game's data, one build for every language (finished games built ahead by the worker:
+  // jobs.ts "bb game pages"); the web process writes the page's text from it (bbGameSeo: no database, no build)
+  definePage({ name: 'bb-game-facts', freshMs: 10 * 60 * 1000, freshOf: bbFactsFreshMs, refresh: false, keepMs: 8 * 86400000, build: q => bbGameFacts(Number(q.id)) });
   definePage({ name: 'seo-page', freshMs: 10 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, build: q => seoPage(q.path) });
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
@@ -3716,8 +3730,13 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     }
     res.set('Cache-Control', 'no-cache');
     try {
+      const bbg = bbPublic() ? bbGamePath(req.path) : null;
+      if (bbg) {
+        const f = (await getPage('bb-game-facts', { id: bbg.id }, { waitMs: SEO_WAIT_MS }))?.body;
+        if (f) return res.type('html').send(renderIndex(indexHtml, bbGameSeo(f, bbg.lang)));
+      }
       const home = seoHome(req.path);
-      // fix210: stored pages only; a page never built waits at most 4 s for the worker, then the plain app page
+      // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page
       // (the app renders it in the browser; the next request gets the stored copy)
       const info = home ? (await getPage('seo', { path: home }))?.body : (await getPage('seo-page', { path: req.path.slice(0, 300) }, { waitMs: SEO_WAIT_MS }))?.body;
       if (!info) return res.sendFile(path.join(STATIC_DIR, 'index.html'));

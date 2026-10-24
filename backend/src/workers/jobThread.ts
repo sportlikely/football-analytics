@@ -10,6 +10,8 @@ async function run(): Promise<unknown> {
   const { job, args } = workerData as { job: string; args: unknown[] };
   if (job === 'bb model') return (await import('../services/bbModel')).buildLeaguesHere(args[0] as string[]);
   if (job === 'national elo') return (await import('../services/nationalElo')).buildNationalEloHere();
+  if (job === 'sitemap') { const seo = await import('../services/seo'); return seo.SITEMAPS[args[0] as string]?.() ?? null; }
+  if (job === 'more backtest') return (await import('../services/morePredictions')).moreBacktestHere(args[0] as any, args[1], args[2] as any);
   throw new Error(`unknown thread job ${job}`);
 }
 

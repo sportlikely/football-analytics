@@ -16,7 +16,7 @@
  * history in, most recent first, always leaving a reserve.
  */
 import { clearPredictionCache } from './predCache';
-import { yieldLoop, timed, afterHeavy, everyHeavy, afterLive } from './perf';
+import { yieldLoop, timed, afterHeavy, everyHeavy, afterLive, yieldEvery } from './perf';
 import { onState, publishState } from './shared';
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -348,7 +348,13 @@ async function syncLineup(fixtureId: number) {
 }
 
 /** Map API-Football team ids to football-data.co.uk names, per group. */
-function mapTeams(group: string) {
+/*
+ * fix210b: every API-Football team against every football-data name (similarity, three spellings each) for every group
+ * on every tick, then one UPDATE per team: up to 2.6 s of blocked worker. Now only when the group's teams or names
+ * changed (mapSig), a yield every 20 teams, and the writes in one transaction.
+ */
+const mapSig = new Map<string, string>();
+async function mapTeams(group: string) {
   const divs = GROUPS[group]?.divisions || [];
   if (!divs.length) return { mapped: 0, unmatched: [] as string[] };
   const fdNames: string[] = db
@@ -356,23 +362,33 @@ function mapTeams(group: string) {
     .all(...divs)
     .map((r: any) => r.n);
   const teams = db.prepare(`SELECT team_id, name FROM af_teams WHERE grp = ?`).all(group) as any[];
+  const sig = `${teams.length}|${teams.reduce((s, t) => s + t.team_id, 0)}|${fdNames.length}|${fdNames.join('').length}`;
+  if (mapSig.get(group) === sig) return { mapped: -1, unmatched: [] as string[] }; // unchanged
+  const step = yieldEvery(20, 50, { live: true });
   const pairs: { id: number; name: string; fd: string; score: number }[] = [];
-  for (const t of teams)
+  for (const t of teams) {
     for (const fd of fdNames) {
       const key = fd.toLowerCase();
       let score = 0;
       for (const h of [fd, ALIASES[key] || '', AF_ALIASES[key] || ''].filter(Boolean)) score = Math.max(score, similarity(h, t.name));
       if (score >= 0.5) pairs.push({ id: t.team_id, name: t.name, fd, score });
     }
+    await step();
+  }
   pairs.sort((a, b) => b.score - a.score);
   const usedT = new Set<number>(), usedF = new Set<string>();
   const upd = db.prepare(`UPDATE af_teams SET fd_name = ?, score = ? WHERE grp = ? AND team_id = ?`);
-  db.prepare(`UPDATE af_teams SET fd_name = NULL, score = NULL WHERE grp = ?`).run(group);
-  for (const p of pairs) {
-    if (usedT.has(p.id) || usedF.has(p.fd)) continue;
-    upd.run(p.fd, p.score, group, p.id);
-    usedT.add(p.id); usedF.add(p.fd);
-  }
+  db.exec('BEGIN');
+  try {
+    db.prepare(`UPDATE af_teams SET fd_name = NULL, score = NULL WHERE grp = ?`).run(group);
+    for (const p of pairs) {
+      if (usedT.has(p.id) || usedF.has(p.fd)) continue;
+      upd.run(p.fd, p.score, group, p.id);
+      usedT.add(p.id); usedF.add(p.fd);
+    }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* none open */ } throw e; }
+  mapSig.set(group, sig);
   const unmatched = teams.filter(t => !usedT.has(t.team_id)).map(t => t.name);
   return { mapped: usedT.size, unmatched };
 }
@@ -646,7 +662,7 @@ export async function afTick(force = false) {
           notes.push(`${lg.id}/${s}: ${e.message}`);
         }
       }
-    for (const g of Object.keys(GROUPS)) { await yieldLoop(); mapTeams(g); }
+    for (const g of Object.keys(GROUPS)) { await yieldLoop(); await mapTeams(g); }
 
     // 2) lineups for matches kicking off within the next 90 min (or started in the last 3 h) — top divisions only
     const now = Date.now();

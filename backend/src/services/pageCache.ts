@@ -266,6 +266,14 @@ export async function startPageWarmer(): Promise<void> {
   }, 15 * 1000).unref();
 }
 
+/** fix210b (worker): when this page was last stored (0 = never) — prebuild jobs skip what is fresh */
+export const storedAt = (name: string, q: Query = {}) => builtAtOf(pageKey(name, q));
+/** fix210b (worker): build and store this page now (prebuild jobs; awaits the write) */
+export function storePage(name: string, q: Query = {}): Promise<void> {
+  if (!runsJobs) throw new Error('pages are built by the worker');
+  return buildNow(pageKey(name, q));
+}
+
 /** worker / one process: rebuild the pages of these names now (e.g. after the fixture window changed) */
 export function refreshPages(...names: string[]) {
   if (!runsJobs) return;

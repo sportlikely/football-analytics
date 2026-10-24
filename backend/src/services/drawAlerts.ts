@@ -11,6 +11,7 @@
  *   history  – walk-forward backtests, priced at the best early price, with the line movement to close
  */
 import { db } from '../db';
+import { yieldEvery, yieldLoop } from './perf';
 import { dcPick } from './upsetAlerts';
 import { DIVISION_NAMES } from './pastView';
 import { GROUPS, loadGroupMatches, seasonCodes } from './history';
@@ -66,20 +67,32 @@ function upcoming() {
   return out;
 }
 
-function live() {
+async function live() {
   const bf = backfilledCol() ? 'p.backfilled' : '0';
-  const rows = db.prepare(`
+  // fix210b: 500 rows a read (by rowid), a yield between; newest first afterwards
+  const step = yieldEvery(50, 100, { live: true });
+  const page = db.prepare(`
     SELECT p.match_id, p.competition_code, p.competition_name, p.utc_date, p.home_team, p.away_team,
            p.p_home, p.p_draw, p.p_away, p.odds_home, p.odds_draw, p.odds_away, p.draw_streak, ${bf} AS backfilled,
            r.home_goals, r.away_goals, r.outcome
     FROM predictions p JOIN results r ON r.match_id = p.match_id
-    WHERE p.model = 'grid-v3' AND p.settled = 1 AND r.outcome IN ('H','D','A') AND p.odds_draw IS NOT NULL
-    ORDER BY p.utc_date DESC
-  `).all() as any[];
+    WHERE p.model = 'grid-v3' AND p.settled = 1 AND r.outcome IN ('H','D','A') AND p.odds_draw IS NOT NULL AND p.rowid > ?
+    ORDER BY p.rowid LIMIT 500
+  `.replace('SELECT p.match_id', 'SELECT p.rowid AS rid, p.match_id'));
+  const rows: any[] = [];
+  for (let after = 0; ;) {
+    const part = page.all(after) as any[];
+    if (!part.length) break;
+    rows.push(...part);
+    after = part[part.length - 1].rid;
+    await step();
+  }
+  rows.sort((a, b) => (a.utc_date < b.utc_date ? 1 : a.utc_date > b.utc_date ? -1 : 0));
   const alerts: any[] = [];
   let all = 0, allDraws = 0;
   const sum = { live: { n: 0, wins: 0, profit: 0 }, backfilled: { n: 0, wins: 0, profit: 0 } };
   for (const r of rows) {
+    await step();
     if (EXCLUDED.has(r.competition_code)) continue;
     all++;
     if (r.outcome === 'D') allDraws++;
@@ -116,10 +129,12 @@ const SEASON_LABEL: Record<string, string> = { '2324': '2023-24', '2425': '2024-
 
 /** Both teams' draw share over their last 20 matches before each match (key division|date|home|away). */
 let teamDrawCache: { at: number; map: Map<string, number> } | null = null;
-function teamDrawMap() {
+async function teamDrawMap() {
   if (teamDrawCache && Date.now() - teamDrawCache.at < 6 * 3600_000) return teamDrawCache.map;
   const map = new Map<string, number>();
+  const step = yieldEvery(500, 50, { live: true });
   for (const group of Object.keys(GROUPS)) {
+    await step();
     const recent = new Map<string, number[]>();
     for (const m of loadGroupMatches(group)) {
       const rh = (recent.get(m.home) || []).slice(-20), ra = (recent.get(m.away) || []).slice(-20);
@@ -127,14 +142,19 @@ function teamDrawMap() {
         map.set(`${m.division}|${m.date}|${m.home}|${m.away}`, Math.min(rh.reduce((s, x) => s + x, 0) / rh.length, ra.reduce((s, x) => s + x, 0) / ra.length));
       const d = m.hg === m.ag ? 1 : 0;
       for (const t of [m.home, m.away]) { const l = recent.get(t) || recent.set(t, []).get(t)!; l.push(d); if (l.length > 20) l.shift(); }
+      await step();
     }
   }
   teamDrawCache = { at: Date.now(), map };
   return map;
 }
 
-function history() {
-  const tdm = teamDrawMap();
+// fix210b: the backtest seasons change only when a backtest is run: the table is kept 6 h, built in slices
+let historyCache: { at: number; v: any[] } | null = null;
+async function history() {
+  if (historyCache && Date.now() - historyCache.at < 6 * 3600_000) return historyCache.v;
+  const tdm = await teamDrawMap();
+  const step = yieldEvery(200, 50, { live: true });
   const seasons = (db.prepare(`SELECT DISTINCT season FROM backtest_runs WHERE model = 'grid-v3' ORDER BY season`).all() as any[]).map(r => r.season);
   const out: any[] = [];
   for (const season of seasons) {
@@ -162,7 +182,9 @@ function history() {
     ];
     let exp = 0, expN = 0;
     const byMkt = MKT_B.map(([lo, hi]) => ({ range: hi > 99 ? `${lo}%+` : `under ${hi}%`.replace('under 26%', '22–26%'), lo, hi, n: 0, wins: 0, profit: 0, moved: 0, movedN: 0 }));
+    await step();
     for (const r of rows) {
+      await step();
       if (r.division.startsWith('SP')) continue;
       matches++;
       if (r.outcome === 'D') draws++;
@@ -212,6 +234,7 @@ function history() {
       byLeague: [...byDiv.entries()].map(([division, d]) => ({ division, league: DIVISION_NAMES[division] || division, n: d.n, hitRate: r1((d.wins / d.n) * 100), roi: r1((d.profit / d.n) * 100) })).sort((a, b) => b.n - a.n)
     });
   }
+  historyCache = { at: Date.now(), v: out };
   return out;
 }
 
@@ -310,14 +333,26 @@ function teamDraws(limit = 10) {
     .sort((a, b) => b.rate - a.rate || b.n - a.n).slice(0, limit);
 }
 
-export function drawAlertsReport() {
+/** fix210b: the summary card's number of draw picks (the 2 likeliest draws of the coming week) */
+export const drawPicksCount = () => likelyDraws().slice(0, PICKS).length;
+
+/** fix210b: in slices (the stored page "draw-alerts" blocked the worker 4.1 s) */
+export async function drawAlertsReportAsync() {
   const up = upcoming();
-  const lv = live();
+  await yieldLoop();
+  const lv = await live();
+  await yieldLoop();
   // Draw picks (Oct 2026, no bookmakers on the site): the 2 games of the next 7 days with the highest draw chance by
   // our own model. The value-alert list (vs the bookmakers' price) is kept for admins as \`upcoming\` / \`alerts\`.
   const likely = likelyDraws();
   const picks = likely.slice(0, PICKS).map(x => ({ ...x, ourDraw: x.draw })).sort((a, b) => a.date.localeCompare(b.date));
-  return { picks, valuePicks: picksOf(up), picksRecord: picksRecord(lv.alerts), likely, leagues: leagueDraws(), teams: teamDraws(), rule: { k: K, minEdge: MIN_EDGE * 100, maxEdge: MAX_EDGE * 100, maxStreak: MAX_STREAK * 100, minV3Draw: MIN_V3, excluded: [...EXCLUDED] }, upcoming: up, ...lv, history: history() };
+  const pr = picksRecord(lv.alerts);
+  await yieldLoop();
+  const leagues = leagueDraws();
+  await yieldLoop();
+  const teams = teamDraws();
+  const hist = await history();
+  return { picks, valuePicks: picksOf(up), picksRecord: pr, likely, leagues, teams, rule: { k: K, minEdge: MIN_EDGE * 100, maxEdge: MAX_EDGE * 100, maxStreak: MAX_STREAK * 100, minV3Draw: MIN_V3, excluded: [...EXCLUDED] }, upcoming: up, ...lv, history: hist };
 }
 
 /* ------------------------------------------------------------------ */

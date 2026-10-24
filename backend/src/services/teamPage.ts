@@ -20,7 +20,7 @@ import { isCrawlerRequest, noProviderCalls } from './afUsage';
 import { teamAnalysis, teamAnalysisTeaser } from './teamAnalysis';
 import { twinDupIds, warmPlayers } from './playerPage';
 import { runsJobs } from './role';
-import { yieldEvery } from './perf';
+import { yieldEvery, runStepsAsync } from './perf';
 import { onState, publishState } from './shared';
 
 const AF_OFFSET = 1_000_000_000;
@@ -69,23 +69,32 @@ function teamIndex(): IndexTeam[] {
   // fix202: the web process uses the worker's copy (rebuilt there every 6 h)
   // fix210: and never builds one (empty until the worker's copy arrives)
   if (!runsJobs) return index?.teams || [];
-  if (index && Date.now() - index.at < TTL) return index.teams;
+  // fix210b: an old copy is used until the 6-hourly job (warmSearchIndex, in slices) has built the next
+  if (index) return index.teams;
+  const g = buildTeamIndex();
+  let r = g.next();
+  while (!r.done) r = g.next();
+  index = { at: Date.now(), teams: r.value };
+  return index.teams;
+}
+/** the team index as a generator (a yield every 500 rows): run at once (first use) or in slices (the warm job) */
+function* buildTeamIndex(): Generator<void, IndexTeam[]> {
   const byId = new Map<number, IndexTeam>();
   const add = (id: number, name: string, national: boolean) => {
     if (!id || !name) return;
     const t = byId.get(id);
-    if (t) { t.n++; t.name = name; t.norm = normalizeName(name); return; }
+    // fix210b: the name is normalised again only when it changed (55,000 rows normalised one by one took most of the time)
+    if (t) { t.n++; if (t.name !== name) { t.name = name; t.norm = normalizeName(name); } return; }
     byId.set(id, { id, name, norm: normalizeName(name), national, n: 1 });
   };
   const since = new Date(Date.now() - 3 * 365 * 86400000).toISOString().slice(0, 10);
-  const q = (sql: string, national: boolean) => {
-    try { for (const r of db.prepare(sql).all(since) as any[]) add(r.id, r.name, national); } catch { /* table missing */ }
-  };
-  q(`SELECT home_id AS id, home_name AS name FROM af_fixtures WHERE date >= ? UNION ALL SELECT away_id, away_name FROM af_fixtures WHERE date >= ?1`, false);
-  q(`SELECT home_id AS id, home_name AS name FROM eur_matches WHERE date >= ? UNION ALL SELECT away_id, away_name FROM eur_matches WHERE date >= ?1`, false);
-  q(`SELECT home_id AS id, home_name AS name FROM nat_matches WHERE date >= ? UNION ALL SELECT away_id, away_name FROM nat_matches WHERE date >= ?1`, true);
-  index = { at: Date.now(), teams: [...byId.values()] };
-  return index.teams;
+  for (const [table, national] of [['af_fixtures', false], ['eur_matches', false], ['nat_matches', true]] as const) {
+    let rows: any[] = [];
+    try { rows = db.prepare(`SELECT home_id AS id, home_name AS name FROM ${table} WHERE date >= ? UNION ALL SELECT away_id, away_name FROM ${table} WHERE date >= ?1`).all(since) as any[]; } catch { /* table missing */ }
+    yield;
+    for (let i = 0; i < rows.length; i++) { add(rows[i].id, rows[i].name, national); if (i % 500 === 499) yield; }
+  }
+  return [...byId.values()];
 }
 
 export function searchTeams(q: string, limit = 8) {
@@ -168,8 +177,7 @@ async function buildPlayerIndex(): Promise<IndexPlayer[]> {
 
 /** fix202 (worker): both search indexes built again and handed to the web process (search, team-name lookups) */
 export async function warmSearchIndex() {
-  index = null;
-  teamIndex();
+  index = { at: Date.now(), teams: await runStepsAsync(buildTeamIndex(), 40, { live: true }) }; // fix210b: in slices
   const players = await buildPlayerIndex(); // fix210: in pages (the old copy serves meanwhile)
   pIndex = { at: Date.now(), players };
   publishState('search:index', { index, pIndex });

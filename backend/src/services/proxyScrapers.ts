@@ -9,6 +9,8 @@
  * Memory holds salted address hashes only; the IP is written straight from the request to the security log.
  */
 import { db } from '../db';
+import { isWeb } from './role';
+import { deferred } from './deferredWrites';
 import logger from '../utils/logger';
 import { every } from './perf';
 import { countryOf } from './geo';
@@ -126,8 +128,11 @@ export function noteWho(ua: string, dc: boolean, verified: boolean) {
   if (!dc) otherRequests++;
 }
 
+// fix210b: from the web process these go to the worker (services/deferredWrites.ts)
+const upNet = deferred(`INSERT OR REPLACE INTO scraper_networks (grp, day, asn, name, cc, addresses, requests, refused, capped, fake_crawler, browser) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const upWho = deferred(`INSERT OR REPLACE INTO who_day (day, data) VALUES (?, ?)`);
 function flush() {
-  const up = db.prepare(`INSERT OR REPLACE INTO scraper_networks (grp, day, asn, name, cc, addresses, requests, refused, capped, fake_crawler, browser) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const up = upNet;
   try {
     for (const n of nets.values()) {
       if (!n.logged || !n.dirty) continue;
@@ -135,9 +140,11 @@ function flush() {
       up.run(grpOf(n.asn), day, n.asn, n.name, n.cc, n.addrBase + n.addrs.size, n.requests, n.refused, n.capBase + n.capped.size, n.fakeCrawler, n.browser);
       securityLogGroup(grpOf(n.asn), 'scraper', lineOf(n), topUa(n));
     }
-    db.prepare(`INSERT OR REPLACE INTO who_day (day, data) VALUES (?, ?)`).run(day, JSON.stringify(whoToday()));
-    db.prepare(`DELETE FROM who_day WHERE day < ?`).run(new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10));
-    db.prepare(`DELETE FROM scraper_networks WHERE day < ?`).run(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10));
+    upWho.run(day, JSON.stringify(whoToday()));
+    if (!isWeb) {
+      db.prepare(`DELETE FROM who_day WHERE day < ?`).run(new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10));
+      db.prepare(`DELETE FROM scraper_networks WHERE day < ?`).run(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10));
+    }
   } catch (e: any) { logger.warn(`proxy scrapers flush: ${e.message}`); }
 }
 every('proxy scrapers flush', flush, 60 * 1000).unref();

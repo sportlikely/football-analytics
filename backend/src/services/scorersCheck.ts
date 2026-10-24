@@ -13,6 +13,7 @@
  * Runs in the worker every 5 minutes (jobs.ts); data health reads the table.
  */
 import { db } from '../db';
+import { yieldEvery } from './perf';
 import logger from '../utils/logger';
 import { footballGap, betterGoals, bbTopGap, nflPlaysGap } from '../utils/scorers';
 import { AF_OFFSET, isAfMatchId, afLive, afFixturesFull, afTwinOfFd, eventsOnFd } from './afMatches';
@@ -104,7 +105,9 @@ async function checkFootball(now: number) {
   const seen = db.prepare(`SELECT score, named FROM scorer_seen WHERE match_id = ?`);
   const need: any[] = [];
   let ok = 0;
+  const step = yieldEvery(50, 100, { live: true }); // fix210b: a yield every 50 games / 100 ms (the job blocked 3.75 s)
   for (const g of games) {
+    await step();
     const score = `${g.hs}-${g.as_}`;
     const prev: any = getCheck.get('football', g.id);
     if (prev?.ok && prev.score === score) { ok++; continue; } // checked and fine at this score
@@ -135,6 +138,7 @@ async function checkFootball(now: number) {
   try { full = fids.length ? await afFixturesFull(fids) : full; } catch (e: any) { logger.warn(`scorers check: ${e.message}`); }
   const putEv = db.prepare(`INSERT OR REPLACE INTO match_goal_events (match_id, json, updated_at) VALUES (?, ?, ?)`);
   for (const g of need) {
+    await step();
     const t = twins.get(g.id);
     const af = t ? full.get(t.fid) : null;
     const base = { id: g.id, homeTeam: { id: g.homeId, name: g.home }, awayTeam: { id: g.awayId, name: g.away }, score: { fullTime: { home: g.hs, away: g.as_ } } };
@@ -158,14 +162,16 @@ async function checkFootball(now: number) {
   return { games: games.length, ok, fetched: fids.length };
 }
 
-function checkBasketball(now: number) {
+async function checkBasketball(now: number) {
   const since = new Date(now - WINDOW_MS).toISOString();
   const games = db.prepare(`SELECT game_id AS id, code, kickoff, home_id, away_id, home_name, away_name, hs, as_, status FROM bb_games
     WHERE kickoff > ? AND kickoff < ? AND status IN ('Q1','Q2','Q3','Q4','OT','BT','HT','FT','AOT') AND COALESCE(hs, 0) + COALESCE(as_, 0) > 0`).all(since, new Date(now).toISOString()) as any[];
   const fin = db.prepare(`SELECT team_id, name, pts FROM bb_player_stats WHERE game_id = ?`);
   const liv = db.prepare(`SELECT team_id, name, pts FROM bb_player_stats_live WHERE game_id = ?`);
   let ok = 0, checked = 0;
+  const step = yieldEvery(50, 100, { live: true }); // fix210b: a yield every 50 games / 100 ms (the job blocked 3.75 s)
   for (const g of games) {
+    await step();
     let rows = fin.all(g.id) as any[];
     if (!rows.length) rows = liv.all(g.id) as any[];
     if (!rows.length) continue; // no box score yet: nothing to show (the live-box line watches the feed)
@@ -186,7 +192,9 @@ async function checkNfl(now: number) {
     WHERE kickoff > ? AND kickoff < ? AND status IN ('Q1','Q2','Q3','Q4','OT','HT','FT','AOT') AND COALESCE(home_pts, 0) + COALESCE(away_pts, 0) > 0`).all(since, new Date(now).toISOString()) as any[];
   const ev = db.prepare(`SELECT json FROM nfl_events WHERE game_id = ?`);
   let ok = 0;
+  const step = yieldEvery(50, 100, { live: true }); // fix210b: a yield every 50 games / 100 ms (the job blocked 3.75 s)
   for (const g of games) {
+    await step();
     let plays: any[] | null = null;
     try { const r: any = ev.get(g.id); plays = r ? JSON.parse(r.json) : null; } catch { plays = null; }
     const miss = nflPlaysGap(plays, { home: g.home_pts, away: g.away_pts }, g.home_id, g.away_id);
@@ -208,7 +216,7 @@ export async function scorersCheckTick(now = Date.now()) {
   busy = true;
   try {
     const football = await checkFootball(now).catch((e: any) => { logger.warn(`scorers check football: ${e.message}`); return null; });
-    const basketball = (() => { try { return checkBasketball(now); } catch (e: any) { logger.warn(`scorers check basketball: ${e.message}`); return null; } })();
+    const basketball = await checkBasketball(now).catch((e: any) => { logger.warn(`scorers check basketball: ${e.message}`); return null; });
     const nfl = await checkNfl(now).catch((e: any) => { logger.warn(`scorers check NFL: ${e.message}`); return null; });
     db.prepare(`DELETE FROM scorer_checks WHERE checked_at < ?`).run(now - 3 * 86400000);
     db.prepare(`DELETE FROM scorer_seen WHERE at < ?`).run(now - 3 * 86400000);

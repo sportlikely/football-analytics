@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import type express from 'express';
 import { db } from '../db';
+import { isWeb } from './role';
+import { deferred } from './deferredWrites';
 import { countryOf, geoStatus } from './geo';
 import { dataCentreOf, asnStatus } from './asn';
 import { every } from './perf';
@@ -55,14 +57,15 @@ const ONLINE_MS = 5 * 60000;
 const online = new Map<string, { at: number; signedIn: boolean; human: boolean }>();
 const written = new Map<string, number>(); // vid|day → last DB write (at most once a minute per visitor)
 
-const upsert = db.prepare(`
+// fix210b: written by the worker (the web process queues them: services/deferredWrites.ts)
+const upsert = deferred(`
   INSERT INTO visits (day, vid, hits, signed_in, first_seen, last_seen, country, human, bot, ua_bot) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(day, vid) DO UPDATE SET hits = hits + 1, signed_in = MAX(signed_in, excluded.signed_in), last_seen = excluded.last_seen,
     country = COALESCE(excluded.country, country), human = MAX(human, excluded.human), bot = COALESCE(bot, excluded.bot),
     ua_bot = MAX(ua_bot, excluded.ua_bot)
 `);
-const markHuman = db.prepare(`UPDATE visits SET human = 1, bot = NULL WHERE day = ? AND vid = ?`);
-const markBot = db.prepare(`UPDATE visits SET bot = ? WHERE day = ? AND vid = ? AND human = 0`);
+const markHuman = deferred(`UPDATE visits SET human = 1, bot = NULL WHERE day = ? AND vid = ?`);
+const markBot = deferred(`UPDATE visits SET bot = ? WHERE day = ? AND vid = ? AND human = 0`);
 
 /** Express middleware: counts every caller of the API (the site calls it on every page); people are told apart later. */
 export function trackVisit(req: express.Request, _res: express.Response, next: express.NextFunction) {
@@ -129,7 +132,7 @@ every('visitors flush', () => {
   for (const [k, v] of online) if (v.at < now - ONLINE_MS) online.delete(k);
   for (const [k, t] of written) if (t < now - 2 * 86400000) written.delete(k);
 }, 60000).unref();
-every('visitors cleanup', () => {
+if (!isWeb) every('visitors cleanup', () => {
   try { db.prepare("DELETE FROM visits WHERE day < date('now', '-90 days')").run(); } catch { /* ignore */ }
 }, 6 * 3600000).unref();
 

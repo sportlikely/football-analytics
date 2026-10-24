@@ -17,9 +17,9 @@ import logger from '../utils/logger';
 import { heapShareMb } from '../utils/memLimit';
 import { isWeb } from './role';
 import { applyState } from './shared';
-import { yieldLoop } from './perf';
+import { yieldLoop, track } from './perf';
 
-export type ThreadJob = 'bb model' | 'national elo';
+export type ThreadJob = 'bb model' | 'national elo' | 'more backtest' | 'sitemap';
 
 function threadFile(): { file: string; execArgv?: string[] } | null {
   const js = path.join(__dirname, '../workers/jobThread.js');
@@ -61,7 +61,7 @@ export function inThread<T>(job: ThreadJob, args: unknown[] = []): Promise<T> {
     w.on('message', (m: any) => {
       if (m?.t === 'state') {
         states++;
-        chain = chain.then(async () => { await yieldLoop(); applyState(m.key, m.value); }).catch(e => { logger.warn(`${job} thread: state ${m.key}: ${e?.message || e}`); });
+        chain = chain.then(async () => { await yieldLoop(); const done = track(`${job} thread: apply ${String(m.key).split(':').slice(0, 2).join(':')}`); try { applyState(m.key, m.value); } finally { done(); } }).catch(e => { logger.warn(`${job} thread: state ${m.key}: ${e?.message || e}`); });
       } else if (m?.t === 'done') { done = true; void chain.then(() => finish(null, m.result)); }
       else if (m?.t === 'error') finish(new Error(m.error || 'thread job failed'));
     });

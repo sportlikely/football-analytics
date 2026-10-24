@@ -17,11 +17,12 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { isWeb, isWorker } from './role';
 import { onIpc, sendIpc } from './ipc';
-import { timed, yieldLoop } from './perf';
+import { timed, yieldLoop, track } from './perf';
 
 db.exec(`CREATE TABLE IF NOT EXISTS shared_state (key TEXT PRIMARY KEY, ver INTEGER NOT NULL, at TEXT NOT NULL, bytes INTEGER NOT NULL, ms INTEGER NOT NULL, data BLOB NOT NULL)`);
 
-type Apply = (key: string, value: any) => void;
+// fix210b: an applier may return a promise (its async part: the NFL engine joins its games); loads wait for it
+type Apply = (key: string, value: any) => void | Promise<void>;
 const appliers: { prefix: string; apply: Apply }[] = [];
 const applied = new Map<string, { ver: number; at: number; ms: number; bytes: number }>();
 const published = new Map<string, { ver: number; at: number; ms: number; bytes: number }>();
@@ -40,6 +41,7 @@ export function publishState(key: string, value: unknown): void {
   if (IN_JOB_THREAD) { capture?.(key, value); return; }
   if (!isWorker) return;
   const t0 = Date.now();
+  const done = track(`state publish ${key.split(':').slice(0, 2).join(':')}`); // fix210b: named in /api/perf
   try {
     const buf = v8.serialize(value);
     const ver = (lastVer = Math.max(lastVer + 1, t0));
@@ -50,14 +52,14 @@ export function publishState(key: string, value: unknown): void {
     sendIpc({ t: 'state', key, ver });
   } catch (e: any) {
     logger.warn(`shared state ${key}: ${e?.message || e}`);
-  }
+  } finally { done(); }
 }
 
 /** web: `apply(key, value)` for every state whose key starts with `prefix` (registered at module load). */
 export function onState(prefix: string, apply: Apply): void {
   appliers.push({ prefix, apply });
 }
-const applyHere = (key: string, value: unknown) => { for (const a of appliers) if (key === a.prefix || key.startsWith(a.prefix)) a.apply(key, value); };
+const applyHere = (key: string, value: unknown) => { for (const a of appliers) if (key === a.prefix || key.startsWith(a.prefix)) void a.apply(key, value); };
 /**
  * fix210 (worker / one process): a state built in a job thread — applied in this process by the same code the web
  * process uses, then published (stored + the web process told) as if it had been built here.
@@ -89,12 +91,13 @@ function queueLoad(key: string, ver?: number) {
   }).catch(e => { logger.warn(`shared state load ${key}: ${e?.message || e}`); });
 }
 
-function loadNow(key: string) {
+async function loadNow(key: string) {
   const row: any = db.prepare(`SELECT ver, bytes, data FROM shared_state WHERE key = ?`).get(key);
   if (!row || (applied.get(key)?.ver || 0) >= row.ver) return;
   const t0 = Date.now();
   const value = v8.deserialize(Buffer.from(row.data));
-  for (const a of appliers) if (key === a.prefix || key.startsWith(a.prefix)) a.apply(key, value);
+  await yieldLoop();
+  for (const a of appliers) if (key === a.prefix || key.startsWith(a.prefix)) { await a.apply(key, value); await yieldLoop(); }
   applied.set(key, { ver: row.ver, at: Date.now(), ms: Date.now() - t0, bytes: row.bytes });
 }
 

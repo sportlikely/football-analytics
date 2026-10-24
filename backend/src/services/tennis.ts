@@ -309,7 +309,7 @@ function playerGen(id: number | null, how: 'rank' | 'profile'): Gen | null {
   const k = `${how}${id}`;
   if (genCache.has(k)) return genCache.get(k)!;
   const g = tourGen(((how === 'rank' ? rankTourQ : profTourQ).get(id) as any)?.tour);
-  if (genCache.size > 100_000) genCache.clear();
+  if (genCache.size > 30_000) genCache.clear(); // fix210b: lower (was 100,000)
   // fix197b: "not known" is not kept (a new player's profile / ranking arrives later in the same sync)
   if (g) genCache.set(k, g);
   return g;
@@ -356,7 +356,7 @@ function eventFor(name: string, at: string, g: Gen): Ev | null {
   let ev: Ev | null = null;
   if (best) ev = { id: mains.length ? best.tournament_id : cat?.id ?? null, name: stripQuali(best.tournament), tour: best.tour, tier: best.tier ?? cat?.tier ?? null };
   else if (cat) ev = { id: cat.id, name: cat.name, tour: /^challenger/i.test(String(cat.tier || '')) ? 'challenger' : cat.tour, tier: cat.tier };
-  if (evCache.size > 2000) evCache.clear();
+  if (evCache.size > 500) evCache.clear(); // fix210b: lower (was 2,000)
   evCache.set(ck, { at: Date.now(), ev });
   return ev;
 }

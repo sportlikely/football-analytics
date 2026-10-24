@@ -304,3 +304,44 @@ One hour after the deploy, `/api/perf`: `worker.restarts` 0, `stallsLastHour` < 
 and `worker.memByJob` say why and which job; write it here.
 
 Result: _to fill in after the check._
+
+## fix210b (24 Oct 2026): the last stalls after fix210
+
+`/api/perf` one hour after fix210 (Yarin, 24 Oct): **memory fixed** (worker restarts 0, heap 729 / 1,728 MB). Still
+failing: **web stalls 26 / h, worst 6.8 s** (first 10 s after the deploy: "GET /basketball/* + state load nfl" 6.8 s,
+"+ state load squad" 3.1 s; then crawler pages of old basketball games, 1,304 an hour, 0.5–1.4 s stalls; "AF usage
+flush" 880 ms on the web process → a 1.7 s stall); **worker stalls 100 / h, worst 4.2 s** (page draw-alerts 4.1 s,
+scorers check + page results 3.75 s, no job name 3.0 s, AF lineups/injuries + lineup/injury features 2.6 s, more
+predictions daily 2.3 s with +397 MB, bb sync + bb model 2.0 s).
+
+| Where | Cause | Fix |
+| --- | --- | --- |
+| web: any database write | a write waits **synchronously** for the worker's lock (busy_timeout 5 s): the AF usage flush, the visit rows, security-log lines, the signed-out page copies (route_cache), perf rows were written by the web process | `services/deferredWrites.ts`: the web process queues them and sends them to the worker once a second (IPC, `serialization: 'advanced'`; kept while the worker restarts); the worker writes 500 a transaction. Cleanups (visits, security log, sessions, client errors, staff activity, calendar, scraper rows) run in the worker only; a browser's error report is passed to the worker. Left in the web process: sign-in and account actions (sign-up, log-in, sessions, plans, picks, favourites, unlocks) |
+| web: start-up | requests came in while the model states loaded | the web process loads every stored state **before it listens** (Railway keeps the old instance until /api/health answers); an applier's async part (NFL engine) is awaited; the squad values and club value history are read 500 rows at a time with yields (`utils/pagedRead.ts`) |
+| web: /basketball/game/:id in every language (crawlers, old games) | the page waited up to 4 s for the worker, often while another stall happened | **one data build per game** (`bbGameFacts` in seo.ts, stored as `bb-game-facts`: game, records, form, head-to-head, preview, the more-predictions line of all 7 languages); the web process writes the page's text from it (`bbGameSeo`, string work only) — a stored game is ~30 ms in any language. The worker builds **every finished game of each league's two latest seasons ahead** (jobs.ts "bb game pages", every 6 h, ids 500 a read, a yield every 50 games / 100 ms; on the 10 Oct copy: 8,039 games in 52 s, blocks ≤ 22 ms, 27 MB). Finished games' facts stay fresh 7 days (10 min in the first 2 days). Other pages: the wait is 3 s, then the plain app page |
+| web: builders | fix210 still ran a page builder in production when one was called | it throws in the web process now (`builders.ts`) |
+| worker: page draw-alerts | the whole report in one block (all settled draw alerts, every backtest season, team draw history) | `drawAlertsReportAsync`: settled rows 500 a read by rowid, yields in every loop, the backtest table kept 6 h; the summary card counts the draw picks only (it built the whole report) |
+| worker: page results / record / summary | 30–400 days of settled predictions read in one query, three times per page | `preloadSettled`: read a day at a time with a yield, the three counts share the copy (60 s) |
+| worker: scorers check | every game of 48 h checked and written one by one in one block | a yield every 50 games / 100 ms |
+| worker: sitemaps | **sitemap-football.xml wrote every missing match preview inside the build (36 s on the copy)**; teams / players / leagues: season-long GROUP BYs | the stored preview dates only (78 ms); the other sitemaps are built in the job thread |
+| worker: AF lineups/injuries | `mapTeams`: every API-Football team × every football-data name (similarity, 3 spellings) for every group on every tick, one UPDATE per team | only when a group's teams or names changed, a yield every 20 teams, the writes in one transaction. The features build was already sliced (30 ms) and stays in the worker: the model reads the full feature history from its memory |
+| worker: more predictions daily (+397 MB) | league fits + walk-forward backtests in the worker's main thread | in the job thread (`moreBacktestHere`: own connection writes the fits / maps / gates; the basketball walk-forward rows are passed in); its memory is freed when the thread ends. Job thread heap now min(THREAD_HEAP_MB 768, 20% of the container) |
+| worker: bb sync | a whole season's games in one transaction; every unchecked box score in one block | 200 games a transaction with a yield; field-goal check 2,000 a run |
+| worker: search index | 55,000 fixture rows, each name normalised again | normalised only when the name changed; the index built as a generator in 40-ms slices |
+| worker: no job name | IPC handlers, state publishes and the thread's state applies were unlabelled | each is named: `ipc <type>`, `state publish <key>`, `<job> thread: apply <key>` |
+| worker: tennis live heap 1,242 MB | the peak is the heap seen while a job runs; tennis live runs every 30 s, so it is "running" at most peaks | caches lowered anyway: player tour 30,000 (was 100,000), events 500 (was 2,000), win-chance memo 150,000 in the main thread (600,000 in the model's own thread) |
+
+Measured on the 10 Oct copy (this laptop, worker role, longest block per job): page draw-alerts 35 ms (13 ms with the
+backtest table kept), results 7 ms, record 7 ms, summary 12 ms, sitemaps 11–62 ms, scorers check 17 ms, search index
+76 ms. `npm run test:fix210`: 121 URLs (+ real old ids: basketball games in 7 languages, football players / matches in 7
+languages, team, NFL, tennis pages) in a web process: no builder, slowest 34 ms; stored basketball facts rendered in 7
+languages, each < 50 ms; the real pair as before (the exit row is now written by the next worker).
+
+### Check after deploy (pending)
+
+One hour after the deploy, Admin → Data health: Web stalls ok (≤ 5 / h, none over 500 ms), Worker stalls ok (none over
+2 s), Worker memory / restarts ok. `/api/perf`: `webWrites.queued` near 0, `threadJobs` (bb model, national elo, more
+backtest, sitemap: ok), `worker.topStalls` without "null". After the first "bb game pages" run (10 min after start):
+`pages` has `bb-game-facts?id=…` rows and the crawler requests for old basketball games stop showing in topStalls.
+
+Result: _to fill in after the check._

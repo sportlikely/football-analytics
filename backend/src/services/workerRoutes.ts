@@ -18,6 +18,8 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { isWeb } from './role';
 import { fetchFromWorker, forwardToWorker, type WorkerAnswer } from './forward';
+import { isWorker } from './role';
+import { deferred } from './deferredWrites';
 
 type RouteDef = { re: RegExp; freshMs: number };
 const S = 1000, MIN = 60 * S;
@@ -163,11 +165,11 @@ function memSet(k: string, c: Copy) {
   memBytes += c.body.length;
   for (const key of mem.keys()) { if (memBytes <= MEM_MAX_BYTES && mem.size <= 3000) break; if (key !== k) memDel(key); }
 }
-if (isWeb) {
-  db.exec(`CREATE TABLE IF NOT EXISTS route_cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, status INTEGER NOT NULL, type TEXT NOT NULL, cache TEXT, body BLOB NOT NULL)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_route_cache_at ON route_cache(at)`);
-  setInterval(() => { try { db.prepare(`DELETE FROM route_cache WHERE at < ?`).run(Date.now() - KEEP_MS); } catch { /* next hour */ } }, 3600 * 1000).unref();
-}
+db.exec(`CREATE TABLE IF NOT EXISTS route_cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, status INTEGER NOT NULL, type TEXT NOT NULL, cache TEXT, body BLOB NOT NULL)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_route_cache_at ON route_cache(at)`);
+// fix210b: the web process never writes: the copies go to the worker (deferredWrites), which also drops the old ones
+const saveRow = deferred(`INSERT OR REPLACE INTO route_cache (key, at, status, type, cache, body) VALUES (?, ?, ?, ?, ?, ?)`);
+if (isWorker) setInterval(() => { try { db.prepare(`DELETE FROM route_cache WHERE at < ?`).run(Date.now() - KEEP_MS); } catch { /* next hour */ } }, 3600 * 1000).unref();
 function readCopy(k: string): Copy | null {
   const m = mem.get(k);
   if (m) { mem.delete(k); mem.set(k, m); return m; }
@@ -182,7 +184,7 @@ function readCopy(k: string): Copy | null {
 function saveCopy(k: string, a: WorkerAnswer): Copy {
   const c: Copy = { at: Date.now(), status: a.status, type: String(a.headers['content-type'] || 'application/json; charset=utf-8'), cache: a.headers['cache-control'] ? String(a.headers['cache-control']) : null, body: a.body };
   memSet(k, c);
-  try { db.prepare(`INSERT OR REPLACE INTO route_cache (key, at, status, type, cache, body) VALUES (?, ?, ?, ?, ?, ?)`).run(k, c.at, c.status, c.type, c.cache, c.body); } catch (e: any) { logger.warn(`route cache: ${e?.message || e}`); }
+  try { saveRow.run(k, c.at, c.status, c.type, c.cache, c.body); } catch (e: any) { logger.warn(`route cache: ${e?.message || e}`); }
   return c;
 }
 const sendCopy = (res: express.Response, c: Copy, state: string) => {

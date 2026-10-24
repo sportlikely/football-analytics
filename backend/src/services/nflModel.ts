@@ -734,13 +734,13 @@ function publishLive(league: LeagueId) {
 }
 onState('nfl:live:', (key, v) => {
   const league = (Number(key.slice(9)) === 2 ? 2 : 1) as LeagueId;
-  void (async () => {
+  return (async () => {
     const games = await loadGamesAsync(league), ctx = await loadCtxAsync(league);
     const E = Object.assign(new Engine(v.engine.p, ctx, league), v.engine);
     lives.set(league, { params: v.params, blend: v.blend, trained: v.trained, builtAt: v.builtAt, finishedCount: v.finishedCount, engine: E, games,
       applied: v.applied, lastT: v.lastT, byId: new Map(games.map(g => [g.id, g])), outOfOrder: false, pending: new Set() });
     noteChanged(league, 'all'); // games finished since the worker's replay are added on the next request
-  })().catch(e => logger.warn(`${MODEL_OF[league]} ratings from the worker: ${e.message}`));
+  })().catch(e => { logger.warn(`${MODEL_OF[league]} ratings from the worker: ${e.message}`); });
 });
 /**
  * The current ratings. fix155: built once (full replay); afterwards each newly finished game is added on top (cheap,

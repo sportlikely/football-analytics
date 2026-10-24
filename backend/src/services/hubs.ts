@@ -57,7 +57,7 @@ export const hubRange = (from: string, to: string) => {
 
 const cache = new Map<string, { at: number; hub: Hub }>();
 const refreshing = new Set<string>();
-onState('hub:', (key, v: { at: number; hub: Hub }) => cache.set(key.slice(4), v));
+onState('hub:', (key, v: { at: number; hub: Hub }) => { cache.set(key.slice(4), v); });
 /**
  * This week's games of a hub with their previews. fix169: kept 15 minutes and then served as it is while a fresh copy is
  * built in the background (a yield between games — "GET /predictions/*" blocked 1.7 s); only a hub never built is

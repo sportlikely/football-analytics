@@ -9,6 +9,8 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { hourBuckets } from './perf';
+import { isWeb } from './role';
+import { deferred } from './deferredWrites';
 
 db.exec(`CREATE TABLE IF NOT EXISTS perf_hours (proc TEXT NOT NULL, hour TEXT NOT NULL, stalls INTEGER NOT NULL, worst_ms INTEGER NOT NULL,
   heap_max_mb INTEGER NOT NULL, rss_max_mb INTEGER NOT NULL, top_json TEXT, PRIMARY KEY (proc, hour))`);
@@ -22,12 +24,13 @@ export type Proc = 'web' | 'worker';
 export function saveHours(proc: Proc) {
   try {
     // (a restart within the hour starts a new bucket: the larger numbers are kept)
-    const up = db.prepare(`INSERT INTO perf_hours (proc, hour, stalls, worst_ms, heap_max_mb, rss_max_mb, top_json) VALUES (?, ?, ?, ?, ?, ?, ?)
+    // fix210b: the web process's rows are written by the worker (services/deferredWrites.ts)
+    const up = deferred(`INSERT INTO perf_hours (proc, hour, stalls, worst_ms, heap_max_mb, rss_max_mb, top_json) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(proc, hour) DO UPDATE SET stalls = MAX(stalls, excluded.stalls), worst_ms = MAX(worst_ms, excluded.worst_ms),
         heap_max_mb = MAX(heap_max_mb, excluded.heap_max_mb), rss_max_mb = MAX(rss_max_mb, excluded.rss_max_mb),
         top_json = CASE WHEN excluded.worst_ms >= worst_ms THEN excluded.top_json ELSE top_json END`);
     for (const b of hourBuckets().slice(-2)) up.run(proc, b.hour, b.stalls, b.worstMs, b.heapMaxMb, b.rssMaxMb, JSON.stringify(b.top));
-    db.prepare(`DELETE FROM perf_hours WHERE hour < ?`).run(new Date(Date.now() - 48 * 3600 * 1000).toISOString().slice(0, 13));
+    if (!isWeb) db.prepare(`DELETE FROM perf_hours WHERE hour < ?`).run(new Date(Date.now() - 48 * 3600 * 1000).toISOString().slice(0, 13));
   } catch (e: any) { logger.warn(`perf hours: ${e?.message || e}`); }
 }
 /** every minute (each process calls it once at start) */
@@ -56,9 +59,10 @@ export function exitReason(code: number | null, signal: string | null, stderr: s
 
 export function saveWorkerExit(x: { code: number | null; signal: string | null; reason: string; ranMin: number; heapLimitMb: number | null; stderr: string[] }) {
   try {
-    db.prepare(`INSERT INTO worker_exits (at, code, signal, reason, ran_min, heap_limit_mb, stderr) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    // (from the web process: written by the next worker, as soon as it is up)
+    deferred(`INSERT INTO worker_exits (at, code, signal, reason, ran_min, heap_limit_mb, stderr) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(Date.now(), x.code, x.signal, x.reason, x.ranMin, x.heapLimitMb, x.stderr.join('\n').slice(-8000));
-    db.prepare(`DELETE FROM worker_exits WHERE at < ?`).run(Date.now() - 30 * 86400000);
+    if (!isWeb) db.prepare(`DELETE FROM worker_exits WHERE at < ?`).run(Date.now() - 30 * 86400000);
   } catch (e: any) { logger.warn(`worker exits: ${e?.message || e}`); }
 }
 

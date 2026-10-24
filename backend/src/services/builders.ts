@@ -2,8 +2,8 @@
  * fix210: the functions that build a page (a player / team / match / game page, news, more predictions, the crawler
  * HTML …) are registered here. The web process never runs one: its routes for them pass the request to the worker
  * (services/workerRoutes.ts) or serve a stored page (services/pageCache.ts). A builder called in the web process is a
- * bug — scripts/no-web-compute.test.mjs runs every public route with SL_STRICT_WEB=1, where it throws; in production it
- * still runs (a page beats an error) but is counted and logged (/api/perf → webBuilds).
+ * bug: it throws (fix210b; fix210 still ran it in production) and is counted and logged (/api/perf → webBuilds).
+ * scripts/no-web-compute.test.mjs opens every public route in a web process to find one.
  */
 import logger from '../utils/logger';
 import { isWeb } from './role';
@@ -24,8 +24,8 @@ export function builder<A extends unknown[], R>(name: string, fn: (...a: A) => R
       const c = calls.get(name) || { n: 0, last: '' };
       c.n++; c.last = new Date().toISOString();
       calls.set(name, c);
-      if (process.env.SL_STRICT_WEB === '1') throw new WebBuildError(name);
-      if (Date.now() - (loggedAt.get(name) || 0) > 3600 * 1000) { loggedAt.set(name, Date.now()); logger.warn(`web process built "${name}" (fix210: it should be the worker's)`); }
+      if (Date.now() - (loggedAt.get(name) || 0) > 3600 * 1000) { loggedAt.set(name, Date.now()); logger.warn(`web process asked to build "${name}" (refused: the worker builds pages)`); }
+      throw new WebBuildError(name);
     }
     return fn(...a);
   };

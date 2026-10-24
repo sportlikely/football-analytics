@@ -292,6 +292,67 @@ function bbCrawlTtl(status: string | null, date: string): number {
   return Number.isFinite(toTip) ? Math.max(0, Math.min(5 * 60 * 1000, toTip)) : 0;
 }
 
+/*
+ * fix210b: a basketball game's crawler page in two parts. bbGameFacts = everything read from the database (the game,
+ * both teams' season records, last five, head-to-head, the written preview, the more-predictions line of every
+ * language): built once per game by the worker and stored ('bb-game-facts', app.ts; finished games are built ahead
+ * for the current and last season). bbGameSeo = the page's text in one language from those facts — plain string work,
+ * so the web process renders /basketball/game/:id and /<lang>/basketball/game/:id from the stored facts without
+ * building anything.
+ */
+export type BbGameFacts = {
+  g: BbGameRow & { homeId: number; awayId: number; code: string; season: string; status: string | null };
+  rh: { n: number; w: number; l: number }; ra: { n: number; w: number; l: number };
+  fh: BbGameRow[]; fa: BbGameRow[]; h2: BbGameRow[]; pv: string | null; more: Partial<Record<Lang, string>>; builtAt: number;
+};
+export function bbGameFacts(id: number): BbGameFacts | null {
+  const g: any = bbGameById(id);
+  if (!g) return null;
+  const more: Partial<Record<Lang, string>> = {};
+  for (const l of LANGS as Lang[]) { const s = moreP('basketball', g.id, l); if (s) more[l] = s; }
+  return {
+    g, more, builtAt: Date.now(),
+    rh: bbRecord(g.homeId, g.code, g.season, g.date), ra: bbRecord(g.awayId, g.code, g.season, g.date),
+    fh: bbLast(g.homeId, 5, g.date), fa: bbLast(g.awayId, 5, g.date), h2: bbH2h(g.homeId, g.awayId, g.date, 5),
+    pv: bbPreview(g.id)
+  };
+}
+/** how long a game's facts stay fresh: finished 7 days (10 min in the first 2 days), to come 5 min, live 1 min */
+export function bbFactsFreshMs(f: BbGameFacts | null): number {
+  if (!f) return 10 * 60 * 1000;
+  const ttl = bbCrawlTtl(f.g.status, f.g.date);
+  const done = ['FT', 'AOT', 'POST', 'CANC', 'SUSP', 'AWD', 'ABD'].includes(String(f.g.status));
+  return done ? (ttl >= 24 * 3600 * 1000 ? 7 * 86400000 : ttl) : Math.max(60 * 1000, ttl);
+}
+/** the page in one language from the stored facts (no database, no build) */
+export function bbGameSeo(f: BbGameFacts, lang: Lang): SeoInfo {
+  const { g, rh, ra, fh, fa, h2 } = f;
+  const pk = pack(lang), path = `/basketball/game/${g.id}`;
+  const name = `${g.home} vs ${g.away}`, lg = bbLeagueName(g.code);
+  const desc = fitDescription([`${name}, ${lg}, ${shortDate(g.date, lang)}`, `${name}, ${shortDate(g.date, lang)}`],
+    [
+      ...(rh.n >= 3 && ra.n >= 3 ? [`${pk.record} ${rh.w}-${rh.l} vs ${ra.w}-${ra.l}`] : []),
+      ...(fh.length >= 3 && fa.length >= 3 ? [`${pk.form} (${formLetters(fh.map(x => bbWl(x, g.homeId)), lang)} vs ${formLetters(fa.map(x => bbWl(x, g.awayId)), lang)})`] : []),
+      ...(h2.length ? [`${pk.lastMeeting} ${h2[0].hs}-${h2[0].as_}`] : [])
+    ], pk.bbFill, pk.bbTails);
+  const pv = lang === 'en' ? f.pv : null;
+  const body = `<h1>${esc(name)} ${esc(pk.prediction)}</h1><p>${esc(lg)} · ${esc(longDate(g.date, lang))} · ${slModel('basketball')}</p>${pv ? `<section><h2>${ui(lang, 'gamePreview')}</h2><p>${esc(pv)}</p></section>` : ''}${f.more[lang] || ''}`
+    + (rh.n && ra.n ? `<p>${ui(lang, 'season')}: ${esc(g.home)} ${rh.w}-${rh.l} · ${esc(g.away)} ${ra.w}-${ra.l}</p>` : '')
+    + (fh.length || fa.length ? `<h2>${ui(lang, 'recentForm')}</h2>${bbFormList(lang, g.home, g.homeId, fh)}${bbFormList(lang, g.away, g.awayId, fa)}` : '')
+    + (h2.length ? `<h2>${ui(lang, 'lastMeetings')}</h2><ul>${h2.map(x => bbScoreLine(lang, x)).join('')}</ul>` : '')
+    + `<ul><li><a href="${link(lang, `/basketball/league/${g.code}`)}">${esc(lg)}</a></li><li><a href="${link(lang, `/basketball/team/${g.homeId}`)}">${esc(g.home)}</a></li><li><a href="${link(lang, `/basketball/team/${g.awayId}`)}">${esc(g.away)}</a></li></ul>`;
+  return {
+    title: `${name} ${lang === 'en' ? 'prediction & preview' : pk.previewTitle} · ${lg} · ${titleDate(g.date, lang)} | ${BRAND}`, description: desc, path, lang,
+    body: `${NAV(lang)}<main>${body}</main>`,
+    jsonld: [sportsEvent(name, g.date, g.home, g.away, SITE + link(lang, path), lg, 'Basketball', pv ? firstSentence(pv) : undefined)]
+  };
+}
+/** /basketball/game/:id or /<lang>/basketball/game/:id → { id, lang } (the web process renders these from facts) */
+export function bbGamePath(rawPath: string): { id: number; lang: Lang } | null {
+  const m = /^(?:\/(es|pt|de|fr|it|tr))?\/basketball\/game\/(\d+)\/?$/.exec(rawPath);
+  return m ? { id: Number(m[2]), lang: (m[1] || 'en') as Lang } : null;
+}
+
 export function seoPage(rawPath: string): SeoInfo {
   let path = rawPath.split('?')[0].replace(/\/+$/, '') || '/';
   let lang: Lang = 'en';
@@ -561,32 +622,9 @@ export function seoPage(rawPath: string): SeoInfo {
           + `<h2>${esc(String(p.season))} season</h2><p>${cur.length} games · ${avg('pts')} points · ${avg('reb')} rebounds · ${avg('ast')} assists a game</p>`);
       }
       if ((m = path.match(/^\/basketball\/game\/(\d+)$/))) {
-        const ck = `${lang}|${m[1]}`;
-        const hit = bbCrawlCache.get(ck);
-        if (hit && Date.now() < hit.until) { bbCrawlCache.delete(ck); bbCrawlCache.set(ck, hit); return hit.v; }
-        const g = bbGameById(Number(m[1]));
-        if (g) {
-          const name = `${g.home} vs ${g.away}`, lg = bbLeagueName(g.code);
-          const rh = bbRecord(g.homeId, g.code, g.season, g.date), ra = bbRecord(g.awayId, g.code, g.season, g.date);
-          const fh = bbLast(g.homeId, 5, g.date), fa = bbLast(g.awayId, 5, g.date), h2 = bbH2h(g.homeId, g.awayId, g.date, 5);
-          const desc = fitDescription([`${name}, ${lg}, ${shortDate(g.date, lang)}`, `${name}, ${shortDate(g.date, lang)}`],
-            [
-              ...(rh.n >= 3 && ra.n >= 3 ? [`${pk.record} ${rh.w}-${rh.l} vs ${ra.w}-${ra.l}`] : []),
-              ...(fh.length >= 3 && fa.length >= 3 ? [`${pk.form} (${formLetters(fh.map(x => bbWl(x, g.homeId)), lang)} vs ${formLetters(fa.map(x => bbWl(x, g.awayId)), lang)})`] : []),
-              ...(h2.length ? [`${pk.lastMeeting} ${h2[0].hs}-${h2[0].as_}`] : [])
-            ], pk.bbFill, pk.bbTails);
-          const pv = lang === 'en' ? bbPreview(g.id) : null;
-          const v = page(`${name} ${lang === 'en' ? 'prediction & preview' : pk.previewTitle} · ${lg} · ${titleDate(g.date, lang)} | ${BRAND}`, desc,
-            `<h1>${esc(name)} ${esc(pk.prediction)}</h1><p>${esc(lg)} · ${esc(longDate(g.date, lang))} · ${slModel('basketball')}</p>${pv ? `<section><h2>${ui(lang, 'gamePreview')}</h2><p>${esc(pv)}</p></section>` : ''}${moreP('basketball', g.id, lang)}`
-            + (rh.n && ra.n ? `<p>${ui(lang, 'season')}: ${esc(g.home)} ${rh.w}-${rh.l} · ${esc(g.away)} ${ra.w}-${ra.l}</p>` : '')
-            + (fh.length || fa.length ? `<h2>${ui(lang, 'recentForm')}</h2>${bbFormList(lang, g.home, g.homeId, fh)}${bbFormList(lang, g.away, g.awayId, fa)}` : '')
-            + (h2.length ? `<h2>${ui(lang, 'lastMeetings')}</h2><ul>${h2.map(x => bbScoreLine(lang, x)).join('')}</ul>` : '')
-            + `<ul><li><a href="${link(lang, `/basketball/league/${g.code}`)}">${esc(lg)}</a></li><li><a href="${link(lang, `/basketball/team/${g.homeId}`)}">${esc(g.home)}</a></li><li><a href="${link(lang, `/basketball/team/${g.awayId}`)}">${esc(g.away)}</a></li></ul>`,
-            { jsonld: [sportsEvent(name, g.date, g.home, g.away, SITE + link(lang, path), lg, 'Basketball', pv ? firstSentence(pv) : undefined)] });
-          const ttl = bbCrawlTtl(g.status, g.date);
-          if (ttl > 0) { bbCrawlCache.set(ck, { until: Date.now() + ttl, v }); while (bbCrawlCache.size > 1000) bbCrawlCache.delete(bbCrawlCache.keys().next().value as string); }
-          return v;
-        }
+        // fix210b: one data build per game (every language shares it), only the text per language
+        const f = bbGameFacts(Number(m[1]));
+        if (f) return bbGameSeo(f, lang);
       }
       if ((m = path.match(/^\/basketball\/team\/(\d+)$/))) {
         const id = Number(m[1]);
@@ -685,10 +723,12 @@ function sitemapFootball(): string {
     urls.push({ loc: '/guides', freq: 'weekly', pri: '0.6', mod: isoDay(gs.map(g => g.updated).sort().pop()), enOnly: true });
     for (const g of gs) urls.push({ loc: `/guides/${g.slug}`, freq: 'weekly', pri: '0.7', mod: isoDay(g.updated), enOnly: true });
   }
-  // match pages: lastmod = the match preview's last rebuild (fix121); a missing preview is written from our own tables
+  // match pages: lastmod = the match preview's last rebuild (fix121)
+  // fix210b: the stored dates only — writing every missing preview here (getPreview) blocked the worker 36 s on a copy;
+  // the match page writes its preview when it is built, and the next sitemap has its date
   const up = fbUpcoming(1500), rec = fbRecent(14, 1500);
   const mods = previewDates([...up, ...rec].map(x => x.id));
-  const mod = (id: number, date: string) => isoDay(mods.get(id) || getPreview(id)?.builtAt || date);
+  const mod = (id: number, date: string) => isoDay(mods.get(id) || date);
   for (const x of up) add(`/match/${x.id}`, 'hourly', '0.8', mod(x.id, x.date));
   for (const x of rec) add(`/match/${x.id}`, 'weekly', '0.4', mod(x.id, x.date));
   return urlset(urls);

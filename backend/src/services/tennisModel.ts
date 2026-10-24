@@ -692,12 +692,14 @@ function matchDist(pa: number, pb: number, bo: number, rule: number, wantGames: 
 }
 /** win chance only, memoised on a 0.001 grid (the replays call it ~10^5 times) */
 const winMemo = new Map<number, number>();
+// fix210b: 600,000 in the model's own thread (replays); 150,000 in the worker's main thread (live chance, pages)
+const WIN_MEMO_MAX = isMainThread ? 150_000 : 600_000;
 function winFast(pa: number, pb: number, bo: number, rule: number) {
   const qa = Math.round(pa * 1000), qb = Math.round(pb * 1000);
   const key = ((qa * 1001 + qb) * 6 + (bo === 5 ? 3 : 0) + rule);
   let v = winMemo.get(key);
   if (v === undefined) {
-    if (winMemo.size > 600_000) winMemo.clear();
+    if (winMemo.size > WIN_MEMO_MAX) winMemo.clear();
     v = matchDist(qa / 1000, qb / 1000, bo, rule, false).win;
     winMemo.set(key, v);
   }

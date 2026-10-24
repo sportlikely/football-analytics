@@ -6,6 +6,7 @@
  * Passwords and message texts are never stored.
  */
 import { db } from '../db';
+import { isWeb as isWebProc } from './role';
 import { userById } from './auth';
 import { every } from './perf';
 
@@ -112,6 +113,7 @@ export function activityList(o: { staffId?: number | null; userId?: number | nul
   };
 }
 
-every('activity flush', () => {
+// fix210b: the database cleanups run in the worker only (the web process writes nothing)
+if (!isWebProc) every('activity flush', () => {
   try { db.prepare('DELETE FROM staff_activity WHERE at < ?').run(new Date(Date.now() - 365 * 86400000).toISOString()); } catch { /* ignore */ }
 }, 12 * 3600000).unref();

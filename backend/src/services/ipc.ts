@@ -6,6 +6,7 @@
 import type { ChildProcess } from 'node:child_process';
 import logger from '../utils/logger';
 import { isWeb, isWorker } from './role';
+import { track } from './perf';
 
 export type IpcMessage = { t: string; [k: string]: unknown };
 type Handler = (m: IpcMessage) => void;
@@ -22,9 +23,13 @@ export function onIpc(t: string, fn: Handler) {
 
 function dispatch(m: unknown) {
   if (!m || typeof m !== 'object' || typeof (m as IpcMessage).t !== 'string') return;
-  for (const fn of handlers.get((m as IpcMessage).t) || []) {
-    try { fn(m as IpcMessage); } catch (e: any) { logger.warn(`ipc ${(m as IpcMessage).t}: ${e?.message || e}`); }
-  }
+  // fix210b: each handler is named in /api/perf (a stall with no job name was often one of these)
+  const done = track(`ipc ${(m as IpcMessage).t}`);
+  try {
+    for (const fn of handlers.get((m as IpcMessage).t) || []) {
+      try { fn(m as IpcMessage); } catch (e: any) { logger.warn(`ipc ${(m as IpcMessage).t}: ${e?.message || e}`); }
+    }
+  } finally { done(); }
 }
 
 if (isWorker) process.on('message', dispatch);

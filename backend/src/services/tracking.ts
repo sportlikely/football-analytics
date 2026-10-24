@@ -369,7 +369,38 @@ export function mainSettledRows(days: number): SettledRow[] {
   return settledRows(days, undefined, 'main');
 }
 
+/*
+ * fix210b: the stored pages (record, results, summary) read the settled games once, a day at a time with a yield
+ * between (preloadSettled), and the record / accuracy / latest-results numbers are then computed from that copy
+ * (kept 60 s). Reading 30–400 days of settled predictions in one query and three times per page blocked the worker 2–4 s.
+ */
+const preloaded = new Map<string, { at: number; rows: SettledRow[] }>();
+const SQL_ROW = `
+    SELECT p.match_id, p.model, p.competition_code, p.competition_name, p.utc_date,
+           p.home_team, p.away_team, p.home_team_id, p.away_team_id, p.p_home, p.p_draw, p.p_away, p.confidence,
+           p.odds_home, p.odds_draw, p.odds_away, p.draw_streak, p.over25, p.btts, p.xg_home, p.xg_away,
+           r.home_goals, r.away_goals, r.outcome
+    FROM predictions p JOIN results r ON r.match_id = p.match_id
+    WHERE p.settled = 1 AND r.outcome IN ('H','D','A')`;
+export async function preloadSettled(days: number, competition?: string): Promise<void> {
+  const key = `${days}|${competition || ''}`;
+  const hit = preloaded.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return;
+  const day = 86400000, end = Date.now() + day;
+  const st = db.prepare(`${SQL_ROW} AND p.utc_date >= ? AND p.utc_date < ?${competition ? ' AND p.competition_code = ?' : ''} ORDER BY p.utc_date DESC`);
+  const rows: SettledRow[] = [];
+  for (let to = end; to > end - (days + 1) * day; to -= day) {
+    const from = Math.max(to - day, Date.now() - days * day);
+    rows.push(...(st.all(new Date(from).toISOString(), new Date(to).toISOString(), ...(competition ? [competition] : [])) as SettledRow[]));
+    await new Promise<void>(r => setImmediate(r));
+  }
+  preloaded.set(key, { at: Date.now(), rows });
+  if (preloaded.size > 20) preloaded.delete(preloaded.keys().next().value as string);
+}
+
 function settledRowsRaw(days: number, competition?: string, model?: string): SettledRow[] {
+  const pre = preloaded.get(`${days}|${competition || ''}`);
+  if (pre && Date.now() - pre.at < 60_000) return model ? pre.rows.filter(r => r.model === model) : pre.rows.slice();
   const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
   const args: any[] = [since];
   let where = '';

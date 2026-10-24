@@ -124,11 +124,12 @@ db.exec(`
  * score better than 2·FGM + 3PM + FTM, the 3-pointers are added back into FGM/FGA (team line and its players), so
  * shooting % and possessions mean the same in every season.
  */
+// fix210b: at most 2,000 unchecked box scores a run (the rest on the next tick)
 export function fixFieldGoals() {
   const rows = db.prepare(`
     SELECT t.game_id, t.team_id, t.fgm, t.fga, t.tpm, t.tpa, t.ftm, g.home_id, g.hs, g.as_
     FROM bb_team_stats t JOIN bb_games g ON g.game_id = t.game_id
-    WHERE t.fg_checked = 0 AND g.hs IS NOT NULL AND t.fgm IS NOT NULL`).all() as any[];
+    WHERE t.fg_checked = 0 AND g.hs IS NOT NULL AND t.fgm IS NOT NULL LIMIT 2000`).all() as any[];
   if (!rows.length) return 0;
   const mark = db.prepare(`UPDATE bb_team_stats SET fg_checked = ? WHERE game_id = ? AND team_id = ?`);
   const fixT = db.prepare(`UPDATE bb_team_stats SET fgm = fgm + COALESCE(tpm, 0), fga = fga + COALESCE(tpa, 0), fg_checked = 2 WHERE game_id = ? AND team_id = ?`);
@@ -271,7 +272,9 @@ function upsertGames(code: string, leagueId: number, season: string, list: any[]
 /** Every game of a league season (one request). */
 async function syncSeason(code: string, leagueId: number, season: string) {
   const json = await bb('/games', { league: leagueId, season });
-  const { n, done } = upsertGames(code, leagueId, season, json.response || []);
+  // fix210b: 200 games a transaction with a yield between (a whole NBA season was one block of the bb sync)
+  let n = 0, done = 0;
+  await perGames((json.response || []) as any[], b => { const r = upsertGames(code, leagueId, season, b); n += r.n; done += r.done; }, 200);
   markSync(`games|${code}|${season}`, { n, done });
   return n;
 }

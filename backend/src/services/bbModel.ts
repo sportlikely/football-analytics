@@ -504,6 +504,10 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
 
 /** Research export (admin): the walk-forward bb-v3 prediction of every finished game (as it was before tip-off). */
 const wfByCode = new Map<string, [number, number, number, number][]>();
+/** fix210b: every league's walk-forward rows (passed to the more-predictions job thread) */
+export const allWalkForward = (): [string, [number, number, number, number][]][] => [...wfByCode.entries()];
+/** fix210b (job thread): the rows the worker holds */
+export function setWalkForward(rows: [string, [number, number, number, number][]][]) { for (const [c, r] of rows) wfByCode.set(c, r); }
 export function bbWalkForward(code: string) {
   return { code, cols: ['id', 'pHome', 'margin', 'total'], rows: wfByCode.get(code) || [] };
 }

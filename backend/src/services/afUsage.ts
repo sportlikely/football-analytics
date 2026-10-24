@@ -25,6 +25,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { promises as dns } from 'node:dns';
 import { db } from '../db';
+import { isWeb } from './role';
+import { deferred } from './deferredWrites';
 import { every } from './perf';
 
 /** fix173: keys = the visitor's salted hashes (IP, user-agent) and, for a paid member, the account (provider-cost caps). */
@@ -221,13 +223,16 @@ export function beforeAfCall() {
 /** Page calls still allowed this hour (for background warm-ups that should give way first). */
 export const pageBudgetLeft = () => { roll(); return Math.max(0, Math.min(PER_HOUR - pageHour.n, PER_DAY - (counts.page || 0))); };
 
+// fix210b: the web process's counts go to the worker, which writes them (services/deferredWrites.ts): a web write
+// waited for the worker's lock ("AF usage flush" 880 ms → a 1.7 s stall on 24 Oct)
+const up = deferred(`INSERT INTO af_usage (day, kind, n) VALUES (?, ?, ?) ON CONFLICT(day, kind) DO UPDATE SET n = n + excluded.n`);
+const upUa = deferred(`INSERT INTO af_usage_ua (day, ua, requests, af_calls, blocked) VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(day, ua) DO UPDATE SET requests = requests + excluded.requests, af_calls = af_calls + excluded.af_calls, blocked = blocked + excluded.blocked`);
 function flush() {
   if (!dirty) return;
   dirty = false;
-  const up = db.prepare(`INSERT INTO af_usage (day, kind, n) VALUES (?, ?, ?) ON CONFLICT(day, kind) DO UPDATE SET n = n + excluded.n`);
-  const upUa = db.prepare(`INSERT INTO af_usage_ua (day, ua, requests, af_calls, blocked) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(day, ua) DO UPDATE SET requests = requests + excluded.requests, af_calls = af_calls + excluded.af_calls, blocked = blocked + excluded.blocked`);
-  db.exec('BEGIN');
+  const tx = !isWeb;
+  if (tx) db.exec('BEGIN');
   try {
     for (const [k, n] of Object.entries(counts)) { const dn = n - (flushedCounts[k] || 0); if (dn) up.run(day, k, dn); flushedCounts[k] = n; }
     for (const [ua, a] of agents) {
@@ -235,9 +240,9 @@ function flush() {
       if (a.requests !== f.requests || a.afCalls !== f.afCalls || a.blocked !== f.blocked) upUa.run(day, ua, a.requests - f.requests, a.afCalls - f.afCalls, a.blocked - f.blocked);
       flushedAgents.set(ua, { ...a });
     }
-    db.prepare(`DELETE FROM af_usage_ua WHERE day < ?`).run(new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10));
-    db.exec('COMMIT');
-  } catch { db.exec('ROLLBACK'); }
+    if (tx) db.prepare(`DELETE FROM af_usage_ua WHERE day < ?`).run(new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10));
+    if (tx) db.exec('COMMIT');
+  } catch { if (tx) db.exec('ROLLBACK'); }
 }
 every('AF usage flush', flush, 60 * 1000).unref();
 

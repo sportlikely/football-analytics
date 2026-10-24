@@ -74,6 +74,8 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   (services/builders.ts); crawler HTML = stored pages. `npm run parity` + `npm run test:fix210` fail otherwise. Heavy
   model builds run in a job thread (services/threadJob.ts); a heavy loop yields every 50 items / 100 ms (yieldEvery);
   one heavy job at a time (heavy()); every cache has a size cap. Exits / memory / stalls: services/perfHistory.ts.
+  fix210b: the web process writes nothing but sign-in / account actions — anything else goes through
+  `deferred(sql)` (services/deferredWrites.ts: written by the worker); it loads the stored state before it listens.
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
   `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a

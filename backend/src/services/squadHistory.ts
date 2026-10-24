@@ -13,6 +13,8 @@ import { gunzip } from 'zlib';
 import { promisify } from 'util';
 import { slicer } from './perf';
 import { onState, publishState } from './shared';
+import { isWeb } from './role';
+import { eachRowPaged } from '../utils/pagedRead';
 const gunzipAsync = promisify(gunzip);
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -47,9 +49,16 @@ function load() {
     (byClub.get(r.club) || byClub.set(r.club, new Map()).get(r.club)!).set(r.month, r.top_eur);
   }
 }
-load();
+/** fix210b: the same in pages of 500 rows with a yield between, swapped in at the end */
+async function loadAsync(): Promise<void> {
+  const by = new Map<string, Map<string, number>>(), comp = new Map<string, string>();
+  await eachRowPaged('club_value_comp', 'club, comp', r => comp.set(r.club, r.comp));
+  await eachRowPaged('club_value_month', 'club, month, top_eur', r => { (by.get(r.club) || by.set(r.club, new Map()).get(r.club)!).set(r.month, r.top_eur); });
+  byClub = by; compOf = comp; loadCount++;
+}
+if (isWeb) void loadAsync().catch(e => logger.warn(`club value history: ${e.message}`)); else load(); // (the worker at once)
 // fix202: synced in the worker; the web process reloads from the database when told
-onState('squad:history', () => load());
+onState('squad:history', () => loadAsync());
 
 /** Squad value (top-15 sum, EUR) of a Transfermarkt club as known at the start of date's month; null if unknown. */
 export function clubValueAt(club: string, date: string): number | null {

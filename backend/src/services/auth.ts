@@ -11,6 +11,7 @@
 import crypto from 'crypto';
 import type express from 'express';
 import { db } from '../db';
+import { isWeb as isWebProc } from './role';
 import logger from '../utils/logger';
 import { roleByKey, ALL_PERMS, type Perm } from './roles';
 import { emailEnabled, sendVerificationCode, sendResetCode, sendEmailChangeCode, sendEmailChangedNotice } from './email';
@@ -570,7 +571,7 @@ export function userForToken(token: string | undefined): User | null {
 /** SHA-256 of a session token (sessions are stored by hash). */
 export const sessionHash = (token: string) => sha(token);
 
-every('auth sessions cleanup', () => {
+if (!isWebProc) every('auth sessions cleanup', () => { // fix210b: worker only
   try {
     db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(new Date().toISOString());
   } catch {}

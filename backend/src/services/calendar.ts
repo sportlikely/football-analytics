@@ -11,6 +11,7 @@
  */
 import crypto from 'crypto';
 import { db } from '../db';
+import { runsJobs } from './role';
 import { listFavorites, type Favorite } from './favorites';
 import { roleByKey, ALL_PERMS } from './roles';
 import { userById, accessOf, canSeeFull, isPaid, type User, type Access } from './auth';
@@ -447,7 +448,7 @@ export function calendarFor(user: User, lang: CalLang, site: string, now = Date.
 }
 
 every('calendar cleanup', () => {
-  try { db.prepare(`DELETE FROM calendar_event_state WHERE modified_at < ?`).run(new Date(Date.now() - 90 * DAY).toISOString()); } catch { /* ignore */ }
+  if (runsJobs) try { db.prepare(`DELETE FROM calendar_event_state WHERE modified_at < ?`).run(new Date(Date.now() - 90 * DAY).toISOString()); } catch { /* ignore */ } // fix210b: not in the web process
   const old = Date.now() - CACHE_MS;
   for (const [k, v] of cache) if (v.at < old) cache.delete(k);
 }, 6 * 3600000).unref();

@@ -19,6 +19,8 @@ import { GROUPS, ALIASES, similarity } from './history';
 import { clubValueAt, syncClubValueHistory, historyClubs, historyVersion } from './squadHistory';
 import { every, after, slicer } from './perf';
 import { onState, publishState } from './shared';
+import { isWeb } from './role';
+import { eachRowPaged } from '../utils/pagedRead';
 
 const SOURCE_URL =
   process.env.SQUAD_VALUES_URL || 'https://pub-e682421888d945d684bcae8890b0ec20.r2.dev/data/players.csv.gz';
@@ -274,9 +276,30 @@ function loadCache() {
   const s: any = db.prepare(`SELECT fetched_at FROM squad_values_sync WHERE id = 1`).get();
   lastFetchedAt = s?.fetched_at || null;
 }
-loadCache();
+/**
+ * fix210b: the same, read 500 rows at a time with a yield between (the web process's reload blocked it 3.1 s); the new
+ * maps are swapped in together at the end.
+ */
+let loadingAsync: Promise<void> | null = null;
+function loadCacheAsync(): Promise<void> {
+  if (loadingAsync) return loadingAsync;
+  loadingAsync = (async () => {
+    const p = new Map<string, { name: string; club: string | null; value: number }[]>();
+    await eachRowPaged('squad_players', 'pkey, name, club, value_eur', r => { const l = p.get(r.pkey) || p.set(r.pkey, []).get(r.pkey)!; l.push({ name: r.name, club: r.club, value: r.value_eur }); });
+    const nv = new Map<string, { name: string; top: number; players: number }>();
+    await eachRowPaged('nat_values', 'country, name, top_eur, players', r => nv.set(r.country, { name: r.name, top: r.top_eur, players: r.players }));
+    const c = new Map<string, { total: number; top: number; club: string }>();
+    await eachRowPaged('squad_values', 'grp, fd_name, club_name, total_eur, top_eur', r => c.set(`${r.grp}|${r.fd_name}`, { total: r.total_eur, top: r.top_eur, club: r.club_name }));
+    const s: any = db.prepare(`SELECT fetched_at FROM squad_values_sync WHERE id = 1`).get();
+    players = p; natValues = nv; cache = c; lastFetchedAt = s?.fetched_at || null;
+  })().finally(() => { loadingAsync = null; });
+  return loadingAsync;
+}
+
+// (the web process reads in pages; the worker and its threads at once: a model build may start right after)
+if (isWeb) void loadCacheAsync().catch(e => logger.warn(`squad values: ${e.message}`)); else loadCache();
 // fix202: the worker syncs; the web process reads the new values from the database when told
-onState('squad:synced', () => loadCache());
+onState('squad:synced', () => loadCacheAsync());
 
 /** Squad value for a football-data.co.uk team name, in EUR (top-15 sum), or null. */
 export function squadValueFor(group: string, fdName: string): { total: number; top: number; club: string } | null {

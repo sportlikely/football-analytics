@@ -26,7 +26,9 @@ import {
 } from '../utils/moreCalib';
 import { GROUPS } from './history';
 import { mainRank } from './tracking';
-import { leagueModelInfo, bbWalkForward, leagueTotalsCheck } from './bbModel';
+import { leagueModelInfo, bbWalkForward, leagueTotalsCheck, allWalkForward, setWalkForward } from './bbModel';
+import { threadJobsOn, inThread } from './threadJob';
+import { applyStored } from './shared';
 import { nflWalkForward, buildReport as buildNflReport } from './nflModel';
 import { tennisExtrasDist, tennisServeChances, tennisRuleFor, tennisExtrasWalkForward } from './tennisModel';
 
@@ -1395,9 +1397,38 @@ export async function moreDaily(force = false) {
   const d = new Date().toISOString().slice(0, 10);
   if (!force && dailyDay === d) return;
   dailyDay = d;
+  // fix210b: the fits and backtests in a job thread (2.3 s of blocked worker and +397 MB heap in the main thread)
+  if (threadJobsOn()) return moreThread('daily', force);
   try { await refitLeagues(); } catch (e: any) { logger.warn(`more predictions fits: ${e.message}`); }
   // a sport tested in the last 20 h (e.g. by the start-up run) waits for the next day
   await runBacktests(undefined, force ? 0 : 20 * 3600 * 1000);
+}
+/*
+ * fix210b: the league fits and the walk-forward backtests run in a job thread (services/threadJob.ts): its own
+ * database connection writes the fits, maps, gates and the re-saved games; the basketball walk-forward rows (kept in
+ * the worker's memory by the bb-v3 build) are passed in; afterwards this process forgets its cached fits and records.
+ */
+type MoreJob = 'daily' | 'first' | 'one';
+async function moreThread(kind: MoreJob, arg?: unknown): Promise<Record<string, any>> {
+  const out = await inThread<Record<string, any>>('more backtest', [kind, arg ?? null, allWalkForward()]);
+  fitCache.clear(); calibCache.clear(); recordCache.clear();
+  return out || {};
+}
+/** (job thread) one run: the daily fits + backtests, the first run, or one sport */
+export async function moreBacktestHere(kind: MoreJob, arg: unknown, wf: [string, [number, number, number, number][]][]): Promise<Record<string, any>> {
+  setWalkForward(wf);
+  applyStored('bb:m:'); // leagueModelInfo / leagueTotalsCheck read the basketball models
+  if (kind === 'daily') {
+    try { await refitLeagues(); } catch (e: any) { logger.warn(`more predictions fits: ${e.message}`); }
+    return runBacktests(undefined, arg ? 0 : 20 * 3600 * 1000);
+  }
+  if (kind === 'first') return moreFirstRunHere();
+  return runBacktests((arg as MoreSport) || undefined);
+}
+/** admin: the backtests now (one sport, or the daily fits + every sport) — in the job thread when on */
+export async function moreBacktestNow(sport?: MoreSport, refit = false) {
+  if (threadJobsOn()) return refit ? moreThread('daily', true) : moreThread('one', sport);
+  return refit ? moreDaily(true) : runBacktests(sport);
 }
 /**
  * fix204b: on start, every sport without a stored backtest report (fix204c: or with one made by older maths) is tested now (in the heavy queue, sliced, never
@@ -1405,6 +1436,10 @@ export async function moreDaily(force = false) {
  * stays admin-only ("no backtest yet").
  */
 export async function moreFirstRun(): Promise<Record<string, any>> {
+  if (!MORE_SPORTS.some(s => !backtestCurrent(s))) return {};
+  return threadJobsOn() ? moreThread('first') : moreFirstRunHere(); // fix210b: in the job thread
+}
+async function moreFirstRunHere(): Promise<Record<string, any>> {
   const todo = MORE_SPORTS.filter(s => !backtestCurrent(s));
   if (!todo.length) return {};
   logger.info(`more backtest: first run for ${todo.join(', ')}`);

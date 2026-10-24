@@ -6,6 +6,8 @@
  * updated in place); its addresses are in security_log_ips (same 90 days).
  */
 import { db } from '../db';
+import { isWeb } from './role';
+import { deferred } from './deferredWrites';
 import { every } from './perf';
 
 db.exec(`
@@ -26,7 +28,8 @@ db.exec(`
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_security_log_grp ON security_log(grp) WHERE grp IS NOT NULL');
 }
 
-const ins = db.prepare(`INSERT INTO security_log (at, user_id, email, event, ip, ua, detail) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+// fix210b: from the web process the lines go to the worker, which writes them (services/deferredWrites.ts)
+const ins = deferred(`INSERT INTO security_log (at, user_id, email, event, ip, ua, detail) VALUES (?, ?, ?, ?, ?, ?, ?)`);
 
 export function securityLog(req: { ip?: string; headers: Record<string, any> }, event: string, user?: { id?: number | null; email?: string | null } | null, detail?: string) {
   try {
@@ -36,12 +39,12 @@ export function securityLog(req: { ip?: string; headers: Record<string, any> }, 
 }
 
 /** fix199: one grouped line (a network's day), written once and updated in place. */
-const upGroup = db.prepare(`INSERT INTO security_log (at, event, ua, detail, grp) VALUES (?, ?, ?, ?, ?)
+const upGroup = deferred(`INSERT INTO security_log (at, event, ua, detail, grp) VALUES (?, ?, ?, ?, ?)
   ON CONFLICT(grp) WHERE grp IS NOT NULL DO UPDATE SET ua = excluded.ua, detail = excluded.detail`);
 export function securityLogGroup(grp: string, event: string, detail: string, ua?: string | null) {
   try { upGroup.run(new Date().toISOString(), event, ua ? ua.slice(0, 200) : null, detail.slice(0, 300), grp); } catch { /* never breaks a request */ }
 }
-const upIp = db.prepare(`INSERT INTO security_log_ips (grp, ip, ua, requests, refused, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+const upIp = deferred(`INSERT INTO security_log_ips (grp, ip, ua, requests, refused, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(grp, ip) DO UPDATE SET requests = requests + excluded.requests, refused = refused + excluded.refused, last_at = excluded.last_at, ua = COALESCE(excluded.ua, ua)`);
 /** fix199: an address of a grouped line (requests / refused added since the last write). */
 export function securityLogIp(grp: string, ip: string, ua: string | null, requests: number, refused: number) {
@@ -69,7 +72,7 @@ export function securityLogFor(userId: number) {
   return db.prepare(`SELECT at, event, ip, ua FROM security_log WHERE user_id = ? ORDER BY id DESC LIMIT 200`).all(userId);
 }
 
-every('security log cleanup', () => {
+if (!isWeb) every('security log cleanup', () => {
   try {
     const old = new Date(Date.now() - 90 * 86400000).toISOString();
     db.prepare(`DELETE FROM security_log WHERE at < ?`).run(old);

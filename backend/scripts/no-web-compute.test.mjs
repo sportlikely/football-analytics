@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(here, '../dist').replace(/\\/g, '/');
@@ -20,13 +21,46 @@ const DATA = path.join(here, '../data');
 const KEYS = ['FOOTBALL_DATA_API_KEY', 'ODDS_API_KEY', 'API_FOOTBALL_KEY', 'API_NFL_KEY', 'TENNIS_API_KEY', 'BALLDONTLIE_KEY', 'YOUTUBE_API_KEY', 'ANTHROPIC_API_KEY', 'API_BASKETBALL_KEY'];
 const LIMIT_MS = 50;
 
+/**
+ * fix210b: real old ids from the copy (an early finished basketball game, the most-used football player, an NFL game,
+ * a tennis player / match …) for the crawler pages in every language; fixed ids when the copy has no such table
+ */
+function realIds(dir) {
+  const ids = { bbGame: 1, bbTeam: 1, bbPlayer: 1, fbPlayer: 276, fbTeam: 33, fbMatch: 1, nflGame: 1, nflTeam: 1, tnPlayer: 1, tnMatch: 1 };
+  const f = path.join(dir, 'bet-to-beat.sqlite');
+  if (!fs.existsSync(f)) return ids;
+  const db = new DatabaseSync(f, { readOnly: true });
+  const one = (sql, k) => { try { const r = db.prepare(sql).get(); if (r && r.v != null) ids[k] = r.v; } catch { /* table missing */ } };
+  one(`SELECT game_id AS v FROM bb_games WHERE status IN ('FT','AOT') ORDER BY kickoff LIMIT 1 OFFSET 200`, 'bbGame');
+  one(`SELECT home_id AS v FROM bb_games WHERE status IN ('FT','AOT') ORDER BY kickoff LIMIT 1 OFFSET 200`, 'bbTeam');
+  one(`SELECT player_id AS v FROM bb_player_stats LIMIT 1 OFFSET 500`, 'bbPlayer');
+  one(`SELECT player_id AS v FROM af_player_season ORDER BY apps DESC LIMIT 1`, 'fbPlayer');
+  one(`SELECT match_id AS v FROM predictions WHERE settled = 1 ORDER BY utc_date LIMIT 1 OFFSET 100`, 'fbMatch');
+  one(`SELECT home_team_id AS v FROM predictions WHERE settled = 1 AND home_team_id IS NOT NULL ORDER BY utc_date LIMIT 1 OFFSET 100`, 'fbTeam');
+  one(`SELECT game_id AS v FROM nfl_games WHERE status IN ('FT','AOT') ORDER BY kickoff LIMIT 1 OFFSET 50`, 'nflGame');
+  one(`SELECT team_id AS v FROM nfl_teams LIMIT 1`, 'nflTeam');
+  one(`SELECT id AS v FROM tennis_players LIMIT 1 OFFSET 100`, 'tnPlayer');
+  one(`SELECT id AS v FROM tennis_matches LIMIT 1 OFFSET 1000`, 'tnMatch');
+  db.close();
+  return ids;
+}
+const LANG_PREFIX = ['', '/es', '/pt', '/de', '/fr', '/it', '/tr'];
+const crawlerUrls = ids => [
+  ...LANG_PREFIX.map(l => `${l}/basketball/game/${ids.bbGame}`),
+  ...LANG_PREFIX.map(l => `${l}/player/${ids.fbPlayer}`),
+  ...LANG_PREFIX.map(l => `${l}/match/${ids.fbMatch}`),
+  `/team/${ids.fbTeam}`, `/fr/team/${ids.fbTeam}`, `/basketball/team/${ids.bbTeam}`, `/de/basketball/player/${ids.bbPlayer}`,
+  `/american-football/game/${ids.nflGame}`, `/american-football/team/${ids.nflTeam}`,
+  `/tennis/player/${ids.tnPlayer}`, `/it/tennis/player/${ids.tnPlayer}`, `/tennis/match/${ids.tnMatch}`
+];
+
 function scratch() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fix210-'));
   const snap = fs.existsSync(DATA) ? fs.readdirSync(DATA).filter(f => /^sportlikely-.*\.sqlite$/.test(f)).sort().pop() : null;
   if (snap) fs.copyFileSync(path.join(DATA, snap), path.join(dir, 'bet-to-beat.sqlite'));
   const stat = path.join(dir, 'static');
   fs.mkdirSync(stat);
-  fs.writeFileSync(path.join(stat, 'index.html'), '<!doctype html><html><head><title>SportLikely</title></head><body><div id="root"></div></body></html>');
+  fs.writeFileSync(path.join(stat, 'index.html'), '<!doctype html><html lang="en"><head><title>SportLikely</title></head><body><div id="root"></div></body></html>');
   return { dir, stat, snap };
 }
 
@@ -57,7 +91,8 @@ const server = app.listen(0, '127.0.0.1', async () => {
     return { status: r.status, ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e6), dbMs: Math.round(dbMs), built: builds() - b0 };
   };
   const out = [];
-  const samples = [...PUBLIC_ROUTES.map(r => ({ url: r.sample, by: r.by, sport: r.sport })), ...PAGE_SAMPLES.map(url => ({ url, by: 'page', sport: 'all' }))];
+  const extra = JSON.parse(process.env.EXTRA_URLS || '[]');
+  const samples = [...PUBLIC_ROUTES.map(r => ({ url: r.sample, by: r.by, sport: r.sport })), ...[...PAGE_SAMPLES, ...extra].map(url => ({ url, by: 'page', sport: 'all' }))];
   for (const s of samples) {
     const first = await open(s.url);
     const second = await open(s.url);
@@ -70,7 +105,7 @@ const server = app.listen(0, '127.0.0.1', async () => {
 
 test('the web process builds nothing: every public route and crawler page', () => {
   const { dir, stat, snap } = scratch();
-  const env = { ...process.env, DATA_DIR: dir, STATIC_DIR: stat, SL_ROLE: 'web', SL_STRICT_WEB: '1', PAGE_WAIT_MS: '1', SEO_WAIT_MS: '1', LOG_LEVEL: 'error', NODE_ENV: 'production', GEO_OFF: '1', BASKETBALL_PUBLIC: '1', NFL_PUBLIC: '1', TENNIS_PUBLIC: '1' };
+  const env = { ...process.env, EXTRA_URLS: JSON.stringify(crawlerUrls(realIds(dir))), DATA_DIR: dir, STATIC_DIR: stat, SL_ROLE: 'web', SL_STRICT_WEB: '1', PAGE_WAIT_MS: '1', SEO_WAIT_MS: '1', LOG_LEVEL: 'error', NODE_ENV: 'production', GEO_OFF: '1', BASKETBALL_PUBLIC: '1', NFL_PUBLIC: '1', TENNIS_PUBLIC: '1' };
   for (const k of KEYS) env[k] = '';
   const r = spawnSync(process.execPath, ['-e', CHILD], { env, encoding: 'utf8', timeout: 300000 });
   assert.equal(r.status, 0, `child failed: ${r.stderr || r.stdout}`);
@@ -87,6 +122,43 @@ test('the web process builds nothing: every public route and crawler page', () =
   console.log(`no-web-compute: ${res.out.length} URLs on ${snap ? `a copy of ${snap}` : 'an empty database'}; slowest: ${slowest.join(', ')}`);
   assert.deepEqual(bad, [], `\n${bad.join('\n')}\nbuilders called: ${JSON.stringify(res.builds)}`);
   assert.deepEqual(res.builds, {});
+});
+
+test('basketball game pages: the worker stores one data build per game, the web process writes every language from it', () => {
+  const { dir, stat } = scratch();
+  const ids = realIds(dir);
+  const base = { ...process.env, DATA_DIR: dir, STATIC_DIR: stat, LOG_LEVEL: 'error', NODE_ENV: 'production', GEO_OFF: '1', BASKETBALL_PUBLIC: '1' };
+  for (const k of KEYS) base[k] = '';
+  // the worker: the prebuild job (every finished game of the two latest seasons) — here only this game, then the job itself
+  const w = spawnSync(process.execPath, ['-e', `
+    const D = ${JSON.stringify(DIST)};
+    require(D + '/app.js');
+    const pc = require(D + '/services/pageCache.js');
+    pc.storePage('bb-game-facts', { id: ${ids.bbGame} }).then(() => { console.log(JSON.stringify({ at: pc.storedAt('bb-game-facts', { id: ${ids.bbGame} }) })); process.exit(0); });`], { env: { ...base, SL_ROLE: 'worker' }, encoding: 'utf8', timeout: 120000 });
+  assert.equal(w.status, 0, w.stderr);
+  assert.ok(JSON.parse(w.stdout.trim().split('\n').pop()).at > 0, 'the facts were not stored');
+  const r = spawnSync(process.execPath, ['-e', `
+    const D = ${JSON.stringify(DIST)};
+    const { app } = require(D + '/app.js');
+    const { webBuilds } = require(D + '/services/builders.js');
+    const s = app.listen(0, '127.0.0.1', async () => {
+      const out = [];
+      for (const l of ${JSON.stringify(LANG_PREFIX)}) {
+        const url = 'http://127.0.0.1:' + s.address().port + l + '/basketball/game/${ids.bbGame}';
+        await fetch(url).then(x => x.text());
+        const t0 = Date.now(); const html = await fetch(url).then(x => x.text());
+        out.push({ l, ms: Date.now() - t0, vs: html.includes('<h1>') && html.includes(' vs '), lang: (html.match(new RegExp('<html lang="([a-z]+)"')) || [])[1] });
+      }
+      console.log(JSON.stringify({ out, builds: webBuilds() })); process.exit(0);
+    });`], { env: { ...base, SL_ROLE: 'web', SL_STRICT_WEB: '1', SEO_WAIT_MS: '1' }, encoding: 'utf8', timeout: 120000 });
+  assert.equal(r.status, 0, r.stderr);
+  const res = JSON.parse(r.stdout.trim().split('\n').pop());
+  assert.deepEqual(res.builds, {});
+  for (const x of res.out) {
+    assert.ok(x.vs, `${x.l || '/'}: no game heading (the stored facts were not used)`);
+    assert.equal(x.lang, x.l ? x.l.slice(1) : 'en');
+    assert.ok(x.ms < 50, `${x.l || '/'}: ${x.ms} ms`);
+  }
 });
 
 test('the real pair: a worker route is answered by the worker, then served from the signed-out copy; a worker crash is recorded', async () => {
@@ -118,7 +190,8 @@ test('the real pair: a worker route is answered by the worker, then served from 
     // the worker dies: the exit is recorded with a reason and it comes back after 5 s
     const pid = p.worker.pid;
     process.kill(pid, 'SIGKILL');
-    const back = await until(async () => { const q = await perf(); return q.worker.on && q.worker.pid !== pid ? q : null; }, 30000);
+    // (the exit row is written by the new worker: the web process queues its writes, fix210b)
+    const back = await until(async () => { const q = await perf(); return q.worker.on && q.worker.pid !== pid && q.worker.restarts24h === 1 ? q : null; }, 30000);
     assert.ok(back, 'the worker did not come back');
     assert.equal(back.worker.restarts, 1);
     assert.equal(back.worker.restarts24h, 1);

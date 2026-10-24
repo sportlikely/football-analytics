@@ -1,7 +1,8 @@
 /**
  * fix210: the container's memory limit (cgroup v2 memory.max, or v1 memory.limit_in_bytes) and each process's heap
- * share of it. The worker gets min(WORKER_HEAP_MB, 55% of the limit), the web process min(WEB_HEAP_MB, 30%), a worker
- * thread (basketball model, national Elo) min(512, 12%); the rest is native memory (SQLite, buffers, code). Without a
+ * share of it. The worker gets min(WORKER_HEAP_MB, 55% of the limit), the web process min(WEB_HEAP_MB, 30%), a job
+ * thread (basketball model, national Elo, more-predictions backtests) min(THREAD_HEAP_MB 768, 20%) — fix210b: the
+ * backtests need ~400 MB; one job thread at a time (heavy queue). The rest is native memory (SQLite, buffers). Without a
  * readable limit (Windows, a laptop) the env values (or the defaults) are used as they are.
  *
  * No imports from the app: the Dockerfile runs `node dist/utils/memLimit.js web` to get the web heap before start.
@@ -25,8 +26,8 @@ export function containerLimitMb(): number | null {
 }
 
 export type HeapRole = 'web' | 'worker' | 'thread';
-const SHARE: Record<HeapRole, number> = { web: 0.3, worker: 0.55, thread: 0.12 };
-const DEFAULT: Record<HeapRole, number> = { web: 1024, worker: 1536, thread: 512 };
+const SHARE: Record<HeapRole, number> = { web: 0.3, worker: 0.55, thread: 0.2 };
+const DEFAULT: Record<HeapRole, number> = { web: 1024, worker: 1536, thread: 768 };
 const ENV: Record<HeapRole, string> = { web: 'WEB_HEAP_MB', worker: 'WORKER_HEAP_MB', thread: 'THREAD_HEAP_MB' };
 
 /** heap (MB) for this role: the env value (or default), capped at the role's share of the container limit */
