@@ -17,7 +17,7 @@ import { oddsTick } from './services/odds';
 import {
   afUpcoming, afWithPredictions, pollAfLive, syncFdLiveFromAf, startAfMatchesScheduler, onAfWindow, withAfOdds, backfillAfOdds, warmMatchExtras
 , afIdOfFd } from './services/afMatches';
-import { fdMatchesNeedingAf } from './services/fdReconcile';
+import { fdMatchesNeedingAf, linkFdTwins } from './services/fdReconcile';
 import { startSquadValuesScheduler } from './services/squadValues';
 import { startClvScheduler } from './services/clv';
 import { startNationalEloScheduler } from './services/nationalElo';
@@ -178,6 +178,10 @@ export function startJobs() {
         return backfillAfOdds();
       })
       .catch(err => { markFailed('results', err); logger.warn('Settle job failed', { message: err.message }); });
+  // fix212b: every Football-Data game of the next 7 days linked to its API-Football fixture before kick-off
+  const twins = () => footballDataAPI.getUpcomingMatches(7).then(ms => linkFdTwins(ms)).catch(e => logger.warn(`FD twins: ${e?.message || e}`));
+  after('FD twins', twins, 3 * 60 * 1000);
+  every('FD twins', twins, 60 * 60 * 1000);
   after('settle picks', settle, 60 * 1000);
   every('settle picks', settle, parseInt(process.env.SETTLE_INTERVAL_MS || '600000', 10));
   // Market odds: decide every 10 minutes which competitions deserve a fetch (budget-aware)

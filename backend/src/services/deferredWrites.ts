@@ -37,20 +37,39 @@ if (isWeb) setInterval(() => {
   if (!sendIpc({ t: 'db:writes', items })) queue.unshift(...items); // the worker is restarting: next second
 }, 1000).unref();
 
-// worker: the web process's writes, 500 a transaction
+// worker: the web process's writes. fix212b: transactions of at most 200 rows and ~1 MB of parameters (a signed-out page
+// copy can be hundreds of KB: 500 of them in one transaction was the "web writes" half of the 9–10 s worker stalls),
+// a yield between batches, each batch timed on its own — never one long synchronous write
+export const WRITE_BATCH = 200;
+export const WRITE_BATCH_BYTES = 1_000_000;
+const sizeOf = (w: Write) => w.params.reduce<number>((n, p) => n + (typeof p === 'string' ? p.length : Buffer.isBuffer(p) ? p.length : 8), 0);
+/** cut a list of writes into batches of ≤ WRITE_BATCH rows and ≤ WRITE_BATCH_BYTES of parameters */
+export function writeBatches(items: Write[], maxRows = WRITE_BATCH, maxBytes = WRITE_BATCH_BYTES): Write[][] {
+  const out: Write[][] = [];
+  let cur: Write[] = [], bytes = 0;
+  for (const w of items) {
+    const b = sizeOf(w);
+    if (cur.length && (cur.length >= maxRows || bytes + b > maxBytes)) { out.push(cur); cur = []; bytes = 0; }
+    cur.push(w); bytes += b;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
 let chain: Promise<void> = Promise.resolve();
 if (isWorker) onIpc('db:writes', m => {
   const items = (m.items as Write[]) || [];
-  chain = chain.then(() => timed('web writes', async () => {
-    for (let i = 0; i < items.length; i += 500) {
-      db.exec('BEGIN');
-      try {
-        for (const w of items.slice(i, i + 500)) { try { stmt(w.sql).run(...(w.params as any[])); } catch (e: any) { logger.warn(`web write: ${e?.message || e}`); } }
-        db.exec('COMMIT');
-      } catch (e: any) { try { db.exec('ROLLBACK'); } catch { /* none open */ } logger.warn(`web writes: ${e?.message || e}`); }
+  chain = chain.then(async () => {
+    for (const batch of writeBatches(items)) {
+      await timed('web writes', async () => {
+        db.exec('BEGIN');
+        try {
+          for (const w of batch) { try { stmt(w.sql).run(...(w.params as any[])); } catch (e: any) { logger.warn(`web write: ${e?.message || e}`); } }
+          db.exec('COMMIT');
+        } catch (e: any) { try { db.exec('ROLLBACK'); } catch { /* none open */ } logger.warn(`web writes: ${e?.message || e}`); }
+      });
       await yieldLoop();
     }
-  })).catch(() => undefined);
+  }).catch(() => undefined);
 });
 
 /** /api/perf: writes waiting in the web process */

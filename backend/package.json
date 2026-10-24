@@ -23,7 +23,8 @@
     "test:fix209": "tsc && node --no-warnings --test --test-force-exit scripts/scorers.test.mjs",
     "test:fix210": "tsc && node --no-warnings --test --test-force-exit scripts/no-web-compute.test.mjs",
     "test:fix211": "tsc && node --no-warnings --test --test-force-exit scripts/player-photos.test.mjs",
-    "test:fix212": "tsc && node --no-warnings --test --test-force-exit scripts/fd-freeze.test.mjs"
+    "test:fix212": "tsc && node --no-warnings --test --test-force-exit scripts/fd-freeze.test.mjs",
+    "test:fix212b": "tsc && node --no-warnings --test --test-force-exit scripts/fd-twins-startup.test.mjs"
   },
   "keywords": [
     "football",

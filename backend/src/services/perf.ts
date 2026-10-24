@@ -35,7 +35,7 @@ try {
 } catch { /* gc entries not available */ }
 
 const STEP = 500;
-const stalls: { at: string; ms: number; job: string | null }[] = [];
+const stalls: { at: string; ms: number; job: string | null; startup?: true }[] = [];
 // fix210: heapDeltaMb = heap after − before the last run; maxHeapDeltaMb = the worst run; peakHeapMb = highest heap seen while it ran
 type JobStat = { runs: number; lastMs: number; maxMs: number; totalMs: number; lastAt: string; maxStallMs: number; heapDeltaMb?: number; maxHeapDeltaMb?: number; peakHeapMb?: number };
 const jobs = new Map<string, JobStat>();
@@ -75,7 +75,7 @@ if (isMainThread) setInterval(() => {
     // fix175: a request carries its full path (ids kept, only the c / n query values) — "http GET /it/* [/it/team/86] 3773 ms"
     const done = ended.slice(0, 4).map(r => `${r.label}${r.detail ? ` [${r.detail}]` : ''} ${Math.round(r.end - r.start)} ms`).join(' + ');
     const job = [running, done].filter(Boolean).join(' + ') || null;
-    stalls.push({ at: new Date(now).toISOString(), ms: lag, job });
+    stalls.push({ at: new Date(now).toISOString(), ms: lag, job, startup: !startupDone || undefined });
     noteHour(lag, job);
     if (stalls.length > 100) stalls.shift();
     // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
@@ -376,9 +376,14 @@ export function afterHeavy(label: string, fn: () => unknown, ms: number): NodeJS
   return setTimeout(() => { heavy(label, () => timed(label, fn)).catch(e => logger.warn(`${label}: ${e?.message || e}`)); }, ms);
 }
 
+/** fix212b: the start-up load (before the process answers anything) is not a stall anyone waited for: listed apart */
+let startupDone = false;
+export const markStartupDone = () => { startupDone = true; };
+export const stallsSinceReady = () => stalls.filter(s => !s.startup && s.ms > 500).length;
 export function perfStatus() {
   const since = Date.now() - 3600 * 1000;
-  const recent = stalls.filter(s => new Date(s.at).getTime() >= since);
+  const recent = stalls.filter(s => new Date(s.at).getTime() >= since && !s.startup);
+  const startup = stalls.filter(s => s.startup);
   return {
     maxLagMs: maxLag,
     stallsLastHour: recent.length,
@@ -386,7 +391,9 @@ export function perfStatus() {
     running: runningLabel(),
     heavy: heavyStatus(),
     liveThisHour: Object.fromEntries(liveHour),
-    recentStalls: stalls.slice(-25).reverse(),
+    recentStalls: stalls.filter(s => !s.startup).slice(-25).reverse(),
+    // fix212b: the start-up load's own stalls (before listen; nobody waited)
+    startupStalls: startup.slice(-5).map(s => ({ at: s.at, ms: s.ms, job: s.job })),
     // fix210: the worst stalls of the last hour (what to fix first)
     topStalls: [...recent].sort((a, b) => b.ms - a.ms).slice(0, 10),
     // maxMs = longest run (waits for the data providers included); maxStallMs = worst event-loop freeze while it ran

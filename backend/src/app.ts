@@ -79,6 +79,8 @@ import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuali
 import { db } from './db';
 import { liveList, liveAt } from './services/liveState';
 import { isWeb, isWorker, ROLE } from './services/role';
+import { isReady, readiness } from './services/readiness';
+import { stallsSinceReady } from './services/perf';
 import { workerRoutes, workerRoutesStatus } from './services/workerRoutes';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
 import { deferredStatus } from './services/deferredWrites';
@@ -234,6 +236,12 @@ app.set('json replacer', (key: string, value: any) =>
     : value);
 app.use(express.urlencoded({ extended: true }));
 
+// fix212b: the web process answers nothing before its shared state is loaded (it listens after the load; this is the
+// guard for a request that slips in while the last states apply): 503 + Retry-After, the health check included
+if (isWeb) app.use((_req, res, next) => {
+  if (isReady()) return next();
+  res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
+});
 // API responses are data, not pages: keep them out of search results (robots.txt stays open so tools can read them)
 app.use('/api', (_req, res, next) => {
   res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -1644,7 +1652,8 @@ app.post('/api/visit/seen', (req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime() });
+  // fix212b: + the start-up load (ready, when, how long) and this process's stalls since it was ready
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime(), ...readiness(), stallsSinceReady: stallsSinceReady() });
 });
 
 // Upcoming + live matches. ?days=30 (1-30). Served from memory.

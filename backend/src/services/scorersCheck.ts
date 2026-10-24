@@ -126,6 +126,7 @@ async function checkFootball(now: number) {
   const budget = Math.min(60, Math.max(0, (afRemaining() - 500) * 20));
   const twins = new Map<number, { fid: number; swapped: boolean } | null>();
   for (const g of need.slice(0, budget)) {
+    await step(); // fix212b: the twin look-ups yield too (part of the 10 s "scorers check + web writes" stall)
     if (isAfMatchId(g.id)) twins.set(g.id, { fid: g.id - AF_OFFSET, swapped: false });
     else {
       try {

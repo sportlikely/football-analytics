@@ -35,7 +35,7 @@ import { BB_MAJOR } from './basketball';
 import { scorersHealth } from './scorersCheck';
 import { perfChecks } from './perfChecks';
 import { photoHealth } from './playerPhotos';
-import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount } from './fdReconcile';
+import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdTwinless } from './fdReconcile';
 import { bestLive } from './liveScores';
 import { afIdOfFd } from './afMatches';
 
@@ -143,6 +143,15 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     id: 'fd-moving', label: 'Football-Data feed moving', level: fz.frozen ? 'fail' : 'ok',
     detail: fz.frozen ? `${frozenText(fz)} — statuses, minutes and scores of its matches come from API-Football until it moves` : `Newest match update ${fz.newest ? `${israelTime(fz.newest)} (Israel time)` : 'not seen yet'}${fz.recoveredAt ? ` · recovered ${israelTime(fz.recoveredAt)}` : ''}`
   });
+  // fix212b: an FD game of the coming days without an API-Football twin is a warning before kick-off, not a fail after
+  if (afConfigured()) {
+    const tw = fdTwinless();
+    checks.push({
+      id: 'fd-twins', label: 'Football-Data games linked to API-Football (next 7 days)', level: tw.list.length ? 'warn' : 'ok',
+      detail: tw.list.length ? `${tw.list.length} game(s) without an API-Football twin — a freeze would leave them stale; add an alias (team_aliases) if the names differ` : `Every game linked${tw.at ? ` · checked ${ago(now - tw.at)} ago` : ''}`,
+      items: tw.list.slice(0, 20).map(x => `${x.name} · ${x.kickoff.slice(0, 16).replace('T', ' ')} UTC · FD ${x.id}`)
+    });
+  }
   try {
     const mm = resultMismatches();
     const n = afSettledCount(7);

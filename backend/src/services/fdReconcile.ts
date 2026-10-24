@@ -17,7 +17,7 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { reportLive, bestLive } from './liveScores';
-import { afTwinOfFd, afLiveReading, afFixturesFull } from './afMatches';
+import { afTwinOfFd, afLiveReading, afFixturesFull, afIdOfFd } from './afMatches';
 import { afConfigured, afRemaining } from './apiFootball';
 import { emailEnabled, sendEmail } from './email';
 import { onState, publishState } from './shared';
@@ -110,6 +110,46 @@ export function fdMatchesNeedingAf(window: any[], now = Date.now()): any[] {
 }
 
 const warned = new Set<number>();
+/* ---------- fix212b: every FD game of the coming days linked before kick-off, the ones without a twin listed ---------- */
+
+const forcedAt = new Map<number, number>();
+let twinless: { id: number; name: string; kickoff: string }[] = [];
+let twinsCheckedAt = 0;
+/**
+ * Link the FD matches of the next `days` days to their API-Football fixture (one day list per day, cached 3 h), so a
+ * freeze never finds a game without a twin, and keep the list of the ones still without one for data health.
+ * Runs hourly in the worker (jobs.ts); at most 40 look-ups a run.
+ */
+export async function linkFdTwins(window: any[], now = Date.now(), days = 7): Promise<{ checked: number; linked: number; missing: number }> {
+  if (!afConfigured()) return { checked: 0, linked: 0, missing: 0 };
+  const soon = window.filter(m => { const ko = ms(m?.utcDate); return ko !== null && ko >= now - 3 * 3600e3 && ko <= now + days * 86400e3; });
+  let checked = 0, linked = 0;
+  const miss: typeof twinless = [];
+  for (const m of soon) {
+    if (afIdOfFd(m.id)) continue;
+    if (checked >= 40 || afRemaining() < 150) { miss.push({ id: m.id, name: `${m.homeTeam?.name} – ${m.awayTeam?.name} (${m.competition?.code})`, kickoff: m.utcDate }); continue; }
+    checked++;
+    try {
+      // a game within 36 h without a twin gets the forced look-up (team-id day search) once an hour
+      const close = (ms(m.utcDate)! - now) < 36 * 3600e3 && now - (forcedAt.get(m.id) || 0) > 3600e3;
+      if (close) forcedAt.set(m.id, now);
+      if (await afTwinOfFd(m, { force: close })) linked++;
+      else miss.push({ id: m.id, name: `${m.homeTeam?.name} – ${m.awayTeam?.name} (${m.competition?.code})`, kickoff: m.utcDate });
+    } catch (e: any) {
+      miss.push({ id: m.id, name: `${m.homeTeam?.name} – ${m.awayTeam?.name} (${m.competition?.code}): ${e?.message || e}`, kickoff: m.utcDate });
+    }
+    if (checked % 10 === 0) await yieldLoop();
+  }
+  twinless = miss.sort((a, b) => a.kickoff.localeCompare(b.kickoff));
+  twinsCheckedAt = now;
+  publishState('fd:twins', { twinless, at: now });
+  if (miss.length) logger.warn(`FD twins: ${miss.length} of ${soon.length} game(s) in the next ${days} days without an API-Football twin: ${miss.slice(0, 5).map(x => `${x.id} ${x.name}`).join('; ')}`);
+  return { checked, linked, missing: miss.length };
+}
+onState('fd:twins', (_k, v: { twinless: typeof twinless; at: number }) => { twinless = v.twinless; twinsCheckedAt = v.at; });
+/** data health: FD games of the coming days without an API-Football twin (and when that was last checked) */
+export const fdTwinless = () => ({ list: twinless, at: twinsCheckedAt });
+
 /**
  * Report API-Football's status, minute and score for the FD matches that need it: from the last live=all poll when the
  * fixture is in it (≤ 3 min old), else by fixture id in batches of 20 (/fixtures?ids=). At most 20 matches per turn.
@@ -124,7 +164,10 @@ export async function reconcileFdWindow(window: any[], now = Date.now()): Promis
   for (const m of wanted) {
     if (++n % 20 === 0) await yieldLoop();
     try {
-      const twin = await afTwinOfFd(m);
+      // fix212b: no twin for a game that needs one right now: the forced look-up (team-id day search), once an hour
+      const force = !afIdOfFd(m.id) && now - (forcedAt.get(m.id) || 0) > 3600e3;
+      if (force) forcedAt.set(m.id, now);
+      const twin = await afTwinOfFd(m, { force });
       if (!twin || twin.swapped) continue; // a swapped fixture's score would be the wrong way round (fix162)
       const live = afLiveReading(twin.fid);
       if (live && now - live.at <= 3 * 60 * 1000) { reportLive(m.id, 'af', live.match, live.at); fromAf++; continue; }

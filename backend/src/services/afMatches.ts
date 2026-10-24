@@ -987,9 +987,55 @@ function nameKey(s: string) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ')
     .split(' ').filter(w => w && !['fc', 'cf', 'afc', 'sc', 'ac', 'as', 'ssc', 'sv', 'club', 'de', 'cp'].includes(w)).join(' ');
 }
-function sameTeam(a: string, b: string) {
-  const x = nameKey(a), y = nameKey(b);
-  return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
+/**
+ * fix212b: names the two providers write differently (Football-Data.org long name ↔ API-Football short name), by key.
+ * "Wolverhampton Wanderers FC" is "Wolves" at API-Football: neither contains the other, so Wolves – Watford (ELC,
+ * 561903) had no twin. Both directions; more can be added in the team_aliases table (Admin, no deploy).
+ */
+const ALIASES: Record<string, string[]> = {
+  'wolverhampton wanderers': ['wolves'], 'brighton hove albion': ['brighton'], 'manchester united': ['man united', 'man utd'], 'manchester city': ['man city'],
+  'tottenham hotspur': ['tottenham', 'spurs'], 'west bromwich albion': ['west brom'], 'queens park rangers': ['qpr'], 'sheffield wednesday': ['sheffield weds'],
+  'nottingham forest': ['nottm forest', 'nott m forest'], 'west ham united': ['west ham'], 'newcastle united': ['newcastle'], 'leeds united': ['leeds'],
+  'leicester city': ['leicester'], 'norwich city': ['norwich'], 'swansea city': ['swansea'], 'cardiff city': ['cardiff'], 'hull city': ['hull'], 'stoke city': ['stoke'],
+  'derby county': ['derby'], 'preston north end': ['preston'], 'blackburn rovers': ['blackburn'], 'bristol city': ['bristol'], 'coventry city': ['coventry'],
+  'plymouth argyle': ['plymouth'], 'oxford united': ['oxford'], 'luton town': ['luton'], 'ipswich town': ['ipswich'], 'charlton athletic': ['charlton'],
+  'wigan athletic': ['wigan'], 'borussia monchengladbach': ['gladbach', 'm gladbach', 'borussia m gladbach'], 'bayern munchen': ['bayern munich', 'bayern'],
+  '1 fc koln': ['fc koln', 'koln', 'cologne'], 'eintracht frankfurt': ['frankfurt'], 'vfb stuttgart': ['stuttgart'], 'borussia dortmund': ['dortmund'],
+  'internazionale milano': ['inter', 'inter milan'], 'inter milano': ['inter', 'inter milan'], 'paris saint germain': ['psg', 'paris sg'], 'athletic club': ['athletic bilbao'],
+  'sporting clube portugal': ['sporting cp', 'sporting lisbon', 'sporting'], 'olympique lyonnais': ['lyon'], 'olympique marseille': ['marseille'],
+  'hellas verona': ['verona'], 'real sociedad futbol': ['real sociedad'], 'rcd espanyol barcelona': ['espanyol'], 'real betis balompie': ['betis', 'real betis'],
+  'deportivo alaves': ['alaves'], 'rayo vallecano madrid': ['rayo vallecano'], 'celta vigo': ['celta'], 'us sassuolo calcio': ['sassuolo'], 'fc internazionale milano': ['inter', 'inter milan'],
+  'afc ajax': ['ajax'], 'psv': ['psv eindhoven'], 'feyenoord rotterdam': ['feyenoord'], 'sl benfica': ['benfica'], 'fc porto': ['porto'], 'sporting braga': ['braga']
+};
+db.exec(`CREATE TABLE IF NOT EXISTS team_aliases (name_key TEXT NOT NULL, alias_key TEXT NOT NULL, PRIMARY KEY (name_key, alias_key))`);
+let aliasRows: Map<string, Set<string>> | null = null;
+/** every key a team can be called by (its own, its aliases, and the names it is an alias of) */
+function keysOf(name: string): string[] {
+  const k = nameKey(name);
+  if (!k) return [];
+  if (!aliasRows) {
+    aliasRows = new Map();
+    const add = (a: string, b: string) => { if (!aliasRows!.has(a)) aliasRows!.set(a, new Set()); aliasRows!.get(a)!.add(b); };
+    for (const [n, list] of Object.entries(ALIASES)) for (const a of list) { add(n, a); add(a, n); }
+    try { for (const r of db.prepare(`SELECT name_key, alias_key FROM team_aliases`).all() as any[]) { add(r.name_key, r.alias_key); add(r.alias_key, r.name_key); } } catch { /* fresh */ }
+  }
+  return [k, ...(aliasRows.get(k) || [])];
+}
+/** Admin / scripts: a new alias pair (both ways), kept in the database */
+export function addTeamAlias(name: string, alias: string) {
+  db.prepare(`INSERT OR IGNORE INTO team_aliases (name_key, alias_key) VALUES (?, ?)`).run(nameKey(name), nameKey(alias));
+  aliasRows = null;
+}
+export function sameTeam(a: string, b: string) {
+  const xs = keysOf(a), ys = keysOf(b);
+  if (!xs.length || !ys.length) return false;
+  for (const x of xs) for (const y of ys) if (x === y || x.includes(y) || y.includes(x)) return true;
+  return false;
+}
+/** fix212b: the API-Football team ids an FD team maps to (team_map → af_teams, same group), for the id-first match */
+function afTeamIdsOf(fdTeamId: number | undefined): number[] {
+  if (!fdTeamId) return [];
+  try { return (db.prepare(`SELECT a.team_id FROM team_map m JOIN af_teams a ON a.grp = m.grp AND a.fd_name = m.fd_name WHERE m.team_id = ?`).all(fdTeamId) as any[]).map(r => r.team_id); } catch { return []; }
 }
 
 /**
@@ -1025,10 +1071,10 @@ export function afLiveOverlay<T extends { id: number; status?: string; score?: a
 }
 
 /** API-Football fixture id for a Football-Data.org match, or null. */
-async function afFixtureForFd(match: any): Promise<number | null> {
+async function afFixtureForFd(match: any, force = false): Promise<number | null> {
   if (fdToAf.has(match.id)) {
     const v = fdToAf.get(match.id)!;
-    if (v !== null || Date.now() - (fdToAfMissAt.get(match.id) || 0) < 20 * 60 * 1000) return v;
+    if (v !== null || (!force && Date.now() - (fdToAfMissAt.get(match.id) || 0) < 20 * 60 * 1000)) return v;
     fdToAf.delete(match.id); // fix162: try again
   }
   const day = String(match.utcDate || '').slice(0, 10);
@@ -1069,29 +1115,51 @@ async function afFixtureForFd(match: any): Promise<number | null> {
       return null; // don't remember a failure caused by the API
     }
   }
-  // anything else (national teams, other cups): every fixture of that day, matched by kick-off time and both names
+  // anything else (national teams, other cups, a league whose fixtures are not in our table): every fixture of that day.
+  // fix212b: by API-Football team id first (team_map → af_teams), then by name + aliases; kick-off ±3 h; the same
+  // country as the competition when both are known (a league game, not a cup / international)
   if (!found) {
     try {
       const j = await cached(`alldate:${day}`, 3 * 3600 * 1000, () => afGet('/fixtures', { date: day }));
       const ko = new Date(match.utcDate).getTime();
-      const hits = (j.response || []).filter((x: any) =>
-        Math.abs(new Date(x.fixture?.date).getTime() - ko) <= 2 * 3600 * 1000 && // fix162: ±2 h (moved kick-offs)
-        (sameTeam(x.teams?.home?.name, match.homeTeam?.name) || sameTeam(x.teams?.home?.name, match.homeTeam?.shortName || '')) &&
-        (sameTeam(x.teams?.away?.name, match.awayTeam?.name) || sameTeam(x.teams?.away?.name, match.awayTeam?.shortName || ''))
-      );
+      const near = (x: any) => Math.abs(new Date(x.fixture?.date).getTime() - ko) <= 3 * 3600 * 1000;
+      const country = match.competition?.type === 'LEAGUE' ? String(match.area?.name || '').toLowerCase() : '';
+      const countryOk = (x: any) => !country || !x.league?.country || String(x.league.country).toLowerCase() === country;
+      const hIds = afTeamIdsOf(match.homeTeam?.id), aIds = afTeamIdsOf(match.awayTeam?.id);
+      const byName = (x: any, side: 'home' | 'away', t: any) => sameTeam(x.teams?.[side]?.name, t?.name) || sameTeam(x.teams?.[side]?.name, t?.shortName || '') || sameTeam(x.teams?.[side]?.name, t?.tla || '');
+      const isH = (x: any, side: 'home' | 'away') => (hIds.length && hIds.includes(x.teams?.[side]?.id)) || byName(x, side, match.homeTeam);
+      const isA = (x: any, side: 'home' | 'away') => (aIds.length && aIds.includes(x.teams?.[side]?.id)) || byName(x, side, match.awayTeam);
+      const all = (j.response || []).filter((x: any) => near(x) && countryOk(x));
+      // both API-Football ids known: that pair alone decides
+      const byId = hIds.length && aIds.length ? all.filter((x: any) => hIds.includes(x.teams?.home?.id) && aIds.includes(x.teams?.away?.id)) : [];
+      const hits = byId.length ? byId : all.filter((x: any) => isH(x, 'home') && isA(x, 'away'));
       if (hits.length === 1) found = hits[0].fixture.id;
-      // fix162: home and away swapped at API-Football (rare, neutral or moved games): same names the other way round
+      // fix162: home and away swapped at API-Football (rare, neutral or moved games): the same pair the other way round
       if (!found) {
-        const sw = (j.response || []).filter((x: any) =>
-          Math.abs(new Date(x.fixture?.date).getTime() - ko) <= 2 * 3600 * 1000 &&
-          (sameTeam(x.teams?.home?.name, match.awayTeam?.name) || sameTeam(x.teams?.home?.name, match.awayTeam?.shortName || '')) &&
-          (sameTeam(x.teams?.away?.name, match.homeTeam?.name) || sameTeam(x.teams?.away?.name, match.homeTeam?.shortName || ''))
-        );
+        const sw = all.filter((x: any) => isH(x, 'away') && isA(x, 'home'));
         if (sw.length === 1) { found = sw[0].fixture.id; fdToAfSwap.add(match.id); }
       }
+      if (!found && hits.length > 1) logger.warn(`AF lookup for FD ${match.id} (${match.homeTeam?.name} – ${match.awayTeam?.name}): ${hits.length} candidates`);
     } catch (e: any) {
       logger.warn(`AF date lookup for FD ${match.id}: ${e.message}`);
       return null;
+    }
+  }
+  // fix212b: still nothing and we know an API-Football team id: that team's fixtures of the day (one call)
+  if (!found && force) {
+    const ids = [...afTeamIdsOf(match.homeTeam?.id), ...afTeamIdsOf(match.awayTeam?.id)];
+    for (const team of ids.slice(0, 2)) {
+      try {
+        const j = await cached(`teamday:${team}:${day}`, 3 * 3600 * 1000, () => afGet('/fixtures', { team, date: day }));
+        const ko = new Date(match.utcDate).getTime();
+        const hit = (j.response || []).filter((x: any) => Math.abs(new Date(x.fixture?.date).getTime() - ko) <= 3 * 3600 * 1000);
+        if (hit.length === 1) {
+          found = hit[0].fixture.id;
+          const straight = sameTeam(hit[0].teams?.home?.name, match.homeTeam?.name) || afTeamIdsOf(match.homeTeam?.id).includes(hit[0].teams?.home?.id);
+          if (!straight) fdToAfSwap.add(match.id);
+          break;
+        }
+      } catch (e: any) { logger.warn(`AF team lookup for FD ${match.id}: ${e.message}`); }
     }
   }
   fdToAf.set(match.id, found);
@@ -1181,8 +1249,8 @@ export async function afFixturesFull(fixtureIds: number[]): Promise<Map<number, 
   return out;
 }
 /** fix209: the API-Football fixture of a Football-Data.org match (null when none) and whether its sides are swapped. */
-export async function afTwinOfFd(match: any): Promise<{ fid: number; swapped: boolean } | null> {
-  const fid = await afFixtureForFd(match);
+export async function afTwinOfFd(match: any, opts: { force?: boolean } = {}): Promise<{ fid: number; swapped: boolean } | null> {
+  const fid = await afFixtureForFd(match, !!opts.force);
   return fid ? { fid, swapped: fdToAfSwap.has(match.id) } : null;
 }
 

@@ -28,6 +28,9 @@ import { threadJobsOn, inThread } from './threadJob';
 export type PhotoSport = 'tennis' | 'basketball';
 export const PHOTO_SPORTS: PhotoSport[] = ['tennis', 'basketball'];
 const SPORT_Q: Record<PhotoSport, string> = { tennis: 'Q847', basketball: 'Q5372' };
+/** fix212b: the occupation items (P106) that mean the same sport — most basketball items carry "basketball player"
+ *  (Q3665646) and no P641 "sport", so the P641-only search and filter found 1 of 5,061 */
+const OCCUPATION_Q: Record<PhotoSport, string> = { tennis: 'Q10833314', basketball: 'Q3665646' };
 const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
 export const PHOTO_DIR = path.join(DATA_DIR, 'player-photos');
 const UA = 'SportLikelyBot/1.0 (https://sportlikely.com; support@sportlikely.com) player photos';
@@ -53,9 +56,13 @@ if (!DB_READ_ONLY) db.exec(`
 
 /** a name as a set of words: accents, case, punctuation and order aside ("Alcaraz, Carlos" = "carlos alcaraz") */
 export function nameKey(raw: string | null | undefined): string {
+  // fix212b: "Jr.", "Sr.", "II", "III", "IV" are not part of the name (rosters write "Gary Trent Jr.", Wikidata "Gary Trent Jr." or not)
   return String(raw || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ø/gi, 'o').replace(/ł/gi, 'l').replace(/ß/g, 'ss')
-    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean).sort().join(' ');
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(w => w && !SUFFIX.has(w)).sort().join(' ');
 }
+const SUFFIX = new Set(['jr', 'sr', 'ii', 'iii', 'iv']);
+/** fix212b: "Tatum, Jayson" (some rosters) → "Jayson Tatum"; a name as the search box wants it */
+export const searchName = (raw: string) => { const m = /^([^,]+),\s*(.+)$/.exec(String(raw || '').trim()); return (m ? `${m[2]} ${m[1]}` : String(raw || '')).replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').trim(); };
 /** "C. Alcaraz", "Alcaraz C." — an initial instead of a first name: never matched */
 export const abbreviated = (raw: string | null | undefined) => !raw || String(raw).trim().split(/\s+/).length < 2 || /(^|\s)\p{L}\.?(\s|$)/u.test(String(raw).trim());
 
@@ -193,7 +200,8 @@ async function refInfo(ids: string[]): Promise<Map<string, string[]>> {
 
 /** Wikidata items of the sport with this name (search, then each item's facts) */
 async function candidatesFor(sport: PhotoSport, name: string): Promise<Candidate[]> {
-  const q = `haswbstatement:P31=Q5 haswbstatement:P641=${SPORT_Q[sport]} ${name.replace(/["\\]/g, ' ')}`;
+  // fix212b: an item of the sport = P641 "sport" OR P106 "<sport> player" (a basketball item usually has only the latter)
+  const q = `haswbstatement:P31=Q5 haswbstatement:P641=${SPORT_Q[sport]}|P106=${OCCUPATION_Q[sport]} ${searchName(name).replace(/["\\]/g, ' ')}`;
   const s = await (await get(`${WD}action=query&list=search&srnamespace=0&srlimit=10&srsearch=${encodeURIComponent(q)}`)).json();
   const ids: string[] = (s?.query?.search || []).map((x: any) => x.title).filter((x: string) => /^Q\d+$/.test(x));
   if (!ids.length) return [];
@@ -204,7 +212,8 @@ async function candidatesFor(sport: PhotoSport, name: string): Promise<Candidate
   const named = ents.filter(e => namesOf(e).some(n => nameKey(n) === key));
   const refs = await refInfo(named.flatMap(e => [...claimIds(e, 'P27'), ...(sport === 'basketball' ? claimIds(e, 'P54') : [])]));
   return ents.map(e => ({
-    qid: e.id, names: namesOf(e), human: claimIds(e, 'P31').includes('Q5'), sports: claimIds(e, 'P641'), dob: claimDate(e),
+    qid: e.id, names: namesOf(e), human: claimIds(e, 'P31').includes('Q5'),
+    sports: [...claimIds(e, 'P641'), ...(claimIds(e, 'P106').includes(OCCUPATION_Q[sport]) ? [SPORT_Q[sport]] : [])], dob: claimDate(e),
     countries: claimIds(e, 'P27').flatMap(id => refs.get(id) || []),
     teams: claimIds(e, 'P54').map(id => (refs.get(id) || [])[0]).filter(Boolean),
     atp: claimStr(e, 'P536'), wta: claimStr(e, 'P597'), image: claimStr(e, 'P18')
@@ -534,22 +543,39 @@ export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn'
     for (const r of rows) { n500++; if (has('tennis', r.id)) top500++; if (r.rank <= 100) { n100++; if (has('tennis', r.id)) top100++; } }
   } catch { /* no tennis tables */ }
   let bbN = 0, bbHas = 0;
+  // fix212b: coverage per league (NBA ≥ 85 % and EuroLeague ≥ 50 % are the targets), and why the rest have none
+  const leagues: { code: string; n: number; has: number }[] = [];
   try {
-    const ids = (db.prepare(`SELECT DISTINCT player_id AS id FROM bb_roster WHERE updated_at >= ?`).all(new Date(Date.now() - 180 * DAY).toISOString()) as any[]).map(r => r.id);
-    bbN = ids.length; bbHas = ids.filter(id => has('basketball', id)).length;
+    const since = new Date(Date.now() - 180 * DAY).toISOString();
+    const rows = db.prepare(`SELECT DISTINCT r.player_id AS id, g.code FROM bb_roster r JOIN (SELECT home_id AS team_id, code FROM bb_games WHERE kickoff >= ? UNION SELECT away_id, code FROM bb_games WHERE kickoff >= ?) g ON g.team_id = r.team_id WHERE r.updated_at >= ?`).all(since, since, since) as any[];
+    const ids = new Set<number>();
+    const by = new Map<string, { code: string; n: number; has: number }>();
+    for (const r of rows) {
+      ids.add(r.id);
+      const l = by.get(r.code) || { code: r.code, n: 0, has: 0 };
+      l.n++; if (has('basketball', r.id)) l.has++;
+      by.set(r.code, l);
+    }
+    bbN = ids.size; bbHas = [...ids].filter(id => has('basketball', id)).length;
+    leagues.push(...[...by.values()].sort((a, b) => b.n - a.n));
   } catch { /* no basketball tables */ }
+  const reasons = (sport: PhotoSport) => { try { return db.prepare(`SELECT COALESCE(reason, status) AS reason, COUNT(*) AS n FROM player_photos WHERE sport = ? AND status <> 'ok' GROUP BY 1 ORDER BY n DESC LIMIT 6`).all(sport) as { reason: string; n: number }[]; } catch { return []; } };
   // a shown photo must have its author and licence stored (credit), and a file
   const bad = db.prepare(`SELECT sport, player_id, name FROM player_photos WHERE status = 'ok' AND (author IS NULL OR author = '' OR licence IS NULL OR licence = '' OR source_url IS NULL)`).all() as any[];
   const missing = (db.prepare(`SELECT sport, player_id, name, path FROM player_photos WHERE status = 'ok'`).all() as any[]).filter(r => !r.path || !fs.existsSync(fileOf(r.sport, r.path)!));
   const review = (db.prepare(`SELECT COUNT(*) AS n FROM player_photos WHERE status = 'review'`).get() as any).n;
   const lastRun = (db.prepare(`SELECT at FROM photo_wd_cache WHERE qid = '_lastRun'`).get() as any)?.at || null;
+  const nba = leagues.find(l => l.code === 'NBA'), el = leagues.find(l => l.code === 'EL');
   const items = [
+    ...leagues.slice(0, 12).map(l => `basketball ${l.code}: ${pct(l.has, l.n)} (${l.has} of ${l.n})`),
+    ...reasons('basketball').map(r => `basketball, no photo — ${r.reason}: ${r.n}`),
+    ...reasons('tennis').map(r => `tennis, no photo — ${r.reason}: ${r.n}`),
     ...bad.map(r => `${r.sport} ${r.player_id} ${r.name || ''}: shown without author / licence`),
     ...missing.slice(0, 10).map(r => `${r.sport} ${r.player_id} ${r.name || ''}: file missing (fetched again on the next run)`)
   ];
   const stale = process.env.PLAYER_PHOTOS !== '0' && (!lastRun || Date.parse(lastRun) < Date.now() - 2 * DAY);
   return {
-    id: 'player-photos', label: 'Player photos', level: bad.length ? 'fail' : stale || missing.length ? 'warn' : 'ok',
+    id: 'player-photos', label: 'Player photos', level: bad.length ? 'fail' : stale || missing.length || (nba && nba.n >= 50 && nba.has / nba.n < 0.85) || (el && el.n >= 50 && el.has / el.n < 0.5) ? 'warn' : 'ok',
     detail: `tennis top 100 ${pct(top100, n100)} · top 500 ${pct(top500, n500)} · basketball ${pct(bbHas, bbN)} (${bbHas} of ${bbN}) · ${review} to review · last run ${lastRun ? lastRun.slice(0, 16).replace('T', ' ') : 'never'}`,
     items
   };

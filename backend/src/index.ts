@@ -24,7 +24,9 @@ import { isWeb } from './services/role';
 import { attachWorker } from './services/ipc';
 import { onLive, loadLiveRows } from './services/liveState';
 import { noteGameView, onBox } from './services/gameViews';
-import { loadNewerStates } from './services/shared';
+import { loadNewerStates, sharedStatus } from './services/shared';
+import { markReady } from './services/readiness';
+import { markStartupDone } from './services/perf';
 import { WORKER_PORT } from './services/forward';
 import { workerState, type WorkerReport } from './services/workerHealth';
 import { heapShareMb } from './utils/memLimit';
@@ -189,9 +191,17 @@ const PORT = process.env.PORT || 3001;
  * Railway keeps the old instance serving until /api/health answers, so nobody waits for this.
  */
 const ready: Promise<void> = isWeb
-  ? (async () => { setJob('start: state load'); try { loadLiveRows(); await loadNewerStates(); } finally { setJob(null); } })()
-  : Promise.resolve();
-ready.catch(e => logger.warn(`start: state load: ${e?.message || e}`)).finally(() => server.listen(PORT, () => {
+  ? (async () => {
+    const t0 = Date.now();
+    setJob('start: state load');
+    try { loadLiveRows(); await loadNewerStates(); } finally { setJob(null); }
+    // fix212b: only now may a request be answered (app.ts answers 503 before); the load's stalls are counted apart
+    markReady({ loadMs: Date.now() - t0, states: Object.keys(sharedStatus()).length });
+    markStartupDone();
+    logger.info(`start: ${Object.keys(sharedStatus()).length} shared state(s) loaded in ${Date.now() - t0} ms — listening now`);
+  })()
+  : (markReady({ loadMs: 0, states: 0 }), markStartupDone(), Promise.resolve());
+ready.catch(e => { logger.warn(`start: state load: ${e?.message || e}`); markReady({ loadMs: -1, states: 0 }); markStartupDone(); }).finally(() => server.listen(PORT, () => {
   setJob('boot (scheduler start)'); setImmediate(() => setJob(null)); // fix165: the sync start-up work is named in /api/perf
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
@@ -199,7 +209,7 @@ ready.catch(e => logger.warn(`start: state load: ${e?.message || e}`)).finally((
   if (isWeb) {
     // fix202: serve straight away from the stored pages and the model state the worker left; then start the worker
     workerState.enabled = true;
-    startWorker();
+    if (process.env.WORKER_SPAWN !== '0') startWorker(); // WORKER_SPAWN=0: a test boots the web role alone
   } else {
     // WORKER=0: every job in this process (the scheduler module is only loaded here)
     void import('./jobs').then(j => j.startJobs()).catch(e => logger.error(`jobs: ${e?.message || e}`));
