@@ -60,17 +60,17 @@ import { buildNationalElo, syncNationalHistory, nationalEloStatus, nationalGoals
 import { buildClubElo, syncEuropeanCups, clubEloStatus, clubValueReport } from './services/clubElo';
 import { nationalValueSearch, historyMatchReport } from './services/squadValues';
 import { drawAlertsReport, drawFactorTest } from './services/drawAlerts';
-import { teamPage, searchTeams, searchPlayers, searchPlayersRemote, resolveAfTeamId, setTeamOverride, teamOverrides } from './services/teamPage';
-import { playerPage, findPlayer } from './services/playerPage';
+import { teamPage as teamPageB, searchTeams, searchPlayers, searchPlayersRemote as searchPlayersRemoteB, resolveAfTeamId, setTeamOverride, teamOverrides } from './services/teamPage';
+import { playerPage as playerPageB, findPlayer as findPlayerB } from './services/playerPage';
 import { unlockStatus, unlockMatch, unlockedIds, isFinished, testCheckout, PLANS, billingTestMode, unlockStats, REFUND_DAYS, FREE_WEEKLY_UNLOCKS, packsFor, buyPack, addCredits, creditBalance, creditEvents, PICK_PRICE, PACK_SIZES } from './services/billing';
 import { goalsCalibration } from './services/goalsCalibration';
 import { runDataAudit, lastDataAudit } from './services/dataAudit';
-import { newsFor, newsStatus, bbTeamNames, footballTeamNames, nflTeamNamesById } from './services/news';
+import { newsFor as newsForB, newsStatus, bbTeamNames, footballTeamNames, nflTeamNamesById } from './services/news';
 import { bbGet, bbStatus, bbSyncNow } from './services/basketball';
 import { adminResult, resultChecksList, checkResults, openCheck, resultFix, ResultError } from './services/bbResults';
 import { bdlGet, refreshNbaInjuries, nbaInjuryStatus } from './services/bbInjuries';
-import { bbPublic, bbLeagues, bbGames, bbGame, bbStandings, bbTeam } from './services/bbSite';
-import { bbPlayer, nbaLeaders, bbSearch, bbLeagueLeaders } from './services/bbPlayers';
+import { bbPublic, bbLeagues, bbGames, bbGame as bbGameB, bbStandings, bbTeam as bbTeamB } from './services/bbSite';
+import { bbPlayer as bbPlayerB, nbaLeaders, bbSearch, bbLeagueLeaders } from './services/bbPlayers';
 import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { bbLiveQuarterTest } from './services/bbLive';
@@ -78,11 +78,14 @@ import { highlightsFor, highlightsStatus, lastCandidates } from './services/high
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
 import { db } from './db';
 import { liveList, liveAt } from './services/liveState';
-import { isWeb, ROLE } from './services/role';
-import { workerHealth } from './services/workerHealth';
+import { isWeb, isWorker, ROLE } from './services/role';
+import { workerRoutes, workerRoutesStatus } from './services/workerRoutes';
+import { builder, webBuilds } from './services/builders';
+import { workerHealth, memorySizing } from './services/workerHealth';
+import { perfHours } from './services/perfHistory';
 import { sharedStatus } from './services/shared';
 import { forwardToWorker } from './services/forward';
-import { definePage, getPage, pageCacheStatus, type Query } from './services/pageCache';
+import { definePage, getPage, pageCacheStatus, pageMemStatus, type Query } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions } from './services/proxyGuard';
@@ -90,9 +93,9 @@ import { noteNetworkRequest, noteWho, whoToday } from './services/proxyScrapers'
 import { shortName } from './utils/tennisNames';
 import { tennisProbe, tennisStatus, tennisSample, tennisDataCheck, tennisMovedId } from './services/tennis';
 import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
-import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch, tennisRecord, levelRank, tennisTournament, tennisPlayer, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
+import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch as tennisMatchB, tennisRecord, levelRank, tennisTournament as tennisTournamentB, tennisPlayer as tennisPlayerB, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { geoCredit, countryOf } from './services/geo';
-import { seoPage, renderIndex, sitemapXml, SITEMAPS, todayGroups, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
+import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, todayGroups as todayGroupsB, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
 import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
 import { hubBySlug, hubByOld, hubOpen, buildHub, HUBS } from './services/hubs';
@@ -107,14 +110,36 @@ import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, dailyRunn
 import { nflProbe, nflCurrentSeason, asLeague, asLeagues, LEAGUES } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
 import { withNflPrediction, nflRatings, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
-import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame, nflStandings, nflTeam, nflPlayer, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury, nflTeamRow } from './services/nflSite';
+import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame as nflGameB, nflStandings, nflTeam as nflTeamB, nflPlayer as nflPlayerB, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury, nflTeamRow } from './services/nflSite';
 import { nflLiveNow, nflLiveCurve } from './services/nflLive';
 import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents } from './services/nflGameExtras';
 import { askAssistant, assistantConfigured, messagesToday, assistantStats } from './services/assistant';
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth } from './services/dataHealth';
-import { moreForGame, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, runBacktests, moreDaily, MORE_SPORTS, gameIdOf, hasExtras, saveOne } from './services/morePredictions';
+import { moreForGame as moreForGameB, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, runBacktests, moreDaily, MORE_SPORTS, gameIdOf, hasExtras, saveOne as saveOneB } from './services/morePredictions';
+/*
+ * fix210: the page builders — the web process never runs one (its routes pass these requests to the worker:
+ * services/workerRoutes.ts); with SL_STRICT_WEB=1 (scripts/no-web-compute.test.mjs) a call in the web process throws
+ */
+const teamPage = builder('team page', teamPageB);
+const searchPlayersRemote = builder('player search (provider)', searchPlayersRemoteB);
+const playerPage = builder('player page', playerPageB);
+const findPlayer = builder('player lookup', findPlayerB);
+const newsFor = builder('news', newsForB);
+const bbGame = builder('basketball game page', bbGameB);
+const bbTeam = builder('basketball team page', bbTeamB);
+const bbPlayer = builder('basketball player page', bbPlayerB);
+const tennisMatch = builder('tennis match page', tennisMatchB);
+const tennisTournament = builder('tennis tournament page', tennisTournamentB);
+const tennisPlayer = builder('tennis player page', tennisPlayerB);
+const seoPage = builder('crawler page', seoPageB);
+const todayGroups = builder('today lists', todayGroupsB);
+const nflGame = builder('NFL game page', nflGameB);
+const nflTeam = builder('NFL team page', nflTeamB);
+const nflPlayer = builder('NFL player page', nflPlayerB);
+const moreForGame = builder('more predictions (game)', moreForGameB);
+const saveOne = builder('more predictions (save)', saveOneB);
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders } from './services/unsettled';
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
@@ -283,7 +308,8 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.use('/api', trackVisit); // visitor counts for the admin page (hashed IPs only)
+// visitor counts for the admin page (hashed IPs only); fix210: in the web process only (the worker's requests came from it)
+if (!isWorker) app.use('/api', trackVisit);
 // keys are salted hashes (salt new at every start), so not even the memory holds a visitor's IP (fix140)
 const RL_SALT = randomBytes(16).toString('hex');
 const ipKey = (req: express.Request) => createHash('sha256').update(RL_SALT + (req.ip || 'unknown')).digest('hex').slice(0, 20);
@@ -315,10 +341,11 @@ app.use('/api', (req, _res, next) => {
   const crawler = verdict === true;
   (req as any).verifiedCrawler = crawler;
   (req as any).crawlerClaim = claims ? verdict === true : null; // fix183: the visitor counter's crawler check
-  notePageRequest(ua, crawler);
+  // fix210: counted once, in the web process (a request the worker answers was counted there before it was passed on)
+  if (!isWorker) notePageRequest(ua, crawler);
   // fix199: a data-centre / proxy address (asn.ts) — stored data only, tight limits, one Security-log line per network
   const nw = req.ip ? networkOf(req.ip) : null;
-  noteWho(ua, !!nw, crawler);
+  if (!isWorker) noteWho(ua, !!nw, crawler);
   const proxy = !!nw && proxyApplies({ network: true, admin: false, verifiedCrawler: crawler, verifiedAccount: !!req.user?.emailVerified });
   (req as any).proxyAnon = proxy && !req.user;
   const fake = claims && verdict === false;
@@ -328,8 +355,8 @@ app.use('/api', (req, _res, next) => {
   const cap = costCapped(keys);
   if (cap && !nw) logScraperOnce(`cap:${cap.key}:${cap.key === 'ip' ? ipH : cap.key === 'ua' ? keys.ua : keys.user}`, req,
     `provider-cost cap: ${cap.calls} provider calls today by this ${cap.key === 'ip' ? 'address' : cap.key === 'ua' ? 'user-agent' : 'account'} (cap ${cap.cap}): stored data only until midnight UTC`);
-  const refused = proxy && countedRead(req.method, req.originalUrl.split('?')[0]) ? proxyLimiter.hit(ipH, nw!.asn) : null;
-  if (nw) noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, capped: !!cap, fakeCrawler: fake, verified: crawler, exempt: !proxy && !crawler });
+  const refused = !isWorker && proxy && countedRead(req.method, req.originalUrl.split('?')[0]) ? proxyLimiter.hit(ipH, nw!.asn) : null;
+  if (nw && !isWorker) noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, capped: !!cap, fakeCrawler: fake, verified: crawler, exempt: !proxy && !crawler });
   if (refused) {
     _res.set('Retry-After', String(refused.retryAfter));
     return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.' });
@@ -469,6 +496,10 @@ app.use('/api', (req, res, next) => {
   }
   return res.status(access === 'anon' ? 401 : 403).json({ error: 'Not allowed' });
 });
+
+// fix210: the public routes that build a page (match / team / player / game pages, news, today, more predictions … of
+// every sport) are answered by the worker; signed-out copies are kept here (services/workerRoutes.ts)
+app.use(workerRoutes);
 
 // Staff console login (services/staffConsole.ts): the CRM and the Users/admin area need a second, separate sign-in once
 // per session. Console endpoints themselves (/api/crm/console/*) and maintenance tokens (which can't reach these) excluded.
@@ -1842,7 +1873,8 @@ function storeDetails(id: number, data: any, startedAt: number) {
     try { db.prepare(`INSERT OR REPLACE INTO match_details_store (match_id, json, built_at) VALUES (?, ?, ?)`).run(id, JSON.stringify(data), new Date().toISOString()); } catch (e: any) { logger.warn(`details store ${id}: ${e.message}`); }
   }
   detailsCache.set(id, { at: Date.now(), ttl: settled ? Infinity : detailsTtl(data), data, refreshing: false, startedAt: 0 });
-  if (detailsCache.size > 2000) { const oldest = [...detailsCache.entries()].sort((x, y) => x[1].at - y[1].at)[0]; if (oldest) detailsCache.delete(oldest[0]); }
+  // fix210: capped low (the page is also stored in the database; the worker answers every page request)
+  if (detailsCache.size > 300) { const oldest = [...detailsCache.entries()].sort((x, y) => x[1].at - y[1].at)[0]; if (oldest) detailsCache.delete(oldest[0]); }
 }
 async function refreshMatchDetails(id: number) {
   const t0 = Date.now();
@@ -3069,7 +3101,7 @@ app.get('/api/basketball/game/:id(\\d+)', async (req, res) => {
     if (!data) return res.status(404).json({ error: 'Game not found' });
     const ttl = bbGameTtl(data);
     if (ttl > 0) bbGameCache.set(key, { at: Date.now(), until: Date.now() + ttl, data }); else bbGameCache.delete(key);
-    while (bbGameCache.size > 1500) bbGameCache.delete(bbGameCache.keys().next().value!);
+    while (bbGameCache.size > 300) bbGameCache.delete(bbGameCache.keys().next().value!); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
     res.json({ data, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to load game');
@@ -3280,7 +3312,8 @@ app.get('/api/admin/link-check', async (req, res) => {
 // job, memory, restarts), the stored pages and the model state taken from the worker
 app.get('/api/perf', (_req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ data: { process: ROLE, ...perfStatus(), worker: workerHealth(), pages: pageCacheStatus(), shared: sharedStatus() }, timestamp: new Date().toISOString() });
+  // fix210: + memory sizing, the 24-h history of both processes, the worker routes and any page the web process built
+  res.json({ data: { process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker: workerHealth(), pages: pageCacheStatus(), pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), shared: sharedStatus() }, timestamp: new Date().toISOString() });
 });
 
 app.get('/api/af/status', async (_req, res) => {
@@ -3656,6 +3689,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   // fix202: the sport home pages (every language) as search engines get them: stored pages built in the worker
   const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr'].map(l => `/${l}`)].flatMap(l => ['', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
   definePage({ name: 'seo', freshMs: 10 * 60 * 1000, warm: SEO_HOMES.map(p => ({ path: p })), build: q => seoPage(q.path) });
+  // fix210: every other page's head tags + content (every language: /fr/* was 4 s on the web process) — built by the
+  // worker when first asked for, then served stored (10 min fresh; kept 2 days); the web process never builds one
+  const SEO_WAIT_MS = Number(process.env.SEO_WAIT_MS) || 4000;
+  definePage({ name: 'seo-page', freshMs: 10 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, build: q => seoPage(q.path) });
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
     // old hub URLs (fix134): /predictions/PL → /predictions/premier-league, permanently
@@ -3680,7 +3717,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     res.set('Cache-Control', 'no-cache');
     try {
       const home = seoHome(req.path);
-      const info = (home && (await getPage('seo', { path: home }))?.body) || seoPage(req.path);
+      // fix210: stored pages only; a page never built waits at most 4 s for the worker, then the plain app page
+      // (the app renders it in the browser; the next request gets the stored copy)
+      const info = home ? (await getPage('seo', { path: home }))?.body : (await getPage('seo-page', { path: req.path.slice(0, 300) }, { waitMs: SEO_WAIT_MS }))?.body;
+      if (!info) return res.sendFile(path.join(STATIC_DIR, 'index.html'));
       res.type('html').send(renderIndex(indexHtml, info));
     } catch (e: any) {
       logger.warn(`seo page ${req.path}: ${e.message}`);

@@ -8,6 +8,7 @@
  */
 import { PerformanceObserver, performance } from 'node:perf_hooks';
 import { isMainThread } from 'node:worker_threads';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import logger from '../utils/logger';
 import { isWorker } from './role';
 
@@ -35,7 +36,10 @@ try {
 
 const STEP = 500;
 const stalls: { at: string; ms: number; job: string | null }[] = [];
-const jobs = new Map<string, { runs: number; lastMs: number; maxMs: number; totalMs: number; lastAt: string; maxStallMs: number }>();
+// fix210: heapDeltaMb = heap after − before the last run; maxHeapDeltaMb = the worst run; peakHeapMb = highest heap seen while it ran
+type JobStat = { runs: number; lastMs: number; maxMs: number; totalMs: number; lastAt: string; maxStallMs: number; heapDeltaMb?: number; maxHeapDeltaMb?: number; peakHeapMb?: number };
+const jobs = new Map<string, JobStat>();
+const newStat = (): JobStat => ({ runs: 0, lastMs: 0, maxMs: 0, totalMs: 0, lastAt: '', maxStallMs: 0 });
 /** jobs in flight (a label can run more than once at a time) */
 const active = new Map<string, number>();
 let manual: string | null = null;
@@ -72,6 +76,7 @@ if (isMainThread) setInterval(() => {
     const done = ended.slice(0, 4).map(r => `${r.label}${r.detail ? ` [${r.detail}]` : ''} ${Math.round(r.end - r.start)} ms`).join(' + ');
     const job = [running, done].filter(Boolean).join(' + ') || null;
     stalls.push({ at: new Date(now).toISOString(), ms: lag, job });
+    noteHour(lag, job);
     if (stalls.length > 100) stalls.shift();
     // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
     // fix202: the worker's own loop is allowed to be busy (no visitor waits for it): its stalls are logged from 2 s
@@ -88,7 +93,65 @@ if (isMainThread) setInterval(() => {
   liveHour.clear();
 }, 3600 * 1000).unref();
 
+/*
+ * fix210: the last 24 hours in hourly buckets (stalls over 300 ms, the worst one, the highest heap / rss seen), so a
+ * trend is visible in /api/perf and data health (services/perfHistory.ts keeps them in perf_hours).
+ */
+export type HourBucket = { hour: string; stalls: number; worstMs: number; heapMaxMb: number; rssMaxMb: number; top: { ms: number; job: string | null }[] };
+const hours: HourBucket[] = [];
+function bucket(): HourBucket {
+  const hour = new Date().toISOString().slice(0, 13);
+  let b = hours[hours.length - 1];
+  if (!b || b.hour !== hour) { hours.push((b = { hour, stalls: 0, worstMs: 0, heapMaxMb: 0, rssMaxMb: 0, top: [] })); if (hours.length > 25) hours.shift(); }
+  return b;
+}
+function noteHour(lag: number, job: string | null) {
+  const b = bucket();
+  b.stalls++;
+  if (lag > b.worstMs) b.worstMs = lag;
+  // the hour's 5 worst, with what ran during them (data health lists them)
+  if (b.top.length < 5 || lag > b.top[b.top.length - 1].ms) { b.top.push({ ms: lag, job: job ? job.slice(0, 200) : null }); b.top.sort((x, y) => y.ms - x.ms); b.top.length = Math.min(5, b.top.length); }
+}
+/** this process's hourly buckets, oldest first (the current hour last) */
+export const hourBuckets = (): HourBucket[] => { bucket(); return hours.map(b => ({ ...b, top: [...b.top] })); };
+/**
+ * fix210: every 10 s — heap and rss into this hour's bucket, and the heap into each running job's peak (so the job
+ * running while the heap grew is named: /api/perf → worker.memByJob).
+ */
+export function sampleHeap() {
+  const m = process.memoryUsage();
+  const heap = Math.round(m.heapUsed / 1048576), rss = Math.round(m.rss / 1048576);
+  const b = bucket();
+  if (heap > b.heapMaxMb) b.heapMaxMb = heap;
+  if (rss > b.rssMaxMb) b.rssMaxMb = rss;
+  for (const label of active.keys()) { const j = jobs.get(label); if (j && heap > (j.peakHeapMb || 0)) j.peakHeapMb = heap; }
+  return { heapMb: heap, rssMb: rss, running: [...active.keys()] };
+}
+if (isMainThread) setInterval(sampleHeap, 10 * 1000).unref();
+/** fix210: the jobs whose runs grew the heap most (worst run: heap after − before) and the highest heap while they ran */
+export function memByJob(n = 5) {
+  return [...jobs.entries()].filter(([k, j]) => !k.startsWith('http ') && (j.maxHeapDeltaMb || j.peakHeapMb))
+    .sort((a, b) => (b[1].maxHeapDeltaMb || 0) - (a[1].maxHeapDeltaMb || 0) || (b[1].peakHeapMb || 0) - (a[1].peakHeapMb || 0)).slice(0, n)
+    .map(([job, j]) => ({ job, maxHeapDeltaMb: j.maxHeapDeltaMb || 0, lastHeapDeltaMb: j.heapDeltaMb || 0, peakHeapMb: j.peakHeapMb || 0, runs: j.runs }));
+}
+
+const heapMbNow = () => Math.round(process.memoryUsage().heapUsed / 1048576);
+
 export const yieldLoop = () => new Promise<void>(r => setImmediate(r));
+/**
+ * fix210: the one rule for heavy loops — give the thread back every `n` items or `ms` milliseconds, whichever comes
+ * first: `const step = yieldEvery(); for (…) { …; await step(); }`. `live` also waits while a live tick runs.
+ */
+export function yieldEvery(n = 50, ms = 100, opts: { live?: boolean } = {}) {
+  let i = 0, t = Date.now();
+  return async () => {
+    if (++i < n && Date.now() - t < ms) return;
+    i = 0;
+    await yieldLoop();
+    if (opts.live) await afterLive();
+    t = Date.now();
+  };
+}
 /** fix187: was the event loop blocked longer than `minLag` ms within the last `windowMs`? (background jobs back off) */
 export const stalledWithin = (windowMs: number, minLag = 500) => stalls.some(s => s.ms > minLag && Date.parse(s.at) >= Date.now() - windowMs);
 
@@ -171,12 +234,18 @@ export function yielder(budgetMs = 50) {
 export async function timed<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
   active.set(label, (active.get(label) || 0) + 1);
   const t0 = Date.now();
+  const h0 = process.memoryUsage().heapUsed;
   try {
     return await fn();
   } finally {
     const ms = Date.now() - t0;
-    const j = jobs.get(label) || { runs: 0, lastMs: 0, maxMs: 0, totalMs: 0, lastAt: '', maxStallMs: 0 };
+    const j = jobs.get(label) || newStat();
     j.runs++; j.lastMs = ms; j.maxMs = Math.max(j.maxMs, ms); j.totalMs += ms; j.lastAt = new Date().toISOString();
+    // fix210: heap before / after the run
+    const h1 = process.memoryUsage().heapUsed;
+    j.heapDeltaMb = Math.round((h1 - h0) / 1048576);
+    j.maxHeapDeltaMb = Math.max(j.maxHeapDeltaMb || 0, j.heapDeltaMb);
+    j.peakHeapMb = Math.max(j.peakHeapMb || 0, Math.round(h1 / 1048576));
     jobs.set(label, j);
     const n = (active.get(label) || 1) - 1;
     if (n > 0) active.set(label, n); else active.delete(label);
@@ -201,7 +270,7 @@ export function track(label: string, detail?: string): () => void {
     if (ended) return;
     ended = true;
     const ms = Date.now() - t0;
-    const j = jobs.get(label) || { runs: 0, lastMs: 0, maxMs: 0, totalMs: 0, lastAt: '', maxStallMs: 0 };
+    const j = jobs.get(label) || newStat();
     j.runs++; j.lastMs = ms; j.maxMs = Math.max(j.maxMs, ms); j.totalMs += ms; j.lastAt = new Date().toISOString();
     jobs.set(label, j);
     if (jobs.size > 400) for (const k of [...jobs.keys()].filter(k => k.startsWith('http ')).slice(0, 100)) jobs.delete(k);
@@ -234,8 +303,16 @@ export function every(label: string, fn: () => unknown, ms: number): NodeJS.Time
  * fix194: one heavy background job at a time (model daily, player pages warm, the tennis jobs). On 20 Oct the 04:04 UTC
  * daily job, the player-page warm-up and the tennis jobs ran together and the slices of all three added up to 1–2 s
  * stalls. A job asks for its turn with heavy(label, fn); a label already running or waiting is not queued twice (the
- * next tick of its timer comes soon enough). Never call heavy() from inside a heavy job: it would wait for itself.
+ * next tick of its timer comes soon enough).
+ *
+ * fix210: the worker's big jobs (AF matches, bb sync / bb model, stored pages, national elo, search index, page
+ * upcoming …) are all in this queue, so they nest: heavy() called while a heavy job runs (in its async context) runs
+ * inside that job at once instead of waiting for itself. heavyLater() queues from anywhere without waiting (a heavy job
+ * that asks for a page rebuild gets it after it ends).
  */
+const heavyCtx = new AsyncLocalStorage<{ label: string; done: boolean }>();
+/** fix210: inside a running heavy job (its async context)? */
+export const inHeavyJob = () => { const c = heavyCtx.getStore(); return !!c && !c.done; };
 const heavyQueue: { label: string; run: () => void }[] = [];
 const heavyWaiting = new Set<string>();
 let heavyNow: string | null = null;
@@ -256,6 +333,8 @@ setInterval(() => {
   heavyNext();
 }, 60 * 1000).unref();
 export function heavy<T>(label: string, fn: () => T | Promise<T>): Promise<T | undefined> {
+  // fix210: part of the heavy job that is running (its own context): run now, never wait for itself
+  if (inHeavyJob()) return Promise.resolve().then(fn);
   if (heavyWaiting.has(label) || heavyNow === label) return Promise.resolve(undefined);
   heavyWaiting.add(label);
   return new Promise<T | undefined>((resolve, reject) => {
@@ -266,8 +345,10 @@ export function heavy<T>(label: string, fn: () => T | Promise<T>): Promise<T | u
         heavyNow = label;
         heavySince = Date.now();
         const turn = ++heavyTurn;
+        const ctx = { label, done: false };
         // fix196: never starts during a live tick
-        afterLive().then(fn).then(resolve, reject).finally(() => {
+        afterLive().then(() => heavyCtx.run(ctx, fn)).then(resolve, reject).finally(() => {
+          ctx.done = true; // timers the job left behind no longer count as "inside" it
           if (turn !== heavyTurn) return; // released by the 45-min watchdog: the queue already moved on
           heavyNow = null;
           setImmediate(heavyNext);
@@ -276,6 +357,14 @@ export function heavy<T>(label: string, fn: () => T | Promise<T>): Promise<T | u
     });
     heavyNext();
   });
+}
+/** fix210: heavy() queued as its own turn even when called from inside a heavy job (never inline, never nested) */
+export function heavyQueued<T>(label: string, fn: () => T | Promise<T>): Promise<T | undefined> {
+  return heavyCtx.exit(() => heavy(label, fn));
+}
+/** fix210: queue a heavy job without waiting for it — from a heavy job too (it runs after the current one) */
+export function heavyLater(label: string, fn: () => unknown): void {
+  heavyQueued(label, () => timed(label, fn)).catch(e => logger.warn(`${label}: ${e?.message || e}`));
 }
 /** the heavy job running now and the ones waiting (for /api/perf) */
 export const heavyStatus = () => ({ running: heavyNow, forMs: heavyNow ? Date.now() - heavySince : 0, waiting: heavyQueue.map(q => q.label) });
@@ -298,9 +387,15 @@ export function perfStatus() {
     heavy: heavyStatus(),
     liveThisHour: Object.fromEntries(liveHour),
     recentStalls: stalls.slice(-25).reverse(),
+    // fix210: the worst stalls of the last hour (what to fix first)
+    topStalls: [...recent].sort((a, b) => b.ms - a.ms).slice(0, 10),
     // maxMs = longest run (waits for the data providers included); maxStallMs = worst event-loop freeze while it ran
     jobs: Object.fromEntries([...jobs.entries()].sort((a, b) => b[1].maxStallMs - a[1].maxStallMs || b[1].maxMs - a[1].maxMs)),
     memoryMb: Math.round(process.memoryUsage().rss / 1048576),
+    heapMb: heapMbNow(),
+    // fix210: the top heap growers and the last 24 h by the hour
+    memByJob: memByJob(),
+    hours: hourBuckets(),
     uptimeMin: Math.round(process.uptime() / 60)
   };
 }

@@ -12,8 +12,10 @@
  */
 import logger from '../utils/logger';
 import { db } from '../db';
+import { isMainThread } from 'node:worker_threads';
 import { yieldLoop } from './perf';
-import { onState, publishState } from './shared';
+import { onState, publishState, applyStored } from './shared';
+import { threadJobsOn, inThread } from './threadJob';
 import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import { injuryLoss } from './bbInjuries';
 
@@ -556,15 +558,29 @@ async function buildChanged(codes: string[], force: boolean): Promise<{ built: s
     if (force || leagueSig.get(c) !== sig || (m && Date.now() - Date.parse(m.builtAt) > MODEL_MAX_AGE_MS)) todo.push({ code: c, sig });
   }
   if (!todo.length) return { built: [], skipped: codes.length };
+  // fix210: in a worker thread (every box-score line is read there, and freed when it ends); its states come back
+  // through the same appliers the web process uses (models, talent), the walk-forward rows with the result
+  const r = threadJobsOn()
+    ? await inThread<{ built: string[]; wf: [string, [number, number, number, number][]][] }>('bb model', [todo.map(t => t.code)])
+    : await buildLeaguesHere(todo.map(t => t.code));
+  for (const [c, rows] of r.wf) wfByCode.set(c, rows);
+  for (const { code: c, sig } of todo) leagueSig.set(c, sig);
+  return { built: r.built, skipped: codes.length - todo.length };
+}
+/**
+ * The talent pass and these leagues' models, published as they are built (fix210: in the job thread; in-process with
+ * THREAD_JOBS=0). In a thread the other leagues' last models are loaded first (newcomer priors read them).
+ */
+export async function buildLeaguesHere(codes: string[]): Promise<{ built: string[]; wf: [string, [number, number, number, number][]][] }> {
+  if (!isMainThread) applyStored('bb:m:');
   try { await buildTalent(); } catch (e: any) { logger.warn(`bb-v3 talent: ${e.message}`); }
   // fix202: the web process gets the player numbers its predictions read (not the per-game history)
   publishState('bb:talent', { rates: talentState.rates, rosters: talentState.rosters, builtAt: talentState.builtAt });
   await yieldLoop();
   const built: string[] = [];
-  for (const { code: c, sig } of todo) {
+  for (const c of codes) {
     try {
       const m = await buildLeague(c);
-      leagueSig.set(c, sig);
       if (m) {
         built.push(c);
         publishLeague(m);
@@ -575,7 +591,7 @@ async function buildChanged(codes: string[], force: boolean): Promise<{ built: s
     }
     await yieldLoop();
   }
-  return { built, skipped: codes.length - todo.length };
+  return { built, wf: codes.filter(c => wfByCode.has(c)).map(c => [c, wfByCode.get(c)!]) };
 }
 
 /*
@@ -932,7 +948,8 @@ db.exec(`
 `);
 
 /** Save / refresh predictions for games in the next 7 days. A game's prediction is frozen at tip-off. */
-export function recordBbPredictions(codes?: string[]) {
+// fix210: async — 200 games a turn (predictions first, then one short transaction), a yield between turns
+export async function recordBbPredictions(codes?: string[]): Promise<number> {
   const now = new Date();
   // optional league filter (fix122): the 15-minute NBA injury refresh only re-saves NBA games
   const only = codes && codes.length ? ` AND code IN (${codes.map(() => '?').join(',')})` : '';
@@ -940,18 +957,19 @@ export function recordBbPredictions(codes?: string[]) {
     WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS')${only}`).all(now.toISOString(), new Date(now.getTime() + 7 * 86400000).toISOString(), ...(codes && codes.length ? codes : [])) as Game[];
   const up = db.prepare(`INSERT OR REPLACE INTO bb_predictions (game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
-  db.exec('BEGIN');
-  try {
-    for (const g of rows) {
-      const pr = predictGameCached(g); // fix159: also fills the cache the game lists read
-      if (!pr) continue;
-      up.run(g.game_id, g.code, g.kickoff, BB_MODEL, pr.pHome, pr.margin, pr.total, pr.home, pr.away, now.toISOString());
-      n++;
+  for (let i = 0; i < rows.length; i += 200) {
+    const part = rows.slice(i, i + 200).map(g => ({ g, pr: predictGameCached(g) })).filter(x => x.pr); // fix159: also fills the cache the game lists read
+    await yieldLoop();
+    db.exec('BEGIN');
+    try {
+      for (const { g, pr } of part) up.run(g.game_id, g.code, g.kickoff, BB_MODEL, pr!.pHome, pr!.margin, pr!.total, pr!.home, pr!.away, now.toISOString());
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
     }
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
+    n += part.length;
+    await yieldLoop();
   }
   return n;
 }

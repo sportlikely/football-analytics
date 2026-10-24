@@ -221,3 +221,86 @@ Result: _to fill in after the check (web stalls / worst, worker restarts, memory
 Still built in the web process on a visitor's request (as before, every model now read from the published state):
 match / game / team / player pages and their caches (the provider is called for a page never opened before), the
 visitor's calendar (.ics), favourites and picks, and nfl-v2's recent-game features when nfl-v2 is adopted.
+
+## fix210 (24 Oct 2026): the worker's memory crash and the last web stalls
+
+`/api/perf` before (Yarin's brief, 24 Oct): **worker restarts 3, last exit SIGABRT after 1 min** (rss 1,018 MB, heap
+707 MB, limit 1,536 MB); worker stalls 86 / h, worst 61.5 s (page upcoming, AF matches, bb model, stored pages, bb sync,
+national Elo, search index all in the first minutes); **web stalls 43 / h, worst 5.3 s** (`/fr/*` 4.0 s,
+`/api/player-page/:id` 3.9 s, `/api/news` and `/api/more/nfl` 2.5 s, `/api/matches/:id/details` 1.7 s,
+`/basketball/*` 1.2 s, `/api/more/basketball` 1.1 s).
+
+Reading: SIGABRT one minute after a start is V8 giving up at the heap limit; a 61-s stall next to it is the garbage
+collector running again and again on a full heap. At start every big job ran at once (the stored-page round, the
+search index, the AF window, the basketball model with every box-score line in memory, national Elo), and the worker
+kept every page it ever built in memory (stored pages, 2,000 match details, 3,000 player pages, 1,500 basketball game
+pages …) — after fix202 it answers all of them.
+
+### The rules (every new job and route follows them)
+
+1. **The web process never builds a page.** A public route that builds something is in `WORKER_ROUTES` and
+   `PUBLIC_ROUTES` (`services/workerRoutes.ts`): the web process passes it to the worker; a signed-out visitor's answer
+   is kept (memory, 32 MB cap, and `route_cache`, 2 days) and served stale-while-revalidate (freshness per route:
+   20 s for game pages, 2–10 min for lists, team / player pages). Signed-in visitors always get the worker's fresh
+   answer (their plan and unlocks change the page). The crawler HTML of every page and language is a stored page
+   (`seo-page`, built by the worker on first request; the web process waits at most 4 s, then sends the plain app
+   page). Page builders are registered (`services/builders.ts`); with `SL_STRICT_WEB=1` one called in the web
+   process throws, in production it is counted (`/api/perf → webBuilds`, should stay `{}`).
+   Guards: `npm run parity` (frontend/scripts/web-routes-check.ts: every public `app.get` is in `PUBLIC_ROUTES`; each
+   'worker' sample matches `WORKER_ROUTES`; game / team / player pages of every sport on the worker) and
+   `npm run test:fix210` (every public route + crawler pages opened in a web process: no builder, none over 50 ms).
+2. **A loop gives the thread back every 50 items or 100 ms** (`yieldEvery()` in perf.ts; `slicer()` /
+   `heavySlicer()` are the 30-ms versions). Big JSON in slices (`utils/jsonAsync.ts`), database writes 200–500 rows a
+   transaction, never a transaction open across an await.
+3. **One heavy job at a time** (`heavy()`): AF matches, bb sync / bb model, national Elo (build + sync), search
+   indexes, every stored page with warm queries (page upcoming, records, home lists, crawler homes, sitemaps), plus
+   the fix194 / fix196 list. heavy() nests: called inside a running heavy job (its async context) it runs there;
+   `heavyQueued()` / `heavyLater()` queue from anywhere without waiting (a page rebuild asked by a heavy job runs
+   after it).
+4. **CPU-heavy model builds in a thread** (`services/threadJob.ts` + `workers/jobThread.ts`): one thread per build,
+   ended after it (its memory is freed at once; a build over its heap — THREAD_HEAP_MB, max 12% of the container —
+   ends the thread, not the worker). The build's `publishState` calls come back one state a message and are applied
+   by the same `onState` code the web process uses, then published. Now: basketball model (talent pass + leagues),
+   national Elo. `THREAD_JOBS=0` = in the worker's main thread as before. Tennis has its own thread (fix200).
+5. **Every cache has a size cap.** Stored pages in memory: 400 copies / 48 MB in the web process
+   (`PAGE_MEM_MAX`, `PAGE_MEM_MAX_MB`), none in the worker (the copy is in page_cache); match details 300, basketball
+   game pages 300, player pages 400 + 300 (crawler), team pages 300 / 400 / 300, team analysis 500 per sport, NFL
+   pages 500, crawler memo 2,000 — each page is also in its database store, so a miss is a read, not a build.
+
+### Memory and restarts
+
+- Heaps from the container: `utils/memLimit.ts` reads cgroup `memory.max` (v2) or `memory.limit_in_bytes` (v1);
+  worker = min(WORKER_HEAP_MB, 55%), web = min(WEB_HEAP_MB, 30%) (the Dockerfile asks `node dist/utils/memLimit.js
+  web` before start), job thread = min(THREAD_HEAP_MB 512, 12%). `/api/perf → memory`.
+- Exit reason: the worker's stderr goes through the web process (still printed); on exit the last 50 lines, code and
+  signal are stored in `worker_exits` with a reason ("out of memory: heap limit", "killed (SIGKILL …)", "aborted
+  (SIGABRT …)", "crashed: …"). Restart after 5 s, then 30 s, then 2 min while it keeps dying (a run of 10+ min resets).
+- What grows: every job's heap before / after (`jobs[...].heapDeltaMb`, `maxHeapDeltaMb`, `peakHeapMb` — the heap is
+  sampled every 10 s into each running job); `/api/perf → worker.memByJob` = the top 5.
+- History: both processes write hourly buckets (stalls over 300 ms, worst, heap / rss peaks, the 5 worst stalls with
+  their jobs) to `perf_hours` every minute (48 h kept): `/api/perf → history` (web), `worker.hours`.
+- Data health (worker, every 5 min): **Web stalls** (fail over 5 / h or one over 500 ms), **Worker stalls** (fail over
+  2 s), **Worker memory** (warn over 70% of the heap limit), **Worker restarts** (warn 1, fail 3 in 24 h) — each with
+  the top offenders.
+
+### Measured locally (10 Oct copy, this laptop)
+
+| | In the worker's main thread | In a job thread |
+| --- | --- | --- |
+| Basketball model, 18 leagues (forced) | 5.6 s, loop blocked up to 37 ms, heap after 43 MB | 6.7 s, main loop blocked ≤ 21 ms, heap after 18 MB; the same 60 predictions and walk-forward rows |
+| National Elo build | 10.9 s, loop blocked up to 59 ms | 11.9 s, ≤ 19 ms; the same 40 predictions |
+
+`npm run test:fix210`: 91 URLs (81 public API routes + 10 crawler pages, every sport) in a web process on the copy:
+no builder ran, slowest 20 ms (before: `/api/leagues` asked Football-Data.org in the web process, 81 ms — moved to the
+worker). The real pair: a worker route built by the worker and the second request served from the web's copy; a killed
+worker recorded with its reason and back after 5 s. All earlier suites pass (fix200–fix209, proxy guard).
+
+Not measurable locally: the server's memory and stalls under real traffic.
+
+### Check after deploy (pending)
+
+One hour after the deploy, `/api/perf`: `worker.restarts` 0, `stallsLastHour` < 5 and `worstLastHour` < 500 ms,
+`worker.worstLastHour` < 2,000 ms, `webBuilds` {}. If the worker still exits: `worker.lastExit.reason` + `stderr`
+and `worker.memByJob` say why and which job; write it here.
+
+Result: _to fill in after the check._

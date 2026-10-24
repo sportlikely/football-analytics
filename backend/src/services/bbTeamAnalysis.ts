@@ -177,7 +177,7 @@ export function bbTeamAnalysis(teamId: number, code: string, name: string) {
   };
   // not cached while the league's model is still being built (server start)
   if (model) cache.set(teamId, { at: Date.now(), data });
-  if (cache.size > 3000) cache.delete(cache.keys().next().value as number);
+  if (cache.size > 500) cache.delete(cache.keys().next().value as number); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
   return data;
 }
 

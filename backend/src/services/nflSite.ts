@@ -298,6 +298,7 @@ const cached = <T>(key: string, fn: () => T, ms = 10 * 60 * 1000): T => {
   if (c && Date.now() - c.at < ms) return c.v;
   const v = fn();
   cache.set(key, { at: Date.now(), v });
+  if (cache.size > 500) cache.delete(cache.keys().next().value as string); // fix210: capped (it had no limit)
   return v;
 };
 

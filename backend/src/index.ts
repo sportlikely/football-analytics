@@ -27,6 +27,8 @@ import { noteGameView, onBox } from './services/gameViews';
 import { loadNewerStates } from './services/shared';
 import { WORKER_PORT } from './services/forward';
 import { workerState, type WorkerReport } from './services/workerHealth';
+import { heapShareMb } from './utils/memLimit';
+import { exitReason, saveWorkerExit, startPerfHistory } from './services/perfHistory';
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -120,15 +122,31 @@ process.env.SL_INTERNAL_KEY = INTERNAL_KEY;
 let worker: ChildProcess | null = null;
 let stopping = false;
 
+// fix210: a worker that keeps dying waits 5 s, then 30 s, then 2 min before each next try (a run of 10+ min resets it)
+const RESTART_WAIT_MS = [5_000, 30_000, 120_000];
+let quickFails = 0;
+
 function startWorker() {
   // dist/worker.js under node; worker.ts under ts-node-dev (development)
   const ts = __filename.endsWith('.ts');
   const file = path.join(__dirname, ts ? 'worker.ts' : 'worker.js');
-  const heap = parseInt(process.env.WORKER_HEAP_MB || '1536', 10);
-  const execArgv = [...(ts ? ['-r', 'ts-node/register/transpile-only'] : []), `--max-old-space-size=${heap}`];
+  // fix210: min(WORKER_HEAP_MB, 55% of the container's memory limit)
+  const heap = heapShareMb('worker');
+  workerState.heap = heap;
+  const execArgv = [...(ts ? ['-r', 'ts-node/register/transpile-only'] : []), `--max-old-space-size=${heap.heapMb}`];
+  // fix210: its stderr passes through this process (still printed), so the last 50 lines say why it ended
   const child = fork(file, [], {
     env: { ...process.env, SL_ROLE: 'worker', SL_INTERNAL_KEY: INTERNAL_KEY, WORKER_PORT: String(WORKER_PORT) },
-    execArgv
+    execArgv,
+    stdio: ['inherit', 'inherit', 'pipe', 'ipc']
+  });
+  const tail: string[] = [];
+  let partial = '';
+  child.stderr?.on('data', (chunk: Buffer) => {
+    process.stderr.write(chunk);
+    const lines = (partial + chunk.toString('utf8')).split('\n');
+    partial = lines.pop() || '';
+    for (const l of lines) if (l.trim()) { tail.push(l.slice(0, 500)); if (tail.length > 50) tail.shift(); }
   });
   worker = child;
   workerState.pid = child.pid || null;
@@ -136,16 +154,19 @@ function startWorker() {
   attachWorker(child);
   child.on('message', (m: any) => { if (m?.t === 'health') workerState.report = m as WorkerReport; });
   child.on('exit', (code, signal) => {
+    if (partial.trim()) tail.push(partial.slice(0, 500));
     const ranMin = Math.round((Date.now() - workerState.startedAt) / 60000);
-    workerState.lastExit = { at: new Date().toISOString(), code, signal, ranMin };
+    const reason = stopping ? 'stopped (SIGTERM)' : exitReason(code, signal, tail);
+    workerState.lastExit = { at: new Date().toISOString(), code, signal, ranMin, reason, stderr: tail.slice(-50) };
     workerState.pid = null;
     worker = null;
     attachWorker(null);
+    saveWorkerExit({ code, signal, reason, ranMin, heapLimitMb: heap.heapMb, stderr: tail });
     if (stopping) return;
     workerState.restarts++;
-    // quick restart; a worker that keeps dying waits longer (up to a minute) before the next try
-    const wait = ranMin >= 10 ? 1000 : Math.min(60_000, 2000 * 2 ** Math.min(5, workerState.restarts - 1));
-    logger.warn(`worker exited (code ${code}, signal ${signal}, ran ${ranMin} min): restart in ${Math.round(wait / 1000)} s`);
+    quickFails = ranMin >= 10 ? 1 : quickFails + 1;
+    const wait = RESTART_WAIT_MS[Math.min(quickFails, RESTART_WAIT_MS.length) - 1];
+    logger.warn(`worker exited (${reason}; code ${code}, signal ${signal}, ran ${ranMin} min): restart in ${Math.round(wait / 1000)} s`);
     setTimeout(startWorker, wait).unref();
   });
 }
@@ -165,6 +186,7 @@ server.listen(PORT, () => {
   setJob('boot (scheduler start)'); setImmediate(() => setJob(null)); // fix165: the sync start-up work is named in /api/perf
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
+  startPerfHistory('web'); // fix210: this process's hourly stalls and memory (perf_hours)
   if (isWeb) {
     // fix202: serve straight away from the stored pages and the model state the worker left; then start the worker
     workerState.enabled = true;

@@ -12,6 +12,7 @@
  * In one process (WORKER=0) publishState does nothing: the jobs fill the same memory the pages read.
  */
 import v8 from 'node:v8';
+import { isMainThread, workerData } from 'node:worker_threads';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { isWeb, isWorker } from './role';
@@ -26,8 +27,17 @@ const applied = new Map<string, { ver: number; at: number; ms: number; bytes: nu
 const published = new Map<string, { ver: number; at: number; ms: number; bytes: number }>();
 let lastVer = 0;
 
+/*
+ * fix210: inside a job thread (services/threadJob.ts) a publish goes to the thread's caller (the worker's main thread),
+ * which applies it there and publishes it to the web process.
+ */
+const IN_JOB_THREAD = !isMainThread && !!workerData?.jobThread;
+let capture: ((key: string, value: unknown) => void) | null = null;
+export const onCaptured = (fn: (key: string, value: unknown) => void) => { capture = fn; };
+
 /** worker: store `value` under `key` and tell the web process (no-op in one process / in the web process). */
 export function publishState(key: string, value: unknown): void {
+  if (IN_JOB_THREAD) { capture?.(key, value); return; }
   if (!isWorker) return;
   const t0 = Date.now();
   try {
@@ -46,6 +56,21 @@ export function publishState(key: string, value: unknown): void {
 /** web: `apply(key, value)` for every state whose key starts with `prefix` (registered at module load). */
 export function onState(prefix: string, apply: Apply): void {
   appliers.push({ prefix, apply });
+}
+const applyHere = (key: string, value: unknown) => { for (const a of appliers) if (key === a.prefix || key.startsWith(a.prefix)) a.apply(key, value); };
+/**
+ * fix210 (worker / one process): a state built in a job thread — applied in this process by the same code the web
+ * process uses, then published (stored + the web process told) as if it had been built here.
+ */
+export function applyState(key: string, value: unknown) {
+  applyHere(key, value);
+  publishState(key, value);
+}
+/** fix210 (job thread): the last published copies of these states, applied before a build (e.g. the other leagues' models) */
+export function applyStored(prefix: string) {
+  for (const r of db.prepare(`SELECT key, data FROM shared_state WHERE key LIKE ? ORDER BY key`).all(`${prefix}%`) as any[]) {
+    try { applyHere(r.key, v8.deserialize(Buffer.from(r.data))); } catch (e: any) { logger.warn(`shared state ${r.key}: ${e?.message || e}`); }
+  }
 }
 
 const wanted = (key: string) => appliers.some(a => key === a.prefix || key.startsWith(a.prefix));

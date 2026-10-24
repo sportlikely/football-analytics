@@ -1,0 +1,249 @@
+/**
+ * fix210: public routes that build something are never computed in the web process.
+ *
+ * On 24 Oct the web process still froze for up to 5 s on pages built on a visitor's request (/api/player-page 3.9 s,
+ * /api/news and /api/more/nfl 2.5 s, /api/matches/:id/details 1.7 s, the basketball / NFL / tennis game, team and
+ * player pages …). Those routes are listed here (WORKER_ROUTES). The web process passes such a request to the worker,
+ * which answers it from its own copy of the app (services/forward.ts) — same handlers, same rules (rate limits,
+ * locked predictions, crawler checks). For a signed-out visitor the answer is also kept (memory, capped, and
+ * page_cache rows "route:…", kept 2 days), keyed by the URL and what can change it for a signed-out visitor
+ * (a data-centre network, a verified search engine), and served stale-while-revalidate: a copy older than the
+ * route's freshness is sent at once while the worker builds the next. Signed-in visitors (their unlocks and plan
+ * change the page) always get the worker's fresh answer.
+ *
+ * While the worker restarts: the last copy if there is one, else 503 (Retry-After). The web process never builds.
+ */
+import type express from 'express';
+import { db } from '../db';
+import logger from '../utils/logger';
+import { isWeb } from './role';
+import { fetchFromWorker, forwardToWorker, type WorkerAnswer } from './forward';
+
+type RouteDef = { re: RegExp; freshMs: number };
+const S = 1000, MIN = 60 * S;
+/**
+ * The public routes the worker answers (GET). Every sport: football match / team / player pages, leagues, today, news,
+ * search, more predictions per game; basketball, American football and tennis game / team / player / leaders /
+ * standings / rankings pages. The stored pages (lists, records, home pages: pageCache.ts) are not here — the web
+ * process sends those itself. scripts/no-web-compute.test.mjs checks every public route against this list.
+ */
+export const WORKER_ROUTES: RouteDef[] = [
+  { re: /^\/api\/matches\/\d+(\/(details|scorers|highlights|head2head|extras\/[a-z0-9]+))?$/, freshMs: 20 * S },
+  { re: /^\/api\/leagues$/, freshMs: 10 * MIN }, // the competition list (asks Football-Data.org)
+  { re: /^\/api\/leagues\/[^/]+\/(standings|results|scorers)$/, freshMs: 2 * MIN },
+  { re: /^\/api\/(teams|team-page)\/\d+$/, freshMs: 10 * MIN },
+  { re: /^\/api\/player-page\/(\d+|find)$/, freshMs: 30 * MIN },
+  { re: /^\/api\/(today|news|search)$/, freshMs: 2 * MIN },
+  { re: /^\/api\/how-it-works\/[a-z-]+$/, freshMs: 10 * MIN },
+  { re: /^\/api\/more\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 1 * MIN },
+  { re: /^\/api\/basketball\/game\/\d+(\/(scorers|highlights))?$/, freshMs: 20 * S },
+  { re: /^\/api\/basketball\/(team|player)\/\d+$/, freshMs: 10 * MIN },
+  { re: /^\/api\/basketball\/(leaders|upset-watch)$/, freshMs: 5 * MIN },
+  { re: /^\/api\/nfl\/game\/\d+(\/(scorers|highlights))?$/, freshMs: 20 * S },
+  { re: /^\/api\/nfl\/(games|standings|leaders|upset-watch|accuracy)$/, freshMs: 2 * MIN },
+  { re: /^\/api\/nfl\/(team|player)\/\d+$/, freshMs: 10 * MIN },
+  { re: /^\/api\/tennis\/match\/-?\d+(\/highlights)?$/, freshMs: 20 * S },
+  { re: /^\/api\/tennis\/(matches|rankings|accuracy|upset-watch)$/, freshMs: 2 * MIN },
+  { re: /^\/api\/tennis\/(player\/\d+|tournament\/[a-z0-9-]+)$/, freshMs: 10 * MIN },
+  { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN }
+];
+
+/**
+ * Every public GET route of app.ts and who answers it (fix210):
+ * - worker: built by the worker (WORKER_ROUTES above; signed-out copies kept here)
+ * - stored: a stored page (pageCache.ts) or model state the worker published (shared.ts) — the web process only sends it
+ * - web:    a small read the web process does itself (the visitor's own account, picks, favourites, config, files)
+ * `kind` marks each sport's game / team / player pages (every sport must have them on the worker).
+ * `npm run parity` (frontend/scripts/web-routes-check.ts) fails when a public route of app.ts is missing here or a
+ * worker route's sample is not in WORKER_ROUTES; scripts/no-web-compute.test.mjs opens every sample in a web process.
+ */
+export type RouteSport = 'football' | 'basketball' | 'nfl' | 'tennis' | 'all';
+export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 'stored' | 'web'; sample: string; kind?: 'game' | 'team' | 'player' }[] = [
+  { path: '/api/health', sport: 'all', by: 'web', sample: '/api/health' },
+  { path: '/api/auth/me', sport: 'all', by: 'web', sample: '/api/auth/me' },
+  { path: '/api/auth/config', sport: 'all', by: 'web', sample: '/api/auth/config' },
+  { path: '/api/auth/signup-token', sport: 'all', by: 'web', sample: '/api/auth/signup-token' },
+  { path: '/api/auth/2fa', sport: 'all', by: 'web', sample: '/api/auth/2fa' },
+  { path: '/api/auth/export', sport: 'all', by: 'web', sample: '/api/auth/export' },
+  { path: '/api/assistant/status', sport: 'all', by: 'web', sample: '/api/assistant/status' },
+  { path: '/api/picks/game/:sport(fb|bb|nfl)/:id(\\d+)', sport: 'all', by: 'web', sample: '/api/picks/game/fb/1' },
+  { path: '/api/picks/record', sport: 'all', by: 'web', sample: '/api/picks/record' },
+  { path: '/api/favorites', sport: 'all', by: 'web', sample: '/api/favorites' },
+  { path: '/api/favorites/calendar', sport: 'all', by: 'worker', sample: '/api/favorites/calendar' },
+  { path: '/api/unsubscribe', sport: 'all', by: 'web', sample: '/api/unsubscribe' },
+  { path: '/api/testers/invite/:code', sport: 'all', by: 'web', sample: '/api/testers/invite/abc' },
+  { path: '/api/unlocks', sport: 'all', by: 'web', sample: '/api/unlocks' },
+  { path: '/api/billing/plans', sport: 'all', by: 'web', sample: '/api/billing/plans' },
+  { path: '/api/changelog', sport: 'all', by: 'web', sample: '/api/changelog' },
+  { path: '/api/guides', sport: 'all', by: 'web', sample: '/api/guides' },
+  { path: '/api/guides/:slug', sport: 'all', by: 'web', sample: '/api/guides/how-to-read-a-match-page' },
+  { path: '/api/how-it-works/:sport', sport: 'all', by: 'worker', sample: '/api/how-it-works/football' },
+  { path: '/api/search', sport: 'all', by: 'worker', sample: '/api/search?q=arsenal' },
+  { path: '/api/today', sport: 'all', by: 'worker', sample: '/api/today?sport=football' },
+  { path: '/api/news', sport: 'all', by: 'worker', sample: '/api/news' },
+  { path: '/api/hub', sport: 'football', by: 'stored', sample: '/api/hub' },
+  { path: '/api/hub/:slug', sport: 'football', by: 'stored', sample: '/api/hub/premier-league' },
+  { path: '/api/public/record', sport: 'football', by: 'stored', sample: '/api/public/record' },
+  { path: '/api/public/results', sport: 'football', by: 'stored', sample: '/api/public/results' },
+  { path: '/api/public/geo-source', sport: 'all', by: 'web', sample: '/api/public/geo-source' },
+  { path: '/api/public/summary', sport: 'football', by: 'stored', sample: '/api/public/summary' },
+  { path: '/api/more/:sport(football|basketball|nfl|tennis)/record', sport: 'all', by: 'stored', sample: '/api/more/basketball/record' },
+  { path: '/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/more/nfl/1' },
+  // football
+  { path: '/api/matches/upcoming', sport: 'football', by: 'stored', sample: '/api/matches/upcoming' },
+  { path: '/api/matches/live', sport: 'football', by: 'stored', sample: '/api/matches/live' },
+  { path: '/api/matches/:id(\\d+)', sport: 'football', by: 'worker', sample: '/api/matches/1' },
+  { path: '/api/matches/:id(\\d+)/highlights', sport: 'football', by: 'worker', sample: '/api/matches/1/highlights' },
+  { path: '/api/matches/:id(\\d+)/details', sport: 'football', by: 'worker', sample: '/api/matches/1/details', kind: 'game' },
+  { path: '/api/matches/:id(\\d+)/scorers', sport: 'football', by: 'worker', sample: '/api/matches/1/scorers' },
+  { path: '/api/matches/:id(\\d+)/extras/:part(stats|lineups|h2h|rest)', sport: 'football', by: 'worker', sample: '/api/matches/1/extras/stats' },
+  { path: '/api/matches/:id(\\d+)/head2head', sport: 'football', by: 'worker', sample: '/api/matches/1/head2head' },
+  { path: '/api/leagues', sport: 'football', by: 'worker', sample: '/api/leagues' },
+  { path: '/api/leagues/:code/standings', sport: 'football', by: 'worker', sample: '/api/leagues/PL/standings' },
+  { path: '/api/leagues/:code/results', sport: 'football', by: 'worker', sample: '/api/leagues/PL/results' },
+  { path: '/api/leagues/:code/scorers', sport: 'football', by: 'worker', sample: '/api/leagues/PL/scorers' },
+  { path: '/api/teams/:id(\\d+)', sport: 'football', by: 'worker', sample: '/api/teams/1' },
+  { path: '/api/team-page/:id(\\d+)', sport: 'football', by: 'worker', sample: '/api/team-page/1', kind: 'team' },
+  { path: '/api/player-page/find', sport: 'football', by: 'worker', sample: '/api/player-page/find?name=x&team=1' },
+  { path: '/api/player-page/:id(\\d+)', sport: 'football', by: 'worker', sample: '/api/player-page/1', kind: 'player' },
+  // basketball
+  { path: '/api/basketball/config', sport: 'basketball', by: 'web', sample: '/api/basketball/config' },
+  { path: '/api/basketball/games', sport: 'basketball', by: 'stored', sample: '/api/basketball/games' },
+  { path: '/api/basketball/game/:id(\\d+)', sport: 'basketball', by: 'worker', sample: '/api/basketball/game/1', kind: 'game' },
+  { path: '/api/basketball/game/:id(\\d+)/scorers', sport: 'basketball', by: 'worker', sample: '/api/basketball/game/1/scorers' },
+  { path: '/api/basketball/game/:id(\\d+)/highlights', sport: 'basketball', by: 'worker', sample: '/api/basketball/game/1/highlights' },
+  { path: '/api/basketball/standings/:code([A-Za-z0-9]{2,8})', sport: 'basketball', by: 'stored', sample: '/api/basketball/standings/NBA' },
+  { path: '/api/basketball/team/:id(\\d+)', sport: 'basketball', by: 'worker', sample: '/api/basketball/team/1', kind: 'team' },
+  { path: '/api/basketball/player/:id(\\d+)', sport: 'basketball', by: 'worker', sample: '/api/basketball/player/1', kind: 'player' },
+  { path: '/api/basketball/leaders', sport: 'basketball', by: 'worker', sample: '/api/basketball/leaders' },
+  { path: '/api/basketball/record', sport: 'basketball', by: 'stored', sample: '/api/basketball/record' },
+  { path: '/api/basketball/upset-watch', sport: 'basketball', by: 'worker', sample: '/api/basketball/upset-watch' },
+  // American football
+  { path: '/api/nfl/config', sport: 'nfl', by: 'web', sample: '/api/nfl/config' },
+  { path: '/api/nfl/home', sport: 'nfl', by: 'stored', sample: '/api/nfl/home' },
+  { path: '/api/nfl/games', sport: 'nfl', by: 'worker', sample: '/api/nfl/games' },
+  { path: '/api/nfl/game/:id(\\d+)', sport: 'nfl', by: 'worker', sample: '/api/nfl/game/1', kind: 'game' },
+  { path: '/api/nfl/game/:id(\\d+)/scorers', sport: 'nfl', by: 'worker', sample: '/api/nfl/game/1/scorers' },
+  { path: '/api/nfl/game/:id(\\d+)/highlights', sport: 'nfl', by: 'worker', sample: '/api/nfl/game/1/highlights' },
+  { path: '/api/nfl/standings', sport: 'nfl', by: 'worker', sample: '/api/nfl/standings' },
+  { path: '/api/nfl/team/:id(\\d+)', sport: 'nfl', by: 'worker', sample: '/api/nfl/team/1', kind: 'team' },
+  { path: '/api/nfl/player/:id(\\d+)', sport: 'nfl', by: 'worker', sample: '/api/nfl/player/1', kind: 'player' },
+  { path: '/api/nfl/upset-watch', sport: 'nfl', by: 'worker', sample: '/api/nfl/upset-watch' },
+  { path: '/api/nfl/accuracy', sport: 'nfl', by: 'worker', sample: '/api/nfl/accuracy' },
+  { path: '/api/nfl/record', sport: 'nfl', by: 'stored', sample: '/api/nfl/record' },
+  { path: '/api/nfl/leaders', sport: 'nfl', by: 'worker', sample: '/api/nfl/leaders' },
+  // tennis (a tournament is its "team" page)
+  { path: '/api/tennis/config', sport: 'tennis', by: 'web', sample: '/api/tennis/config' },
+  { path: '/api/tennis/home', sport: 'tennis', by: 'stored', sample: '/api/tennis/home' },
+  { path: '/api/tennis/matches', sport: 'tennis', by: 'worker', sample: '/api/tennis/matches' },
+  { path: '/api/tennis/match/:id(-?\\d+)', sport: 'tennis', by: 'worker', sample: '/api/tennis/match/1', kind: 'game' },
+  { path: '/api/tennis/record', sport: 'tennis', by: 'stored', sample: '/api/tennis/record' },
+  { path: '/api/tennis/tournament/:key([a-z0-9-]{3,90})', sport: 'tennis', by: 'worker', sample: '/api/tennis/tournament/wimbledon', kind: 'team' },
+  { path: '/api/tennis/player/:id(\\d+)', sport: 'tennis', by: 'worker', sample: '/api/tennis/player/1', kind: 'player' },
+  { path: '/api/tennis/rankings', sport: 'tennis', by: 'worker', sample: '/api/tennis/rankings' },
+  { path: '/api/tennis/accuracy', sport: 'tennis', by: 'worker', sample: '/api/tennis/accuracy' },
+  { path: '/api/tennis/match/:id(\\d+)/highlights', sport: 'tennis', by: 'worker', sample: '/api/tennis/match/1/highlights' },
+  { path: '/api/tennis/upset-watch', sport: 'tennis', by: 'worker', sample: '/api/tennis/upset-watch' }
+];
+/** the crawler HTML pages (every language): stored pages built by the worker (app.ts: 'seo' / 'seo-page') */
+export const PAGE_SAMPLES = ['/', '/fr', '/fr/team/33', '/de/player/276', '/basketball', '/basketball/game/1', '/es/basketball/team/1', '/american-football/game/1', '/tennis/player/1', '/it/match/1'];
+export const workerRouteOf = (path: string) => WORKER_ROUTES.find(r => r.re.test(path)) || null;
+
+/* ---------- the signed-out copies ---------- */
+
+type Copy = { at: number; status: number; type: string; cache: string | null; body: Buffer };
+const KEEP_MS = 2 * 86400000;
+const MEM_MAX_BYTES = (Number(process.env.ROUTE_MEM_MAX_MB) || 32) * 1048576;
+const mem = new Map<string, Copy>();
+let memBytes = 0;
+const memDel = (k: string) => { const c = mem.get(k); if (c) { memBytes -= c.body.length; mem.delete(k); } };
+function memSet(k: string, c: Copy) {
+  memDel(k);
+  mem.set(k, c);
+  memBytes += c.body.length;
+  for (const key of mem.keys()) { if (memBytes <= MEM_MAX_BYTES && mem.size <= 3000) break; if (key !== k) memDel(key); }
+}
+if (isWeb) {
+  db.exec(`CREATE TABLE IF NOT EXISTS route_cache (key TEXT PRIMARY KEY, at INTEGER NOT NULL, status INTEGER NOT NULL, type TEXT NOT NULL, cache TEXT, body BLOB NOT NULL)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_route_cache_at ON route_cache(at)`);
+  setInterval(() => { try { db.prepare(`DELETE FROM route_cache WHERE at < ?`).run(Date.now() - KEEP_MS); } catch { /* next hour */ } }, 3600 * 1000).unref();
+}
+function readCopy(k: string): Copy | null {
+  const m = mem.get(k);
+  if (m) { mem.delete(k); mem.set(k, m); return m; }
+  try {
+    const r: any = db.prepare(`SELECT at, status, type, cache, body FROM route_cache WHERE key = ?`).get(k);
+    if (!r) return null;
+    const c: Copy = { at: r.at, status: r.status, type: r.type, cache: r.cache, body: Buffer.from(r.body) };
+    memSet(k, c);
+    return c;
+  } catch { return null; }
+}
+function saveCopy(k: string, a: WorkerAnswer): Copy {
+  const c: Copy = { at: Date.now(), status: a.status, type: String(a.headers['content-type'] || 'application/json; charset=utf-8'), cache: a.headers['cache-control'] ? String(a.headers['cache-control']) : null, body: a.body };
+  memSet(k, c);
+  try { db.prepare(`INSERT OR REPLACE INTO route_cache (key, at, status, type, cache, body) VALUES (?, ?, ?, ?, ?, ?)`).run(k, c.at, c.status, c.type, c.cache, c.body); } catch (e: any) { logger.warn(`route cache: ${e?.message || e}`); }
+  return c;
+}
+const sendCopy = (res: express.Response, c: Copy, state: string) => {
+  res.status(c.status).set('Content-Type', c.type).set('X-SL-Copy', state);
+  if (c.cache) res.set('Cache-Control', c.cache);
+  res.end(c.body);
+};
+
+/** a signed-out request's copy key: the URL (query sorted) + what changes the page for a signed-out visitor */
+function copyKey(req: express.Request): string {
+  const [path, qs = ''] = req.originalUrl.split('?');
+  const q = new URLSearchParams(qs);
+  q.sort();
+  const flags = [(req as any).proxyAnon ? 'proxy' : '', (req as any).verifiedCrawler ? 'crawler' : ''].filter(Boolean).join(',');
+  return `${path}?${q.toString()}|${flags}`;
+}
+
+// one fetch per key at a time: the other visitors asking for it wait for the same answer
+const inflight = new Map<string, Promise<Copy | WorkerAnswer>>();
+const stats = { forwarded: 0, served: 0, stale: 0, refreshed: 0, failed: 0 };
+
+function fetchCopy(k: string, req: express.Request, keep: boolean): Promise<Copy | WorkerAnswer> {
+  let p = inflight.get(k);
+  if (!p) {
+    p = fetchFromWorker(req).then(a => (keep && a.status === 200 ? saveCopy(k, a) : a)).finally(() => inflight.delete(k));
+    inflight.set(k, p);
+  }
+  return p;
+}
+const isCopy = (x: Copy | WorkerAnswer): x is Copy => typeof (x as Copy).at === 'number';
+
+/** web process: the middleware (after the access, rate-limit and crawler checks; before the route handlers) */
+export function workerRoutes(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!isWeb || req.method !== 'GET') return next();
+  const route = workerRouteOf(req.path);
+  if (!route) return next();
+  // signed in: the plan and the unlocks change the page — always the worker's fresh answer, streamed
+  if (req.user || req.access === 'admin') { stats.forwarded++; return forwardToWorker(req, res); }
+  const k = copyKey(req);
+  const have = readCopy(k);
+  if (have) {
+    const stale = Date.now() - have.at > route.freshMs;
+    sendCopy(res, have, stale ? 'stale' : 'fresh');
+    if (stale) { stats.stale++; fetchCopy(k, req, true).then(() => { stats.refreshed++; }, () => { stats.failed++; }); } else stats.served++;
+    return;
+  }
+  stats.forwarded++;
+  fetchCopy(k, req, true).then(x => {
+    if (isCopy(x)) return sendCopy(res, x, 'new');
+    res.status(x.status);
+    for (const h of ['content-type', 'cache-control', 'retry-after']) if (x.headers[h]) res.set(h, String(x.headers[h]));
+    res.end(x.body);
+  }, () => {
+    stats.failed++;
+    if (!res.headersSent) res.status(503).set('Retry-After', '10').json({ error: 'Loading, please try again in a moment' });
+  });
+}
+
+/** /api/perf: how the worker routes were answered since start, and the copies kept */
+export function workerRoutesStatus() {
+  let rows = 0;
+  try { rows = (db.prepare(`SELECT COUNT(*) AS n FROM route_cache`).get() as any)?.n || 0; } catch { /* no table (one process) */ }
+  return { ...stats, inMemory: mem.size, memMb: Math.round(memBytes / 1048576), stored: rows };
+}

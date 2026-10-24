@@ -14,8 +14,9 @@ import { afGet, afConfigured } from './apiFootball';
 import { Prediction } from './predictionModel';
 import { Meetings, commonSense, type H2H } from './h2hGuard';
 import { nationalValueFor } from './squadValues';
-import { every, after, runSteps, runStepsAsync } from './perf';
+import { runSteps, runStepsAsync, afterHeavy, everyHeavy } from './perf';
 import { onState, publishState } from './shared';
+import { threadJobsOn, inThread } from './threadJob';
 
 export const MODEL_ELO = 'elo-intl';
 const AF_OFFSET = 1_000_000_000;
@@ -325,9 +326,12 @@ export const buildNationalElo = () => runSteps(buildSteps());
  */
 let building: Promise<unknown> | null = null;
 export function buildNationalEloAsync() {
-  if (!building) building = runStepsAsync(buildSteps()).finally(() => { building = null; });
+  // fix210: in a worker thread (its state comes back through the onState below, as in the web process)
+  if (!building) building = (threadJobsOn() ? inThread('national elo') : runStepsAsync(buildSteps())).finally(() => { building = null; });
   return building;
 }
+/** fix210 (job thread): the whole build at once — the thread is its own */
+export const buildNationalEloHere = () => buildNationalElo();
 function* buildSteps(): Generator<unknown, { matches: number; teams: number; engine: 'grid' | 'elo' }> {
   const rows = db.prepare(`SELECT * FROM nat_matches ORDER BY date, fixture_id`).all() as any[];
   ratings.clear();
@@ -675,10 +679,11 @@ export function nationalEloStatus() {
 export function startNationalEloScheduler() {
   if (!afConfigured()) return;
   // fix167: built in slices (was one synchronous build at start-up and after every sync)
-  after('national elo build', () => buildNationalEloAsync().catch(() => undefined /* empty table on first boot */), 0);
+  // fix210: in the heavy-job queue; the build itself runs in a worker thread (services/threadJob.ts)
+  afterHeavy('national elo build', () => buildNationalEloAsync().catch(() => undefined /* empty table on first boot */), 0);
   const run = () => syncNationalHistory().then(r => (r.requests ? buildNationalEloAsync() : undefined)).catch(() => undefined);
-  after('national elo', run, 3 * 60 * 1000);
-  every('national elo', run, 12 * 3600 * 1000);
+  afterHeavy('national elo', run, 3 * 60 * 1000);
+  everyHeavy('national elo', run, 12 * 3600 * 1000);
 }
 
 /** Team analysis for a national team: Elo and world rank among active national teams. */

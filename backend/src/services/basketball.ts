@@ -11,7 +11,7 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { buildAll, recordBbPredictions, bumpBbInjuries } from './bbModel';
-import { timed, every, after, perGames } from './perf';
+import { timed, every, after, perGames, heavy, afterHeavy, everyHeavy } from './perf';
 import { publishState } from './shared';
 import { refreshNbaInjuries, nbaInjuryStatus } from './bbInjuries';
 import { applyResultFixes, checkResults } from './bbResults';
@@ -527,15 +527,16 @@ export function startBasketballScheduler() {
   if (started || !KEY()) return;
   started = true;
   // ratings from the stored games right away, so the site has predictions before the first sync finishes
-  setTimeout(() => void (async () => {
+  // fix210: the model build and the sync in the heavy-job queue (one heavy job at a time in the worker)
+  setTimeout(() => void heavy('bb model', async () => {
     try {
       fixFieldGoals();
       await timed('bb model', () => buildAll(BB_LEAGUES.map(l => l.code)));
       await timed('bb predictions', () => recordBbPredictions());
     } catch (e: any) { logger.warn(`Basketball model: ${e.message}`); }
-  })(), 15 * 1000).unref();
-  after('bb sync', () => bbTick(), 45 * 1000).unref();
-  every('bb sync', () => void bbTick(), 30 * 60 * 1000).unref();
+  }), 15 * 1000).unref();
+  afterHeavy('bb sync', () => bbTick(), 45 * 1000).unref();
+  everyHeavy('bb sync', () => bbTick(), 30 * 60 * 1000).unref();
   setInterval(() => void timed('bb live', () => liveTick()), 60 * 1000).unref(); // fix155: named in /api/perf
   // fix208: live box scores, 20 s after the scores (a game that just ended is already FT)
   setTimeout(() => setInterval(() => void timed('bb live box', () => bbLiveBoxTick()), 60 * 1000).unref(), 20 * 1000).unref();

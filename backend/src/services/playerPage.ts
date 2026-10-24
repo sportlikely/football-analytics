@@ -495,7 +495,7 @@ async function buildAndStore(pid: number, stored: any) {
   try {
     const data = await build(pid);
     cache.set(pid, { at: Date.now(), data });
-    if (cache.size > 3000) cache.delete(cache.keys().next().value as number);
+    if (cache.size > 400) cache.delete(cache.keys().next().value as number); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
     db.prepare(`INSERT OR REPLACE INTO player_page_store (player_id, json, built_at) VALUES (?, ?, ?)`).run(pid, JSON.stringify(data), data.builtAt);
     return data;
   } catch (e: any) {
@@ -527,7 +527,7 @@ async function crawlerPage(pid: number) {
   data = data || storedData || seasonDataPage(pid);
   if (!data) throw Object.assign(new Error('Player not found'), { response: { status: 404 } });
   crawlerCache.set(pid, { at: Date.now(), data });
-  if (crawlerCache.size > 2000) crawlerCache.delete(crawlerCache.keys().next().value as number);
+  if (crawlerCache.size > 300) crawlerCache.delete(crawlerCache.keys().next().value as number); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
   return data;
 }
 

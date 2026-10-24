@@ -33,6 +33,7 @@ import { createHealthStore, NOT_YET } from '../utils/healthStore';
 import { LATE_MS } from '../utils/liveBox';
 import { BB_MAJOR } from './basketball';
 import { scorersHealth } from './scorersCheck';
+import { perfChecks } from './perfChecks';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -346,6 +347,9 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
       });
     }
   } catch { /* no report yet */ }
+
+  // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts
+  try { checks.push(...perfChecks(now)); } catch (e: any) { logger.warn(`perf checks: ${e?.message || e}`); }
 
   const level: Level = checks.some(c => c.level === 'fail') ? 'fail' : checks.some(c => c.level === 'warn') ? 'warn' : 'ok';
   return { level, at: new Date(now).toISOString(), checks };

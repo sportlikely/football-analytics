@@ -13,7 +13,8 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { isWeb, isWorker, runsJobs } from './role';
 import { onIpc, sendIpc } from './ipc';
-import { timed, yieldLoop } from './perf';
+import { timed, yieldLoop, heavyQueued } from './perf';
+import { stringifyAsync } from '../utils/jsonAsync';
 
 db.exec(`CREATE TABLE IF NOT EXISTS page_cache (key TEXT PRIMARY KEY, json TEXT NOT NULL, built_at INTEGER NOT NULL, ms INTEGER NOT NULL DEFAULT 0)`);
 
@@ -27,6 +28,12 @@ export interface PageDef {
   variants?: Record<string, (body: any) => string>;
   /** queries built on start and kept fresh by the worker */
   warm?: Query[];
+  /** fix210: how fresh this copy should be, from the copy itself (a finished game keeps longer than a live one); default freshMs */
+  freshOf?: (body: any) => number;
+  /** fix210: a stored copy older than this is dropped (default 7 days; on-demand pages sooner) */
+  keepMs?: number;
+  /** fix210: false = built only when a visitor asks for it (player / match / news pages …), never kept fresh by the warmer */
+  refresh?: boolean;
 }
 export interface Stored { body: any; builtAt: number; variant: (v: string) => string | undefined }
 
@@ -45,14 +52,36 @@ const parseKey = (key: string) => {
 };
 
 // this process's copy of each page (parsed once per build)
-type Mem = { builtAt: number; checkedAt: number; body: any; variants: Map<string, string | null> };
+// fix210: capped, least recently used out first: at most MEM_MAX copies and MEM_MAX_MB in memory (the rest stays in
+// page_cache and is read again when asked for). The worker keeps none: it held every page it ever built.
+type Mem = { builtAt: number; checkedAt: number; body: any; variants: Map<string, string | null>; bytes: number };
 const mem = new Map<string, Mem>();
+const MEM_MAX = Number(process.env.PAGE_MEM_MAX) || 400;
+const MEM_MAX_BYTES = (Number(process.env.PAGE_MEM_MAX_MB) || 48) * 1048576;
+let memBytes = 0;
+function memGet(key: string): Mem | undefined {
+  const m = mem.get(key);
+  if (m) { mem.delete(key); mem.set(key, m); } // most recently used last
+  return m;
+}
+function memDel(key: string) { const m = mem.get(key); if (m) { memBytes -= m.bytes; mem.delete(key); } }
+function memSet(key: string, m: Mem) {
+  memDel(key);
+  mem.set(key, m);
+  memBytes += m.bytes;
+  for (const k of mem.keys()) { if (mem.size <= MEM_MAX && memBytes <= MEM_MAX_BYTES) break; if (k !== key) memDel(k); }
+}
 const stats = new Map<string, { builtAt: number; ms: number; kb: number; builds: number; requested: number }>();
+const statOf = (key: string) => {
+  let st = stats.get(key);
+  if (!st) { stats.set(key, (st = { builtAt: 0, ms: 0, kb: 0, builds: 0, requested: 0 })); if (stats.size > 3000) stats.delete(stats.keys().next().value as string); }
+  return st;
+};
 
 function readRow(key: string): Mem | null {
   const row: any = db.prepare(`SELECT json, built_at FROM page_cache WHERE key = ?`).get(key);
   if (!row) return null;
-  try { return { builtAt: row.built_at, checkedAt: Date.now(), body: JSON.parse(row.json), variants: new Map() }; } catch { return null; }
+  try { return { builtAt: row.built_at, checkedAt: Date.now(), body: JSON.parse(row.json), variants: new Map(), bytes: row.json.length * 2 }; } catch { return null; }
 }
 const builtAtOf = (key: string): number => (db.prepare(`SELECT built_at FROM page_cache WHERE key = ?`).get(key) as any)?.built_at || 0;
 
@@ -61,7 +90,11 @@ function stored(key: string, m: Mem): Stored {
     body: m.body,
     builtAt: m.builtAt,
     variant: v => {
-      if (!m.variants.has(v)) m.variants.set(v, (db.prepare(`SELECT json FROM page_cache WHERE key = ? AND built_at = ?`).get(`${key}#${v}`, m.builtAt) as any)?.json ?? null);
+      if (!m.variants.has(v)) {
+        const s: string | null = (db.prepare(`SELECT json FROM page_cache WHERE key = ? AND built_at = ?`).get(`${key}#${v}`, m.builtAt) as any)?.json ?? null;
+        m.variants.set(v, s);
+        if (s && mem.get(key) === m) { m.bytes += s.length * 2; memBytes += s.length * 2; }
+      }
       return m.variants.get(v) ?? undefined;
     }
   };
@@ -72,6 +105,23 @@ function stored(key: string, m: Mem): Stored {
 const building = new Map<string, Promise<void>>();
 // keys a visitor asked for lately: the worker keeps them fresh for an hour after the last request
 const requestedAt = new Map<string, number>();
+const noteRequested = (key: string, def: PageDef) => {
+  if (def.refresh === false) return; // on-demand pages: rebuilt when asked for again, not kept fresh
+  requestedAt.delete(key); requestedAt.set(key, Date.now());
+  if (requestedAt.size > 2000) requestedAt.delete(requestedAt.keys().next().value as string);
+};
+const freshOf = (def: PageDef, body: any) => { try { return def.freshOf ? def.freshOf(body) : def.freshMs; } catch { return def.freshMs; } };
+// worker: when each key was last built (the copy itself is in page_cache, not in memory)
+const builtAtMem = new Map<string, number>();
+/**
+ * fix210: pages with warm queries (the lists every visitor opens: big) are built in the heavy-job queue, one heavy job
+ * at a time in the worker; on-demand pages (one player, one match: small, a visitor may be waiting) are built at once.
+ */
+function buildQueued(key: string): Promise<void> {
+  const def = defs.get(parseKey(key).name);
+  if (!def?.warm?.length || !runsJobs) return buildNow(key);
+  return heavyQueued(`page ${key}`, () => buildNow(key)).then(() => undefined);
+}
 
 function buildNow(key: string): Promise<void> {
   const run = building.get(key);
@@ -83,7 +133,8 @@ function buildNow(key: string): Promise<void> {
     const t0 = Date.now();
     const body = await def.build(q);
     await yieldLoop();
-    const json = JSON.stringify(body);
+    // fix210: a long list becomes JSON in slices (the upcoming list is several MB)
+    const json = await stringifyAsync(body);
     const at = Date.now();
     const variants: [string, string][] = [];
     for (const [v, fn] of Object.entries(def.variants || {})) { variants.push([`${key}#${v}`, fn(body)]); await yieldLoop(); }
@@ -95,10 +146,10 @@ function buildNow(key: string): Promise<void> {
       for (const [k, s] of variants) ins.run(k, s, at, 0);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
-    mem.set(key, { builtAt: at, checkedAt: at, body, variants: new Map(variants.map(([k, s]) => [k.slice(key.length + 1), s])) });
-    const st = stats.get(key) || { builtAt: 0, ms: 0, kb: 0, builds: 0, requested: 0 };
+    if (!isWorker) memSet(key, { builtAt: at, checkedAt: at, body, variants: new Map(variants.map(([k, s]) => [k.slice(key.length + 1), s])), bytes: (json.length + variants.reduce((n, [, s]) => n + s.length, 0)) * 2 });
+    else { builtAtMem.delete(key); builtAtMem.set(key, at); if (builtAtMem.size > 5000) builtAtMem.delete(builtAtMem.keys().next().value as string); }
+    const st = statOf(key);
     st.builtAt = at; st.ms = at - t0; st.kb = Math.round(json.length / 1024); st.builds++;
-    stats.set(key, st);
     sendIpc({ t: 'page', key, builtAt: at });
   }).catch(e => {
     logger.warn(`page ${key}: ${e?.message || e}`);
@@ -121,14 +172,15 @@ function askWorker(key: string) {
 if (isWeb) onIpc('page', m => {
   const key = String(m.key);
   const cur = mem.get(key);
-  if (cur && cur.builtAt < Number(m.builtAt)) mem.delete(key);
+  if (cur && cur.builtAt < Number(m.builtAt)) memDel(key);
   for (const w of waiters.get(key) || []) w();
   waiters.delete(key);
 });
 if (isWorker) onIpc('page:build', m => {
   const key = String(m.key);
-  requestedAt.set(key, Date.now());
-  void buildNow(key);
+  const def = defs.get(parseKey(key).name);
+  if (def) noteRequested(key, def);
+  void buildQueued(key);
 });
 
 const WAIT_FIRST_MS = Number(process.env.PAGE_WAIT_MS) || 10_000;
@@ -137,35 +189,36 @@ const WAIT_FIRST_MS = Number(process.env.PAGE_WAIT_MS) || 10_000;
  * The stored copy of a page (null only when none was ever built and the build did not finish in 10 s). A copy older
  * than the page's freshMs is still returned; a new one is built in the background.
  */
-export async function getPage(name: string, q: Query = {}): Promise<Stored | null> {
+export async function getPage(name: string, q: Query = {}, opts: { waitMs?: number } = {}): Promise<Stored | null> {
   const def = defs.get(name);
   if (!def) throw new Error(`page ${name} is not defined`);
   const key = pageKey(name, q);
-  const st = stats.get(key) || { builtAt: 0, ms: 0, kb: 0, builds: 0, requested: 0 };
-  st.requested++; stats.set(key, st);
-  let m = mem.get(key);
+  statOf(key).requested++;
+  let m = memGet(key);
   // web: the worker may have rebuilt it without the message reaching us (restart): look at the row now and then
   if (m && isWeb && Date.now() - m.checkedAt > Math.min(def.freshMs, 60_000)) {
     m.checkedAt = Date.now();
-    if (builtAtOf(key) > m.builtAt) { mem.delete(key); m = undefined; }
+    if (builtAtOf(key) > m.builtAt) { memDel(key); m = undefined; }
   }
   if (!m) {
     const row = readRow(key);
-    if (row) mem.set(key, (m = row));
+    if (row) { m = row; if (!isWorker) memSet(key, row); }
   }
   if (m) {
-    if (Date.now() - m.builtAt > def.freshMs) {
-      if (runsJobs) { requestedAt.set(key, Date.now()); void buildNow(key); } else askWorker(key);
+    if (Date.now() - m.builtAt > freshOf(def, m.body)) {
+      if (runsJobs) { noteRequested(key, def); void buildQueued(key); } else askWorker(key);
     }
     return stored(key, m);
   }
   // never built: one process builds it now; the web process asks the worker and waits (at most 10 s)
   if (runsJobs) {
-    requestedAt.set(key, Date.now());
+    noteRequested(key, def);
     await buildNow(key);
+    const row = isWorker ? readRow(key) : null;
+    if (row) return stored(key, row);
   } else {
     await new Promise<void>(resolve => {
-      const t = setTimeout(resolve, WAIT_FIRST_MS);
+      const t = setTimeout(resolve, opts.waitMs ?? WAIT_FIRST_MS);
       let l = waiters.get(key);
       if (!l) waiters.set(key, (l = []));
       l.push(() => { clearTimeout(t); resolve(); });
@@ -173,7 +226,7 @@ export async function getPage(name: string, q: Query = {}): Promise<Stored | nul
       askWorker(key);
     });
     const row = readRow(key);
-    if (row) mem.set(key, row);
+    if (row) memSet(key, row);
   }
   const done = mem.get(key);
   return done ? stored(key, done) : null;
@@ -184,7 +237,7 @@ export async function getPage(name: string, q: Query = {}): Promise<Stored | nul
  * asked for within the last hour, fresh. Returns when the first round is done.
  */
 export async function startPageWarmer(): Promise<void> {
-  const due = (key: string, def: PageDef) => Date.now() - (mem.get(key)?.builtAt || builtAtOf(key)) > def.freshMs;
+  const due = (key: string, def: PageDef) => Date.now() - (mem.get(key)?.builtAt || builtAtMem.get(key) || builtAtOf(key)) > def.freshMs;
   const round = async (first: boolean) => {
     const keys = new Set<string>();
     for (const def of defs.values()) for (const q of def.warm || []) keys.add(pageKey(def.name, q));
@@ -192,13 +245,19 @@ export async function startPageWarmer(): Promise<void> {
     for (const key of keys) {
       const def = defs.get(parseKey(key).name);
       if (!def || (!first && !due(key, def))) continue;
-      await buildNow(key);
+      await buildQueued(key); // fix210: one heavy job at a time (the first round took 205 s beside every other start-up job)
       await yieldLoop();
     }
   };
   await round(true);
   // copies nobody asked for in a week (an old query, a league gone) are dropped
-  setInterval(() => { try { db.prepare(`DELETE FROM page_cache WHERE built_at < ?`).run(Date.now() - 7 * 86400000); } catch { /* next hour */ } }, 3600 * 1000).unref();
+  // fix210: on-demand pages (keepMs) sooner: a crawler opening thousands of player / match pages must not fill the file
+  setInterval(() => {
+    try {
+      db.prepare(`DELETE FROM page_cache WHERE built_at < ?`).run(Date.now() - 7 * 86400000);
+      for (const d of defs.values()) if (d.keepMs) db.prepare(`DELETE FROM page_cache WHERE (key = ? OR key LIKE ?) AND built_at < ?`).run(d.name, `${d.name}?%`, Date.now() - d.keepMs);
+    } catch { /* next hour */ }
+  }, 3600 * 1000).unref();
   let running = false;
   setInterval(() => {
     if (running) return;
@@ -213,7 +272,7 @@ export function refreshPages(...names: string[]) {
   const keys = new Set<string>();
   for (const d of defs.values()) if (names.includes(d.name)) for (const q of d.warm || []) keys.add(pageKey(d.name, q));
   for (const k of requestedAt.keys()) if (names.includes(parseKey(k).name)) keys.add(k);
-  for (const k of keys) void buildNow(k);
+  for (const k of keys) void buildQueued(k); // fix210: queued after the heavy job that asked for it, never inside it
 }
 
 /** /api/perf: each stored page (when built, how long the build took, size, requests in this process) */
@@ -223,4 +282,6 @@ export function pageCacheStatus() {
 }
 
 /** tests: forget this process's copies (the next read comes from the table) */
-export const _forgetPageMemory = () => mem.clear();
+export const _forgetPageMemory = () => { mem.clear(); memBytes = 0; };
+/** /api/perf: this process's in-memory copies (fix210: capped) */
+export const pageMemStatus = () => ({ copies: mem.size, mb: Math.round(memBytes / 1048576), maxCopies: MEM_MAX, maxMb: Math.round(MEM_MAX_BYTES / 1048576) });

@@ -20,6 +20,7 @@ import { isCrawlerRequest, noProviderCalls } from './afUsage';
 import { teamAnalysis, teamAnalysisTeaser } from './teamAnalysis';
 import { twinDupIds, warmPlayers } from './playerPage';
 import { runsJobs } from './role';
+import { yieldEvery } from './perf';
 import { onState, publishState } from './shared';
 
 const AF_OFFSET = 1_000_000_000;
@@ -55,7 +56,7 @@ async function cached<T>(key: string, ttl: number, load: () => Promise<T>): Prom
   if (c && Date.now() - c.at < ttl) return c.data;
   const data = await load();
   cache.set(key, { at: Date.now(), data });
-  if (cache.size > 2000) cache.delete(cache.keys().next().value as string);
+  if (cache.size > 300) cache.delete(cache.keys().next().value as string); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
   return data;
 }
 
@@ -65,8 +66,10 @@ type IndexTeam = { id: number; name: string; norm: string; national: boolean; n:
 let index: { at: number; teams: IndexTeam[] } | null = null;
 
 function teamIndex(): IndexTeam[] {
-  // fix202: the web process uses the worker's copy (rebuilt there every 6 h); it builds one only if it never got one
-  if (index && (Date.now() - index.at < TTL || !runsJobs)) return index.teams;
+  // fix202: the web process uses the worker's copy (rebuilt there every 6 h)
+  // fix210: and never builds one (empty until the worker's copy arrives)
+  if (!runsJobs) return index?.teams || [];
+  if (index && Date.now() - index.at < TTL) return index.teams;
   const byId = new Map<number, IndexTeam>();
   const add = (id: number, name: string, national: boolean) => {
     if (!id || !name) return;
@@ -114,24 +117,43 @@ let pIndex: { at: number; players: IndexPlayer[] } | null = null;
  * page has been built, so "erling haaland", "haaland" and "e haaland" all find him.
  */
 function playerIndex(): IndexPlayer[] {
-  if (pIndex && (Date.now() - pIndex.at < TTL || !runsJobs)) return pIndex.players;
+  // fix210: built only by the worker's job (buildPlayerIndex, in pages); the pages read the last copy
+  return pIndex?.players || [];
+}
+/**
+ * fix210: the player index in pages of player ids (500 stored player pages / 2,000 player ids at a time) with a yield
+ * between: one GROUP BY over every player season and a json_extract over every stored player page blocked the worker
+ * for up to a minute.
+ */
+async function buildPlayerIndex(): Promise<IndexPlayer[]> {
+  const step = yieldEvery(50, 100);
   const best = new Map<number, { name: string; team: number; season: number; minutes: number; position: string | null }>();
   try {
-    const rows = db.prepare(`
+    const span: any = db.prepare(`SELECT MIN(player_id) AS lo, MAX(player_id) AS hi, MAX(season) AS s FROM af_player_season`).get();
+    const seasons = db.prepare(`
       SELECT player_id, name, team_id, season, SUM(COALESCE(minutes, 0)) AS minutes, MAX(position) AS position
-      FROM af_player_season WHERE season >= (SELECT MAX(season) - 1 FROM af_player_season)
-      GROUP BY player_id, team_id, season`).all() as any[];
-    for (const r of rows) {
-      if (!r.name) continue;
-      const b = best.get(r.player_id);
-      if (!b || r.season > b.season || (r.season === b.season && r.minutes > b.minutes))
-        best.set(r.player_id, { name: r.name, team: r.team_id, season: r.season, minutes: r.minutes, position: r.position || null });
+      FROM af_player_season WHERE season >= ? AND player_id >= ? AND player_id < ?
+      GROUP BY player_id, team_id, season`);
+    for (let lo = span?.lo ?? 0; span?.hi != null && lo <= span.hi; lo += 2000) {
+      for (const r of seasons.all(span.s - 1, lo, lo + 2000) as any[]) {
+        if (!r.name) continue;
+        const b = best.get(r.player_id);
+        if (!b || r.season > b.season || (r.season === b.season && r.minutes > b.minutes))
+          best.set(r.player_id, { name: r.name, team: r.team_id, season: r.season, minutes: r.minutes, position: r.position || null });
+      }
+      await step();
     }
   } catch { /* table missing */ }
   const full = new Map<number, { name: string; all: string }>();
   try {
-    const rows = db.prepare(`SELECT player_id, json_extract(json, '$.player.name') AS name, json_extract(json, '$.player.firstname') AS f, json_extract(json, '$.player.lastname') AS l FROM player_page_store`).all() as any[];
-    for (const r of rows) if (r.name) full.set(r.player_id, { name: String(r.name), all: [r.name, r.f, r.l].filter(Boolean).join(' ') });
+    const page = db.prepare(`SELECT rowid AS rid, player_id, json_extract(json, '$.player.name') AS name, json_extract(json, '$.player.firstname') AS f, json_extract(json, '$.player.lastname') AS l FROM player_page_store WHERE rowid > ? ORDER BY rowid LIMIT 500`);
+    for (let after = 0; ;) {
+      const rows = page.all(after) as any[];
+      if (!rows.length) break;
+      for (const r of rows) if (r.name) full.set(r.player_id, { name: String(r.name), all: [r.name, r.f, r.l].filter(Boolean).join(' ') });
+      after = rows[rows.length - 1].rid;
+      await step();
+    }
   } catch { /* no pages yet */ }
   const players: IndexPlayer[] = [];
   for (const [id, b] of best) {
@@ -139,15 +161,17 @@ function playerIndex(): IndexPlayer[] {
     const norm = normalizeName(`${b.name} ${f?.all || ''}`);
     const display = f ? f.name : b.name;
     players.push({ id, name: display, words: [...new Set(norm.split(' '))], norm: normalizeName(b.name), teamId: b.team, position: b.position, minutes: b.minutes });
+    await step();
   }
-  pIndex = { at: Date.now(), players };
   return players;
 }
 
 /** fix202 (worker): both search indexes built again and handed to the web process (search, team-name lookups) */
-export function warmSearchIndex() {
-  index = null; pIndex = null;
-  teamIndex(); playerIndex();
+export async function warmSearchIndex() {
+  index = null;
+  teamIndex();
+  const players = await buildPlayerIndex(); // fix210: in pages (the old copy serves meanwhile)
+  pIndex = { at: Date.now(), players };
   publishState('search:index', { index, pIndex });
 }
 onState('search:index', (_k, v) => { index = v.index; pIndex = v.pIndex; });
@@ -752,7 +776,7 @@ function assemble(afId: number, slow: any) {
   const { compNames, ...rest } = slow;
   const data = { ...rest, standing, form, last, next, resultsAt: new Date().toISOString(), _playedUnknown: playedUnknown };
   fastCache.set(afId, { at: Date.now(), slowAt: slow.builtAt, data });
-  if (fastCache.size > 3000) fastCache.delete(fastCache.keys().next().value as number);
+  if (fastCache.size > 400) fastCache.delete(fastCache.keys().next().value as number); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
   return data;
 }
 
@@ -805,7 +829,7 @@ function offlinePage(afId: number) {
   };
   const data = assemble(afId, slow);
   offlineCache.set(afId, { at: Date.now(), data });
-  if (offlineCache.size > 2000) offlineCache.delete(offlineCache.keys().next().value as number);
+  if (offlineCache.size > 300) offlineCache.delete(offlineCache.keys().next().value as number); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
   return data;
 }
 

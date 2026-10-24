@@ -36,7 +36,7 @@ function memo<A extends unknown[], R>(name: string, fn: (...a: A) => R): (...a: 
     if (hit && now - hit.at < MEMO_TTL) return hit.v as R;
     const v = fn(...a);
     memoStore.set(key, { at: now, v });
-    if (memoStore.size > 6000) for (const [k, x] of memoStore) { if (now - x.at >= MEMO_TTL || memoStore.size > 5000) memoStore.delete(k); else break; }
+    if (memoStore.size > 2000) for (const [k, x] of memoStore) { if (now - x.at >= MEMO_TTL || memoStore.size > 1500) memoStore.delete(k); else break; } // fix210: lower (the crawler pages are stored pages now)
     return v;
   };
 }
@@ -584,7 +584,7 @@ export function seoPage(rawPath: string): SeoInfo {
             + `<ul><li><a href="${link(lang, `/basketball/league/${g.code}`)}">${esc(lg)}</a></li><li><a href="${link(lang, `/basketball/team/${g.homeId}`)}">${esc(g.home)}</a></li><li><a href="${link(lang, `/basketball/team/${g.awayId}`)}">${esc(g.away)}</a></li></ul>`,
             { jsonld: [sportsEvent(name, g.date, g.home, g.away, SITE + link(lang, path), lg, 'Basketball', pv ? firstSentence(pv) : undefined)] });
           const ttl = bbCrawlTtl(g.status, g.date);
-          if (ttl > 0) { bbCrawlCache.set(ck, { until: Date.now() + ttl, v }); while (bbCrawlCache.size > 3000) bbCrawlCache.delete(bbCrawlCache.keys().next().value as string); }
+          if (ttl > 0) { bbCrawlCache.set(ck, { until: Date.now() + ttl, v }); while (bbCrawlCache.size > 1000) bbCrawlCache.delete(bbCrawlCache.keys().next().value as string); }
           return v;
         }
       }

@@ -34,5 +34,31 @@ export function forwardToWorker(req: express.Request, res: express.Response) {
   req.pipe(up);
 }
 
+export type WorkerAnswer = { status: number; headers: http.IncomingHttpHeaders; body: Buffer };
+/**
+ * fix210: a GET request answered by the worker, read whole (the web process keeps the answer for signed-out visitors:
+ * services/workerRoutes.ts). Rejects when the worker is not there or takes longer than `timeoutMs`.
+ */
+export function fetchFromWorker(req: express.Request, timeoutMs = 20_000): Promise<WorkerAnswer> {
+  if (!workerConnected()) return Promise.reject(new Error('worker not running'));
+  const headers: http.OutgoingHttpHeaders = { ...req.headers };
+  headers['x-forwarded-for'] = req.ip || '';
+  headers['x-forwarded-proto'] = req.protocol;
+  headers[INTERNAL_HEADER] = internalKey();
+  delete headers['content-length'];
+  delete headers['accept-encoding']; // the answer is stored as it is
+  return new Promise<WorkerAnswer>((resolve, reject) => {
+    const up = http.request({ host: '127.0.0.1', port: WORKER_PORT, method: 'GET', path: req.originalUrl, headers, agent }, r => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => resolve({ status: r.statusCode || 502, headers: r.headers, body: Buffer.concat(chunks) }));
+      r.on('error', reject);
+    });
+    up.setTimeout(timeoutMs, () => up.destroy(new Error(`worker took over ${Math.round(timeoutMs / 1000)} s`)));
+    up.on('error', reject);
+    up.end();
+  });
+}
+
 /** worker: only the web process may call the worker's port */
 export const fromWebProcess = (req: http.IncomingMessage) => !!internalKey() && req.headers[INTERNAL_HEADER] === internalKey();

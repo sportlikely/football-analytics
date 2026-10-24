@@ -69,6 +69,11 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   (`publishState` / `onState`, services/shared.ts); a heavy page every visitor opens is a stored page (`definePage`,
   services/pageCache.ts); live games go through services/liveState.ts. `WORKER=0` = one process. Admin / staff
   routes are answered by the worker (forwarded). Notes: docs/notes/perf.md (fix202).
+  fix210: the web process never builds a page — a public route that builds something is listed in WORKER_ROUTES and
+  PUBLIC_ROUTES (services/workerRoutes.ts: the worker answers, signed-out copies kept) and its builder registered
+  (services/builders.ts); crawler HTML = stored pages. `npm run parity` + `npm run test:fix210` fail otherwise. Heavy
+  model builds run in a job thread (services/threadJob.ts); a heavy loop yields every 50 items / 100 ms (yieldEvery);
+  one heavy job at a time (heavy()); every cache has a size cap. Exits / memory / stalls: services/perfHistory.ts.
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
   `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a

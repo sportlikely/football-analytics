@@ -227,7 +227,7 @@ export function teamAnalysis(afId: number, page: any) {
     builtAt: new Date().toISOString()
   };
   cache.set(afId, { at: Date.now(), data });
-  if (cache.size > 3000) cache.delete(cache.keys().next().value as number);
+  if (cache.size > 500) cache.delete(cache.keys().next().value as number); // fix210: capped low (the page is also stored in the database; the worker answers every page request)
   return data;
 }
 

@@ -11,7 +11,7 @@ import { isPreseason } from './bbModel';
 import { nbaKey } from './bbInjuries';
 import { bdlPlayerOf, bdlTeamOf, bdlSeasonNow, bdlContract, personKey } from './bdl';
 import { isCrawlerRequest } from './afUsage';
-import { yieldLoop } from './perf';
+import { yieldLoop, yieldEvery } from './perf';
 import { runsJobs } from './role';
 import { onState, publishState } from './shared';
 
@@ -335,34 +335,44 @@ let searchCache: { at: number; players: SearchPlayer[]; teams: SearchTeam[] } | 
 const tokensOf = (s: string) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
 
 function searchIndex() {
-  // fix202: the web process uses the worker's copy (rebuilt there every hour); it builds one only if it never got one
-  if (searchCache && (Date.now() - searchCache.at < 3600000 || !runsJobs)) return searchCache;
+  // fix202: the web process uses the worker's copy (rebuilt there every hour)
+  // fix210: and never builds one (empty until the worker's copy arrives); the worker builds it in pages (buildSearch)
+  return searchCache || { at: 0, players: [] as SearchPlayer[], teams: [] as SearchTeam[] };
+}
+/** fix210: the index in pages of player ids with a yield between (the GROUP BY over every box-score line was one block) */
+async function buildSearch() {
+  const step = yieldEvery(50, 100);
   const since = new Date(Date.now() - 2 * 365 * 86400000).toISOString();
   const teams = new Map<number, SearchTeam>();
   for (const g of db.prepare(`SELECT code, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo FROM bb_games WHERE kickoff > ? AND kickoff < ? ORDER BY kickoff`).all(since, new Date(Date.now() + 30 * 86400000).toISOString()) as any[]) {
     teams.set(g.home_id, { id: g.home_id, name: g.home_name, tokens: tokensOf(g.home_name), logo: g.home_logo, code: g.code, last: g.kickoff });
     teams.set(g.away_id, { id: g.away_id, name: g.away_name, tokens: tokensOf(g.away_name), logo: g.away_logo, code: g.code, last: g.kickoff });
   }
+  await step();
   const players = new Map<number, SearchPlayer>();
-  // one row per player: his latest game (SQLite returns the other columns from the MAX row)
-  const rows = db.prepare(`SELECT ps.player_id, ps.name, ps.team_id, g.code, MAX(g.kickoff) AS kickoff FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff > ? GROUP BY ps.player_id`).all(since) as any[];
-  for (const r of rows) {
-    const t = teams.get(r.team_id);
-    players.set(r.player_id, { id: r.player_id, name: r.name, tokens: tokensOf(r.name), teamId: r.team_id, team: t?.name || '', logo: t?.logo || null, code: r.code, last: r.kickoff });
+  // one row per player: his latest game (SQLite returns the other columns from the MAX row) — 2,000 player ids a query
+  const span: any = db.prepare(`SELECT MIN(player_id) AS lo, MAX(player_id) AS hi FROM bb_player_stats`).get();
+  const latest = db.prepare(`SELECT ps.player_id, ps.name, ps.team_id, g.code, MAX(g.kickoff) AS kickoff FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff > ? AND ps.player_id >= ? AND ps.player_id < ? GROUP BY ps.player_id`);
+  for (let lo = span?.lo ?? 0; span?.hi != null && lo <= span.hi; lo += 2000) {
+    for (const r of latest.all(since, lo, lo + 2000) as any[]) {
+      const t = teams.get(r.team_id);
+      players.set(r.player_id, { id: r.player_id, name: r.name, tokens: tokensOf(r.name), teamId: r.team_id, team: t?.name || '', logo: t?.logo || null, code: r.code, last: r.kickoff });
+    }
+    await step();
   }
   // current squads: new signings and moves show with their new team
   for (const r of db.prepare(`SELECT player_id, name, team_id, updated_at FROM bb_roster`).all() as any[]) {
     const t = teams.get(r.team_id);
     const prev = players.get(r.player_id);
     players.set(r.player_id, { id: r.player_id, name: prev?.name || r.name, tokens: tokensOf(prev?.name || r.name), teamId: r.team_id, team: t?.name || prev?.team || '', logo: t?.logo || prev?.logo || null, code: t?.code || prev?.code || '', last: prev && prev.last > r.updated_at ? prev.last : r.updated_at });
+    await step();
   }
-  searchCache = { at: Date.now(), players: [...players.values()], teams: [...teams.values()] };
-  return searchCache;
+  return { at: Date.now(), players: [...players.values()], teams: [...teams.values()] };
 }
 /** fix202 (worker): the basketball search index built again and handed to the web process */
-export function warmBbSearch() {
-  searchCache = null;
-  publishState('bb:search', searchIndex());
+export async function warmBbSearch() {
+  searchCache = await buildSearch(); // fix210: in pages; the old copy serves meanwhile
+  publishState('bb:search', searchCache);
 }
 onState('bb:search', (_k, v) => { searchCache = v; });
 

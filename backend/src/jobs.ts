@@ -7,7 +7,7 @@
  */
 import footballDataAPI from './services/footballDataAPI';
 import logger from './utils/logger';
-import { timed, every, after, inBatches, heavy, mapGames } from './services/perf';
+import { timed, every, after, inBatches, heavy, mapGames, afterHeavy, everyHeavy } from './services/perf';
 import { slimForList } from './services/predCache';
 import { withLiveScore, publishLiveBook } from './services/liveScores';
 import { scorersCheckTick } from './services/scorersCheck';
@@ -64,9 +64,10 @@ export function startJobs() {
   after('nfl player games', () => backfillPlayerGames().catch(e => logger.warn(`nfl player games: ${e.message}`)), 5 * 60 * 1000).unref();
   after('link check', () => linkCheckTick(), 10 * 60 * 1000).unref();
   // fix202: the search indexes (teams, players) for the web process
-  after('search index', () => { warmSearchIndex(); warmBbSearch(); }, 30 * 1000).unref();
-  every('search index', () => warmSearchIndex(), 6 * 3600 * 1000).unref();
-  every('bb search index', () => warmBbSearch(), 3600 * 1000).unref();
+  // fix210: in the heavy-job queue, built in pages
+  afterHeavy('search index', async () => { await warmSearchIndex(); await warmBbSearch(); }, 30 * 1000).unref();
+  everyHeavy('search index', () => warmSearchIndex(), 6 * 3600 * 1000).unref();
+  everyHeavy('bb search index', () => warmBbSearch(), 3600 * 1000).unref();
   // fix209: "Scorers shown" — every live / finished game of the last 48 h names its scorers (and fetches them again)
   after('scorers check', () => scorersCheckTick(), 3 * 60 * 1000).unref();
   every('scorers check', () => scorersCheckTick(), 5 * 60 * 1000).unref();

@@ -24,7 +24,8 @@ import { reportLive } from './liveScores';
 import { predictNational, isNationalTeam } from './nationalElo';
 import { predictClubEuro, eloEuroMiss } from './clubElo';
 import { onExtraLeague } from './leagueConfig';
-import { every, after, yielder, mapGames, yieldLoop } from './perf';
+import { every, after, yielder, mapGames, yieldLoop, afterHeavy, everyHeavy } from './perf';
+import { stringifyAsync } from '../utils/jsonAsync';
 import { onState, publishState } from './shared';
 
 export const AF_OFFSET = 1_000_000_000;
@@ -476,7 +477,7 @@ export async function refreshAfWindow() {
   windowMatches = all.sort((a, b) => a.utcDate.localeCompare(b.utcDate));
   windowAt = Date.now();
   markFresh('extra-fixtures', `${windowMatches.length} matches`);
-  try { db.prepare(`INSERT OR REPLACE INTO af_window_store (id, json, at) VALUES (1, ?, ?)`).run(JSON.stringify(windowMatches), new Date(windowAt).toISOString()); } catch (e: any) { logger.warn(`AF window store: ${e.message}`); }
+  try { db.prepare(`INSERT OR REPLACE INTO af_window_store (id, json, at) VALUES (1, ?, ?)`).run(await stringifyAsync(windowMatches), new Date(windowAt).toISOString()); } catch (e: any) { logger.warn(`AF window store: ${e.message}`); }
   try {
     windowListener?.(windowMatches);
   } catch (e: any) {
@@ -587,8 +588,9 @@ export function afOverdue() {
 export function startAfMatchesScheduler() {
   if (!afConfigured()) return;
   const refresh = () => refreshAfWindow().then(n => logger.info(`AF extra competitions: ${n} matches in window`)).catch(() => undefined);
-  after('AF matches', refresh, 30 * 1000);
-  every('AF matches', refresh, 30 * 60 * 1000);
+  // fix210: in the heavy-job queue (one heavy job at a time in the worker)
+  afterHeavy('AF matches', refresh, 30 * 1000);
+  everyHeavy('AF matches', refresh, 30 * 60 * 1000);
 }
 
 /* ------------------------------------------------------------------ */
