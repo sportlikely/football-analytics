@@ -32,6 +32,7 @@ import { historyStatus, teamMapStatus, GROUPS, syncAll, syncH2HArchive, h2hArchi
 import { withLive, liveHalfTimeTest } from './services/liveChance';
 import { backtestUpsets, upsetWatchReport, upsetWatchBacktest } from './services/upsetAlerts';
 import { submitContact, contactInbox, markContact, ContactError } from './services/contact';
+import { adminSummary } from './services/adminSummary';
 import { ADMIN_2FA_REQUIRED, checkCode, revealSetup, twoFactorEnabled, twoFactorStatus, startSetup, confirmSetup, newRecovery, disableTwoFactor, issueTicket, redeemTicket, securePastSessions, TwoFactorError } from './services/twoFactor';
 import { securityLog, securityLogList } from './services/securityLog';
 import { recordActivity, activityList } from './services/activity';
@@ -1540,6 +1541,8 @@ app.post('/api/crm/testers/invite/:code', need('customers.plan'), jsonOnly, (req
   } catch (e) { testerFail(res, e); }
 });
 // Admin: contact messages (read, mark handled)
+// fix237: the admin page's summary tiles + "Needs you" counts (light COUNT queries, answered by the worker)
+app.get('/api/admin/summary', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: adminSummary() }); });
 app.get('/api/admin/contact', (_req, res) => {
   try { res.json({ data: contactInbox(), timestamp: new Date().toISOString() }); }
   catch (e: any) { sendError(res, e, 'Contact inbox failed'); }
