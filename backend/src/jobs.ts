@@ -50,7 +50,7 @@ import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
 import { photosTick, photosBbPass } from './services/playerPhotos';
-import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune, missFitDue, runMissFit, impactFitDue, impactRowsReady, runImpactFit } from './services/bbTuner';
+import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune, missFitDue, runMissFit, impactFitDue, impactRowsReady, runImpactFit, impactRegateDue, regateImpact } from './services/bbTuner';
 import { threadJobsOn, inThread } from './services/threadJob';
 import { buildBbCalibration } from './services/sportCalibration';
 import { startKeyPlayersScheduler } from './services/keyPlayers';
@@ -126,6 +126,14 @@ export function startJobs() {
         const r: any = await heavy('bb impact fit', () => (threadJobsOn() ? inThread('bb impact fit', [opt]) : runImpactFit(opt)));
         calib = calib || !!r?.applied;
       } catch (e: any) { logger.warn(`bb-v4 box-score impact (${iwhy}): ${e?.message || e}`); }
+    }
+    // fix236: a fix225 fit the old gate rejected, judged once more by the gate on the live basis (no refit)
+    const rwhy = impactRegateDue();
+    if (rwhy && impactRowsReady()) {
+      try {
+        const r: any = await heavy('bb impact regate', () => regateImpact({ auto: rwhy, apply: 'gate' }));
+        calib = calib || !!r?.applied;
+      } catch (e: any) { logger.warn(`bb-v4 box-score impact re-gate: ${e?.message || e}`); }
     }
     const why = autoTuneDue();
     if (why) {

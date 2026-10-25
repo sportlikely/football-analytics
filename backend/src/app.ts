@@ -76,7 +76,7 @@ import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
-import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit, storedLeagues, storedMiss, storedImpact } from './services/bbTuner';
+import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit, storedLeagues, storedMiss, storedImpact, regateImpact } from './services/bbTuner';
 import { startAdminJob, adminJobAnswer } from './services/adminJobs';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
@@ -3688,6 +3688,11 @@ app.get('/api/bb/impact-fit', (req, res, next) => {
   const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
   const opt = { apply };
   return fitJob('bb impact fit', () => (threadJobsOn() ? inThread('bb impact fit', [opt]) : runImpactFit(opt)), () => noParams(storedImpact()), noParams)(req, res, next);
+});
+// fix236 (admin): the stored fix225 fit judged again by the gate on the live basis (NBA #4 = who played), no refit; ?apply=gate (default) | 1 | 0
+app.get('/api/bb/impact-regate', (req, res, next) => {
+  const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
+  return fitJob('bb impact regate', () => regateImpact({ apply }), () => noParams(storedImpact()), noParams)(req, res, next);
 });
 // fix219 (admin): the stored bb-v4 settings, the last tune report and the gate; ?reload=1 publishes again, ?clear=1 = code defaults
 app.get('/api/bb/tuned', (req, res) => {

@@ -28,7 +28,13 @@ import { loadRows, liveRows, storedBox, gridSnap, plRating } from './bbGrid';
 
 db.exec(`CREATE TABLE IF NOT EXISTS bb_tuned (id TEXT PRIMARY KEY, params TEXT NOT NULL, report TEXT, at TEXT NOT NULL)`);
 
-export type GroupGate = { group: string; pass: boolean; reason: string; whole: any; first25: any; oracle: any; leagues: string[] };
+/**
+ * fix236: variant = the settings the group runs with ('full' = the shared + the leagues' own, 'shared' = the leagues'
+ * own dropped: they lost the test season), basis = the #4 inputs the test read, checks = what each variant scored (a
+ * failing group: with the leagues' own dropped, #4's proxy at its value before the fix228 fit, #4's proxy off).
+ */
+export type GateCheck = { name: string; pass: boolean; whole: number; first25: number; live: boolean };
+export type GroupGate = { group: string; pass: boolean; reason: string; whole: any; first25: any; oracle: any; leagues: string[]; variant?: 'full' | 'shared'; basis?: string; checks?: GateCheck[] };
 export type GridState = { params: GridParams; gate: Record<string, GroupGate>; stats: { mean: number[]; sd: number[] }; at: string; perLeague: Record<string, any>; live: any };
 let gs: GridState | null = null;
 let ver = 0;
@@ -56,17 +62,70 @@ export function storedParams(): GridParams {
   return l && l.base === baseKey(p) && Object.keys(l.league).length ? { ...p, league: l.league } : p;
 }
 
-/** The gate of every group on the test season with these settings. */
-export function gridGate(items: GridItem[], p: GridParams): Record<string, GroupGate> {
+/**
+ * fix236: the gate's inputs = what each group runs live: the NBA's #4 from who actually played (live: the injury report
+ * + confirmed starters on every game, fix217 / fix228), every other league the news / rest proxy it reads live.
+ * (fix219–fix228 judged the NBA blind, #4 = 0: a test of a model the NBA never runs.)
+ */
+export const gateInputs = (items: GridItem[], p: GridParams) => inputsFor(items, p, 'oracle');
+export const gateBasis = (group: string) => (group === 'NBA' ? '#4 = who actually played (live: injury report + confirmed starters)' : '#4 = the news / rest proxy (as live)');
+
+/** the settings a group's league runs with (fix236 variant 'shared': the leagues' own settings dropped) */
+const withoutLeagues = (p: GridParams, codes: string[]): GridParams => {
+  if (!p.league) return p;
+  const league = Object.fromEntries(Object.entries(p.league).filter(([c]) => !codes.includes(c)));
+  return { ...p, league: Object.keys(league).length ? league : undefined };
+};
+
+/**
+ * The gate of every group on the test season with these settings (`items` = gateInputs: the inputs live has). bb-v4
+ * must beat bb-v3 on the whole season and on games 1–25. fix236: a group that fails is checked again with its leagues'
+ * own settings dropped (those may run live: a return to the shared settings, not a new fit) and, as a diagnosis only,
+ * with #4's proxy at its value before the fix228 fit (`proxyBefore`) and with #4's proxy off.
+ */
+export function gridGate(items: GridItem[], p: GridParams, opt: { proxyBefore?: number | null } = {}): Record<string, GroupGate> {
   const out: Record<string, GroupGate> = {};
   const groups = [...new Set(items.map(x => groupOf(x.code)))];
+  const r5 = (x: number) => Math.round(x * 1e5) / 1e5;
   for (const gname of groups) {
     const test = items.filter(x => groupOf(x.code) === gname && x.year === GRID_TEST);
     const first = test.filter(x => x.gp < 25);
-    const whole = compare(p, test), f25 = compare(p, first);
-    const ok1 = test.length >= 200 && whole.v4.logLoss < whole.v3.logLoss, ok2 = first.length >= 50 && f25.v4.logLoss < f25.v3.logLoss;
-    const why = [!ok1 && (test.length < 200 ? `only ${test.length} test games` : `whole season ${whole.v4.logLoss} vs bb-v3 ${whole.v3.logLoss}`), !ok2 && (first.length < 50 ? `only ${first.length} games 1–25` : `games 1–25 ${f25.v4.logLoss} vs bb-v3 ${f25.v3.logLoss}`)].filter(Boolean);
-    out[gname] = { group: gname, pass: ok1 && ok2, reason: ok1 && ok2 ? 'bb-v4 beats bb-v3 on the whole test season and on games 1–25' : `bb-v3 stays: ${why.join('; ')}`, whole: { v3: whole.v3, v4: whole.v4 }, first25: { v3: f25.v3, v4: f25.v4 }, oracle: whole.oracle, leagues: [...new Set(test.map(x => x.code))].sort() };
+    const codes = [...new Set(test.map(x => x.code))].sort();
+    const judge = (q: GridParams) => {
+      const whole = compare(q, test), f25 = compare(q, first);
+      const ok1 = test.length >= 200 && whole.v4.logLoss < whole.v3.logLoss, ok2 = first.length >= 50 && f25.v4.logLoss < f25.v3.logLoss;
+      const why = [!ok1 && (test.length < 200 ? `only ${test.length} test games` : `whole season ${whole.v4.logLoss} vs bb-v3 ${whole.v3.logLoss}`), !ok2 && (first.length < 50 ? `only ${first.length} games 1–25` : `games 1–25 ${f25.v4.logLoss} vs bb-v3 ${f25.v3.logLoss}`)].filter(Boolean) as string[];
+      return { pass: ok1 && ok2, whole, f25, why };
+    };
+    const full = judge(p);
+    let use = full, variant: 'full' | 'shared' = 'full';
+    const checks: GateCheck[] = [];
+    if (!full.pass) {
+      const own = codes.filter(c => p.league?.[c]);
+      if (own.length) {
+        const s = judge(withoutLeagues(p, own));
+        checks.push({ name: `without the leagues' own settings (${own.join(', ')})`, pass: s.pass, whole: r5(s.whole.v4.logLoss), first25: r5(s.f25.v4.logLoss), live: true });
+        if (s.pass) { use = s; variant = 'shared'; }
+      }
+      if (p.miss && gname !== 'NBA') {
+        const px = (v: number): GridParams => ({ ...p, miss: { ...p.miss!, proxy: v } });
+        if (typeof opt.proxyBefore === 'number' && Math.abs(opt.proxyBefore - p.miss.proxy) > 1e-9) {
+          const b = judge(px(opt.proxyBefore));
+          checks.push({ name: `#4 proxy ${opt.proxyBefore} (before the fix228 fit; now ${p.miss.proxy})`, pass: b.pass, whole: r5(b.whole.v4.logLoss), first25: r5(b.f25.v4.logLoss), live: false });
+        }
+        if (p.miss.proxy) {
+          const z = judge(px(0));
+          checks.push({ name: '#4 proxy off', pass: z.pass, whole: r5(z.whole.v4.logLoss), first25: r5(z.f25.v4.logLoss), live: false });
+        }
+      }
+    }
+    const reason = use.pass
+      ? `bb-v4 beats bb-v3 on the whole test season and on games 1–25${variant === 'shared' ? ` (with the leagues' own settings dropped: with them ${full.why.join('; ')})` : ''}`
+      : `bb-v3 stays: ${full.why.join('; ')}${checks.length ? ` · checked: ${checks.map(c => `${c.name} ${c.whole} / ${c.first25}${c.pass ? ' passes' : ''}${c.pass && !c.live ? ' (diagnosis only)' : ''}`).join('; ')}` : ''}`;
+    out[gname] = {
+      group: gname, pass: use.pass, reason, whole: { v3: use.whole.v3, v4: use.whole.v4 }, first25: { v3: use.f25.v3, v4: use.f25.v4 }, oracle: use.whole.oracle, leagues: codes,
+      variant, basis: gateBasis(gname), ...(checks.length ? { checks } : {})
+    };
   }
   return out;
 }
@@ -79,22 +138,70 @@ function perLeague(items: GridItem[], p: GridParams, year: (y: number) => boolea
 
 /**
  * fix228: the rows as the settings read them. With #4 frozen (p.miss): 'oracle' = the NBA's #4 is who actually played
- * (what the injury report gives live: the tunes, the split's spread), 'blind' = the NBA's #4 is 0 (the gate against
+ * (what the injury report gives live: the tunes, the split's spread), 'blind' = the NBA's #4 is 0 (fix219–228's gate against
  * bb-v3, which had no injury information in those seasons either). Without it: the stored rows.
+ * fix236: the gate reads 'oracle' too (gateInputs: the NBA's injury report is known on every live game).
  */
 export const inputsFor = (items: GridItem[], p: GridParams, mode: 'oracle' | 'blind') => { const x = impactInputs(items, p.impact); return p.miss ? missInputs(x, mode) : x; };
 
+/** fix236: the #4 proxy weight before the stored fix228 fit (the gate's diagnosis of a failing group) */
+const proxyBefore = () => storedMiss()?.before?.other ?? null;
+
 /** Gate + stats with the stored settings over every league's stored rows; published for every process. */
 export function publishGridState(items = loadRows(), p = storedParams()): GridState {
-  const live = inputsFor(items, p, 'oracle'), blind = inputsFor(items, p, 'blind');
+  const live = gateInputs(items, p); // fix236: the gate and the tables on the inputs live has (NBA #4 = who played)
   const train = live.filter(x => (p.train || GRID_TRAIN).includes(x.year));
   const s: GridState = {
-    params: p, gate: gridGate(blind, p), stats: rowStats(train), at: new Date().toISOString(),
-    perLeague: perLeague(blind, p, y => y === GRID_TEST), live: perLeague(blind, p, y => y >= GRID_LIVE_FROM)
+    params: p, gate: gridGate(live, p, { proxyBefore: proxyBefore() }), stats: rowStats(train), at: new Date().toISOString(),
+    perLeague: perLeague(live, p, y => y === GRID_TEST), live: perLeague(live, p, y => y >= GRID_LIVE_FROM)
   };
   gs = s; ver++;
+  try { noteEngines(s.gate); } catch (e: any) { logger.warn(`bb engine log: ${e?.message || e}`); }
   publishState('bb:grid:p', s);
   return s;
+}
+
+/* ---------- fix236: which engine each group runs, why, since when (bb_tuned 'engine') ---------- */
+
+export type EngineRow = { group: string; engine: 'bb-v3' | 'bb-v4'; variant: 'full' | 'shared'; reason: string; basis: string; since: string; leagues: string[] };
+export function engineLog(): Record<string, EngineRow> {
+  const r = db.prepare(`SELECT params FROM bb_tuned WHERE id = 'engine'`).get() as any;
+  try { return r?.params ? JSON.parse(r.params) : {}; } catch { return {}; }
+}
+/** keeps `since` while a group's engine (and variant) stays the same; a change starts a new `since` */
+function noteEngines(gate: Record<string, GroupGate>, now = new Date().toISOString()) {
+  const old = engineLog(), next: Record<string, EngineRow> = { ...old };
+  for (const g of Object.values(gate)) {
+    const engine = g.pass ? 'bb-v4' : 'bb-v3', variant = g.variant || 'full';
+    const prev = old[g.group];
+    const same = prev && prev.engine === engine && prev.variant === variant;
+    next[g.group] = { group: g.group, engine, variant, reason: g.reason, basis: g.basis || '', since: same ? prev.since : now, leagues: g.leagues };
+    if (!same) logger.info(`bb engine ${g.group}: ${prev ? `${prev.engine} → ` : ''}${engine}${variant === 'shared' ? ' (shared settings)' : ''} — ${g.reason}`);
+  }
+  db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('engine', ?, NULL, ?)`).run(JSON.stringify(next), now);
+}
+/** the engine each group runs now (BB_GRID=on|off overrides every group) */
+export function engineInfo() {
+  const env = String(process.env.BB_GRID || '').toLowerCase();
+  const log = engineLog();
+  const groups = Object.values(gs?.gate || {}).map(g => {
+    const engine: 'bb-v3' | 'bb-v4' = env === 'off' ? 'bb-v3' : env === 'on' || g.pass ? 'bb-v4' : 'bb-v3';
+    return { group: g.group, engine, variant: g.variant || 'full', reason: env === 'on' || env === 'off' ? `BB_GRID=${env} (gate: ${g.reason})` : g.reason, basis: g.basis || gateBasis(g.group), since: log[g.group]?.since || null, leagues: g.leagues };
+  });
+  return { env: env || null, at: gs?.at || null, groups };
+}
+/** Data health "Basketball engine per group": warn when the NBA runs bb-v3 (or nothing is published yet) */
+export function engineHealth(): Check[] {
+  const e = engineInfo();
+  const nba = e.groups.find(g => g.group === 'NBA');
+  const level = !gs ? 'warn' : nba && nba.engine === 'bb-v3' ? 'warn' : 'ok';
+  const since = (s: string | null) => (s ? ` since ${s.slice(0, 16).replace('T', ' ')} UTC` : '');
+  return [{
+    id: 'bb-engine', label: 'Basketball engine per group', level,
+    detail: !gs ? 'No bb-v4 gate published yet (the next basketball model build publishes it): every league runs bb-v3'
+      : `${e.groups.map(g => `${g.group} ${g.engine}${g.variant === 'shared' ? ' (shared settings)' : ''}`).join(' · ')}${nba?.engine === 'bb-v3' ? ' — the NBA runs bb-v3: no grid on its game pages' : ''}${e.env ? ` · BB_GRID=${e.env}` : ''}`,
+    items: e.groups.map(g => `${g.group}: ${g.engine}${since(g.since)} — ${g.reason} [${g.basis}]`)
+  }];
 }
 
 /**
@@ -125,8 +232,8 @@ export async function runTune(opt: { train?: number[]; test?: number; apply?: bo
     offsetLeagues: fit.offsetLeagues,
     split: GRID_ROWS.map((r, i) => ({ id: r.id, name: r.name, weight: Math.round(params.w[i] * 1000) / 1000, points: fittedSplit(params.w, stats.sd)[i], sd: stats.sd[i] })),
     stretch: params.stretch, offsets: params.offsets,
-    testTable: { all: compare(params, te), first25: compare(params, te.filter(x => x.gp < 25)), byGroup: gridGate(inputsFor(raw, params, 'blind').filter(x => x.year === test), params), byLeague: perLeague(inputsFor(raw, params, 'blind'), params, y => y === test) },
-    live: { note: 'the live period: reported, never tuned', byLeague: perLeague(inputsFor(raw, params, 'blind'), params, y => y >= GRID_LIVE_FROM) },
+    testTable: { all: compare(params, te), first25: compare(params, te.filter(x => x.gp < 25)), byGroup: gridGate(gateInputs(raw, params).filter(x => x.year === test), params, { proxyBefore: proxyBefore() }), byLeague: perLeague(gateInputs(raw, params), params, y => y === test) },
+    live: { note: 'the live period: reported, never tuned', byLeague: perLeague(gateInputs(raw, params), params, y => y >= GRID_LIVE_FROM) },
     params
   };
   const fittedAt = new Date().toISOString();
@@ -188,7 +295,7 @@ export function tunedInfo(action?: 'reload' | 'clear') {
   return {
     stored: !!r, at: r?.at || null, params: storedParams(), report, auto: lastAutoTune(), autoDue: autoTuneDue(), gate: gs?.gate || null, perLeague: gs?.perLeague || null, live: gs?.live || null, stats: gs?.stats || null,
     leagues: lg ? { at: lg.at, stale: lg.base !== baseKey(sharedParams()), due: leagueTuneDue(), report: lg.report } : { at: null, stale: false, due: leagueTuneDue(), report: null },
-    miss: missInfo(), impact: impactInfo()
+    miss: missInfo(), impact: impactInfo(), engine: engineInfo()
   };
 }
 
@@ -320,9 +427,9 @@ export async function runMissFit(opt: { train?: number[]; test?: number; apply?:
   const all = missSplit(oracleAll, train, test);
   const fit = await fitGrid(all.train, { ...shared, miss }, { rounds: opt.rounds, pause: yieldLoop });
   const params: GridParams = { ...fit.params, miss, version: `fit ${at.slice(0, 10)} (#4 frozen)`, fittedAt: at, train };
-  // 4. the gate (inputs live has) + bb-v4 against bb-v3 per group (NBA blind: no injury information for either)
+  // 4. the gate (inputs live has) + bb-v4 against bb-v3 per group (fix236: NBA #4 = who played, as live)
   const gate = missGate(all.test, params, cur);
-  const groups = gridGate(missInputs(rows, 'blind').filter(x => x.year === test), params);
+  const groups = gridGate(gateInputs(raw, params).filter(x => x.year === test), params, { proxyBefore: weightsFor(cur, '')[MISS] });
   const apply = opt.apply === true || ((opt.apply === 'gate' || !!opt.auto) && gate.pass);
   const sdN = rowStats(nba.train).sd, sdO = rowStats(others.train).sd;
   const before = missFrom(cur, 'NBA');
@@ -407,8 +514,11 @@ export function missingRowHealth(now = Date.now()): Check[] {
   }];
 }
 
+/** fix236: the settings a league runs with live (its group's gate variant 'shared' = the leagues' own dropped) */
+export const groupParams = (p: GridParams, gate: Record<string, GroupGate>, code: string) => (gate[groupOf(code)]?.variant === 'shared' ? withoutLeagues(p, [code]) : p);
+export const liveParams = (code: string): GridParams | null => (gs ? groupParams(gs.params, gs.gate, code) : null);
 /** the live weight of row i for a league (shared + offset) */
-export const gridWeight = (code: string, i: number) => (gs ? weightsFor(gs.params, code)[i] : 0);
+export const gridWeight = (code: string, i: number) => { const p = liveParams(code); return p ? weightsFor(p, code)[i] : 0; };
 
 /** Is bb-v4 live for this league (its group passed the gate)? BB_GRID=on|off overrides every league. */
 export function gridLive(code: string): boolean {
@@ -426,8 +536,9 @@ export function gridPredict(g: { code: string; home_id: number; away_id: number;
   const r = liveRows(g, { p: x.p, sig: sigma, hca: x.hca, haH: x.haH || 0, haA: x.haA || 0, b2bH: x.b2bHome, b2bA: x.b2bAway }, miss, gs.params.impact);
   if (!r) return null;
   const it = { hv: r.hv, av: r.av, sig: sigma, t4: r.t4 };
-  const e = gridEval(gs.params, g.code, it);
-  return { pHome: e.pHome, margin: e.margin, parts: e.parts, view: split1000(gs.params, g.code, it, gs.stats.sd) };
+  const p = liveParams(g.code)!;
+  const e = gridEval(p, g.code, it);
+  return { pHome: e.pHome, margin: e.margin, parts: e.parts, view: split1000(p, g.code, it, gs.stats.sd) };
 }
 
 /** Row sanity from the game-page views (the rows a live prediction used): see rowSanity. */
@@ -481,6 +592,8 @@ export type ImpactReport = {
   miss: MissSet; before: { wb: number | null; nba: number; star: number; top: number | null; other: number };
   oracle: { trainGames: number; startLL: number; trainLL: number };
   gate: ImpactGate; groups: Record<string, GroupGate>;
+  /** fix236: the stored fit judged again by the gate on the live basis */
+  regate?: { rule: string; at: string; why: string; was: string; applied: boolean };
   split: { nba: { before: number[]; after: number[] }; other: { before: number[]; after: number[] } };
   params: GridParams;
 };
@@ -563,7 +676,7 @@ export async function runImpactFit(opt: { train?: number[]; test?: number; apply
   // 3. the gate: each side on its own inputs as live has them
   const curItems = inputsFor(raw, cur, 'oracle'), nextItems = inputsFor(raw, params, 'oracle');
   const gate = impactGate(curItems, nextItems, cur, params, test);
-  const groups = gridGate(inputsFor(raw, params, 'blind').filter(x => x.year === test), params);
+  const groups = gridGate(gateInputs(raw, params).filter(x => x.year === test), params, { proxyBefore: proxyBefore() });
   const apply = opt.apply === true || ((opt.apply === 'gate' || !!opt.auto) && gate.pass);
   const curN = inputsFor(raw, cur, 'oracle'), sdN = rowStats(curN.filter(x => usesOracle(x.code) && train.includes(x.year))).sd, sdO = rowStats(curN.filter(x => !usesOracle(x.code) && train.includes(x.year))).sd;
   const sdN2 = rowStats(f.nbaTrain).sd, sdO2 = rowStats(f.othersTrain).sd;
@@ -596,6 +709,38 @@ export function impactFitLine(): string | null {
   const m = storedImpact();
   if (!m) return null;
   return `Basketball player impact (box score × ${m.wb} + on/off × ${Math.round((1 - m.wb) * 100) / 100}, ${m.at.slice(0, 10)}): star factor ×${m.miss.top}, NBA #4 ${m.before.nba} → ${m.miss.w}; ${m.gate.reason}${m.applied ? '' : ' (not stored)'}.`;
+}
+
+/**
+ * fix236 — the stored fix225 fit judged again by today's gate (no refit): NBA #4 = who played on both sides, games 1–25
+ * worse only beyond FIRST25_TOL; stored live when it passes. The worker runs it once a database (impactRegateDue).
+ */
+const REGATE_RULE = 'fix236';
+export function impactRegateDue(): string | null {
+  const m = storedImpact();
+  if (!m?.params?.impact || m.applied || m.regate?.rule === REGATE_RULE) return null;
+  return sharedParams().impact?.fittedAt === m.params.impact.fittedAt ? null : 'fix236: the fix225 fit judged by the gate on the live basis';
+}
+export async function regateImpact(opt: { apply?: boolean | 'gate'; auto?: string } = {}) {
+  const m = storedImpact();
+  if (!m?.params?.impact) throw new Error('no fix225 fit stored on this database');
+  const raw = loadRows();
+  await yieldLoop();
+  const cur = sharedParams(), params = m.params, at = new Date().toISOString();
+  const gate = impactGate(inputsFor(raw, cur, 'oracle'), inputsFor(raw, params, 'oracle'), cur, params, m.test);
+  const groups = gridGate(gateInputs(raw, params).filter(x => x.year === m.test), params, { proxyBefore: proxyBefore() });
+  const apply = opt.apply === true || ((opt.apply === 'gate' || !!opt.auto) && gate.pass);
+  const regate = { rule: REGATE_RULE, at, why: opt.auto || 'admin', was: m.gate.reason, applied: apply };
+  const report: ImpactReport = { ...m, gate, groups, applied: apply, regate };
+  db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('impact', ?, ?, ?)`).run(JSON.stringify(params.impact), JSON.stringify(report), m.at);
+  if (apply) {
+    db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('live', ?, ?, ?)`)
+      .run(JSON.stringify(params), JSON.stringify({ source: `fix225 box-score impact, fix236 gate (${regate.why})`, fittedAt: params.fittedAt || m.at, impact: gate, wb: m.wb }), at);
+    publishGridState(raw, storedParams());
+  }
+  impactCache = null;
+  logger.info(`bb-v4 box-score impact re-gated (${regate.why}${apply ? ', stored' : ', not stored'}): was "${m.gate.reason}" → ${gate.reason}`);
+  return { ...report, params: undefined };
 }
 
 /** the impact setting live (null = fix219's on/off ratings) */

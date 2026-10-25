@@ -19,7 +19,7 @@ import logger from '../utils/logger';
 import { onState, publishState } from './shared';
 import { yieldLoop } from './perf';
 import { buildLayer, applyLayer, inSeasonLayer, applyInSeason, type LeagueLayer, type LRow, type InSeasonFit } from '../utils/sportCalib';
-import { gridEval, groupOf, impactInputs, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, type GridParams } from '../utils/bbGridMath';
+import { gridEval, groupOf, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, type GridParams } from '../utils/bbGridMath';
 
 export const BB_CALIB_VERSION = 'fix222-1';
 /** the strong line before fix222 (and while no layer is fitted) */
@@ -66,11 +66,11 @@ export function bbCalibrated(code: string, p: number) {
 export const bbStrongLine = (code: string) => cur()?.strong?.[code] ?? cur()?.strongSport ?? BB_STRONG_DEFAULT;
 
 /** the chance the live model shows for a walk-forward row: bb-v4 where its group passes the gate, else bb-v3 */
-function shownRows(items: { id: number; code: string; year: number; y: number; v3: number; sig: number; hv: number[]; av: number[] }[], params: GridParams, pass: Record<string, boolean>): LRow[] {
+function shownRows(items: { id: number; code: string; year: number; y: number; v3: number; sig: number; hv: number[]; av: number[] }[], params: GridParams, pass: Record<string, boolean>, forCode: (code: string) => GridParams = () => params): LRow[] {
   const env = String(process.env.BB_GRID || '').toLowerCase();
   return items.map(x => {
     const v4 = env === 'on' || (env !== 'off' && pass[groupOf(x.code)]);
-    return { p: v4 ? gridEval(params, x.code, x).pHome : x.v3, y: x.y, season: x.year, league: x.code };
+    return { p: v4 ? gridEval(forCode(x.code), x.code, x).pHome : x.v3, y: x.y, season: x.year, league: x.code };
   });
 }
 
@@ -78,14 +78,15 @@ function shownRows(items: { id: number; code: string; year: number; y: number; v
 export async function buildBbCalibrationHere(why: string) {
   const t0 = Date.now();
   const { loadRows } = await import('./bbGrid');
-  const { storedParams, gridGate } = await import('./bbTuner');
+  const { storedParams, gridGate, gateInputs, groupParams } = await import('./bbTuner');
   const params = storedParams();
-  const items = impactInputs(loadRows(), params.impact); // fix225: the rows as the live impact setting reads them
+  // fix225: the rows as the live impact setting reads them; fix236: and #4 as live has it (NBA: who played)
+  const items = gateInputs(loadRows(), params);
   await yieldLoop();
   if (items.length < 1000) { logger.info(`bb calibration: only ${items.length} walk-forward rows (the basketball model builds them first)`); return null; }
   const gate = gridGate(items, params);
   const pass = Object.fromEntries(Object.values(gate).map(g => [g.group, g.pass]));
-  const rows = shownRows(items, params, pass);
+  const rows = shownRows(items, params, pass, code => groupParams(params, gate, code));
   await yieldLoop();
   const r = buildLayer(rows, { first: GRID_TRAIN[0], test: GRID_TEST, last: GRID_TEST, symmetric: false, strongDefault: BB_STRONG_DEFAULT });
   // fix222b: the in-season layer on this season's finished games (the season layer applied first), walk-forward by day

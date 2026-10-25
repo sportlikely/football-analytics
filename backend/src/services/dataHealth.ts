@@ -41,7 +41,7 @@ import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdT
 import { bestLive } from './liveScores';
 import { calibrationHealth } from './calibrationHealth';
 import { leagueSettingsHealth } from './leagueSettingsHealth';
-import { missingRowHealth } from './bbTuner';
+import { missingRowHealth, engineHealth } from './bbTuner';
 import { afIdOfFd } from './afMatches';
 import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
@@ -434,6 +434,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...keyPlayersHealth(now)); } catch (e: any) { logger.warn(`key players health: ${e?.message || e}`); }
   // fix228: basketball row #4 — the weight live (frozen at the who-actually-played fit) and the games it moved this week
   try { checks.push(...missingRowHealth(now)); } catch (e: any) { logger.warn(`missing players row health: ${e?.message || e}`); }
+  // fix236: which engine each basketball group runs (v3 / v4), why and since when; warn when the NBA runs bb-v3
+  try { checks.push(...engineHealth()); } catch (e: any) { logger.warn(`bb engine health: ${e?.message || e}`); }
   // fix231: weather / referee / trends / difficulty on the next 48 h's games (warn under 80% with their weather card)
   try { checks.push(...gameExtrasHealth(now)); } catch (e: any) { logger.warn(`game extras health: ${e?.message || e}`); }
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }

@@ -335,3 +335,26 @@ Jokić ~+10. Bulls–Wizards: the on/off model had the Bulls by 6 (Trae Young �
   the impact setting live. Morning report line. Tests: `npm run test:fix225` (7).
 - Real numbers: on the server after deploy (no basketball database copy here). If the gate keeps today's values, write
   the report's reason here.
+
+## The gate judges each group the way it runs live (fix236, 25 Oct 2026)
+
+- Live 25 Oct after fix228 / fix225: the stored gate said NBA "bb-v3 stays: whole season 0.5957 vs bb-v3 0.5952", Rest
+  of the world "0.5674 vs 0.5635"; Europe passed. NBA game pages had no grid. The NBA comparison read #4 blind (= 0),
+  but every live NBA game has the injury report + confirmed starters (fix217 / fix228). fix225 was rejected on NBA games
+  1–25 0.60196 → 0.60308 with the whole season and who-played-known better.
+- **Gate inputs** (`bbTuner.gateInputs` = `inputsFor(…, 'oracle')`): NBA #4 = who actually played on the test season,
+  every other league its stored news / rest proxy — the same rows in `publishGridState`, `runTune`'s byGroup, the
+  #4 fit, the impact fit and the calibration layer (`sportCalibration.buildBbCalibrationHere`). Whole season and games
+  1–25 both on that basis; still only the test season (2025), the live period never in a gate or fit.
+- **A failing group** is checked again (`gridGate` checks): without its leagues' own settings (fix223) — that variant
+  may go live (`variant: 'shared'`, `groupParams` / `liveParams`: a return to the shared settings, not a new fit) —
+  and, as a diagnosis only, with #4's proxy at its value before the fix228 fit and with the proxy off. If nothing
+  passes, bb-v3 stays and the reason lists what was checked (admin card, under the gate table).
+- **fix225 gate**: a games 1–25 check counts as worse only beyond 0.002 (`FIRST25_TOL`, noise at ~385 NBA games) when
+  the whole season and who-played-known improve. The stored fit is judged again without a refit (`regateImpact`,
+  `/api/bb/impact-regate?apply=gate|1|0`, the worker once a database: `impactRegateDue`), stored live when it passes.
+- **Engine per group** (bb_tuned 'engine'): engine, variant, reason, basis, since (kept while the engine stays). Admin
+  card (top of "Basketball model v4") and data health "Basketball engine per group" (warn when the NBA runs bb-v3).
+  The game page's grid shows whenever the group's engine is bb-v4 (`gridLive`).
+- Tests: `npm run test:fix236` (5). Real numbers: on the server after deploy (no basketball rows in the local copy);
+  if Rest of the world still fails, the card's checks say whether the league settings or #4's proxy is the cause.

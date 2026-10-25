@@ -5,7 +5,10 @@ import { errorText } from '../lib/auth'
 import { slAdmin } from '../lib/modelNames'
 
 type Score = { games: number; logLoss: number; brier: number; hitRate: number }
-type Gate = { group: string; pass: boolean; reason: string; whole: { v3: Score; v4: Score }; first25: { v3: Score; v4: Score }; oracle: { games: number; v3: Score; v4: Score }; leagues: string[] }
+/** fix236: variant 'shared' = the leagues' own settings dropped; basis = the #4 inputs the test read; checks = a failing group's diagnosis */
+type GateCheck = { name: string; pass: boolean; whole: number; first25: number; live: boolean }
+type Gate = { group: string; pass: boolean; reason: string; whole: { v3: Score; v4: Score }; first25: { v3: Score; v4: Score }; oracle: { games: number; v3: Score; v4: Score }; leagues: string[]; variant?: 'full' | 'shared'; basis?: string; checks?: GateCheck[] }
+type EngineRow = { group: string; engine: 'bb-v3' | 'bb-v4'; variant: 'full' | 'shared'; reason: string; basis: string; since: string | null; leagues: string[] }
 type Info = {
   stored: boolean; at: string | null; params: { w: number[]; version: string; fittedAt: string | null; train: number[] | null; stretch: Record<string, number>; offsets: Record<string, number[]> }
   report: null | { split: { id: string; name: string; weight: number; points: number }[]; trainGames: number; testGames: number; trainLL: number; startLL: number; offsetLeagues: string[] }
@@ -20,13 +23,16 @@ type Info = {
   miss?: MissInfo
   /** fix225: box-score value blended with on/off, the star factor */
   impact?: ImpactInfo
+  /** fix236: the engine each group runs, why, since when */
+  engine?: { env: string | null; at: string | null; groups: EngineRow[] }
 }
-type ImpactCheck = { name: string; games: number; cur: number; next: number; better: boolean; worse: boolean }
+type ImpactCheck = { name: string; games: number; cur: number; next: number; better: boolean; worse: boolean; tol?: number }
 type ImpactReport = {
   at: string; why: string; train: number[]; test: number; seconds: number; applied: boolean; wb: number; tried: { wb: number; trainLL: number }[]
   box: { c: number[]; version: string; games: number }; miss: MissSet & { top?: number }; before: { wb: number | null; nba: number; star: number; top: number | null; other: number }
   gate: { pass: boolean; reason: string; checks: ImpactCheck[] }
   split: { nba: { before: number[]; after: number[] }; other: { before: number[]; after: number[] } }
+  regate?: { rule: string; at: string; why: string; was: string; applied: boolean }
 }
 type ImpactPlayer = { id: number; name: string; rating: number; was?: number }
 type ImpactInfo = {
@@ -128,6 +134,13 @@ export default function BbGridCard() {
       .then(data => { setImpPreview(data); setMsg(data.applied ? `Stored: ${data.gate.reason}` : `Not stored: ${data.gate.reason}`); load() })
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
+  // fix236: the stored fix225 fit judged again by the gate on the live basis (no refit)
+  const impactRegate = () => {
+    setBusy(true); setMsg('Judging the stored box-score fit again (NBA #4 = who played), stored if the gate passes…')
+    runFitJob(`${API_URL}/bb/impact-regate?apply=gate`, setMsg)
+      .then(data => { setImpPreview(data); setMsg(data.applied ? `Stored: ${data.gate.reason}` : `Not stored: ${data.gate.reason}`); load() })
+      .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
+  }
   const ir = impPreview || d.impact?.report || null
   const il = d.impact?.leagues.find(x => x.code === impLeague) || d.impact?.leagues[0] || null
   // the fitted split: points per row out of 1,000 (weight × spread of the row on the training games)
@@ -148,7 +161,17 @@ export default function BbGridCard() {
           Fitted on live data at {new Date(d.auto.at).toLocaleString('en-GB')} · train {d.auto.train.join(', ')} ({d.auto.trainGames} games) → test {d.auto.test} ({d.auto.testGames} games) · {d.auto.reason}
         </p>
       ) : <p className="text-xs text-loss mb-1">Not fitted on the live database yet{d.autoDue ? ` (due: ${d.autoDue}; the worker runs it ~20 min after a start, then monthly)` : ''}.</p>}
-      <p className="text-sm text-muted">Gate on 2025-26 (or the 2025 season): bb-v4 must beat bb-v3 on log loss over the whole season and on games 1–25, per group; otherwise bb-v3 stays live there.</p>
+      <p className="text-sm text-muted">Gate on 2025-26 (or the 2025 season): bb-v4 must beat bb-v3 on log loss over the whole season and on games 1–25, per group; otherwise bb-v3 stays live there. Each group is judged the way it runs live: NBA #4 = who actually played (live: injury report + confirmed starters), other leagues the news / rest proxy. A failing group is checked again without its leagues' own settings (that may go live) and with #4's proxy changed (diagnosis only).</p>
+      {d.engine && d.engine.groups.length > 0 && (
+        <div className="mt-2 text-xs">
+          {d.engine.groups.map(g => (
+            <p key={g.group} className={g.engine === 'bb-v4' ? 'text-win' : g.group === 'NBA' ? 'text-loss font-semibold' : 'text-muted'}>
+              <b>{g.group}</b>: {slAdmin(g.engine)}{g.variant === 'shared' ? ' (shared settings)' : ''}{g.since ? ` since ${new Date(g.since).toLocaleString('en-GB')}` : ''} — {g.reason}
+            </p>
+          ))}
+          {d.engine.env && <p className="text-loss">BB_GRID={d.engine.env} overrides the gate.</p>}
+        </div>
+      )}
       {d.gate && (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-xs">
@@ -160,11 +183,16 @@ export default function BbGridCard() {
                   <td className="py-1.5 pr-3 num">{ll(g.whole.v3)} → <b className={g.whole.v4.logLoss < g.whole.v3.logLoss ? 'text-win' : 'text-loss'}>{ll(g.whole.v4)}</b> <span className="text-faint">({g.whole.v4.games})</span></td>
                   <td className="py-1.5 pr-3 num">{ll(g.first25.v3)} → <b className={g.first25.v4.logLoss < g.first25.v3.logLoss ? 'text-win' : 'text-loss'}>{ll(g.first25.v4)}</b> <span className="text-faint">({g.first25.v4.games})</span></td>
                   <td className="py-1.5 pr-3 num text-muted">{ll(g.oracle.v4)}</td>
-                  <td className={`py-1.5 font-semibold ${g.pass ? 'text-win' : 'text-loss'}`} title={g.reason}>{g.pass ? 'bb-v4' : 'bb-v3'}</td>
+                  <td className={`py-1.5 font-semibold ${g.pass ? 'text-win' : 'text-loss'}`} title={`${g.reason}${g.basis ? ` [${g.basis}]` : ''}`}>{g.pass ? 'bb-v4' : 'bb-v3'}{g.variant === 'shared' ? ' (shared)' : ''}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {Object.values(d.gate).filter(g => g.checks?.length).map(g => (
+            <p key={g.group} className="mt-1 text-xs text-faint num">
+              {g.group} checked (whole season / games 1–25, bb-v3 {ll(g.whole.v3)} / {ll(g.first25.v3)}): {g.checks!.map(c => `${c.name} ${c.whole.toFixed(4)} / ${c.first25.toFixed(4)}${c.pass ? (c.live ? ' passes' : ' passes (diagnosis only)') : ''}`).join(' · ')}
+            </p>
+          ))}
         </div>
       )}
       <div className="mt-3 grid sm:grid-cols-2 gap-x-6 text-xs">
@@ -320,6 +348,7 @@ export default function BbGridCard() {
             <span className="flex gap-2">
               <button type="button" className={btn} disabled={busy} onClick={() => impactFit('0')}>Preview</button>
               <button type="button" className={btn} disabled={busy} onClick={() => impactFit('gate')}>Fit, store if the gate passes</button>
+              {d.impact.report && !d.impact.report.applied && <button type="button" className={btn} disabled={busy} onClick={impactRegate}>Judge the stored fit again</button>}
             </span>
           </div>
           <p className="text-faint">Player impact = box-score value (points, shot attempts, 3-pointers, rebounds, assists per game length, pace-adjusted; a team's players add up to its net rating) × share + on/off rating × the rest, the on/off shrink scaled by minutes. A top-3 player out counts × the star factor in #4 (NBA). Gate on {ir ? ir.test : 2025}: NBA and Europe, whole season and games 1–25, and the NBA's games with who played known.</p>
@@ -347,6 +376,7 @@ export default function BbGridCard() {
                 </table>
               </div>
               <p className={ir.gate.pass ? 'text-win' : 'text-loss'}>Gate: {ir.gate.reason}{ir.applied ? ' · stored' : ' · not stored'}</p>
+              {ir.regate && <p className="text-faint">Judged again {new Date(ir.regate.at).toLocaleString('en-GB')} ({ir.regate.why}); the first gate said: {ir.regate.was}</p>}
               <p className="text-faint num">1,000 points split, NBA before → after: {ROWS.map((n, i) => (i === 11 ? null : `${n.split(' ')[0]} ${ir.split.nba.before[i]}→${ir.split.nba.after[i]}`)).filter(Boolean).join(' · ')}</p>
             </>
           )}

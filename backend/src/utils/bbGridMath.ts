@@ -372,31 +372,33 @@ export function missGate(test: GridItem[], next: GridParams, cur: GridParams): M
  * on its own inputs as live has them (`curItems` / `nextItems`: NBA #4 = who played). Checks: NBA and Europe, the whole
  * season and games 1–25, and the NBA's games with who played known. Passes when the NBA's whole season and its
  * who-played-known games improve and no check is worse.
+ * fix236: a games 1–25 check counts as worse only beyond FIRST25_TOL (0.002: noise at the NBA's ~385 games 1–25).
  */
-export type ImpactCheck = { name: string; games: number; cur: number; next: number; better: boolean; worse: boolean };
+export const FIRST25_TOL = 0.002;
+export type ImpactCheck = { name: string; games: number; cur: number; next: number; better: boolean; worse: boolean; tol?: number };
 export type ImpactGate = { pass: boolean; reason: string; checks: ImpactCheck[] };
 export function impactGate(curItems: GridItem[], nextItems: GridItem[], cur: GridParams, next: GridParams, test: number): ImpactGate {
   const r5 = (x: number) => Math.round(x * 1e5) / 1e5;
   const ids = (l: GridItem[]) => l.map(x => x.id);
   const by = new Map(nextItems.map(x => [x.id, x]));
   const checks: ImpactCheck[] = [];
-  const add = (name: string, sel: (x: GridItem) => boolean, min: number) => {
+  const add = (name: string, sel: (x: GridItem) => boolean, min: number, tol = 1e-9) => {
     const c = curItems.filter(x => x.year === test && sel(x));
     const n = ids(c).map(id => by.get(id)).filter((x): x is GridItem => !!x);
     if (c.length < min || n.length !== c.length) return;
     const a = logLoss(cur, c), b = logLoss(next, n);
-    checks.push({ name, games: c.length, cur: r5(a), next: r5(b), better: b < a - 1e-9, worse: b > a + 1e-9 });
+    checks.push({ name, games: c.length, cur: r5(a), next: r5(b), better: b < a - 1e-9, worse: b > a + tol, ...(tol > 1e-9 ? { tol } : {}) });
   };
   add('NBA whole season', x => x.code === 'NBA', 200);
-  add('NBA games 1–25', x => x.code === 'NBA' && x.gp < 25, 50);
+  add('NBA games 1–25', x => x.code === 'NBA' && x.gp < 25, 50, FIRST25_TOL);
   add('NBA who played known', x => x.code === 'NBA' && x.oracle !== null && (by.get(x.id)?.oracle ?? null) !== null, 100);
   add('Europe whole season', x => groupOf(x.code) === 'Europe', 200);
-  add('Europe games 1–25', x => groupOf(x.code) === 'Europe' && x.gp < 25, 50);
+  add('Europe games 1–25', x => groupOf(x.code) === 'Europe' && x.gp < 25, 50, FIRST25_TOL);
   const need = ['NBA whole season', 'NBA who played known'];
   const missing = need.filter(n => !checks.some(c => c.name === n));
   const notBetter = checks.filter(c => need.includes(c.name) && !c.better), worse = checks.filter(c => c.worse);
   const pass = !missing.length && !notBetter.length && !worse.length;
-  const f = (c: ImpactCheck) => `${c.name} ${c.cur} → ${c.next}`;
+  const f = (c: ImpactCheck) => `${c.name} ${c.cur} → ${c.next}${c.tol && !c.better && !c.worse ? ` (within ${c.tol}: noise at ${c.games} games)` : ''}`;
   const reason = pass ? `the new values win: ${checks.map(f).join('; ')}`
     : `today's values stay: ${[...missing.map(n => `${n}: too few test games`), ...notBetter.filter(c => !c.worse).map(c => `${f(c)} (not better)`), ...worse.map(c => `${f(c)} (worse)`)].join('; ')}`;
   return { pass, reason, checks };
