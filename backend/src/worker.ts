@@ -34,13 +34,13 @@ const health = () => {
   const mem = process.memoryUsage();
   // each job: when it last ran, how long it took, the worst stall while it ran (the http entries are the forwarded admin requests)
   // fix210: + the heap each run added (heapDeltaMb, worst maxHeapDeltaMb) and the highest heap while it ran
-  const jobs = Object.fromEntries(Object.entries(p.jobs).filter(([k]) => !k.startsWith('http ')).map(([k, j]: [string, any]) => [k, { lastAt: j.lastAt, lastMs: j.lastMs, maxMs: j.maxMs, runs: j.runs, maxStallMs: j.maxStallMs, heapDeltaMb: j.heapDeltaMb, maxHeapDeltaMb: j.maxHeapDeltaMb, peakHeapMb: j.peakHeapMb }]));
+  const jobs = Object.fromEntries(Object.entries(p.jobs).filter(([k]) => !k.startsWith('http ')).map(([k, j]: [string, any]) => [k, { lastAt: j.lastAt, lastMs: j.lastMs, maxMs: j.maxMs, totalMs: j.totalMs, runs: j.runs, maxStallMs: j.maxStallMs, heapDeltaMb: j.heapDeltaMb, maxHeapDeltaMb: j.maxHeapDeltaMb, peakHeapMb: j.peakHeapMb }]));
   const now = sampleHeap();
   sendIpc({
     t: 'health', at: Date.now(), pid: process.pid, uptimeMin: Math.round(process.uptime() / 60), memoryMb: Math.round(mem.rss / 1048576), heapMb: Math.round(mem.heapUsed / 1048576),
     heapLimitMb: Math.round(v8.getHeapStatistics().heap_size_limit / 1048576),
     perf: { stallsLastHour: p.stallsLastHour, worstLastHour: p.worstLastHour, running: p.running, heavy: p.heavy, recentStalls: p.recentStalls.slice(0, 10), topStalls: p.topStalls },
-    jobs, shared: sharedStatus(), memByJob: memByJob(), running: now.running.map(label => ({ label, heapMb: now.heapMb }))
+    jobs, shared: sharedStatus(), memByJob: memByJob(10), running: now.running.map(label => ({ label, heapMb: now.heapMb }))
   });
 };
 setInterval(health, 10 * 1000).unref();

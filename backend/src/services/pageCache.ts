@@ -13,7 +13,7 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { isWeb, isWorker, runsJobs } from './role';
 import { onIpc, sendIpc } from './ipc';
-import { timed, yieldLoop, heavyQueued } from './perf';
+import { timed, yieldLoop, pageLane, markPagesFirstDone } from './perf';
 import { stringifyAsync } from '../utils/jsonAsync';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
@@ -21,7 +21,8 @@ import { promisify } from 'node:util';
 
 db.exec(`CREATE TABLE IF NOT EXISTS page_cache (key TEXT PRIMARY KEY, json TEXT NOT NULL, built_at INTEGER NOT NULL, ms INTEGER NOT NULL DEFAULT 0)`);
 // fix221: each stored view carries its ETag and a gzip copy made by the worker (the web process only sends them)
-for (const col of ['etag TEXT', 'gz BLOB']) { try { db.exec(`ALTER TABLE page_cache ADD COLUMN ${col}`); } catch { /* there already */ } }
+// fix232: + the page's size, so /api/perf never reads length(json) over the whole table (it read every stored page)
+for (const col of ['etag TEXT', 'gz BLOB', 'kb INTEGER']) { try { db.exec(`ALTER TABLE page_cache ADD COLUMN ${col}`); } catch { /* there already */ } }
 const gzip = promisify(zlib.gzip);
 
 export type Query = Record<string, string | number | boolean | null | undefined>;
@@ -197,13 +198,14 @@ const freshOf = (def: PageDef, body: () => any) => { try { return def.freshOf ? 
 // worker: when each key was last built (the copy itself is in page_cache, not in memory)
 const builtAtMem = new Map<string, number>();
 /**
- * fix210: pages with warm queries (the lists every visitor opens: big) are built in the heavy-job queue, one heavy job
- * at a time in the worker; on-demand pages (one player, one match: small, a visitor may be waiting) are built at once.
+ * fix210: pages with warm queries (the lists every visitor opens: big) are built one at a time in the worker; on-demand
+ * pages (one player, one match: small, a visitor may be waiting) are built at once.
+ * fix232: in the page lane (perf.pageLane), not the heavy queue: a model rebuild or fit never holds a page build back.
  */
 function buildQueued(key: string): Promise<void> {
   const def = defs.get(parseKey(key).name);
   if (!def?.warm?.length || !runsJobs) return buildNow(key);
-  return heavyQueued(`page ${key}`, () => buildNow(key)).then(() => undefined);
+  return pageLane(`page ${key}`, () => buildNow(key)).then(() => undefined);
 }
 
 function buildNow(key: string): Promise<void> {
@@ -234,12 +236,12 @@ function buildNow(key: string): Promise<void> {
       await yieldLoop();
     }
     const at = Date.now();
-    const ins = db.prepare(`INSERT INTO page_cache (key, json, built_at, ms, etag, gz) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET json = excluded.json, built_at = excluded.built_at, ms = excluded.ms, etag = excluded.etag, gz = excluded.gz`);
+    const ins = db.prepare(`INSERT INTO page_cache (key, json, built_at, ms, etag, gz, kb) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET json = excluded.json, built_at = excluded.built_at, ms = excluded.ms, etag = excluded.etag, gz = excluded.gz, kb = excluded.kb`);
     db.exec('BEGIN');
     try {
-      ins.run(key, json, at, at - t0, null, null);
-      for (const [v, x] of variants) ins.run(`${key}#${v}`, x.text, at, 0, x.etag, x.gz);
+      ins.run(key, json, at, at - t0, null, null, Math.round(json.length / 1024));
+      for (const [v, x] of variants) ins.run(`${key}#${v}`, x.text, at, 0, x.etag, x.gz, Math.round(x.text.length / 1024));
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     if (!isWorker) memSet(key, { builtAt: at, checkedAt: at, body, variants: new Map(variants.filter(([v]) => v !== 'rows')), bytes: (json.length + variants.reduce((n, [, x]) => n + x.text.length, 0)) * 2 });
@@ -346,21 +348,33 @@ export async function startPageWarmer(): Promise<void> {
       await yieldLoop();
     }
   };
-  await round(true);
-  // copies nobody asked for in a week (an old query, a league gone) are dropped
-  // fix210: on-demand pages (keepMs) sooner: a crawler opening thousands of player / match pages must not fill the file
-  setInterval(() => {
-    try {
-      db.prepare(`DELETE FROM page_cache WHERE built_at < ?`).run(Date.now() - 7 * 86400000);
-      for (const d of defs.values()) if (d.keepMs) db.prepare(`DELETE FROM page_cache WHERE (key = ? OR key LIKE ?) AND built_at < ?`).run(d.name, `${d.name}?%`, Date.now() - d.keepMs);
-    } catch { /* next hour */ }
-  }, 3600 * 1000).unref();
+  const t0 = Date.now();
+  try { await round(true); } finally {
+    // fix232: the model rebuilds and fits (perf.MODEL_JOBS) start now — after every list was stored once
+    markPagesFirstDone();
+    logger.info(`stored pages: first round done in ${Math.round((Date.now() - t0) / 1000)} s — the model jobs may start`);
+  }
+  setInterval(cleanPageCache, 3600 * 1000).unref();
   let running = false;
   setInterval(() => {
     if (running) return;
     running = true;
     round(false).catch(e => logger.warn(`page warmer: ${e?.message || e}`)).finally(() => { running = false; });
   }, 15 * 1000).unref();
+}
+
+/**
+ * Copies nobody asked for in a week (an old query, a league gone) are dropped; fix210: on-demand pages (keepMs) sooner:
+ * a crawler opening thousands of player / match pages must not fill the file. fix232: the lists every visitor opens
+ * (warm queries) are never dropped — their last copy is what a restart serves while the worker builds the next one.
+ */
+export function cleanPageCache(now = Date.now()) {
+  try {
+    const keep = [...defs.values()].flatMap(d => (d.warm || []).map(q => pageKey(d.name, q)));
+    const base = `CASE WHEN instr(key, '#') > 0 THEN substr(key, 1, instr(key, '#') - 1) ELSE key END`;
+    db.prepare(`DELETE FROM page_cache WHERE built_at < ?${keep.length ? ` AND ${base} NOT IN (${keep.map(() => '?').join(',')})` : ''}`).run(now - 7 * 86400000, ...keep);
+    for (const d of defs.values()) if (d.keepMs) db.prepare(`DELETE FROM page_cache WHERE (key = ? OR key LIKE ?) AND built_at < ?`).run(d.name, `${d.name}?%`, now - d.keepMs);
+  } catch { /* next hour */ }
 }
 
 /** fix210b (worker): when this page was last stored (0 = never) — prebuild jobs skip what is fresh */
@@ -380,10 +394,22 @@ export function refreshPages(...names: string[]) {
   for (const k of keys) void buildQueued(k); // fix210: queued after the heavy job that asked for it, never inside it
 }
 
-/** /api/perf: each stored page (when built, how long the build took, size, requests in this process) */
+/**
+ * /api/perf?full=1 (worker): each kept-fresh page (when built, how long the build took, size, requests in this process);
+ * fix232: the on-demand pages (thousands of game / crawler pages) as one line per page name, and no length(json) (the
+ * size is stored with the page)
+ */
 export function pageCacheStatus() {
-  const rows = db.prepare(`SELECT key, built_at, ms, length(json) AS len FROM page_cache WHERE key NOT LIKE '%#%' ORDER BY key`).all() as any[];
-  return rows.map(r => ({ key: r.key, builtAt: new Date(r.built_at).toISOString(), ageS: Math.round((Date.now() - r.built_at) / 1000), buildMs: r.ms, kb: Math.round(r.len / 1024), requests: stats.get(r.key)?.requested || 0 }));
+  const lists: any[] = [], onDemand = new Map<string, { name: string; copies: number; kb: number; oldestS: number }>();
+  for (const r of db.prepare(`SELECT key, built_at, ms, kb FROM page_cache WHERE key NOT LIKE '%#%'`).all() as any[]) {
+    const name = parseKey(r.key).name, ageS = Math.round((Date.now() - r.built_at) / 1000);
+    if (defs.get(name)?.refresh === false) {
+      const o = onDemand.get(name) || { name, copies: 0, kb: 0, oldestS: 0 };
+      o.copies++; o.kb += r.kb || 0; o.oldestS = Math.max(o.oldestS, ageS);
+      onDemand.set(name, o);
+    } else lists.push({ key: r.key, builtAt: new Date(r.built_at).toISOString(), ageS, buildMs: r.ms, kb: r.kb ?? null, requests: stats.get(r.key)?.requested || 0 });
+  }
+  return { lists: lists.sort((a, b) => (a.key < b.key ? -1 : 1)), onDemand: [...onDemand.values()] };
 }
 
 /** tests: forget this process's copies (the next read comes from the table) */

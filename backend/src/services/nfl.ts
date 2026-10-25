@@ -13,7 +13,7 @@
  */
 import { db } from '../db';
 import logger from '../utils/logger';
-import { timed, yieldLoop, every, after, slicer, perGames } from './perf';
+import { timed, yieldLoop, every, after, slicer, perGames, pagesFirst } from './perf';
 import { schoolOf } from './collegeNames';
 
 const BASE = 'https://v1.american-football.api-sports.io';
@@ -726,6 +726,7 @@ export function startNflScheduler() {
       if (Date.now() - ranAt('job|rosters') > 24 * 3600 * 1000) mark('job|rosters', await timed('nfl rosters', () => nflRosters()));
       // fix139: weekly re-tune (Tuesday) + save the coming predictions (after the injury report)
       const { nflModelTick } = await import('./nflModel');
+      await pagesFirst(); // fix232: the model after the stored pages were rebuilt once
       await timed('nfl model', () => nflModelTick());
     } catch (e: any) {
       logger.warn(`NFL sync: ${e.message}`);
@@ -751,6 +752,7 @@ export function startNflScheduler() {
   // fix171: a 10 s pause between the leagues, so the two builds never run back to back
   setTimeout(() => void (async () => {
     const { rebuildLive } = await import('./nflModel');
+    await pagesFirst(); // fix232: the ratings rebuild after the stored pages were rebuilt once (the pages use the saved predictions meanwhile)
     for (const [i, lg] of LEAGUES.entries()) {
       if (i) await new Promise(r => setTimeout(r, 10 * 1000));
       await timed('nfl ratings', () => rebuildLive(lg));

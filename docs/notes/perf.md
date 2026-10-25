@@ -397,3 +397,25 @@ gap with no listener (Railway answers 502). fix227 keeps it short and lets the s
 - Frontend: the loader in index.html (retry the app file, then the "Updating SportLikely…" card) and `lib/startupRetry.ts`.
 - Measured locally (`npm run test:fix227`): 0 errors for / and the app file over two restarts, gap 0.44 s.
 - Data health "Errors during the last deploy" (`services/deployErrors.ts`).
+
+## fix232 — no empty lists after a deploy, a light /api/perf
+
+25 Oct ~17:55–18:07 UTC (fix225 deploy): /api/basketball/games answered 503 "Loading" for ~12 min while the worker's
+first "bb model" build (every game's impact recomputed) held the heavy queue — the list builds were queued behind it.
+/api/perf was 5 MB (every stored page listed with length(json), all jobs, the shared states) and froze the web
+4.8–18.6 s each time it was opened.
+- **Page lane** (`perf.pageLane`): stored-page builds run one at a time beside the heavy queue, never behind a model job.
+  A heavy job a page build asks for runs inside it (as when pages were heavy jobs), unless it runs / waits already.
+- **Pages first** (`perf.MODEL_JOBS`, `expectPagesFirst` / `pagesFirst`): the model rebuilds and fits of every sport
+  wait for the warmer's first round (`stored pages: first round done in N s`), at most 10 min (`PAGES_FIRST_MAX_MS`).
+  NFL ratings / model tick and the tennis model tick await it explicitly (they are not heavy() jobs).
+- **The last copy survives**: the weekly clean-up never drops a warm list (`pageCache.cleanPageCache`); every stored
+  answer carries `X-SL-Built-At`. A list without any copy is built in the page lane within seconds (no 12-min wait).
+- **Deploy health**: 503 "Loading" answers of stored lists in the first 30 min (`deployErrors.noteLoading`), fail when
+  any comes after the first 60 s.
+- **/api/perf**: summary by default (≤ 50 KB, from memory: web / worker totals, top 20 stalls, jobs top 30 by total
+  time, memory by job top 10, 24 h with the 2 worst stalls each); `?full=1` the old detail with the stored pages listed by
+  the worker (`/api/perf/pages`; lists one by one, on-demand pages one line per name; the size is stored with each page,
+  no length(json) scan; index `idx_page_cache_meta`); `?shared=1` the shared states. A stall while only /api/perf or
+  /api/admin/* ran is kept apart (`diagStalls`), never in the hour's count or data health "Web stalls".
+- Test: `npm run test:fix232` (restart with a 60-s fake model rebuild, `SL_TEST_MODEL_MS`).

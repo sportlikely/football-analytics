@@ -17,7 +17,10 @@ const INDEXES: { name: string; sql: string }[] = [
   { name: 'idx_tennis_stats_player', sql: 'CREATE INDEX IF NOT EXISTS idx_tennis_stats_player ON tennis_match_stats(player_id)' },
   // fix196: basketball game pages and crawler pages — a league season's games (season record, preview); with only
   // (code, kickoff) SQLite walked every game of the league before the date
-  { name: 'idx_bb_games_code_season', sql: 'CREATE INDEX IF NOT EXISTS idx_bb_games_code_season ON bb_games(code, season, kickoff)' }
+  { name: 'idx_bb_games_code_season', sql: 'CREATE INDEX IF NOT EXISTS idx_bb_games_code_season ON bb_games(code, season, kickoff)' },
+  // fix232: a stored page's time and size without reading its text (built_at comes after the json column: reading it
+  // walked the page's overflow pages — the web's freshness check and /api/perf's page list read every stored page)
+  { name: 'idx_page_cache_meta', sql: 'CREATE INDEX IF NOT EXISTS idx_page_cache_meta ON page_cache(key, built_at, ms, kb)' }
 ];
 
 export function ensureIndexes(): Promise<void> {

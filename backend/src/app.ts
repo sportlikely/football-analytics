@@ -9,7 +9,7 @@ import { runLinkCheck, lastLinkCheck } from './services/linkCheck';
 import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
 import { sendMail as sendMailFix168 } from './services/email';
-import { perfStatus, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy, perGames, mapGames } from './services/perf';
+import { perfStatus, perfSummary, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy, perGames, mapGames } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
 import http from 'http';
@@ -86,7 +86,7 @@ import { liveList, liveAt } from './services/liveState';
 import { isWeb, isWorker, ROLE } from './services/role';
 import { isReady, readiness } from './services/readiness';
 import { serveEarly, needsState, currentMainScript } from './services/earlyStatic';
-import { deployErrorsMiddleware } from './services/deployErrors';
+import { deployErrorsMiddleware, noteLoading } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
 import { workerRoutes, workerRoutesStatus } from './services/workerRoutes';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
@@ -519,7 +519,10 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   const read = track(`stored ${name}: read`);
   let s: Awaited<ReturnType<typeof getPage>>;
   try { s = await getPage(name, q); } finally { read(); }
-  if (!s) return res.status(503).set('Retry-After', '5').json({ error: 'Loading, please try again in a moment' });
+  // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
+  if (!s) { noteLoading(req.path); return res.status(503).set('Retry-After', '5').json({ error: 'Loading, please try again in a moment' }); }
+  // fix232: when this copy was built (after a restart: the last copy stored before it, until the worker has a new one)
+  res.set('X-SL-Built-At', new Date(s.builtAt).toISOString());
   const pick = track(`stored ${name}: pick`);
   try { return sendStoredPick(req, res, s, view, keep, name); } finally { pick(); }
 }
@@ -3830,11 +3833,45 @@ app.get('/api/admin/link-check', async (req, res) => {
 // Admin: event-loop stalls and how long the heavy jobs take (why the site feels slow)
 // fix202: this process's numbers (the web process: the one visitors wait for), the worker's health (last run of each
 // job, memory, restarts), the stored pages and the model state taken from the worker
-app.get('/api/perf', (_req, res) => {
+// fix232: a summary by default (≤ 50 KB, from memory only: no table read, no multi-MB JSON on the web — the 5 MB answer
+// froze the web 4.8–18.6 s each time); ?full=1 the old detail (the stored-page list read by the worker, sent as its
+// text), ?shared=1 the shared-state list. /api/perf itself is not counted as a web stall (perf.ts isDiagLabel).
+const PERF_MAX = 50 * 1024;
+const topJobs = (jobs: Record<string, any>, n: number) => Object.entries(jobs || {}).sort((a, b) => (b[1].totalMs || 0) - (a[1].totalMs || 0) || (b[1].maxMs || 0) - (a[1].maxMs || 0)).slice(0, n)
+  .map(([job, j]) => ({ job, runs: j.runs, totalMs: j.totalMs ?? null, maxMs: j.maxMs, lastMs: j.lastMs, lastAt: j.lastAt, maxStallMs: j.maxStallMs }));
+function perfSummaryText(): string {
+  const w: any = workerHealth();
+  const { hours, ...web } = perfSummary();
+  const worker = w.on === undefined || !('pid' in w) ? w : {
+    on: w.on, pid: w.pid, upMin: w.upMin, restarts: w.restarts, restarts24h: w.restarts24h, reportAgeS: w.reportAgeS,
+    lastExit: w.lastExit ? { ...w.lastExit, stderr: (w.lastExit.stderr || []).slice(-10) } : null,
+    exits24h: (w.exits24h || []).slice(0, 5), memoryMb: w.memoryMb, heapMb: w.heapMb, heapLimitMb: w.heapLimitMb,
+    stallsLastHour: w.stallsLastHour, worstLastHour: w.worstLastHour, running: w.running, heavy: w.heavy && { ...w.heavy, waiting: (w.heavy.waiting || []).slice(0, 20) },
+    topStalls: (w.topStalls || []).slice(0, 20).map((s: any) => ({ at: s.at, ms: s.ms, job: s.job ? String(s.job).slice(0, 300) : null })),
+    jobs: topJobs(w.jobs, 30), memByJob: (w.memByJob || []).slice(0, 10)
+  };
+  const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), hours };
+  let text = JSON.stringify({ data: body, timestamp: new Date().toISOString() });
+  if (text.length > PERF_MAX) { body.hours = hours.slice(-6); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
+  if (text.length > PERF_MAX) { body.hours = []; body.web.jobs = body.web.jobs.slice(0, 10); if (body.worker?.jobs) body.worker.jobs = body.worker.jobs.slice(0, 10); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
+  return text;
+}
+app.get('/api/perf', async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  // fix210: + memory sizing, the 24-h history of both processes, the worker routes and any page the web process built
-  res.json({ data: { process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker: workerHealth(), pages: pageCacheStatus(), pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), threadJobs: threadJobStatus(), shared: sharedStatus() }, timestamp: new Date().toISOString() });
+  if (req.query.shared === '1') return res.json({ data: { process: ROLE, shared: sharedStatus(), workerShared: (workerHealth() as any).shared ?? null }, timestamp: new Date().toISOString() });
+  if (req.query.full !== '1') return res.type('application/json').send(perfSummaryText());
+  // the old detail: this process's numbers, the worker's report and the stored pages (listed by the worker)
+  const { shared: _shared, ...worker } = workerHealth() as any;
+  const head = JSON.stringify({ process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker, pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), threadJobs: threadJobStatus() });
+  let pages = 'null';
+  if (isWeb) {
+    const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+    try { const a = await fetchFromWorker(req, 15_000, `/api/perf/pages${qs}`); if (a.status === 200) pages = a.body.toString('utf8'); } catch { /* the worker is restarting */ }
+  } else pages = JSON.stringify(pageCacheStatus());
+  res.type('application/json').send(`{"data":${head.slice(0, -1)},"pages":${pages}},"timestamp":"${new Date().toISOString()}"}`);
 });
+// fix232 (worker): the stored pages for /api/perf?full=1
+app.get('/api/perf/pages', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json(pageCacheStatus()); });
 
 app.get('/api/af/status', async (_req, res) => {
   try {

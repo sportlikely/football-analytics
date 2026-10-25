@@ -47,7 +47,7 @@ import { Worker, isMainThread, workerData, MessagePort } from 'worker_threads';
 import { db, Statement } from '../db';
 import logger from '../utils/logger';
 import { winnerBands, winnerByConfidence } from '../utils/winnerBands';
-import { slicer, yieldLoop, timed, heavy, track } from './perf';
+import { slicer, yieldLoop, timed, heavy, track, pagesFirst } from './perf';
 import { isWeb, isWorker } from './role';
 import { onState, publishState } from './shared';
 import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
@@ -1548,6 +1548,7 @@ function israelNow() {
  */
 export async function tennisModelTick(force: 'report' | 'retune' | null = null): Promise<void> {
   if (IN_WORKER) { await tickHere(force); return; }
+  await pagesFirst(); // fix232: after the stored pages were rebuilt once
   if (useWorker()) {
     try {
       const r = await callWorker({ cmd: 'tick', force });

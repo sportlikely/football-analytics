@@ -6,7 +6,9 @@
  *  1. a public route of app.ts (under OPEN_API) is not in PUBLIC_ROUTES, or PUBLIC_ROUTES lists one app.ts doesn't have,
  *  2. a 'worker' route's sample URL is not matched by WORKER_ROUTES (the web process would run it), or a 'stored' /
  *     'web' route's sample is (the list says something else than what happens),
- *  3. a sport (football, basketball, American football, tennis) has no game, team or player page on the worker.
+ *  3. a sport (football, basketball, American football, tennis) has no game, team or player page on the worker,
+ *  4. (fix232) a sport has no stored list (served from its last stored copy after a restart) or no model jobs in
+ *     MODEL_JOBS (backend/src/services/perf.ts: rebuilt only after the stored pages, never in front of a page build).
  * Reads the code without running it (TypeScript syntax tree). scripts/no-web-compute.test.mjs (backend) then opens
  * every sample in a real web process and fails when a page builder runs or a handler takes over 50 ms.
  */
@@ -21,6 +23,7 @@ const parse = (file: string) => ts.createSourceFile(file, fs.readFileSync(file, 
 
 const app = parse(path.join(BACK, 'app.ts'))
 const routesFile = parse(path.join(BACK, 'services/workerRoutes.ts'))
+const perfFile = parse(path.join(BACK, 'services/perf.ts'))
 
 // OPEN_API (the public API) and every app.get path
 let openApi: RegExp | null = null
@@ -67,6 +70,12 @@ routesFile.forEachChild(n => {
   }
 })
 
+let modelJobs: Record<string, string[]> = {}
+perfFile.forEachChild(n => {
+  if (!ts.isVariableStatement(n)) return
+  for (const d of n.declarationList.declarations) if ((d.name as ts.Identifier).text === 'MODEL_JOBS' && d.initializer) modelJobs = literal(d.initializer) || {}
+})
+
 const problems: string[] = []
 const byPath = new Map(listed.map(e => [e.path, e]))
 for (const p of publicPaths) if (!byPath.has(p)) problems.push(`not listed in PUBLIC_ROUTES: ${p} (worker, stored or web?)`)
@@ -80,10 +89,16 @@ for (const sport of ['football', 'basketball', 'nfl', 'tennis'])
   for (const kind of ['game', 'team', 'player'])
     if (!listed.some(e => e.sport === sport && e.kind === kind && e.by === 'worker')) problems.push(`${sport}: no ${kind} page answered by the worker`)
 
+// fix232: every sport's list survives a restart (a stored page) and its model rebuilds wait for the pages
+for (const sport of ['football', 'basketball', 'nfl', 'tennis']) {
+  if (!listed.some(e => e.sport === sport && e.by === 'stored')) problems.push(`${sport}: no stored list (a restart would leave it empty)`)
+  if (!modelJobs[sport]?.length) problems.push(`${sport}: no model jobs in MODEL_JOBS (perf.ts) — they would run before the pages after a restart`)
+}
+
 if (problems.length) {
   console.error(`web-routes-check: ${problems.length} problem(s) — the web process must never build a page (fix210)`)
   for (const p of problems) console.error(`  · ${p}`)
   process.exit(1)
 }
 const count = (by: string) => listed.filter(e => e.by === by).length
-console.log(`web-routes-check: ${publicPaths.length} public routes — ${count('worker')} on the worker, ${count('stored')} stored, ${count('web')} small web reads; game / team / player pages of every sport on the worker`)
+console.log(`web-routes-check: ${publicPaths.length} public routes — ${count('worker')} on the worker, ${count('stored')} stored, ${count('web')} small web reads; game / team / player pages of every sport on the worker; stored lists + model jobs after the pages in every sport`)

@@ -98,6 +98,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   fix221: the web process only sends stored strings — never JSON.parse / stringify a page there. Every stored view has
   an ETag + gzip copy (made by the worker); a big list is stored row by row (`rows` in definePage: members' copies are
   joined from the strings); anything that needs the page itself goes to the worker (`byWorker` in app.ts).
+  fix232: stored-page builds run in their own lane (perf.pageLane), never behind a heavy job; model rebuilds / fits of
+  every sport (perf.MODEL_JOBS — add a new model job there) start after the first page round; warm lists are never
+  dropped from page_cache (a restart serves the last copy, X-SL-Built-At). /api/perf = summary (?full=1, ?shared=1).
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
   `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a

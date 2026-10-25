@@ -49,7 +49,15 @@ if (isMainThread) for (const s of [process.stdout, process.stderr]) {
 }
 
 const STEP = 500;
-const stalls: { at: string; ms: number; job: string | null; startup?: true }[] = [];
+const stalls: { at: string; ms: number; job: string | null; startup?: true; diag?: true }[] = [];
+/*
+ * fix232: a stall while only an admin diagnostic ran (/api/perf, /api/admin/* answered here) is not a stall a visitor
+ * waited for: it is kept apart (diagStalls) and not counted in the hour (data health "Web stalls"). On 25 Oct the 5 MB
+ * /api/perf froze the web 4.8–18.6 s each time it was opened: the top 4 web stalls of the hour were "http GET /api/perf".
+ */
+const DIAG = /^http GET \/api\/(perf|admin\/)/;
+export const isDiagLabel = (label: string) => DIAG.test(label);
+const onlyDiag = (labels: string[]) => labels.some(isDiagLabel) && labels.every(l => isDiagLabel(l) || /^gc\b/.test(l));
 // fix210: heapDeltaMb = heap after − before the last run; maxHeapDeltaMb = the worst run; peakHeapMb = highest heap seen while it ran
 type JobStat = { runs: number; lastMs: number; maxMs: number; totalMs: number; lastAt: string; maxStallMs: number; heapDeltaMb?: number; maxHeapDeltaMb?: number; peakHeapMb?: number };
 const jobs = new Map<string, JobStat>();
@@ -91,9 +99,11 @@ if (isMainThread) setInterval(() => {
     // fix175: a request carries its full path (ids kept, only the c / n query values) — "http GET /it/* [/it/team/86] 3773 ms"
     const done = ended.slice(0, 4).map(r => `${r.label}${r.detail ? ` [${r.detail}]` : ''} ${Math.round(r.end - r.start)} ms`).join(' + ');
     const job = [logs, running, done].filter(Boolean).join(' + ') || null;
-    stalls.push({ at: new Date(now).toISOString(), ms: lag, job, startup: !startupDone || undefined });
+    const diag = !logs && onlyDiag([...active.keys(), ...(manual ? [manual] : []), ...ended.map(r => r.label)]);
+    stalls.push({ at: new Date(now).toISOString(), ms: lag, job, startup: !startupDone || undefined, diag: diag || undefined });
     // fix222: the hourly count (data health "Web stalls") is what visitors could wait for: start-up stalls are listed apart
-    if (startupDone) noteHour(lag, job);
+    // fix232: so are the stalls of an admin diagnostic (/api/perf)
+    if (startupDone && !diag) noteHour(lag, job);
     if (stalls.length > 100) stalls.shift();
     // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
     // fix202: the worker's own loop is allowed to be busy (no visitor waits for it): its stalls are logged from 2 s
@@ -333,7 +343,7 @@ export function every(label: string, fn: () => unknown, ms: number): NodeJS.Time
  * inside that job at once instead of waiting for itself. heavyLater() queues from anywhere without waiting (a heavy job
  * that asks for a page rebuild gets it after it ends).
  */
-const heavyCtx = new AsyncLocalStorage<{ label: string; done: boolean }>();
+const heavyCtx = new AsyncLocalStorage<{ label: string; done: boolean; page?: boolean }>();
 /** fix210: inside a running heavy job (its async context)? */
 export const inHeavyJob = () => { const c = heavyCtx.getStore(); return !!c && !c.done; };
 const heavyQueue: { label: string; run: () => void }[] = [];
@@ -357,30 +367,107 @@ setInterval(() => {
 }, 60 * 1000).unref();
 export function heavy<T>(label: string, fn: () => T | Promise<T>): Promise<T | undefined> {
   // fix210: part of the heavy job that is running (its own context): run now, never wait for itself
-  if (inHeavyJob()) return Promise.resolve().then(fn);
+  // fix232: a page build (its own lane) runs a heavy job it asks for inline, as before — unless that job runs or waits already
+  if (inHeavyJob()) return heavyCtx.getStore()?.page && (heavyWaiting.has(label) || heavyNow === label) ? Promise.resolve(undefined) : Promise.resolve().then(fn);
   if (heavyWaiting.has(label) || heavyNow === label) return Promise.resolve(undefined);
   heavyWaiting.add(label);
   return new Promise<T | undefined>((resolve, reject) => {
-    heavyQueue.push({
+    const enqueue = () => {
+      heavyQueue.push({
+        label,
+        run: () => {
+          heavyWaiting.delete(label);
+          heavyNow = label;
+          heavySince = Date.now();
+          const turn = ++heavyTurn;
+          const ctx = { label, done: false };
+          // fix196: never starts during a live tick
+          afterLive().then(() => heavyCtx.run(ctx, fn)).then(resolve, reject).finally(() => {
+            ctx.done = true; // timers the job left behind no longer count as "inside" it
+            if (turn !== heavyTurn) return; // released by the 45-min watchdog: the queue already moved on
+            heavyNow = null;
+            setImmediate(heavyNext);
+          });
+        }
+      });
+      heavyNext();
+    };
+    // fix232: a model rebuild / fit waits until the stored pages were rebuilt once after the start
+    if (isModelJob(label) && !pagesFirstDone()) void pagesFirst().then(enqueue); else enqueue();
+  });
+}
+
+/*
+ * fix232: the stored pages first, then the models. On 25 Oct (fix225 deploy) the worker's first "bb model" build took
+ * ~12 min and every page build waited behind it in the heavy queue: /api/basketball/games answered 503 "Loading" for
+ * 12 min. Now (1) the model rebuilds and fits (MODEL_JOBS, every sport) start only after the first round of page builds
+ * (or PAGES_FIRST_MAX_MS), and (2) page builds have their own lane (pageLane): one page at a time, never queued behind
+ * a heavy job — a model build running in a job thread or in slices no longer holds the lists back.
+ * frontend/scripts/web-routes-check.ts (npm run parity) checks every sport has its model jobs listed here.
+ */
+export const MODEL_JOBS: Record<'football' | 'basketball' | 'nfl' | 'tennis', string[]> = {
+  football: ['model daily job', 'feature state', 'more predictions backtest', 'more predictions first backtest', 'season forecast accuracy'],
+  basketball: ['bb model', 'bb tune', 'bb miss fit', 'bb impact fit', 'bb league tune', 'bb calibration'],
+  nfl: ['nfl ratings', 'nfl model', 'af calibration'],
+  tennis: ['tennis model', 'tennis benchmark']
+};
+const MODEL_LABELS = new Set(Object.values(MODEL_JOBS).flat());
+export const isModelJob = (label: string) => MODEL_LABELS.has(label);
+const PAGES_FIRST_MAX_MS = Number(process.env.PAGES_FIRST_MAX_MS) || 10 * 60 * 1000;
+let pagesExpected = false, pagesDoneAt = 0;
+let pagesResolve: (() => void) | null = null;
+const pagesPromise = new Promise<void>(r => { pagesResolve = r; });
+/** fix232 (worker / one process): the page warmer will run — model jobs wait for its first round (at most 10 min) */
+export function expectPagesFirst() {
+  if (pagesExpected) return;
+  pagesExpected = true;
+  setTimeout(() => { if (!pagesDoneAt) { logger.warn(`stored pages: first round not done after ${Math.round(PAGES_FIRST_MAX_MS / 60000)} min — the model jobs start anyway`); markPagesFirstDone(); } }, PAGES_FIRST_MAX_MS).unref();
+}
+/** fix232: the first round of page builds is done (pageCache.startPageWarmer) */
+export function markPagesFirstDone() { if (!pagesDoneAt) { pagesDoneAt = Date.now(); pagesResolve?.(); } }
+export const pagesFirstDone = () => !pagesExpected || !!pagesDoneAt;
+/** fix232: resolves once the stored pages were rebuilt once (at once when no warmer runs: tests, the web process) */
+export const pagesFirst = (): Promise<void> => (pagesFirstDone() ? Promise.resolve() : pagesPromise);
+
+// fix232: the page lane — one page build at a time, beside the heavy queue (never behind a model build)
+const pageQueue: { label: string; run: () => void }[] = [];
+const pageWaiting = new Set<string>();
+let pageNow: string | null = null, pageSince = 0, pageTurn = 0, pagesBuilt = 0;
+const pageNext = () => { if (pageNow) return; const next = pageQueue.shift(); if (next) next.run(); };
+const PAGE_MAX_MS = 5 * 60 * 1000;
+setInterval(() => {
+  if (!pageNow || Date.now() - pageSince < PAGE_MAX_MS) return;
+  logger.warn(`page build "${pageNow}" still running after ${Math.round((Date.now() - pageSince) / 60000)} min: the page lane moves on`);
+  pageNow = null;
+  pageTurn++;
+  pageNext();
+}, 60 * 1000).unref();
+export function pageLane<T>(label: string, fn: () => T | Promise<T>): Promise<T | undefined> {
+  if (pageWaiting.has(label) || pageNow === label) return Promise.resolve(undefined);
+  pageWaiting.add(label);
+  return new Promise<T | undefined>((resolve, reject) => {
+    pageQueue.push({
       label,
       run: () => {
-        heavyWaiting.delete(label);
-        heavyNow = label;
-        heavySince = Date.now();
-        const turn = ++heavyTurn;
-        const ctx = { label, done: false };
-        // fix196: never starts during a live tick
+        pageWaiting.delete(label);
+        pageNow = label;
+        pageSince = Date.now();
+        const turn = ++pageTurn;
+        // its own heavy context: a heavy job the build asks for runs inside it (as when pages were heavy jobs)
+        const ctx = { label, done: false, page: true };
         afterLive().then(() => heavyCtx.run(ctx, fn)).then(resolve, reject).finally(() => {
-          ctx.done = true; // timers the job left behind no longer count as "inside" it
-          if (turn !== heavyTurn) return; // released by the 45-min watchdog: the queue already moved on
-          heavyNow = null;
-          setImmediate(heavyNext);
+          ctx.done = true;
+          pagesBuilt++;
+          if (turn !== pageTurn) return;
+          pageNow = null;
+          setImmediate(pageNext);
         });
       }
     });
-    heavyNext();
+    heavyCtx.exit(pageNext);
   });
 }
+export const pageLaneStatus = () => ({ running: pageNow, forMs: pageNow ? Date.now() - pageSince : 0, waiting: pageQueue.length, built: pagesBuilt, firstRoundDone: pagesFirstDone(), firstRoundAt: pagesDoneAt ? new Date(pagesDoneAt).toISOString() : null });
 /** fix210: heavy() queued as its own turn even when called from inside a heavy job (never inline, never nested) */
 export function heavyQueued<T>(label: string, fn: () => T | Promise<T>): Promise<T | undefined> {
   return heavyCtx.exit(() => heavy(label, fn));
@@ -390,7 +477,7 @@ export function heavyLater(label: string, fn: () => unknown): void {
   heavyQueued(label, () => timed(label, fn)).catch(e => logger.warn(`${label}: ${e?.message || e}`));
 }
 /** the heavy job running now and the ones waiting (for /api/perf) */
-export const heavyStatus = () => ({ running: heavyNow, forMs: heavyNow ? Date.now() - heavySince : 0, waiting: heavyQueue.map(q => q.label) });
+export const heavyStatus = () => ({ running: heavyNow, forMs: heavyNow ? Date.now() - heavySince : 0, waiting: heavyQueue.map(q => q.label), pages: pageLaneStatus() });
 /** every() for a heavy job: timed only while it runs (the wait in the queue is not counted as running) */
 export function everyHeavy(label: string, fn: () => unknown, ms: number): NodeJS.Timeout {
   return setInterval(() => { heavy(label, () => timed(label, fn)).catch(e => logger.warn(`${label}: ${e?.message || e}`)); }, ms);
@@ -412,12 +499,12 @@ export function markListening(loadMs: number) {
   if (loadMs > 300) stalls.push({ at: new Date().toISOString(), ms: Math.round(loadMs), job: 'module load before listen', startup: true });
 }
 export const markStartupDone = () => { startupDone = true; };
-export const stallsSinceReady = () => stalls.filter(s => !s.startup && s.ms > 500).length;
+export const stallsSinceReady = () => stalls.filter(s => !s.startup && !s.diag && s.ms > 500).length;
 /** fix218: requests that took over 500 ms since the process was ready (http entries of the recent list) */
-export const slowSinceReady = () => recent.filter(r => r.label.startsWith('http ') && r.end - r.start > 500 && !(r as any).startup).length;
+export const slowSinceReady = () => recent.filter(r => r.label.startsWith('http ') && !isDiagLabel(r.label) && r.end - r.start > 500 && !(r as any).startup).length;
 export function perfStatus() {
   const since = Date.now() - 3600 * 1000;
-  const recent = stalls.filter(s => new Date(s.at).getTime() >= since && !s.startup);
+  const recent = stalls.filter(s => new Date(s.at).getTime() >= since && !s.startup && !s.diag);
   const startup = stalls.filter(s => s.startup);
   return {
     maxLagMs: maxLag,
@@ -426,11 +513,13 @@ export function perfStatus() {
     running: runningLabel(),
     heavy: heavyStatus(),
     liveThisHour: Object.fromEntries(liveHour),
-    recentStalls: stalls.filter(s => !s.startup).slice(-25).reverse(),
+    recentStalls: stalls.filter(s => !s.startup && !s.diag).slice(-25).reverse(),
     // fix212b: the start-up load's own stalls (before listen; nobody waited)
     startupStalls: startup.slice(-5).map(s => ({ at: s.at, ms: s.ms, job: s.job })),
-    // fix210: the worst stalls of the last hour (what to fix first)
-    topStalls: [...recent].sort((a, b) => b.ms - a.ms).slice(0, 10),
+    // fix232: stalls while only an admin diagnostic ran (not counted above)
+    diagStalls: stalls.filter(s => s.diag).slice(-5).map(s => ({ at: s.at, ms: s.ms, job: s.job })),
+    // fix210: the worst stalls of the last hour (what to fix first); fix232: 20
+    topStalls: [...recent].sort((a, b) => b.ms - a.ms).slice(0, 20),
     // maxMs = longest run (waits for the data providers included); maxStallMs = worst event-loop freeze while it ran
     jobs: Object.fromEntries([...jobs.entries()].sort((a, b) => b[1].maxStallMs - a[1].maxStallMs || b[1].maxMs - a[1].maxMs)),
     memoryMb: Math.round(process.memoryUsage().rss / 1048576),
@@ -439,5 +528,24 @@ export function perfStatus() {
     memByJob: memByJob(),
     hours: hourBuckets(),
     uptimeMin: Math.round(process.uptime() / 60)
+  };
+}
+
+/** fix232: the jobs that took the most time in all (/api/perf summary: top 30), small rows */
+export function jobsTop(n = 30) {
+  return [...jobs.entries()].sort((a, b) => b[1].totalMs - a[1].totalMs).slice(0, n)
+    .map(([job, j]) => ({ job, runs: j.runs, totalMs: j.totalMs, maxMs: j.maxMs, lastMs: j.lastMs, lastAt: j.lastAt, maxStallMs: j.maxStallMs }));
+}
+/** fix232: /api/perf summary — this process's totals, the 20 worst stalls of the hour, jobs top 30, memory by job top 10 */
+export function perfSummary() {
+  const p = perfStatus();
+  return {
+    uptimeMin: p.uptimeMin, maxLagMs: p.maxLagMs, stallsLastHour: p.stallsLastHour, worstLastHour: p.worstLastHour,
+    running: p.running, heavy: { ...p.heavy, waiting: p.heavy.waiting.slice(0, 20) }, memoryMb: p.memoryMb, heapMb: p.heapMb,
+    topStalls: p.topStalls.map(s => ({ at: s.at, ms: s.ms, job: s.job ? s.job.slice(0, 300) : null })),
+    startupStalls: p.startupStalls, diagStalls: p.diagStalls,
+    jobs: jobsTop(30), memByJob: memByJob(10),
+    // the last 24 h by the hour, each with its 2 worst stalls
+    hours: p.hours.slice(-24).map(h => ({ ...h, top: h.top.slice(0, 2).map(t => ({ ms: t.ms, job: t.job ? t.job.slice(0, 120) : null })) }))
   };
 }

@@ -7,7 +7,7 @@
  */
 import footballDataAPI from './services/footballDataAPI';
 import logger from './utils/logger';
-import { timed, every, after, inBatches, heavy, mapGames, afterHeavy, everyHeavy } from './services/perf';
+import { timed, every, after, inBatches, heavy, mapGames, afterHeavy, everyHeavy, expectPagesFirst } from './services/perf';
 import { slimForList } from './services/predCache';
 import { withLiveScore, publishLiveBook } from './services/liveScores';
 import { scorersCheckTick } from './services/scorersCheck';
@@ -66,6 +66,11 @@ export function startJobs() {
   if (started) return;
   started = true;
   clearLive();
+  // fix232: the model rebuilds and fits (perf.MODEL_JOBS) wait for the first round of stored pages (at most 10 min)
+  expectPagesFirst();
+  // fix232 (scripts/deploy-restart.test.mjs): a long "bb model" rebuild without data — the lists must stay served and rebuilt meanwhile
+  const testModelMs = Number(process.env.SL_TEST_MODEL_MS) || 0;
+  if (testModelMs) after('test model', () => heavy('bb model', async () => { const end = Date.now() + testModelMs; while (Date.now() < end) await new Promise(r => setTimeout(r, 50)); }), 1000).unref();
 
   every('link check', linkCheckTick, 3600 * 1000).unref();
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the

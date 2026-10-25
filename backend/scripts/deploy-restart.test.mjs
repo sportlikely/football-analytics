@@ -144,3 +144,121 @@ test('the files before the state (earlyStatic): app file, icons, the plain page;
   assert.ok(!(o.up.done && o.up.st === 200 && o.up.body.includes('root:')), 'a path outside the build was sent');
   assert.deepEqual(o.states, [true, true, true, false]);
 });
+
+// fix232: no empty lists after a deploy — every sport's list answers 200 from its stored copy during a model rebuild
+//  - first start: the lists are built and stored; then a restart with a long "bb model" rebuild (SL_TEST_MODEL_MS)
+//  - /api/basketball/games, /api/nfl/home, /api/tennis/home and /api/matches/upcoming are asked every second: after
+//    "Starting up" no 5xx (never 503 "Loading"), each with X-SL-Built-At (the copy's build time)
+//  - the model rebuild starts after the first round of page builds, and while it runs a list is rebuilt (newer
+//    X-SL-Built-At) and a list never stored before is built in the page lane (200, not "Loading")
+//  - /api/perf: the summary stays under 50 KB; ?full=1 has the stored pages, ?shared=1 the shared states
+test('restart (fix232): every sport\'s list from its stored copy during a model rebuild; /api/perf summary under 50 KB', { timeout: 300000 }, async () => {
+  const { dir: staticDir } = site();
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fix232-data-'));
+  const port = await freePort();
+  const MODEL_MS = 60000;
+  const e = { ...process.env, DATA_DIR: dataDir, STATIC_DIR: staticDir, PORT: String(port), WORKER_PORT: String(port + 1), LOG_LEVEL: 'info', NODE_ENV: 'production', GEO_OFF: '1',
+    BASKETBALL_PUBLIC: '1', NFL_PUBLIC: '1', TENNIS_PUBLIC: '1', API_READ_TOKEN: 'fix232-test', CANONICAL_HOST: '' };
+  for (const k of KEYS) e[k] = '';
+  delete e.SL_ROLE; delete e.SITE_PASSWORD; delete e.WORKER;
+  let out = '';
+  const start = env => {
+    const p = spawn(process.execPath, [path.join(DIST, 'boot.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { out += d; });
+    return p;
+  };
+  const ask = (p) => new Promise(res => {
+    const req = http.get({ host: '127.0.0.1', port, path: p, agent: false, timeout: 20000 }, r => {
+      let body = '';
+      r.setEncoding('utf8');
+      r.on('data', d => { body += d; });
+      r.on('end', () => res({ status: r.statusCode, body, builtAt: r.headers['x-sl-built-at'] || null }));
+    });
+    req.on('timeout', () => { req.destroy(); res({ status: 0, err: 'timeout' }); });
+    req.on('error', err => res({ status: 0, err: err.code || String(err) }));
+  });
+  const until = async (fn, ms) => { const t = Date.now(); for (;;) { const v = await fn(); if (v || Date.now() - t > ms) return v; await sleep(250); } };
+  const LISTS = ['/api/basketball/games?days=7', '/api/nfl/home', '/api/tennis/home', '/api/matches/upcoming'];
+  const perf = async (q = '') => { const r = await ask(`/api/perf?token=fix232-test${q}`); return { size: Buffer.byteLength(r.body || ''), data: r.status === 200 ? JSON.parse(r.body).data : null }; };
+
+  // first start: every list stored once
+  let proc = start(e);
+  try {
+    assert.ok(await until(async () => (await Promise.all(LISTS.map(ask))).every(r => r.status === 200 && r.builtAt), 120000), `the lists were never stored: ${out.slice(-1500)}`);
+  } finally {
+    const exited = new Promise(r => proc.once('exit', r));
+    proc.kill('SIGTERM');
+    await exited;
+  }
+
+  // restart with a long model rebuild
+  out = '';
+  proc = start({ ...e, SL_TEST_MODEL_MS: String(MODEL_MS) });
+  const bad = [], seen = {};
+  let running = true;
+  const poll = async u => {
+    while (running) {
+      const r = await ask(u);
+      if (r.status === 200) { if (!r.builtAt) bad.push(`${u}: 200 without X-SL-Built-At`); (seen[u] ||= new Set()).add(r.builtAt); }
+      else if (r.status >= 500 && !(r.status === 503 && /"ready":false/.test(r.body))) bad.push(`${u}: ${r.status} ${String(r.body).slice(0, 80)}`);
+      await sleep(1000); // (the visitor rate limit: 4 lists a second stay under it)
+    }
+  };
+  const pollers = LISTS.map(poll);
+  try {
+    // the model rebuild runs — after the first round of page builds
+    const during = await until(async () => { const p = await perf(); const h = p.data?.worker?.heavy; return h?.running === 'bb model' ? p : null; }, 150000);
+    assert.ok(during, `the model rebuild never ran: ${out.slice(-1500)}`);
+    assert.equal(during.data.worker.heavy.pages.firstRoundDone, true, 'the model rebuild started before the first round of page builds');
+    assert.match(out, /stored pages: first round done/);
+    // while it runs: a list is rebuilt (a newer copy than when the rebuild started) …
+    const bbAt = (await ask(LISTS[0])).builtAt;
+    const newer = await until(async () => { const r = await ask(LISTS[0]); return r.builtAt && r.builtAt > bbAt ? r : null; }, 30000);
+    assert.ok(newer, 'no list was rebuilt while the model rebuild ran (the page builds waited behind it)');
+    // … and a list never stored before is built in the page lane, not "Loading"
+    const fresh = await ask('/api/basketball/games?league=NBA&days=10');
+    assert.equal(fresh.status, 200, `a new list during the model rebuild: ${fresh.status} ${String(fresh.body).slice(0, 100)}`);
+    assert.equal((await perf()).data.worker.heavy.running, 'bb model', 'the model rebuild ended too early for the check');
+    // /api/perf: the summary is small; the detail and the shared states only when asked for
+    const sum = await perf();
+    assert.ok(sum.size < 50 * 1024, `/api/perf summary is ${Math.round(sum.size / 1024)} KB (target ≤ 50 KB)`);
+    assert.equal(sum.data.summary, true);
+    assert.ok(Array.isArray(sum.data.web.topStalls) && sum.data.web.jobs.length <= 30 && sum.data.web.memByJob.length <= 10);
+    assert.ok(sum.data.worker.jobs.length <= 30 && sum.data.worker.topStalls.length <= 20);
+    assert.equal(sum.data.pages, undefined);
+    assert.equal(sum.data.shared, undefined);
+    const full = await perf('&full=1');
+    assert.ok(full.data && Array.isArray(full.data.pages?.lists) && full.data.pages.lists.some(p => p.key.startsWith('bb-games')), 'full=1 has no stored-page list');
+    assert.ok(full.data.jobs && full.data.worker);
+    const shared = await perf('&shared=1');
+    assert.ok(shared.data && 'shared' in shared.data);
+    // /api/perf is not a web stall
+    assert.ok(!(sum.data.web.topStalls || []).some(s => /api\/perf/.test(s.job || '')), 'a /api/perf stall was counted');
+  } finally {
+    running = false;
+    await Promise.all(pollers);
+    proc.kill('SIGTERM');
+    await sleep(500);
+    proc.kill('SIGKILL');
+  }
+  console.log('fix232 restart:', JSON.stringify(Object.fromEntries(Object.entries(seen).map(([u, s]) => [u, s.size]))));
+  assert.deepEqual(bad, [], `a list failed during the model rebuild: ${bad.slice(0, 5).join(' | ')}`);
+  for (const u of LISTS) assert.ok(seen[u]?.size, `${u} never answered 200`);
+});
+
+test('the stored lists are never dropped by the weekly clean-up (fix232); on-demand pages are', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fix232-clean-'));
+  const code = `
+    const { db } = require(${JSON.stringify(path.join(DIST, 'db/index.js'))});
+    const pc = require(${JSON.stringify(path.join(DIST, 'services/pageCache.js'))});
+    pc.definePage({ name: 'list-x', freshMs: 1000, warm: [{ days: 7 }], build: () => ({}) });
+    pc.definePage({ name: 'game-x', freshMs: 1000, refresh: false, build: () => ({}) });
+    const old = Date.now() - 9 * 86400000;
+    const ins = db.prepare('INSERT INTO page_cache (key, json, built_at) VALUES (?, ?, ?)');
+    for (const k of ['list-x?days=7', 'list-x?days=7#anon', 'list-x?days=3', 'game-x?id=1']) ins.run(k, '{}', old);
+    pc.cleanPageCache();
+    console.log(JSON.stringify(db.prepare('SELECT key FROM page_cache ORDER BY key').all().map(r => r.key)));`;
+  const r = spawnSync(process.execPath, ['-e', code], { env: { ...process.env, DATA_DIR: dataDir, LOG_LEVEL: 'error', SL_ROLE: 'worker' }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), ['list-x?days=7', 'list-x?days=7#anon']);
+});

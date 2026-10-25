@@ -5,6 +5,8 @@
  * After 5 minutes one row goes to deploy_errors (through the worker: deferred). Data health shows the last start;
  * target 0 for files and pages. The 502s Railway's proxy answers while no process listens never reach us: the
  * visitor's side of those is the inline loader in index.html (retries, then "Updating SportLikely…").
+ * fix232: + every 503 "Loading" a stored list answered (no copy of it yet) in the first 30 minutes, apart from the
+ * first 60 s — on 25 Oct /api/basketball/games answered it for ~12 min after the deploy. Target 0 after the first 60 s.
  */
 import type { Request, Response, NextFunction } from 'express';
 import { db } from '../db';
@@ -18,9 +20,12 @@ const counts: Record<Kind, number> = { files: 0, pages: 0, api: 0, health: 0 };
 const statuses: Record<string, number> = {};
 let requests = 0;
 let saved = false;
+const LOADING_WINDOW_MS = 30 * 60 * 1000, LOADING_GRACE_MS = 60 * 1000;
+const loading = { early: 0, late: 0, paths: {} as Record<string, number> };
 
 if (runsJobs) db.exec(`CREATE TABLE IF NOT EXISTS deploy_errors (started_at TEXT PRIMARY KEY, requests INTEGER NOT NULL,
   files INTEGER NOT NULL, pages INTEGER NOT NULL, api INTEGER NOT NULL, health INTEGER NOT NULL, statuses TEXT NOT NULL)`);
+if (runsJobs) for (const col of ['loading INTEGER', 'loading_late INTEGER', 'loading_paths TEXT']) { try { db.exec(`ALTER TABLE deploy_errors ADD COLUMN ${col}`); } catch { /* there already */ } }
 
 export function kindOf(p: string): Kind {
   if (p === '/health' || p === '/api/health') return 'health';
@@ -29,16 +34,24 @@ export function kindOf(p: string): Kind {
   return 'pages';
 }
 
-export const deployErrors = () => ({ startedAt: new Date(startedAt).toISOString(), requests, ...counts, statuses: { ...statuses } });
+export const deployErrors = () => ({ startedAt: new Date(startedAt).toISOString(), requests, ...counts, statuses: { ...statuses }, loading: loading.early + loading.late, loadingLate: loading.late, loadingPaths: { ...loading.paths } });
+
+/** fix232: a stored list answered 503 "Loading" (app.ts sendStored: no copy of it yet) */
+export function noteLoading(path: string) {
+  const age = Date.now() - startedAt;
+  if (age > LOADING_WINDOW_MS) return;
+  if (age > LOADING_GRACE_MS) loading.late++; else loading.early++;
+  if (Object.keys(loading.paths).length < 20 || loading.paths[path]) loading.paths[path] = (loading.paths[path] || 0) + 1;
+}
 
 function save() {
-  if (saved) return;
   saved = true;
   const d = deployErrors();
-  deferred(`INSERT OR REPLACE INTO deploy_errors (started_at, requests, files, pages, api, health, statuses) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(d.startedAt, d.requests, d.files, d.pages, d.api, d.health, JSON.stringify(d.statuses));
+  deferred(`INSERT OR REPLACE INTO deploy_errors (started_at, requests, files, pages, api, health, statuses, loading, loading_late, loading_paths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(d.startedAt, d.requests, d.files, d.pages, d.api, d.health, JSON.stringify(d.statuses), d.loading, d.loadingLate, JSON.stringify(d.loadingPaths));
 }
-if (isWeb) setTimeout(save, WINDOW_MS + 1000).unref();
+// the 5-minute row, then again at 30 minutes with the "Loading" answers of the whole half hour
+if (isWeb) { setTimeout(save, WINDOW_MS + 1000).unref(); setTimeout(save, LOADING_WINDOW_MS + 1000).unref(); }
 
 export function deployErrorsMiddleware(req: Request, res: Response, next: NextFunction) {
   if (Date.now() - startedAt > WINDOW_MS) return next();
@@ -58,11 +71,14 @@ export function deployErrorsHealth(): Check[] {
   if (!rows.length) return [{ id: 'deploy-errors', label: 'Errors during the last deploy', level: 'ok', detail: 'No start recorded yet (written 5 minutes after the web process starts)' }];
   const r = rows[0];
   const bad = r.files + r.pages;
-  const line = (x: any) => `${x.started_at.slice(0, 16).replace('T', ' ')} UTC: ${x.requests} requests — files ${x.files}, pages ${x.pages}, API ${x.api}, /health ${x.health} (expected while loading) · ${x.statuses}`;
+  const late = r.loading_late || 0;
+  const line = (x: any) => `${x.started_at.slice(0, 16).replace('T', ' ')} UTC: ${x.requests} requests — files ${x.files}, pages ${x.pages}, API ${x.api}, /health ${x.health} (expected while loading) · ${x.statuses}`
+    + (x.loading ? ` · lists "Loading" ${x.loading} (${x.loading_late || 0} after 60 s: ${x.loading_paths || '{}'})` : '');
   return [{
     id: 'deploy-errors', label: 'Errors during the last deploy',
-    level: bad ? 'fail' : r.api ? 'warn' : 'ok',
+    level: bad || late ? 'fail' : r.api ? 'warn' : 'ok',
     detail: bad ? `${bad} file / page request(s) got a 5xx in the 5 minutes after the start (target 0)`
+      : late ? `${late} list request(s) got 503 "Loading" more than 60 s after the start (no stored copy; target 0): ${r.loading_paths || ''}`
       : r.api ? `${r.api} API request(s) got a 5xx in the 5 minutes after the start (the app retries "Starting up" answers; target 0)`
       : `No 5xx for files, pages or the API in the 5 minutes after the start (${r.requests} requests)`,
     items: rows.map(line)
