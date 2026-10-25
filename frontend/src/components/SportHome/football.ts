@@ -206,7 +206,7 @@ function useFootballData(): SportHomeData {
     record: {
       rows, aside: summary ? (summary.doubleChance?.n ? tt("{0} games, last {1} days", { 0: summary.doubleChance.n.toLocaleString(), 1: summary.days }) : tt("last {0} days", { 0: summary.days })) : null,
       note: `${tt("Picks right, every game counted. Each prediction is saved before kick-off and never edited.")} ${tt("Double chance = one of the two results we rate highest (1X, X2 or 12).")}`,
-      link: { to: '/accuracy', label: tt("See the full record →") },
+      link: { to: '/football/accuracy', label: tt("See the full record →") },
       empty: { text: tt("No finished games yet.") }
     },
     special: {
@@ -216,9 +216,9 @@ function useFootballData(): SportHomeData {
         title: summary?.drawAlerts?.picks ? tt("{n, plural, one {# draw pick} other {# draw picks}} this week", { n: summary.drawAlerts.picks }) : tt("Draw picks"),
         text: tt("The 2 games of the week most likely to end in a draw, picked by our model. Part of Pro.")
       },
-      link: full ? { to: '/draw-alerts', label: tt("All draw picks →") } : { to: '/premium', label: tt("Unlock draw picks →") }
+      link: full ? { to: '/football/draw-alerts', label: tt("All draw picks →") } : { to: '/premium', label: tt("Unlock draw picks →") }
     },
-    results: { rows: resultRows, days: 30, link: { to: '/accuracy', label: tt("How accurate is the model? →") } },
+    results: { rows: resultRows, days: 30, link: { to: '/football/accuracy', label: tt("How accurate is the model? →") } },
     introStats: summary?.doubleChance?.v3 != null ? [
       { value: `${summary.doubleChance.v3}%`, label: tt("right · double chance"), sub: tt("{0} games, last {1} days", { 0: summary.doubleChance.n.toLocaleString(), 1: summary.days }) },
       ...(sure ? [{ value: `${sure.pct}%`, label: tt("when we're {0}%+ sure · double chance", { 0: sure.min }), sub: tt("{0} games", { 0: sure.n }) }] : [])
@@ -230,8 +230,8 @@ export const footballAdapter: SportAdapter = {
   field: 'pitch',
   labels: {
     featured: tt("Featured match"), modelPrediction: tt("{0} prediction", { 0: slModel('football') }), nextList: tt("Next kick-offs"), nextSection: tt("Next matches"),
-    all: { to: '/matches', label: tt("All matches →") }, today: { to: '/predictions/today', label: tt("Today's predictions →") },
-    favorites: '/favorites', liveDetail: tt("Live stats, lineups and events →"),
+    all: { to: '/football/matches', label: tt("All matches →") }, today: { to: '/football/today', label: tt("Today's predictions →") },
+    favorites: '/football/favorites', liveDetail: tt("Live stats, lineups and events →"),
     emptyHero: [tt("Sports predictions,"), tt("tested in public."), tt("The next fixtures appear here as soon as they are scheduled.")],
     newsLoading: tt("Loading the latest football news…"),
     premiumText: tt("Full percentages, the {0} breakdown, draw picks, strong picks, team analysis and the complete track record.", { 0: slModel('football') })
@@ -244,7 +244,7 @@ export const footballAdapter: SportAdapter = {
       [tt("Free to start"), tt("2 full picks every week. No card needed.")]
     ],
     cta: { to: '/signup', label: tt("Get 2 free picks a week") },
-    second: { to: '/accuracy', label: tt("See our record"), record: true }
+    second: { to: '/football/accuracy', label: tt("See our record"), record: true }
   },
   useData: useFootballData
 }

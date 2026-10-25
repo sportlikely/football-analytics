@@ -83,7 +83,7 @@ export default function Favorites({ a }: { a: FavoritesAdapter }) {
                   <span className="num text-xs text-faint">{items.length}</span>
                 </div>
                 {items.length === 0 ? (
-                  <p className="text-xs text-faint">{/player/.test(kind) ? t("Star a player on its page.") : kind === 'tennis-tournament' ? t("Star a tournament on its page or in the Matches list.") : /league/.test(kind) ? (a.browse.to === '/matches' ? t("Star a league on its page or in the Matches list.") : t("Star a league on its page or in the Games list.")) : t("Star a team on its page or on a game page.")}</p>
+                  <p className="text-xs text-faint">{/player/.test(kind) ? t("Star a player on its page.") : kind === 'tennis-tournament' ? t("Star a tournament on its page or in the Matches list.") : /league/.test(kind) ? (a.browse.to === '/football/matches' ? t("Star a league on its page or in the Matches list.") : t("Star a league on its page or in the Games list.")) : t("Star a team on its page or on a game page.")}</p>
                 ) : (
                   <ul className="space-y-1">
                     {items.map(f => {

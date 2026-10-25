@@ -289,7 +289,7 @@ export function TeamRecordCard({ rec, teamName, sport = 'football' }: { rec: Tea
     <section className="card p-5 sm:p-6">
       <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="font-display text-base sm:text-lg font-bold text-ink">{t("Our record on")}{' '}{teamName}</h2>
-        <RecordLink to={bb ? '/basketball/accuracy' : '/accuracy'} className="text-xs font-bold text-accent">{t("Full record →")}</RecordLink>
+        <RecordLink to={bb ? '/basketball/accuracy' : '/football/accuracy'} className="text-xs font-bold text-accent">{t("Full record →")}</RecordLink>
       </div>
       {!rec.n ? (
         <p className="text-sm text-faint">{t("No finished games with a saved prediction yet.")}</p>

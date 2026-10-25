@@ -4262,6 +4262,8 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   // jobs.ts "bb game pages"); the web process writes the page's text from it (bbGameSeo: no database, no build)
   definePage({ name: 'bb-game-facts', freshMs: 10 * 60 * 1000, freshOf: bbFactsFreshMs, refresh: false, keepMs: 8 * 86400000, build: q => bbGameFacts(Number(q.id)) });
   definePage({ name: 'seo-page', freshMs: 10 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, variants: VIEWS_HTML, build: q => seoPage(q.path) });
+  // fix235: a tab (/football/match/<slug>/stats) is its page for search engines (one stored copy, canonical = the page)
+  const seoPathOf = (p: string) => p.replace(/^((?:\/(?:es|pt|de|fr|it|tr))?\/[a-z-]+\/(?:match|league)\/[a-z0-9-]+)\/[a-z0-9-]+\/?$/, '$1');
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
   // fix229: an address outside the web process's slug state — the worker reads the table (3 s at most, else the app page)
   const askWorker = async (req: express.Request, qs: string): Promise<LinkAnswer> => {
@@ -4284,7 +4286,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     if (moved) return res.redirect(301, moved + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''));
     // fix185: American football is one sport — the old college list pages are the same pages filtered to college
     const college = /^\/american-football\/college(\/games|\/today)?\/?$/.exec(req.path);
-    if (college) return res.redirect(301, `/american-football${college[1] || ''}?league=college`);
+    if (college) return res.redirect(301, `/american-football${college[1] === '/games' ? '/matches' : college[1] || ''}?league=college`);
     // fix195: an old tennis fixture id merged into its match → the match's page (any language prefix kept)
     const tnOld = /^(\/[a-z]{2})?\/tennis\/match\/(\d+)\/?$/.exec(req.path);
     if (tnOld) { const to = tennisMovedId(Number(tnOld[2])); if (to) return res.redirect(301, `${tnOld[1] || ''}/tennis/match/${to}`); }
@@ -4309,7 +4311,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       const home = seoHome(req.path);
       // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page
       // (the app renders it in the browser; the next request gets the stored copy)
-      const s = home ? await getPage('seo', { path: home }) : await getPage('seo-page', { path: req.path.slice(0, 300) }, { waitMs: SEO_WAIT_MS });
+      const s = home ? await getPage('seo', { path: home }) : await getPage('seo-page', { path: seoPathOf(req.path).slice(0, 300) }, { waitMs: SEO_WAIT_MS });
       const html = s?.view('html');
       // fix227: a copy stored before a deploy names the old build's app file (gone: a 404, no app, the crawler text
       // left on screen) — the plain app page until the worker has made the new copy

@@ -22,6 +22,7 @@ import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, 
 import { fbLast as fbLastRaw, fbNext as fbNextRaw, fbH2h as fbH2hRaw, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById as bbGameByIdRaw, bbLast as bbLastRaw, bbNext as bbNextRaw, bbH2h as bbH2hRaw, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName as bbTeamNameRaw, BbGameRow } from './seoFacts';
 import { cleanText } from './sponsorNames';
 import { pubPath, pubLinks, parseNew, parseOld, idOfSlug, internalPath } from './slugs';
+import { internalPage } from '../utils/slugRules';
 
 /*
  * fix175: the crawler pages' data, cached 10 minutes by function + arguments — never by language, so /it/match/1,
@@ -281,7 +282,7 @@ function buildToday(sport: TodaySport, lang: Lang, dayIso: string, leagues: 1 | 
 const NAV = (lang: Lang) => `<nav><a href="${link(lang, '/')}">${BRAND}</a> · <a href="${link(lang, '/matches')}">${ui(lang, 'matches')}</a> · <a href="${link(lang, '/predictions/today')}">${ui(lang, 'today')}</a> · <a href="${link(lang, '/premium')}">Premium</a>${bbPublic() ? ` · <a href="${link(lang, '/basketball')}">${ui(lang, 'basketball')}</a>` : ''}${nflPublic() ? ` · <a href="/american-football">American football</a>` : ''}${tennisPublic() ? ` · <a href="${link(lang, '/tennis')}">${TENNIS_WORD[lang]}</a>` : ''}</nav>`;
 /** fix193c: "Tennis" in the nav of the crawler pages */
 const TENNIS_WORD: Record<Lang, string> = { en: 'Tennis', es: 'Tenis', pt: 'Ténis', de: 'Tennis', fr: 'Tennis', it: 'Tennis', tr: 'Tenis' };
-const PRIVATE = /^\/(admin|account|verify|forgot|login|signup|favorites|my-picks|join|crm|search)(\/|$)|^\/basketball\/(favorites|past)(\/|$)|^\/past(\/|$)/;
+const PRIVATE = /^\/(admin|account|verify|forgot|login|signup|favorites|my-picks|join|crm|search)(\/|$)|^\/(football|basketball|american-football|tennis)\/(favorites|my-picks|past)(\/|$)|^\/past(\/|$)/;
 
 /*
  * fix196: basketball game pages for search engines (Googlebot reads old games, many an hour: 0.4–1 s each on 20 Oct)
@@ -372,6 +373,8 @@ export function seoPage(rawPath: string): SeoInfo {
     if (hit) { ent = { sport: nw.sport, kind: nw.kind, slug: hit.canonical, id: hit.id }; path = internalPath(nw.sport, nw.kind, hit.id); }
     else return { title: `Not found | ${BRAND}`, description: 'This page does not exist.', path, lang, body: `${NAV(lang)}<main><h1>Not found</h1></main>`, noindex: true };
   }
+  // fix235: a sport page (/football/matches, /basketball/today …) is built from its old address; pubPath gives the new one back
+  path = internalPage(path) ?? path;
   // (an old id address reaches this only while its item has no slug yet — new in the last minutes: its page as before)
   const pubOf = (p: string) => (ent && p === path ? `/${ent.sport}/${ent.kind}/${ent.slug}` : pubPath(p));
   const page = (title: string, description: string, body: string, extra: Partial<SeoInfo> = {}): SeoInfo =>

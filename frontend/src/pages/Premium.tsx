@@ -6,6 +6,7 @@ import { errorText, useAuth } from '../lib/auth'
 import { refreshUnlocks, useUnlocks, resetDay, money, type Pack } from '../lib/unlocks'
 import PickPacks from '../components/PickPacks'
 import { t } from '../lib/i18n'
+import { useSectionPath } from '../lib/tabPath'
 
 /**
  * Plans (fix147): Free · Premium $8.99 (60 match unlocks a month) · Pro $14.99 (unlimited + draw alerts); each also for
@@ -47,7 +48,10 @@ function Check() {
   )
 }
 
+const SECTIONS = ['packs'] // fix235: /premium/packs (was #packs)
+
 export default function Premium() {
+  useSectionPath(SECTIONS)
   const { user, access, refresh } = useAuth()
   const [testMode, setTestMode] = useState(false)
   const [plans, setPlans] = useState<PlanRow[]>(PLAN_DEFAULTS)

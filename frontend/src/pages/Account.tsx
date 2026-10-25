@@ -10,12 +10,16 @@ import { TwoFactorCard } from '../components/TwoFactor'
 import CalendarCard from '../components/CalendarCard'
 import EmailsCard from '../components/EmailsCard'
 import AlertsCard from '../components/AlertsCard'
+import { useSectionPath } from '../lib/tabPath'
 
 function fmtDay(iso: string | null) {
   return iso ? new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' }) : ''
 }
 
+const SECTIONS = ['emails', 'alerts'] // fix235: /account/emails, /account/alerts (were #emails, #alerts)
+
 export default function Account() {
+  useSectionPath(SECTIONS)
   const { user, access, loading, logout, needsVerification } = useAuth()
   const unlocks = useUnlocks(access === 'premium' || access === 'free')
   const nav = useNavigate()
@@ -69,7 +73,7 @@ export default function Account() {
               </div>
             )}
             {(access === 'free' || access === 'premium') && unlocks && (
-              <div className="text-xs text-ink mt-1">{t("Pick packs: {0} picks left", { 0: unlocks.credits ?? 0 })} · <Link to="/premium#packs" className="font-semibold text-accent">{t("Buy picks")}</Link></div>
+              <div className="text-xs text-ink mt-1">{t("Pick packs: {0} picks left", { 0: unlocks.credits ?? 0 })} · <Link to="/premium/packs" className="font-semibold text-accent">{t("Buy picks")}</Link></div>
             )}
             <div className="text-xs text-faint mt-0.5">{t("Member since")}{' '}{fmtDay(user.createdAt)}</div>
             {needsVerification && (

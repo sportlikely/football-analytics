@@ -12,6 +12,7 @@ import SeasonForecast from '../../components/sport/forecast/SeasonForecast'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import { StandingsBlock, LeagueSwitch, NflGameRow } from './parts'
 import { teamHref, playerHref } from '../../lib/links'
+import { hubHref } from '../../lib/hubs'
 
 /**
  * NFL + college league page: football's league page (fix152d) — the header with our record, standings and leaders on
@@ -57,7 +58,7 @@ export default function NflLeague() {
       forecast={<SeasonForecast sport="nfl" code={league === 2 ? 'NCAA' : 'NFL'} teamHref={(id, name) => teamHref('american-football', id, name)!} />}
       // fix175 (parity) + fix174: favorite star and the weekly hub, like football and basketball
       fav={fav}
-      hub={{ to: `/predictions/${league === 2 ? 'college-football' : 'nfl'}`, label: t("This week's predictions →") }}
+      hub={{ to: hubHref(league === 2 ? 'college-football' : 'nfl'), label: t("This week's predictions →") }}
       left={<>
         <Card title={t('Table')}>
           {d === undefined ? <Skeleton rows={10} h="h-7" /> : !d || !d.conferences.length ? <p className="text-sm text-faint">{t('Standings appear once the season has started.')}</p> : <StandingsBlock data={d} />}
@@ -89,7 +90,7 @@ export default function NflLeague() {
       </>}
       right={<>
         {live.length > 0 && <Card title={t('Live now')}>{rows(live)}</Card>}
-        <Card title={t('Next games')} action={<Link to={`/american-football/games?league=${league === 2 ? 'college' : 'nfl'}`} className="text-xs font-bold text-accent">{t('All →')}</Link>}>
+        <Card title={t('Next games')} action={<Link to={`/american-football/matches?league=${league === 2 ? 'college' : 'nfl'}`} className="text-xs font-bold text-accent">{t('All →')}</Link>}>
           {!games ? <Skeleton rows={5} /> : next.length ? <div className="max-h-[430px] overflow-y-auto overscroll-contain">{rows(next)}</div> : <p className="text-sm text-faint">{t('No games in the next two weeks.')}</p>}
         </Card>
         {(news === null || news === undefined || news.length > 0) && (

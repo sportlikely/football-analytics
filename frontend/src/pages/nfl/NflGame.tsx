@@ -168,7 +168,7 @@ export default function NflGame() {
 
   return (
     <GamePage
-      back={{ to: '/american-football/games', label: t('All games') }}
+      back={{ to: '/american-football/matches', label: t('All games') }}
       top={<LeagueSwitch />}
       srTitle={`${g.home.name} vs ${g.away.name} · ${nflLeagueName(lg)} ${weekLabel(g.weekKey, g.league)}`}
       league={{ name: nflLeagueName(lg), href: leagueHref('american-football', String(lg))!, bits: [weekLabel(g.weekKey, g.league)] }}

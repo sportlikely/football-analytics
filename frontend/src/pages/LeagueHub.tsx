@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useParams } from 'react-router-dom'
 import NameLink from '../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { t as tt, LOCALE } from '../lib/i18n'
-import { hubByOld } from '../lib/hubs'
+import { hubByOld, hubHref } from '../lib/hubs'
 import { leagueHref } from '../lib/links'
 
 /*
- * Weekly league hub (fix125): /predictions/<league> — intro, then this week's games with their preview text and a
+ * Weekly league hub (fix125): /<sport>/predictions/<league> (fix235) — intro, then this week's games with their preview text and a
  * link to each game page. Never the pick or a %: the game page shows the prediction. English text for now.
  */
 
@@ -24,9 +24,11 @@ export default function LeagueHub() {
   const { league = '' } = useParams()
   const [hub, setHub] = useState<Hub | null>(null)
   const [missing, setMissing] = useState(false)
-  // old address (fix134): /predictions/PL → /predictions/premier-league (the server answers it with a 301 too)
+  // old address (fix134): /predictions/PL → /football/predictions/premier-league, a hub under another sport → its own
+  // (the server answers both with a 301 too)
   const old = hubByOld(league)
-  const moved = old && league !== old.slug ? old.slug : null
+  const want = hubHref(old && league !== old.slug ? old.slug : league)
+  const moved = useLocation().pathname.replace(/\/+$/, '') !== want ? want : null
 
   useEffect(() => {
     if (moved) return
@@ -40,7 +42,7 @@ export default function LeagueHub() {
       .catch(() => setMissing(true))
   }, [league, moved])
 
-  if (moved) return <Navigate to={`/predictions/${moved}`} replace />
+  if (moved) return <Navigate to={moved} replace />
 
   if (missing) return <div className="max-w-2xl mx-auto px-4 py-16 text-center text-muted">{tt("Page not found.")}</div>
   if (!hub) return <div className="min-h-[50vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={tt('Loading…')} /></div>

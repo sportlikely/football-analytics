@@ -11,8 +11,28 @@ Every public page is `/<lang?>/<sport>/<kind>/<slug>`, in every sport and every 
 | Sport home | `/football`, `/basketball`, `/american-football`, `/tennis` ("/" stays the site home) | — |
 
 Languages: `/es/football/team/real-madrid` etc. The day in a match slug is the UTC date of the start.
-Weekly hubs (`/predictions/<slug>`) and list pages (`/matches`, `/predictions/today`, `/basketball/games` …) carry no ids and
-stay where they are.
+
+## Tabs and sport pages (fix235, Yarin 25 Oct 2026 — permanent)
+
+No `#…` in links. A match page opens on the prediction; each other tab is a sub-path, same names in every sport
+(`MATCH_TABS` in the slug rules): `/football/match/barcelona-vs-real-madrid-2026-10-25/stats` · `/lineups` · `/h2h` · `/table` ·
+`/highlights` · `/rest` (basketball also `/box` `/players` `/quarters`, NFL `/players` `/plays`, tennis `/form` `/draw`). League
+pages: `…/league/<slug>/forecast`. Sections: `/account/emails`, `/account/alerts`, `/premium/packs`. The app's routes end in `/*`
+(`match/:slug/*`), so a tab click changes the address (`lib/tabPath.ts` useTabPath, replace) without reloading the page. An old
+`#stats` / `#prediction` link opens that tab and the address becomes the sub-path; a sub-path that is not a tab → the page (301
+on load). Crawler pages: a tab is its match page (one stored copy, canonical without the tab).
+
+| Page | Address now | Old address (301, one hop, any language, `#…` dropped) |
+|---|---|---|
+| Lists | `/football/matches`, `/basketball/matches`, `/american-football/matches`, `/tennis/matches` | `/matches`, `/basketball/games`, `/american-football/games` |
+| Today | `/football/today`, `/basketball/today`, `/american-football/today`, `/tennis/today` | `/predictions/today`, `/basketball/predictions/today` |
+| Weekly hubs | `/football/predictions/premier-league`, `/basketball/predictions/nba`, `/american-football/predictions/nfl` | `/predictions/<slug>`, `/predictions/PL`, a hub under the wrong sport |
+| Football pages | `/football/favorites`, `/my-picks`, `/upset-watch`, `/draw-alerts`, `/accuracy`, `/past` | `/favorites`, `/my-picks`, `/upset-watch`, `/draw-alerts`, `/accuracy`, `/past` |
+
+Site-wide pages stay at the root: `/`, `/search`, `/account`, `/premium`, `/guides/…`, `/changelog`, `/how-it-works`, `/privacy`,
+`/terms`, `/contact`. The moves are one function (`movedPage`, both copies of the slug rules): the server's 301s and `pubPath` /
+`pubLinks` (crawler HTML, JSON-LD, sitemaps, emails, push, calendar), the app's `<MovedPage>` routes and the parity guard.
+The crawler pages are still built from the old addresses inside (`internalPage`). Tests: `npm run test:fix235`.
 
 ## Slugs
 

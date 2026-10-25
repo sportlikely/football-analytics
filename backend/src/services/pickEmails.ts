@@ -666,7 +666,7 @@ const sectionHtml = (title: string) =>
 function frame(f: Frame): string {
   const tx = words(f.lang);
   const unsub = picksUnsubUrl(f.userId);
-  const manage = linkTo(f.lang, '/account#emails', f.campaign);
+  const manage = linkTo(f.lang, '/account/emails', f.campaign);
   return `<!doctype html><html lang="${f.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>SportLikely</title>
 <style>
@@ -703,7 +703,7 @@ function frame(f: Frame): string {
 function footerText(lang: EmailLang, userId: number, campaign: string) {
   const tx = words(lang);
   return `\n—\n${tx(FOOTER_LINE)} ${tx('get help')}: ${HELP_URL}\n${tx('You get this email because you turned it on in your SportLikely account.')}\n` +
-    `${tx('Manage emails')}: ${linkTo(lang, '/account#emails', campaign)}\n${tx('Unsubscribe')}: ${picksUnsubUrl(userId)}\n`;
+    `${tx('Manage emails')}: ${linkTo(lang, '/account/emails', campaign)}\n${tx('Unsubscribe')}: ${picksUnsubUrl(userId)}\n`;
 }
 
 export function renderDaily(p: Person, d: Daily, now: number): Built {

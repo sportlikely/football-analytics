@@ -120,7 +120,7 @@ function useNflData(): SportHomeData {
       items: upsetItems(notStarted, g => g.prediction ? { id: g.id, href: matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, league: compOf(g), date: g.kickoff, home: nick(g.home.name, lgOf(g)), away: nick(g.away.name, lgOf(g)), pHome: g.prediction.pHome, pAway: g.prediction.pAway, locked: g.prediction.locked } : null),
       empty: tt("No upsets on the radar this week."),
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
-      link: full ? { to: '/american-football/games', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
+      link: full ? { to: '/american-football/matches', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
     },
     results: { rows: resultRows, days: 30, link: { to: '/american-football/accuracy', label: tt("How accurate is the model? →") } },
     // fix174: first-visit tiles like football
@@ -139,7 +139,7 @@ export function useNflAdapter(): SportAdapter {
     switcher: null,
     labels: {
       featured: tt("Featured game"), modelPrediction: tt("{0} prediction", { 0: slModel('american-football') }), nextList: tt("Next kick-offs"), nextSection: tt("Next games"),
-      all: { to: '/american-football/games', label: tt("All games →") }, today: { to: '/american-football/today', label: tt("Today's predictions →") },
+      all: { to: '/american-football/matches', label: tt("All games →") }, today: { to: '/american-football/today', label: tt("Today's predictions →") },
       favorites: '/american-football/favorites', liveDetail: tt("Live score and box score →"),
       emptyHero: [tt("American football,"), tt("tested in public."), tt("The next games appear here as soon as they are scheduled.")],
       newsLoading: tt("Loading the latest news…"),
@@ -154,7 +154,7 @@ export function useNflAdapter(): SportAdapter {
         [tt("Free to start"), tt("2 full picks every week. No card needed.")]
       ],
       cta: { to: '/signup', label: tt("Get 2 free picks a week") },
-      second: { to: '/american-football/games', label: tt("See the games") }
+      second: { to: '/american-football/matches', label: tt("See the games") }
     },
     useData: useNflData
   }

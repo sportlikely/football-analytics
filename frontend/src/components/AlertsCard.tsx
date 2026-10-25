@@ -109,7 +109,7 @@ export default function AlertsCard() {
       </div>
       {!s ? (err ? <p className="text-sm text-loss">{err}</p> : <p className="text-sm text-faint">{t("Loading…")}</p>) : (
         <>
-          <p className="text-sm text-muted">{t("Alerts on your phone or computer for your favourite teams and players: kick-off, scores and the final result with our pick.")} <Link to="/favorites" className="font-semibold text-accent">{t("Your favourites →")}</Link></p>
+          <p className="text-sm text-muted">{t("Alerts on your phone or computer for your favourite teams and players: kick-off, scores and the final result with our pick.")} <Link to="/football/favorites" className="font-semibold text-accent">{t("Your favourites →")}</Link></p>
           {needsHomeScreen && <p className="text-sm text-draw">{t("On iPhone, alerts work only from the Home Screen: tap Share, then \"Add to Home Screen\", and open SportLikely from there.")}</p>}
           {!supported && !needsHomeScreen && <p className="text-sm text-faint">{t("This browser can't show alerts. Try Chrome, Edge, Firefox or Safari.")}</p>}
           {!s.enabled && <p className="text-xs text-faint">{t("Alerts are not switched on on this server yet.")}</p>}

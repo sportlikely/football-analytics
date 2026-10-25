@@ -18,7 +18,7 @@ import { isWeb, runsJobs } from './role';
 import { onState, applyState } from './shared';
 import { yieldEvery } from './perf';
 import { assignSlugs, assignMatchSlugs, baseOf, type SlugEntity, type SlugRow, type MatchEntity } from '../utils/slugAssign';
-import { teamSlug, slugify, playerSlug, matchSlug, parseMatchSlug, isSlug, LINK_SPORTS, ALLOWED_QUERY, type LinkSport, type LinkKind } from '../utils/slugRules';
+import { teamSlug, slugify, playerSlug, matchSlug, parseMatchSlug, isSlug, splitTab, movedPage, LINK_SPORTS, ALLOWED_QUERY, type LinkSport, type LinkKind } from '../utils/slugRules';
 
 db.exec(`CREATE TABLE IF NOT EXISTS slugs (sport TEXT NOT NULL, kind TEXT NOT NULL, slug TEXT NOT NULL, id TEXT NOT NULL, is_primary INTEGER NOT NULL DEFAULT 1, base TEXT, at TEXT NOT NULL, PRIMARY KEY (sport, kind, slug))`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_slugs_id ON slugs(sport, kind, id, is_primary)`);
@@ -140,14 +140,18 @@ export function pubPath(href: string): string {
   const m = /^(https:\/\/sportlikely\.com)?(\/(?:es|pt|de|fr|it|tr))?(\/[^?#]*)(\?[^#]*)?(#.*)?$/.exec(href);
   if (!m) return href;
   const old = parseOld(m[3]);
-  if (!old) return href;
+  if (!old) {
+    // fix235: an old sport page (/matches, /predictions/today, /basketball/games …) → /<sport>/<page>
+    const mv = movedPage(m[3]);
+    return mv ? `${m[1] || ''}${m[2] || ''}${mv}${keptQuery(m[4] || '')}` : href;
+  }
   const to = publicPathOf(old.sport, old.kind, old.id);
   if (!to) return href;
   return `${m[1] || ''}${m[2] || ''}${to}${keptQuery(m[4] || '')}${m[5] || ''}`;
 }
 /** href="…" / href='…' / "url":"…" of old addresses inside HTML or JSON-LD text → new ones */
 export function pubLinks(html: string): string {
-  return html.replace(/(href=["']|"url":"|"@id":")((?:https:\/\/sportlikely\.com)?(?:\/(?:es|pt|de|fr|it|tr))?\/(?:team|match|player|league|basketball|american-football|tennis)\/[^"'#\s]*)/g,
+  return html.replace(/(href=["']|"url":"|"@id":")((?:https:\/\/sportlikely\.com)?(?:\/(?:es|pt|de|fr|it|tr))?\/(?:(?:team|match|player|league|basketball|american-football|tennis|predictions)\/[^"'#\s]*|(?:matches|favorites|my-picks|upset-watch|draw-alerts|accuracy|past)(?=[?"'#\s])[^"'#\s]*))/g,
     (_a, pre: string, url: string) => pre + pubPath(url.replace(/&amp;/g, '&')).replace(/&(?!amp;)/g, '&amp;'));
 }
 function keptQuery(qs: string): string {
@@ -173,23 +177,34 @@ export type LinkAnswer =
  */
 export function linkAnswer(path: string, query = ''): LinkAnswer {
   const lm = new RegExp(`^${LANG_RE}(\\/.*)$`).exec(path);
-  const lang = lm?.[1] ? `/${lm[1]}` : '', rest = (lm?.[2] || path).replace(/\/+$/, '') || '/';
+  const lang = lm?.[1] ? `/${lm[1]}` : '';
+  let rest = (lm?.[2] || path).replace(/\/+$/, '') || '/';
   const kept = keptQuery(query);
+  // fix235: a tab is a sub-path (/football/match/<slug>/stats); a sub-path that is not a tab of the page → the page
+  const tb = splitTab(rest);
+  if (tb && parseNew(tb.base)) {
+    if (!tb.tab) return { to: `${lang}${tb.base}${kept}` };
+    rest = tb.base;
+  }
+  const sub = tb?.tab ? `/${tb.tab}` : '';
   const nw = parseNew(rest);
   if (nw) {
     // NFL standings: /american-football/league/nfl … are not ids; an upper-case basketball code is an old address
     const hit = idOfSlug(nw.sport, nw.kind, nw.slug);
     if (hit) {
-      if (hit.canonical !== nw.slug) return { to: `${lang}/${nw.sport}/${nw.kind}/${hit.canonical}${kept}` };
+      if (hit.canonical !== nw.slug) return { to: `${lang}/${nw.sport}/${nw.kind}/${hit.canonical}${sub}${kept}` };
       return { page: { sport: nw.sport, kind: nw.kind, id: hit.id, slug: nw.slug } };
     }
     if (isWeb) return { ask: true };
     const m = nw.kind === 'match' ? matchBySlugParts(nw.sport, nw.slug) : null;
-    if (m) return { to: `${lang}/${nw.sport}/match/${m}${kept}` };
+    if (m) return { to: `${lang}/${nw.sport}/match/${m}${sub}${kept}` };
     return { search: `${lang}/search?q=${encodeURIComponent(nw.slug.replace(/-vs-/, ' ').replace(/-\d{4}-\d{2}-\d{2}(-\d)?$/, '').replace(/-/g, ' '))}` };
   }
   const old = parseOld(rest);
-  if (!old) return null;
+  if (!old) {
+    const mv = movedPage(rest); // fix235: /matches → /football/matches, /basketball/games → /basketball/matches …
+    return mv ? { to: `${lang}${mv}${kept}` } : null;
+  }
   let id = old.id;
   if (old.sport === 'football' && old.kind === 'league') id = MERGED_FB_LEAGUES[id.toUpperCase()] || id.toUpperCase();
   let s = slugOf(old.sport, old.kind, id);

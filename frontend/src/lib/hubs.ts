@@ -1,3 +1,4 @@
+import { movedPage } from './slugRules'
 /**
  * Weekly league prediction hubs (fix125): /predictions/<slug>. Same list as backend/src/services/hubs.ts.
  * old = the fix125 URL (/predictions/PL …), redirected to the slug (fix134).
@@ -17,3 +18,5 @@ export const HUBS: { slug: string; old: string; sport: HubSport; code: string; n
 ]
 export const hubByOld = (slug: string) => HUBS.find(h => h.old === slug.toUpperCase()) || null
 export const hubFor = (sport: HubSport, code: string) => HUBS.find(h => h.sport === sport && h.code === code.toUpperCase()) || null
+/** fix235: a hub's address, under its sport: /football/predictions/premier-league, /basketball/predictions/nba */
+export const hubHref = (slug: string) => movedPage(`/predictions/${slug}`) || `/football/predictions/${slug}`

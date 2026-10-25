@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { t, LOCALE } from '../../../lib/i18n'
+import { useTabPath } from '../../../lib/tabPath'
 import StickyBar from '../../StickyBar'
 import { useNews, NewsRows, type NewsItem } from '../../NewsList'
 import { hasScorerLine, type ScorerLines } from '../../../lib/scorers'
@@ -47,19 +48,9 @@ export interface GamePageProps {
 export const fmtGameDate = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 export const fmtGameTime = (iso: string) => new Date(iso).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })
 
-/** The open tab, kept in the address (#stats, #h2h …) so a link can open it; aliases map old hashes. */
-export function useGameTab(ids: string[], aliases: Record<string, string> = {}): [string, (id: string) => void] {
-  const [tab, setTab] = useState(() => {
-    const raw = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
-    const h = aliases[raw] || raw
-    return ids.includes(h) ? h : ids[0]
-  })
-  const pick = (id: string) => {
-    setTab(id)
-    try { history.replaceState(null, '', id === ids[0] ? window.location.pathname + window.location.search : `#${id}`) } catch { /* ignore */ }
-  }
-  return [tab, pick]
-}
+/** The open tab, kept in the address as a sub-path (fix235: …/match/<slug>/stats) so a link can open it; aliases map
+ *  old #hashes. */
+export const useGameTab = (ids: string[], aliases: Record<string, string> = {}) => useTabPath(ids, aliases)
 
 export function Section({ title, note, id, action, children }: { title: string; note?: string; id?: string; action?: ReactNode; children: ReactNode }) {
   return (

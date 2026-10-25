@@ -129,7 +129,7 @@ export default function BbGame() {
     if (d) document.title = t('{0} · SportLikely', { 0: `${d.game.home.name} vs ${d.game.away.name}` })
   }, [d?.game.id])
 
-  if (error) return <div className="max-w-5xl mx-auto px-4 py-10"><Link to="/basketball/games" className="text-sm text-muted hover:text-ink">{t('← All games')}</Link><div className="mt-4 card border-loss/40 text-loss rounded-lg p-4">{error}</div></div>
+  if (error) return <div className="max-w-5xl mx-auto px-4 py-10"><Link to="/basketball/matches" className="text-sm text-muted hover:text-ink">{t('← All games')}</Link><div className="mt-4 card border-loss/40 text-loss rounded-lg p-4">{error}</div></div>
   if (!d) return <div className="max-w-5xl mx-auto px-4 py-16 text-center text-muted">{t('Loading game…')}</div>
 
   const g = d.game
@@ -140,7 +140,7 @@ export default function BbGame() {
   const q = g.quarters
   const showQ = showScore && q && q.home.some(x => x !== null)
   const side = (team: Game['home']) => ({
-    name: team.name, logo: <TeamLogo team={team} size={72} />, href: `${teamHref('basketball', team.id, team.name)}#analysis`,
+    name: team.name, logo: <TeamLogo team={team} size={72} />, href: teamHref('basketball', team.id, team.name) ?? '',
     title: t('{0}: team page', { 0: team.name }), linkLabel: t('Team page →'), star: <FavStar size="sm" fav={bbTeamFav(team, g.league.code)} />
   })
 
@@ -216,7 +216,7 @@ export default function BbGame() {
 
   return (
     <GamePage
-      back={{ to: '/basketball/games', label: t('All games') }}
+      back={{ to: '/basketball/matches', label: t('All games') }}
       srTitle={`${g.home.name} vs ${g.away.name} · ${g.league.name} ${t('prediction')}`}
       league={{
         name: g.league.name, href: leagueHref('basketball', g.league.code, g.league.name)!, logo: cfg?.leagues.find(l => l.code === g.league.code)?.logo || null,

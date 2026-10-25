@@ -17,7 +17,7 @@ export default function TeamForecast({ sport, id, leagueHref }: { sport: FcSport
 
 function Card({ c, sport, leagueHref }: { c: FcTeamCard; sport: FcSport; leagueHref: (code: string) => string }) {
   const zones = tableZones(c.zones)
-  const action = <Link to={`${leagueHref(c.code)}#forecast`} className="text-xs font-bold text-accent">{t('Whole table →')}</Link>
+  const action = <Link to={`${leagueHref(c.code)}/forecast`} className="text-xs font-bold text-accent">{t('Whole table →')}</Link>
   if (c.team.locked) return (
     <TCard title={t('Season forecast')} action={action}>
       <p className="text-sm text-muted">{t('Pro shows the season forecast for every team. Free shows the top three, the bottom three and your favourite teams.')}</p>

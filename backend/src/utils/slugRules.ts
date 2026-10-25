@@ -107,3 +107,58 @@ export const slugPath = (sport: LinkSport, kind: LinkKind, slug: string) => `/${
  * that tells a page which item to show is in the path.
  */
 export const ALLOWED_QUERY = ['q', 'league', 'tour', 'tab', 'day', 'plan', 'ref', 'token', 'next', 'utm_source', 'utm_medium', 'utm_campaign'] as const
+
+/* ---------- fix235: tabs are sub-paths, every sport page is /<sport>/<page> (docs/notes/links.md) ---------- */
+
+/** a match page's tabs, every sport: /<sport>/match/<slug>/<tab>; the prediction is the page itself (no sub-path) */
+export const MATCH_TABS = ['stats', 'lineups', 'h2h', 'table', 'highlights', 'rest', 'players', 'box', 'quarters', 'plays', 'form', 'draw'] as const
+/** a league page's tabs: /<sport>/league/<slug>/<tab> (the overview is the page itself) */
+export const LEAGUE_TABS = ['forecast'] as const
+/**
+ * "/football/match/<slug>/stats" → { base: "/football/match/<slug>", tab: "stats" }; tab null = not a tab of that page
+ * (the address moves to the page itself); null = no sub-path of a match / league page
+ */
+export function splitTab(path: string): { base: string; tab: string | null } | null {
+  const m = /^(\/[a-z-]+\/(match|league)\/[a-z0-9-]+)\/([^/]+)\/?$/.exec(path)
+  if (!m) return null
+  const list: readonly string[] = m[2] === 'match' ? MATCH_TABS : LEAGUE_TABS
+  return { base: m[1], tab: list.includes(m[3]) ? m[3] : null }
+}
+
+/** the pages every sport has under its name (same names in every sport; football no longer at the root) */
+export const SPORT_PAGES = ['matches', 'today', 'predictions', 'favorites', 'my-picks', 'upset-watch', 'draw-alerts', 'accuracy', 'how-it-works', 'past', 'rankings'] as const
+/** the weekly hubs that are not football's: /<sport>/predictions/<slug> */
+const HUB_SPORT: Record<string, LinkSport> = { nba: 'basketball', euroleague: 'basketball', nfl: 'american-football', 'college-football': 'american-football' }
+const FOOTBALL_ROOT = /^\/(matches|favorites|my-picks|upset-watch|draw-alerts|accuracy|past)$/
+/**
+ * an old page address (no language prefix, no query) → its address now; null = not an old page address.
+ * /matches → /football/matches, /predictions/today → /football/today, /predictions/nba → /basketball/predictions/nba,
+ * /basketball/games → /basketball/matches, /basketball/predictions/today → /basketball/today, a hub under the wrong sport.
+ */
+export function movedPage(path: string): string | null {
+  const p = path.replace(/\/+$/, '') || '/'
+  if (p === '/predictions/today') return '/football/today'
+  let m = /^\/predictions\/([a-z0-9-]+)$/.exec(p)
+  if (m) return `/${HUB_SPORT[m[1]] || 'football'}/predictions/${m[1]}`
+  m = /^\/(football|basketball|american-football)\/predictions\/([a-z0-9-]+)$/.exec(p)
+  if (m && m[2] === 'today') return `/${m[1]}/today`
+  if (m && (HUB_SPORT[m[2]] || 'football') !== m[1]) return `/${HUB_SPORT[m[2]] || 'football'}/predictions/${m[2]}`
+  m = FOOTBALL_ROOT.exec(p)
+  if (m) return `/football/${m[1]}`
+  m = /^\/(basketball|american-football)\/games$/.exec(p)
+  if (m) return `/${m[1]}/matches`
+  return null
+}
+/** the server's crawler pages still read the old page addresses: /football/matches → /matches, … (null = not a sport page) */
+export function internalPage(path: string): string | null {
+  const p = path.replace(/\/+$/, '') || '/'
+  let m = /^\/football\/(matches|favorites|my-picks|upset-watch|draw-alerts|accuracy|past)$/.exec(p)
+  if (m) return `/${m[1]}`
+  if (p === '/football/today') return '/predictions/today'
+  if (p === '/basketball/today') return '/basketball/predictions/today'
+  m = /^\/(football|basketball|american-football)\/predictions\/([a-z0-9-]+)$/.exec(p)
+  if (m) return `/predictions/${m[2]}`
+  m = /^\/(basketball|american-football)\/matches$/.exec(p)
+  if (m) return `/${m[1]}/games`
+  return null
+}

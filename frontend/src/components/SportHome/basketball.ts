@@ -100,7 +100,7 @@ function useBasketballData(): SportHomeData {
       items: upsetItems(notStarted, g => g.prediction ? { id: g.id, href: matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, league: g.league.name, date: g.kickoff, home: g.home.name, away: g.away.name, pHome: g.prediction.pHome, pAway: g.prediction.pAway, locked: g.prediction.locked } : null),
       empty: tt("No upsets on the radar this week."),
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
-      link: full ? { to: '/basketball/games', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
+      link: full ? { to: '/basketball/matches', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }
     },
     results: { rows: resultRows, days: 30, link: { to: '/basketball/accuracy', label: tt("How accurate is the model? →") } },
     // fix174: first-visit tiles like football; Latest results over 30 days like football
@@ -116,7 +116,7 @@ export function useBasketballAdapter(): SportAdapter {
     banner: cfg && !cfg.public ? tt('Admin preview · not public yet') : null,
     labels: {
       featured: tt("Featured game"), modelPrediction: tt("{0} prediction", { 0: slModel('basketball') }), nextList: tt("Next tip-offs"), nextSection: tt("Next games"),
-      all: { to: '/basketball/games', label: tt("All games →") }, today: { to: '/basketball/predictions/today', label: tt("Today's predictions →") },
+      all: { to: '/basketball/matches', label: tt("All games →") }, today: { to: '/basketball/today', label: tt("Today's predictions →") },
       favorites: '/basketball/favorites', liveDetail: tt("Live score and box score →"),
       emptyHero: [tt("Basketball predictions,"), tt("tested in public."), tt("The next games appear here as soon as they are scheduled.")],
       newsLoading: tt("Loading the latest news…"),

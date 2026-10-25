@@ -20,11 +20,11 @@ import { useTheme } from './lib/theme'
 import { useUnlocks, resetDay } from './lib/unlocks'
 import { reportError } from './lib/report'
 import { isChunkError, isReloading, reloadForNewVersion } from './lib/chunkReload'
-import { HUBS } from './lib/hubs'
+import { HUBS, hubHref } from './lib/hubs'
 import { howPath } from './lib/howItWorks'
 import { SOCIAL, type SocialId } from './lib/social'
 import { t as tt, basename, applyHeadLang, LANGS, lang, setLang, type Lang } from './lib/i18n'
-import { SlugRoute, OldLink } from './components/SlugRoute'
+import { SlugRoute, OldLink, MovedPage } from './components/SlugRoute'
 import { useSlugVersion } from './lib/links'
 
 /**
@@ -314,9 +314,9 @@ function UserMenu() {
             <div className="text-[11px] text-faint truncate">{user.email}</div>
           </div>
           {(access === 'free' || access === 'premium') && (
-            <Link to="/premium#packs" role="menuitem" className={item}>{icon('M4 7h16v12H4zM8 7V5h8v2M4 11h16')}<span className="flex-1">{tt("Pick packs")}</span><span className="num text-xs font-bold text-accent">{unl?.credits ?? 0}</span></Link>
+            <Link to="/premium/packs" role="menuitem" className={item}>{icon('M4 7h16v12H4zM8 7V5h8v2M4 11h16')}<span className="flex-1">{tt("Pick packs")}</span><span className="num text-xs font-bold text-accent">{unl?.credits ?? 0}</span></Link>
           )}
-          <Link to="/my-picks" role="menuitem" className={item}>{icon('M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9')}{tt("My picks")}</Link>
+          <Link to="/football/my-picks" role="menuitem" className={item}>{icon('M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9')}{tt("My picks")}</Link>
           <Link to="/account" role="menuitem" className={item}>{icon('M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z')}{tt("Settings")}</Link>
           {(staff || can('model')) && (
             <>
@@ -397,7 +397,7 @@ function FooterHubs() {
     <div className="flex flex-wrap gap-x-3 gap-y-1">
       <span>{tt("Predictions this week:")}</span>
       {HUBS.filter(h => h.sport === 'football' || (h.sport === 'basketball' ? !!cfg?.open : !!nfl?.open)).map(h => (
-        <Link key={h.slug} to={`/predictions/${h.slug}`} className="hover:text-ink">{h.name}</Link>
+        <Link key={h.slug} to={hubHref(h.slug)} className="hover:text-ink">{h.name}</Link>
       ))}
     </div>
   )
@@ -632,19 +632,19 @@ function BottomTabs() {
 
 const TITLES: [RegExp, string][] = [
   [/^\/$/, tt('Home')],
-  [/^\/matches/, tt('Matches')],
-  [/^\/predictions\/today/, tt('Football predictions today')],
-  [/^\/favorites/, tt('Favorites')],
+  [/^\/football\/matches/, tt('Matches')],
+  [/^\/football\/today/, tt('Football predictions today')],
+  [/^\/football\/favorites/, tt('Favorites')],
   [/^\/(football\/)?team\//, tt('Team')],
   [/^\/(football\/)?league\//, tt('League')],
   [/^\/(football\/)?player\//, tt('Player')],
   [/^\/(football\/)?match\//, tt('Match')],
-  [/^\/accuracy/, tt('Accuracy')],
+  [/^\/football\/accuracy/, tt('Accuracy')],
   [/^\/changelog/, tt('Changelog')],
   [/^\/credits/, tt('Photo credits')],
-  [/^\/draw-alerts/, tt('Draw picks')],
-  [/^\/upset-watch/, tt('Upset watch')],
-  [/^\/past/, tt('Past seasons')],
+  [/^\/football\/draw-alerts/, tt('Draw picks')],
+  [/^\/football\/upset-watch/, tt('Upset watch')],
+  [/^\/football\/past/, tt('Past seasons')],
   [/^\/premium/, tt('Premium')],
   [/^\/login/, tt('Sign in')],
   [/^\/signup/, tt('Create account')],
@@ -743,59 +743,52 @@ function Shell() {
           <Suspense fallback={<PageLoading />}>
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/matches" element={<Dashboard />} />
-            <Route path="/predictions/today" element={<Today sport="football" />} />
-            <Route path="/predictions/:league" element={<LeagueHub />} />
             {/* fix206: how our models work (every sport) + the changelog */}
             <Route path="/how-it-works" element={<HowItWorks sport="football" />} />
             <Route path="/changelog" element={<Changelog />} />
             <Route path="/credits" element={<Credits />} />
             <Route path="/guides" element={<GuideIndex />} />
             <Route path="/guides/:slug" element={<Guide />} />
-            <Route path="/favorites" element={<Favorites />} />
-            <Route path="/my-picks" element={<MyPicks />} />
             {/* fix229: clean links — /football/<kind>/<slug>; the old id addresses move to them (the server 301s them on load) */}
+            {/* fix235: every football page is under /football (same page names in every sport); a tab is a sub-path */}
             <Route path="/football" element={<Home />} />
+            <Route path="/football/matches" element={<Dashboard />} />
+            <Route path="/football/today" element={<Today sport="football" />} />
+            <Route path="/football/predictions/:league" element={<LeagueHub />} />
+            <Route path="/football/favorites" element={<Favorites />} />
+            <Route path="/football/my-picks" element={<MyPicks />} />
+            <Route path="/football/accuracy" element={<RecordGate home="/football"><AccuracySimple /></RecordGate>} />
+            <Route path="/football/upset-watch" element={<PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming games where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}><UpsetWatch /></PremiumGate>} />
+            <Route path="/football/draw-alerts" element={<PremiumGate title="Draw picks" pro><DrawAlerts /></PremiumGate>} />
+            <Route path="/football/past" element={<ModelOnly><Past /></ModelOnly>} />
             <Route path="/football/team/:slug" element={<SlugRoute sport="football" kind="team"><Team /></SlugRoute>} />
-            <Route path="/football/league/:slug" element={<SlugRoute sport="football" kind="league"><League /></SlugRoute>} />
+            <Route path="/football/league/:slug/*" element={<SlugRoute sport="football" kind="league"><League /></SlugRoute>} />
             <Route path="/football/player/:slug" element={<SlugRoute sport="football" kind="player"><Player /></SlugRoute>} />
-            <Route path="/football/match/:slug" element={<SlugRoute sport="football" kind="match"><MatchDetail /></SlugRoute>} />
+            <Route path="/football/match/:slug/*" element={<SlugRoute sport="football" kind="match"><MatchDetail /></SlugRoute>} />
             <Route path="/team/:id" element={<OldLink sport="football" kind="team" />} />
             <Route path="/league/:code" element={<OldLink sport="football" kind="league" />} />
             <Route path="/player/find" element={<Player />} />
             <Route path="/player/:id" element={<OldLink sport="football" kind="player" />} />
             <Route path="/match/:id" element={<OldLink sport="football" kind="match" />} />
+            <Route path="/matches" element={<MovedPage />} />
+            <Route path="/predictions/today" element={<MovedPage />} />
+            <Route path="/predictions/:league" element={<MovedPage />} />
+            <Route path="/favorites" element={<MovedPage />} />
+            <Route path="/my-picks" element={<MovedPage />} />
+            <Route path="/accuracy" element={<MovedPage />} />
+            <Route path="/upset-watch" element={<MovedPage />} />
+            <Route path="/draw-alerts" element={<MovedPage />} />
+            <Route path="/past" element={<MovedPage />} />
             <Route path="/search" element={<Search />} />
-            <Route
-              path="/accuracy"
-              element={<RecordGate home="/"><AccuracySimple /></RecordGate>}
-            />
-            <Route
-              path="/upset-watch"
-              element={
-                <PremiumGate title="Upset watch" pro text={tt("Upset watch: the coming games where our model gives the underdog the best chance. Part of Pro, together with unlimited predictions.")}>
-                  <UpsetWatch />
-                </PremiumGate>
-              }
-            />
-            <Route
-              path="/draw-alerts"
-              element={
-                <PremiumGate title="Draw picks" pro>
-                  <DrawAlerts />
-                </PremiumGate>
-              }
-            />
-            <Route
-              path="/past"
-              element={<ModelOnly><Past /></ModelOnly>}
-            />
             <Route path="/login" element={<Login mode="login" />} />
             <Route path="/signup" element={<Login mode="signup" />} />
             <Route path="/account" element={<Account />} />
+            <Route path="/account/emails" element={<Account />} />
+            <Route path="/account/alerts" element={<Account />} />
             <Route path="/verify" element={<Verify />} />
             <Route path="/forgot" element={<Forgot />} />
             <Route path="/premium" element={<Premium />} />
+            <Route path="/premium/packs" element={<Premium />} />
             <Route path="/admin" element={<AdminOnly><ConsoleGate><Admin /></ConsoleGate></AdminOnly>} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
@@ -855,9 +848,9 @@ function TennisRoutes() {
       <Route index element={<TennisHome />} />
       <Route path="matches" element={<TennisMatches />} />
       <Route path="today" element={<TennisMatches today />} />
-      <Route path="match/:slug" element={<SlugRoute sport="tennis" kind="match"><TennisMatch /></SlugRoute>} />
+      <Route path="match/:slug/*" element={<SlugRoute sport="tennis" kind="match"><TennisMatch /></SlugRoute>} />
       <Route path="player/:slug" element={<SlugRoute sport="tennis" kind="player"><TennisPlayer /></SlugRoute>} />
-      <Route path="league/:slug" element={<SlugRoute sport="tennis" kind="league"><TennisTournament /></SlugRoute>} />
+      <Route path="league/:slug/*" element={<SlugRoute sport="tennis" kind="league"><TennisTournament /></SlugRoute>} />
       <Route path="tournament/:key" element={<OldLink sport="tennis" kind="league" />} />
       <Route path="predictions/:key" element={<OldLink sport="tennis" kind="league" />} />
       <Route path="rankings" element={<TennisRankings />} />
@@ -879,18 +872,20 @@ function NflRoutes() {
   return (
     <Routes>
       <Route index element={<NflHome />} />
-      <Route path="games" element={<NflGames />} />
+      <Route path="matches" element={<NflGames />} />
+      <Route path="games" element={<MovedPage />} />
+      <Route path="predictions/:league" element={<LeagueHub />} />
       <Route path="today" element={<NflGames today />} />
       {/* fix185: one sport — the old college list pages are the same pages filtered to college; the college
           standings stay a page of their own (games / teams / players by id are shared) */}
       <Route path="college" element={<Navigate to="/american-football?league=college" replace />} />
-      <Route path="college/games" element={<Navigate to="/american-football/games?league=college" replace />} />
+      <Route path="college/games" element={<Navigate to="/american-football/matches?league=college" replace />} />
       <Route path="college/today" element={<Navigate to="/american-football/today?league=college" replace />} />
       <Route path="college/league" element={<OldLink sport="american-football" kind="league" id="2" />} />
       <Route path="league" element={<OldLink sport="american-football" kind="league" id="1" />} />
       <Route path="game/:id" element={<OldLink sport="american-football" kind="match" />} />
-      <Route path="match/:slug" element={<SlugRoute sport="american-football" kind="match"><NflGame /></SlugRoute>} />
-      <Route path="league/:slug" element={<SlugRoute sport="american-football" kind="league"><NflLeague /></SlugRoute>} />
+      <Route path="match/:slug/*" element={<SlugRoute sport="american-football" kind="match"><NflGame /></SlugRoute>} />
+      <Route path="league/:slug/*" element={<SlugRoute sport="american-football" kind="league"><NflLeague /></SlugRoute>} />
       <Route path="team/:slug" element={<SlugRoute sport="american-football" kind="team"><NflTeam /></SlugRoute>} />
       <Route path="player/:slug" element={<SlugRoute sport="american-football" kind="player"><NflPlayer /></SlugRoute>} />
       <Route path="favorites" element={<NflFavorites />} />
@@ -914,11 +909,14 @@ function BbRoutes() {
   return (
     <Routes>
       <Route index element={<BbHome />} />
-      <Route path="games" element={<BbGames />} />
-      <Route path="predictions/today" element={<Today sport="basketball" />} />
+      <Route path="matches" element={<BbGames />} />
+      <Route path="today" element={<Today sport="basketball" />} />
+      <Route path="predictions/:league" element={<LeagueHub />} />
+      <Route path="games" element={<MovedPage />} />
+      <Route path="predictions/today" element={<MovedPage />} />
       <Route path="game/:id" element={<OldLink sport="basketball" kind="match" />} />
-      <Route path="match/:slug" element={<SlugRoute sport="basketball" kind="match"><BbGame /></SlugRoute>} />
-      <Route path="league/:slug" element={<SlugRoute sport="basketball" kind="league"><BbLeague /></SlugRoute>} />
+      <Route path="match/:slug/*" element={<SlugRoute sport="basketball" kind="match"><BbGame /></SlugRoute>} />
+      <Route path="league/:slug/*" element={<SlugRoute sport="basketball" kind="league"><BbLeague /></SlugRoute>} />
       <Route path="team/:slug" element={<SlugRoute sport="basketball" kind="team"><BbTeam /></SlugRoute>} />
       <Route path="player/:slug" element={<SlugRoute sport="basketball" kind="player"><BbPlayer /></SlugRoute>} />
       <Route path="favorites" element={<BbFavorites />} />

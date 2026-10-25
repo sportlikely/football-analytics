@@ -28,7 +28,7 @@ const TYPES: { key: string; sport: SportKey; market: string }[] = [
 const SPORT_LABEL = (s: SportKey) => (s === 'fb' ? tt('Football') : s === 'bb' ? tt('Basketball') : tt('American football'))
 const GAME_HREF = (r: Row) => matchHref(s2l(r.sport), r.gameId, { home: r.home, away: r.away, date: r.kickoff })!
 const s2l = (s: SportKey) => (s === 'fb' ? 'football' : s === 'bb' ? 'basketball' : 'american-football')
-const GAMES_HREF: Record<SportKey, string> = { fb: '/matches', bb: '/basketball/games', nfl: '/american-football/games' }
+const GAMES_HREF: Record<SportKey, string> = { fb: '/football/matches', bb: '/basketball/matches', nfl: '/american-football/matches' }
 const pct = (s: { settled: number; hits: number }) => (s.settled ? Math.round((s.hits / s.settled) * 1000) / 10 : null)
 
 export default function MyPicks({ initial = 'all' }: { initial?: 'all' | SportKey }) {

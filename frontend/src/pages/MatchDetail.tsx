@@ -28,6 +28,7 @@ import GameMeaning from '../components/sport/forecast/GameMeaning'
 import GameExtras from '../components/sport/game/GameExtras'
 import { footballScorers } from '../lib/scorers'
 import { playerHref, leagueHref } from '../lib/links'
+import { useTabPath } from '../lib/tabPath'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
 const CompCode = createContext<string | undefined>(undefined)
@@ -393,12 +394,6 @@ function MatchDetail() {
   useEffect(() => {
     if (wantReveal && hidden && !autoRevealed.current) { autoRevealed.current = true; setUnlockAnim(true) }
   }, [wantReveal, hidden])
-  const scrolled = useRef(false)
-  useEffect(() => {
-    if (scrolled.current || !details || window.location.hash !== '#prediction') return
-    scrolled.current = true
-    requestAnimationFrame(() => document.getElementById('prediction-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-  }, [details])
 
   const load = (initial = false) => {
     if (initial && !seedFromList(location.state, matchId)) setLoading(true)
@@ -558,15 +553,9 @@ function MatchDetail() {
   }, [details])
 
   // Page sections as tabs: Prediction first, then Statistics, Lineups and the league table.
-  // The open tab lives in the URL hash (#stats, #lineups, #table) so a link can open it directly.
-  const [tab, setTab] = useState<TabId>(() => {
-    const h = (typeof window !== 'undefined' ? window.location.hash.slice(1) : '') as TabId
-    return TAB_IDS.includes(h) ? h : 'prediction'
-  })
-  const pickTab = (t: TabId) => {
-    setTab(t)
-    try { history.replaceState(null, '', t === 'prediction' ? window.location.pathname + window.location.search : `#${t}`) } catch { /* ignore */ }
-  }
+  // The open tab lives in the address as a sub-path (fix235: …/match/<slug>/stats, /lineups, /table) so a link can
+  // open it directly; the prediction is the page itself.
+  const [tab, pickTab] = useTabPath(TAB_IDS) as [TabId, (t: TabId) => void]
 
   // League table (fetched once per competition; the tab is hidden when there is none)
   const compCode = details?.match.competition.code
@@ -618,7 +607,7 @@ function MatchDetail() {
   if (!details || (error && !details.partial))
     return (
       <div className="max-w-5xl mx-auto px-4 py-10">
-        <Link to="/matches" className="text-sm text-muted hover:text-ink">{tt("← Back")}</Link>
+        <Link to="/football/matches" className="text-sm text-muted hover:text-ink">{tt("← Back")}</Link>
         <div className="mt-4 card border-loss/40 text-loss rounded-lg p-4">
           {tt("Could not load match:")}{' '}{error || tt("unknown error")}
         </div>
@@ -1064,7 +1053,7 @@ function MatchDetail() {
   return (
     <CompCode.Provider value={m.competition?.code}>
     <GamePage
-      back={{ to: '/matches', label: tt("All matches") }}
+      back={{ to: '/football/matches', label: tt("All matches") }}
       srTitle={tabTitle ? `${tabTitle}${m.competition?.name ? ` · ${m.competition.name}` : ''} ${tt("prediction")}` : undefined}
       league={{
         name: m.competition.name, href: leagueHref('football', m.competition.code, m.competition.name) || '/football', logo: m.competition.emblem || null, bits: roundBits,

@@ -100,7 +100,7 @@ export default function DrawAlerts() {
         <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink">{tt("Draw picks")}</h1>
         <p className="text-muted mt-2 max-w-2xl">
           {tt("The 2 games of the coming week where a draw is most likely, picked by our model. Updated as new information comes in.")}</p>
-        <Link to="/upset-watch" className="inline-block mt-2 text-sm font-bold text-accent">{tt("Also for Pro: Upset watch →")}</Link>
+        <Link to="/football/upset-watch" className="inline-block mt-2 text-sm font-bold text-accent">{tt("Also for Pro: Upset watch →")}</Link>
       </div>
 
       {!data ? (

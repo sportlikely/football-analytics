@@ -1,8 +1,9 @@
-import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { createContext, Fragment, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { knownId, rememberSlug, type LinkKind, type LinkSport } from '../lib/links'
+import { movedPage } from '../lib/slugRules'
 import { t } from '../lib/i18n'
 
 /**
@@ -30,9 +31,12 @@ function fromServer(sport: string, kind: string, slug: string): string | null {
 const searchOf = (slug: string) => `/search?q=${encodeURIComponent(slug.replace(/-vs-/, ' ').replace(/-\d{4}-\d{2}-\d{2}(-\d)?$/, '').replace(/-/g, ' '))}`
 
 export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: LinkKind; children: ReactNode }) {
-  const { slug = '' } = useParams()
+  const { slug = '', '*': tab0 = '' } = useParams()
   const nav = useNavigate()
   const loc = useLocation()
+  // fix235: a tab sub-path (…/match/<slug>/stats), the query and the hash are kept on a move; a tab change is no new item
+  const tail = useRef('')
+  tail.current = `${tab0 ? `/${tab0.replace(/\/+$/, '')}` : ''}${loc.search}${loc.hash}`
   // a number (an old id) or a code with capitals (an old basketball league code: NBA, BB123) where the slug belongs
   const numeric = /^-?\d+$/.test(slug) || /[A-Z]/.test(slug)
   const [id, setId] = useState<string | null>(() => (numeric ? null : knownId(sport, kind, slug) ?? fromServer(sport, kind, slug)))
@@ -45,7 +49,7 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
       // the link drew this slug from the name it had: the address bar gets the item's own slug if that differs
       axios.get(`${API_URL}/slug-of/${sport}/${kind}/${encodeURIComponent(clicked)}`).then(r => {
         const s = r.data?.data?.slug
-        if (!off && s && s !== slug) { rememberSlug(sport, kind, s, clicked); nav(`/${sport}/${kind}/${s}${loc.search}${loc.hash}`, { replace: true }) }
+        if (!off && s && s !== slug) { rememberSlug(sport, kind, s, clicked); nav(`/${sport}/${kind}/${s}${tail.current}`, { replace: true }) }
       }).catch(() => undefined)
     }
     if (now) return () => { off = true }
@@ -55,11 +59,11 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
       const d = r.data?.data || {}
       if (d.slug && d.slug !== slug) {
         if (d.id) rememberSlug(sport, kind, d.slug, d.id)
-        nav(`/${sport}/${kind}/${d.slug}${loc.search}${loc.hash}`, { replace: true })
+        nav(`/${sport}/${kind}/${d.slug}${tail.current}`, { replace: true })
       } else if (d.id) setId(String(d.id))
     }).catch(() => { if (!off) nav(numeric ? `/${sport}` : searchOf(slug), { replace: true }) })
     return () => { off = true }
-  }, [sport, kind, slug, numeric, nav, loc.search, loc.hash])
+  }, [sport, kind, slug, numeric, nav])
   if (!id) return <div className="min-h-[70vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={t('Loading…')} /></div>
   return <EntityId.Provider value={id}><Fragment key={id}>{children}</Fragment></EntityId.Provider>
 }
@@ -81,4 +85,14 @@ export function OldLink({ sport, kind, id: fixedId }: { sport: LinkSport; kind: 
     return () => { off = true }
   }, [sport, kind, id, loc.search, nav])
   return <div className="min-h-[70vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={t('Loading…')} /></div>
+}
+
+/**
+ * fix235: an old page address inside the app (/matches, /predictions/today, /basketball/games …): the server answers
+ * these with a 301 on load; a stale in-app link lands here and moves to /<sport>/<page> (lib/slugRules.ts movedPage).
+ */
+export function MovedPage() {
+  const loc = useLocation()
+  const to = movedPage(loc.pathname.toLowerCase()) // an old hub code (/predictions/PL): its hub page moves it on
+  return <Navigate to={to ? `${to}${loc.search}` : '/'} replace />
 }

@@ -18,8 +18,8 @@ export interface NavItem {
 export function sportNav(sport: SportId, nflBase = '/american-football'): NavItem[] {
   if (sport === 'basketball') return [
     { key: 'home', label: 'Home', to: '/basketball', end: true, tab: 'Home' },
-    { key: 'games', label: 'Games', to: '/basketball/games', tab: 'Games' },
-    { key: 'today', label: 'Today', to: '/basketball/predictions/today' },
+    { key: 'games', label: 'Games', to: '/basketball/matches', tab: 'Games' },
+    { key: 'today', label: 'Today', to: '/basketball/today' },
     { key: 'favorites', label: 'Favorites', to: '/basketball/favorites', tab: 'Favorites' },
     { key: 'myPicks', label: 'My picks', to: '/basketball/my-picks' },
     { key: 'upsets', label: 'Upset watch', to: '/basketball/upset-watch', tab: 'Upsets' },
@@ -39,7 +39,7 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
   if (sport === 'american-football') return [
     // fix185: one home / games / today for NFL and college; the standings follow the league last shown
     { key: 'home', label: 'Home', to: '/american-football', end: true, tab: 'Home' },
-    { key: 'games', label: 'Games', to: '/american-football/games', tab: 'Games' },
+    { key: 'games', label: 'Games', to: '/american-football/matches', tab: 'Games' },
     { key: 'today', label: 'Today', to: '/american-football/today' },
     { key: 'standings', label: 'Standings', to: nflBase.endsWith('/college') ? '/american-football/league/college-football' : '/american-football/league/nfl' },
     { key: 'favorites', label: 'Favorites', to: '/american-football/favorites', tab: 'Favorites' },
@@ -48,16 +48,16 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
     { key: 'accuracy', label: 'Accuracy', to: '/american-football/accuracy', admin: true, tab: 'Accuracy' }
   ]
   return [
-    { key: 'home', label: 'Home', to: '/', end: true, tab: 'Home' },
-    { key: 'games', label: 'Matches', to: '/matches', tab: 'Matches' },
-    { key: 'today', label: 'Today', to: '/predictions/today' },
-    { key: 'favorites', label: 'Favorites', to: '/favorites', tab: 'Favorites' },
-    { key: 'myPicks', label: 'My picks', to: '/my-picks' },
-    { key: 'upsets', label: 'Upset watch', to: '/upset-watch' },
-    { key: 'draws', label: 'Draw picks', to: '/draw-alerts', tab: 'Draws' },
-    { key: 'accuracy', label: 'Accuracy', to: '/accuracy', admin: true, tab: 'Accuracy' }
+    { key: 'home', label: 'Home', to: '/football', end: true, tab: 'Home' },
+    { key: 'games', label: 'Matches', to: '/football/matches', tab: 'Matches' },
+    { key: 'today', label: 'Today', to: '/football/today' },
+    { key: 'favorites', label: 'Favorites', to: '/football/favorites', tab: 'Favorites' },
+    { key: 'myPicks', label: 'My picks', to: '/football/my-picks' },
+    { key: 'upsets', label: 'Upset watch', to: '/football/upset-watch' },
+    { key: 'draws', label: 'Draw picks', to: '/football/draw-alerts', tab: 'Draws' },
+    { key: 'accuracy', label: 'Accuracy', to: '/football/accuracy', admin: true, tab: 'Accuracy' }
   ]
 }
 
 /** Staff "Past seasons" page of each sport (account menu). */
-export const PAST_OF: Record<SportId, string> = { football: '/past', basketball: '/basketball/past', 'american-football': '/american-football/past', tennis: '/tennis/past', baseball: '/past' }
+export const PAST_OF: Record<SportId, string> = { football: '/football/past', basketball: '/basketball/past', 'american-football': '/american-football/past', tennis: '/tennis/past', baseball: '/football/past' }

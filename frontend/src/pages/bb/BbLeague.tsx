@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t } from '../../lib/i18n'
-import { hubFor } from '../../lib/hubs'
+import { hubFor, hubHref } from '../../lib/hubs'
 import { useBbConfig, bbLeagueFav, type BbGame } from '../../lib/bb'
 import { GameList, Skeleton, TeamLogo, LiveRow } from './parts'
 import SeasonForecast from '../../components/sport/forecast/SeasonForecast'
@@ -134,7 +134,7 @@ export default function BbLeague() {
       country={{ name: league ? t(league.country) : t('League') }}
       name={league?.name || code.toUpperCase()}
       sub={table?.season || null}
-      hub={hub ? { to: `/predictions/${hub.slug}`, label: t("This week's predictions →") } : null}
+      hub={hub ? { to: hubHref(hub.slug), label: t("This week's predictions →") } : null}
       fav={league ? bbLeagueFav(league) : null}
       record={record}
       forecast={<SeasonForecast sport="basketball" code={code} teamHref={(id, name) => teamHref('basketball', id, name)!} />}
@@ -150,7 +150,7 @@ export default function BbLeague() {
             <ul className="space-y-1">{live.map(g => <li key={g.id}><LiveRow g={g} /></li>)}</ul>
           </Card>
         )}
-        <Card title={t('Next games')} action={<Link to="/basketball/games" className="text-xs font-bold text-accent">{t('All →')}</Link>}>
+        <Card title={t('Next games')} action={<Link to="/basketball/matches" className="text-xs font-bold text-accent">{t('All →')}</Link>}>
           {!next ? <Skeleton rows={5} /> : <div className="max-h-[430px] overflow-y-auto overscroll-contain pr-1"><GameList games={next.filter(g => g.state !== 'live')} empty={t('No games in the next 10 days.')} /></div>}
         </Card>
         {(news === null || news === undefined || news.length > 0) && (

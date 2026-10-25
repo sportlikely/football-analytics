@@ -31,7 +31,7 @@ interface HowData {
   season: { points: string[]; check: string; accuracy: { sim: number; base: number } | null } | null
 }
 
-const ACCURACY_PATH: Record<HowSport, string> = { football: '/accuracy', basketball: '/basketball/accuracy', 'american-football': '/american-football/accuracy', tennis: '/tennis/accuracy' }
+const ACCURACY_PATH: Record<HowSport, string> = { football: '/football/accuracy', basketball: '/basketball/accuracy', 'american-football': '/american-football/accuracy', tennis: '/tennis/accuracy' }
 const date = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
 
 /** A FAQ answer: numbers, the translated input list and the date filled in (same rule as the server's faqAnswer). */

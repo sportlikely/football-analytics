@@ -6,11 +6,11 @@ import { matchHref, leagueHref } from '../lib/links'
 const ADAPTERS: Record<'football' | 'basketball', TodayAdapter> = {
   football: {
     title: tt("Football predictions today"), params: { sport: 'football' },
-    gameHref: g => matchHref('football', g.id, { ...g, date: g.kickoff })!, leagueHref: (code, name) => leagueHref('football', code, name), all: { to: '/matches', label: tt("All matches →") }
+    gameHref: g => matchHref('football', g.id, { ...g, date: g.kickoff })!, leagueHref: (code, name) => leagueHref('football', code, name), all: { to: '/football/matches', label: tt("All matches →") }
   },
   basketball: {
     title: tt("Basketball predictions today"), params: { sport: 'basketball' },
-    gameHref: g => matchHref('basketball', g.id, { ...g, date: g.kickoff })!, leagueHref: (code, name) => leagueHref('basketball', code, name), all: { to: '/basketball/games', label: tt('All games →') }
+    gameHref: g => matchHref('basketball', g.id, { ...g, date: g.kickoff })!, leagueHref: (code, name) => leagueHref('basketball', code, name), all: { to: '/basketball/matches', label: tt('All games →') }
   }
 }
 

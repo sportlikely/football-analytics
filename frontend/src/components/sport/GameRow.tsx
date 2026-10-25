@@ -93,7 +93,7 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
   const scorable = (isLive || done) && !!scorersSource(g.href)
   return (
     <div>
-    <Link to={`${g.href}${p.kind !== 'none' ? '#prediction' : ''}`} state={g.linkState} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
+    <Link to={g.href} state={g.linkState} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
       {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
         {g.favWhy.length > 0 && (

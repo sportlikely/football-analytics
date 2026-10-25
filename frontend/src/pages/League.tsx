@@ -9,7 +9,7 @@ import { DcBlock, DcLine } from '../components/DcPick'
 import { isCovered, revealMatch, useRevealState } from '../lib/reveal'
 import RecentResults from '../components/RecentResults'
 import { t as tt, LOCALE } from '../lib/i18n'
-import { hubFor } from '../lib/hubs'
+import { hubFor, hubHref } from '../lib/hubs'
 import { footballTeamHref } from '../lib/teamLink'
 import NameLink, { href } from '../components/sport/NameLink'
 import SeasonForecast from '../components/sport/forecast/SeasonForecast'
@@ -221,7 +221,7 @@ function League() {
       logo={comp?.emblem || null}
       country={{ flag: comp?.area?.flag || null, name: comp?.area?.name || tt("League") }}
       name={comp?.name || code}
-      hub={hub ? { to: `/predictions/${hub.slug}`, label: tt("This week's predictions →") } : null}
+      hub={hub ? { to: hubHref(hub.slug), label: tt("This week's predictions →") } : null}
       fav={comp?.name && code ? { kind: 'league', ref: code, code, name: comp.name, img: comp.emblem || null } : null}
       record={record && record.hitRate !== null && record.n > 0 ? { hitRate: record.hitRate, n: record.n } : null}
       forecast={code ? <SeasonForecast sport="football" code={code} teamHref={(id, name) => href.team(Number(id), code, name) || '/football'} /> : null}
@@ -354,7 +354,7 @@ function League() {
             </Card>
           )}
 
-          <Card title={tt("Next fixtures")} action={<Link to={`/matches?league=${code}`} className="text-xs font-bold text-accent">All →</Link>}>
+          <Card title={tt("Next fixtures")} action={<Link to={`/football/matches?league=${code}`} className="text-xs font-bold text-accent">All →</Link>}>
             {!matches ? (
               <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 rounded-xl bg-surface2/60 animate-pulse" />)}</div>
             ) : upcoming.length === 0 ? (
@@ -453,7 +453,7 @@ function FixtureRow({ m }: { m: Match }) {
   // fix120: our pick is the double chance
   const dc = doubleChance(p)
   return (
-    <Link to={`${matchHref('football', m.id, { home: m.homeTeam.name || m.homeTeam.shortName, away: m.awayTeam.name || m.awayTeam.shortName, homeId: m.homeTeam.id, awayId: m.awayTeam.id, date: m.utcDate })}#prediction`} state={{ match: m }} className="flex items-center gap-2 sm:gap-3 px-1 sm:px-2 py-2 rounded-xl hover:bg-surface2/60 transition-colors">
+    <Link to={matchHref('football', m.id, { home: m.homeTeam.name || m.homeTeam.shortName, away: m.awayTeam.name || m.awayTeam.shortName, homeId: m.homeTeam.id, awayId: m.awayTeam.id, date: m.utcDate }) ?? ''} state={{ match: m }} className="flex items-center gap-2 sm:gap-3 px-1 sm:px-2 py-2 rounded-xl hover:bg-surface2/60 transition-colors">
       <span className="w-10 sm:w-12 flex-shrink-0 text-center">
         <span className="block text-[10px] text-faint">{new Date(m.utcDate).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric' })}</span>
         <span className="block text-xs font-bold text-ink num">{new Date(m.utcDate).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}</span>

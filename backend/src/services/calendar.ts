@@ -431,7 +431,7 @@ export function calendarFor(user: User, lang: CalLang, site: string, now = Date.
   if (!fbTeams.length && !bbIds.length && !nflIds.length && !tnIds.length) {
     const day = new Date(now); day.setUTCHours(0, 0, 0, 0);
     events.push({ uid: `sl-empty-${user.id}@sportlikely.com`, start: day.toISOString(), end: new Date(day.getTime() + DAY).toISOString(), allDay: true,
-      summary: w.empty, description: `${site}${prefix}/favorites\n${w.footer}`, url: `${site}${prefix}/favorites` });
+      summary: w.empty, description: `${site}${prefix}/football/favorites\n${w.footer}`, url: `${site}${prefix}/football/favorites` });
   } else {
     const st = stamps(games, now);
     for (const g of games) {

@@ -8,14 +8,16 @@
  *  2. a link carries a query parameter that is not in ALLOWED_QUERY (lib/slugRules.ts, the one list);
  *  3. a page route of App.tsx takes an id (:id / :code / :key) and is not an OldLink (the old addresses only move on);
  *  4. a sport has no /<sport>/<kind>/:slug route for each of its kinds (tennis: player, league, match);
- *  5. the two copies of the slug rules (backend/src/utils/slugRules.ts, frontend/src/lib/slugRules.ts) differ.
+ *  5. the two copies of the slug rules (backend/src/utils/slugRules.ts, frontend/src/lib/slugRules.ts) differ;
+ *  6. (fix235) an app link carries "#…" (tabs are sub-paths: …/match/<slug>/stats; in-page anchors only on guide pages),
+ *     or a sport page is at the root / under an old name (/matches, /predictions/today, /basketball/games: movedPage).
  * Reads the code without running it (TypeScript syntax tree).
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { ALLOWED_QUERY, LINK_SPORTS, LINK_KINDS } from '../src/lib/slugRules.ts'
+import { ALLOWED_QUERY, LINK_SPORTS, LINK_KINDS, movedPage } from '../src/lib/slugRules.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SRC = path.resolve(here, '../src')
@@ -40,6 +42,8 @@ const OLD_ITEM = /^\/(?:(?:basketball|american-football|tennis|football)\/)?(?:t
 const OLD_AFTER_BASE = /^\$\{x\}\/(?:team|match|player|league|game|tournament|predictions)\/\$\{|^\$\{x\}\/league$/
 const PUBLIC_START = /^\/(?!api\/|assets\/|media\/|fonts\/|socket\.io)/
 const allowed = new Set<string>(ALLOWED_QUERY as readonly string[])
+/** fix235: the only files whose links may carry an in-page "#…" anchor (guide pages) */
+const ANCHOR_OK = new Set(['pages/Guide.tsx'])
 
 for (const file of walk(SRC)) {
   const r = path.relative(SRC, file).replace(/\\/g, '/')
@@ -55,9 +59,15 @@ for (const file of walk(SRC)) {
     // route definitions are checked below (3)
     if (ts.isJsxAttribute(n) && n.name.getText(sf) === 'path') return
     const t = textOf(n)
+    // `${matchHref(…)}#prediction`: a link helper's address with a hash after it
+    if (t != null && /^\$\{[vx]\}#[a-zA-Z]/.test(t) && !ANCHOR_OK.has(r)) problems.push(`${rel(file)}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1} — "#…" after a link: "${t.slice(0, 70)}" (a tab is a sub-path: …/match/<slug>/stats)`)
     if (t != null && (PUBLIC_START.test(t) || OLD_AFTER_BASE.test(t))) {
       const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1
       if (OLD_ITEM.test(t) || OLD_AFTER_BASE.test(t)) problems.push(`${rel(file)}:${line} — an item link by id: "${t.slice(0, 70)}" (use teamHref / playerHref / leagueHref / matchHref, lib/links.ts)`)
+      // 6 (fix235): no "#…" in an app link (tabs and sections are sub-paths), no sport page at an old address
+      if (/#[a-zA-Z]/.test(t) && !ANCHOR_OK.has(r)) problems.push(`${rel(file)}:${line} — "#…" in a link: "${t.slice(0, 70)}" (a tab is a sub-path: …/match/<slug>/stats, lib/tabPath.ts)`)
+      const p0 = t.split(/[?#]/)[0]
+      if (!p0.includes('${') && movedPage(p0)) problems.push(`${rel(file)}:${line} — an old page address "${p0}" (now ${movedPage(p0)}: every sport page is /<sport>/<page>)`)
       const q = t.indexOf('?')
       if (q >= 0 && !/^\/\$\{/.test(t)) {
         for (const m of t.slice(q + 1).matchAll(/(?:^|&)([a-zA-Z_]+)=/g))
@@ -84,8 +94,13 @@ for (const r of routes) {
 }
 for (const sport of LINK_SPORTS) for (const kind of LINK_KINDS) {
   if (sport === 'tennis' && kind === 'team') continue
-  if (!routes.some(r => r.path === `/${sport}/${kind}/:slug` && new RegExp(`<SlugRoute sport="${sport}" kind="${kind}"`).test(r.element)))
+  if (!routes.some(r => (r.path === `/${sport}/${kind}/:slug` || ((kind === 'match' || kind === 'league') && r.path === `/${sport}/${kind}/:slug/*`)) && new RegExp(`<SlugRoute sport="${sport}" kind="${kind}"`).test(r.element)))
     problems.push(`frontend/src/App.tsx — ${sport}: no /${sport}/${kind}/:slug route (every sport has its slug pages)`)
+}
+// 6 (fix235): a match page takes its tab as a sub-path (…/match/:slug/*); every sport has /<sport>/matches and /today
+for (const sport of LINK_SPORTS) {
+  if (!routes.some(r => r.path === `/${sport}/match/:slug/*`)) problems.push(`frontend/src/App.tsx — ${sport}: the match route must be /${sport}/match/:slug/* (tabs are sub-paths)`)
+  for (const page of ['matches', 'today']) if (!routes.some(r => r.path === `/${sport}/${page}`)) problems.push(`frontend/src/App.tsx — ${sport}: no /${sport}/${page} route (same page names in every sport)`)
 }
 // the server: one parser for the new addresses of every sport (services/slugs.ts parseNew, LINK_SPORTS)
 const slugsTs = fs.readFileSync(path.join(BACK, 'services/slugs.ts'), 'utf8')

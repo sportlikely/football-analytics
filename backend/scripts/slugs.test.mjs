@@ -237,7 +237,7 @@ test('the sitemaps list slug addresses only (never an id address)', () => {
 
 test('links inside crawler HTML, JSON-LD and emails become slug links', () => {
   const html = slugs.pubLinks(`<a href="/team/86?c=PD&amp;n=Real+Madrid+CF">x</a><a href="/es/basketball/game/519565">y</a><a href="/matches">z</a>`);
-  assert.equal(html, `<a href="/football/team/real-madrid">x</a><a href="/es/basketball/match/real-madrid-vs-barcelona-${iso(now + DAY).slice(0, 10)}">y</a><a href="/matches">z</a>`);
+  assert.equal(html, `<a href="/football/team/real-madrid">x</a><a href="/es/basketball/match/real-madrid-vs-barcelona-${iso(now + DAY).slice(0, 10)}">y</a><a href="/football/matches">z</a>`); // fix235: list pages under their sport
   assert.equal(slugs.pubPath('https://sportlikely.com/tennis/player/50000'), 'https://sportlikely.com/tennis/player/alder-server');
   const ld = JSON.parse(slugs.pubLinks(JSON.stringify({ url: 'https://sportlikely.com/match/560616' })));
   assert.match(ld.url, /^https:\/\/sportlikely\.com\/football\/match\/manchester-city-vs-manchester-united-\d{4}-\d{2}-\d{2}$/);

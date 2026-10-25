@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { t } from '../../../lib/i18n'
+import { useTabPath } from '../../../lib/tabPath'
 import { FavStar, type Favorite } from '../../../lib/favorites'
 
 /**
@@ -41,21 +42,10 @@ export const Lines = ({ n = 5, h = 'h-8' }: { n?: number; h?: string }) => (
   <div className="space-y-2">{Array.from({ length: n }).map((_, i) => <div key={i} className={`${h} rounded-lg bg-surface2/60 animate-pulse`} />)}</div>
 )
 
-/** fix215: Overview | Season forecast, the tab kept in the address (#forecast) so a team page can link to it */
-function useLeagueTab(): ['overview' | 'forecast', (x: 'overview' | 'forecast') => void] {
-  const read = () => (typeof window !== 'undefined' && window.location.hash === '#forecast' ? 'forecast' : 'overview')
-  const [tab, setTab] = useState<'overview' | 'forecast'>(read)
-  useEffect(() => {
-    const on = () => setTab(read())
-    window.addEventListener('hashchange', on)
-    return () => window.removeEventListener('hashchange', on)
-  }, [])
-  const pick = (x: 'overview' | 'forecast') => {
-    setTab(x)
-    window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}${x === 'forecast' ? '#forecast' : ''}`)
-  }
-  return [tab, pick]
-}
+/** fix215: Overview | Season forecast, the tab kept in the address (fix235: …/league/<slug>/forecast) so a team page
+ *  can link to it */
+const LEAGUE_TAB_IDS = ['overview', 'forecast']
+const useLeagueTab = () => useTabPath(LEAGUE_TAB_IDS) as ['overview' | 'forecast', (x: 'overview' | 'forecast') => void]
 
 export default function LeaguePage(p: LeaguePageProps) {
   const [tab, setTab] = useLeagueTab()

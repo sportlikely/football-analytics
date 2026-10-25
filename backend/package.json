@@ -43,7 +43,8 @@
     "test:fix230": "tsc && node --no-warnings --test --test-force-exit scripts/season-formats.test.mjs scripts/season-sim.test.mjs scripts/season-forecast.test.mjs",
     "test:fix229": "tsc && node --no-warnings --test --test-force-exit scripts/slugs.test.mjs",
     "test:fix231": "tsc && node --no-warnings --test --test-force-exit scripts/game-extras.test.mjs",
-    "test:fix232": "tsc && node --no-warnings --test --test-force-exit --test-name-pattern=fix232 scripts/deploy-restart.test.mjs"
+    "test:fix232": "tsc && node --no-warnings --test --test-force-exit --test-name-pattern=fix232 scripts/deploy-restart.test.mjs",
+    "test:fix235": "tsc && node --no-warnings --test --test-force-exit scripts/links235.test.mjs"
   },
   "keywords": [
     "football",

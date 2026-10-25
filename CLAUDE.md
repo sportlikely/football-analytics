@@ -73,8 +73,17 @@ is model work, the matching note, in the same commit.
   plain slug; the next gets name + country / team / birth year / -2). Table `slugs` (sport, kind, slug, id, is_primary).
 - **Old links 301 in one hop, forever**; a renamed item keeps its old slug as an alias (301 to the new); an unknown slug opens
   the search (`/search?q=`), never a 404. New items get their slug from the worker's "slugs" job (15 min).
-- `npm run parity` fails on an id / query-string link or a missing `/<sport>/<kind>/:slug` route (scripts/links-check.ts);
-  `npm run test:fix229` (backend) checks the rules, uniqueness, one-hop 301s and the sitemaps. Notes: docs/notes/links.md.
+- **No `#…` for tabs — tabs are sub-paths; every sport page is `/<sport>/<page>`** (fix235). A match page opens on the
+  prediction (`/football/match/<slug>`); its tabs are `…/stats`, `…/lineups`, `…/h2h`, `…/table`, `…/highlights` … (same names in
+  every sport, `MATCH_TABS` in the slug rules, `lib/tabPath.ts`; a league's `…/forecast`; account / premium sections
+  `/account/emails`, `/premium/packs`). Sport pages, same names in every sport: `/<sport>/matches`, `/today`, `/predictions/<league>`,
+  `/favorites`, `/my-picks`, `/upset-watch`, `/draw-alerts`, `/accuracy`, `/past`; football is no longer at the root. Site-wide
+  pages stay at the root: `/`, `/search`, `/account`, `/premium`, `/guides/…`, `/changelog`, `/how-it-works`, `/privacy`, `/terms`,
+  `/contact`. Old addresses (`/matches`, `/predictions/today`, `/basketball/games` …) 301 in one hop (`movedPage` in the slug rules);
+  old `#tab` links open their tab and the address becomes the sub-path. In-page `#` anchors only on guide pages.
+- `npm run parity` fails on an id / query-string link, a `#…` link, an old page address or a missing `/<sport>/<kind>/:slug`
+  route (scripts/links-check.ts); `npm run test:fix229` (backend) checks the rules, uniqueness, one-hop 301s and the sitemaps,
+  `npm run test:fix235` the tab sub-paths and the page moves. Notes: docs/notes/links.md.
 
 ## How to work here
 

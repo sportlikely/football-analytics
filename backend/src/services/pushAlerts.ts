@@ -544,7 +544,7 @@ export async function sendTestPush(admin: User, post: Poster = realPost) {
   if (!pushEnabled && post === realPost) throw new PushError(503, 'Push alerts are not configured on the server (VAPID_PUBLIC / VAPID_PRIVATE).');
   const lang = pushPrefs(admin.id).lang;
   const tx = pushWords(lang);
-  return sendToDevices(admin.id, { title: tx('Test alert'), body: tx('Alerts are working on this device.'), url: linkTo(lang, '/account#alerts'), tag: 'test', kind: 'start' }, { kind: 'start' }, post);
+  return sendToDevices(admin.id, { title: tx('Test alert'), body: tx('Alerts are working on this device.'), url: linkTo(lang, '/account/alerts'), tag: 'test', kind: 'start' }, { kind: 'start' }, post);
 }
 
 export function pushAdminStats(days = 14) {

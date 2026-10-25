@@ -87,8 +87,8 @@ function useData(): GamesData {
     })
     return {
       loading, error, games, leagues: [...leagues.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),
-      results: { rows: results ? results.map(toResult) : null, days: 30, link: { to: '/accuracy', label: tt("How accurate is the model? →") } },
-      favTeams: favList.filter(f => f.kind === 'team').map(f => ({ key: f.ref, name: f.name, logo: f.img || null, to: f.ids?.[0] ? footballTeamHref(f.ids[0], f.name) : '/favorites' })),
+      results: { rows: results ? results.map(toResult) : null, days: 30, link: { to: '/football/accuracy', label: tt("How accurate is the model? →") } },
+      favTeams: favList.filter(f => f.kind === 'team').map(f => ({ key: f.ref, name: f.name, logo: f.img || null, to: f.ids?.[0] ? footballTeamHref(f.ids[0], f.name) : '/football/favorites' })),
       favLeagues: favList.filter(f => f.kind === 'league').map(f => f.code || f.ref),
       hasFavorites: favList.length > 0
     }
@@ -100,7 +100,7 @@ export const footballGames: GamesAdapter = {
   countLine: (n, days) => tt("{0} fixtures in the next {1} days", { 0: n, 1: days }),
   noLive: tt("No matches in play right now."),
   defaultPinned: ['PL', 'PD', 'BL1', 'SA', 'FL1', 'CL'],
-  favoritesHref: '/favorites',
+  favoritesHref: '/football/favorites',
   leaguePanel: code => <LeaguePanel code={code} />,
   useData
 }

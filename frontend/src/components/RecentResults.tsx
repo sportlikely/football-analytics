@@ -77,7 +77,7 @@ export default function RecentResults({ code, limit, days = 14, compact, large, 
         ))}
       </ul>
       {rows && rows.length > 0 && (
-        <RecordLink to="/accuracy" className="block px-1 pt-2 text-[11px] font-semibold text-muted hover:text-ink">
+        <RecordLink to="/football/accuracy" className="block px-1 pt-2 text-[11px] font-semibold text-muted hover:text-ink">
           {tt("How accurate is the model? →")}</RecordLink>
       )}
     </div>

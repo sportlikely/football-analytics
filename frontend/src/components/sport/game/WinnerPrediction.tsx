@@ -74,13 +74,13 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
   const { hidden, reveal } = useReveal(x.rid, x.status, open)
   const [anim, setAnim] = useState(false)
   const roll = justRevealed(x.rid)
-  // opened from a phone list's "See prediction": scroll here and play the reveal of a "guess first" cover
+  // opened from a phone list's "See prediction": play the reveal of a "guess first" cover (fix235: the page opens on
+  // the prediction, no #prediction)
   const location = useLocation()
   const once = useRef(false)
   useEffect(() => {
     if (once.current) return
     once.current = true
-    if (window.location.hash === '#prediction') requestAnimationFrame(() => document.getElementById('prediction')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     if ((location.state as any)?.reveal && hidden) setAnim(true)
   }, [])
   const note = p ? [slModelOf(p.model || x.model, x.sport), x.upcoming ? x.updated : x.saved].join(' · ') : undefined

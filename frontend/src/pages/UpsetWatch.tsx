@@ -14,7 +14,8 @@ import { matchHref } from '../lib/links'
  * winner sports have no draw, so the draw bar and the draw numbers are left out.
  */
 export type UpsetSport = 'football' | 'basketball' | 'american-football' | 'tennis'
-const API_OF: Record<UpsetSport, string> = { football: '/upset-watch', basketball: '/basketball/upset-watch', 'american-football': '/nfl/upset-watch', tennis: '/tennis/upset-watch' }
+/** the API route of each sport's list (under API_URL; not page addresses) */
+const API_OF: Record<UpsetSport, string> = { football: 'upset-watch', basketball: 'basketball/upset-watch', 'american-football': 'nfl/upset-watch', tennis: 'tennis/upset-watch' }
 /** fix229: the game's slug link (the sides as listed, the day) */
 const GAME_OF = (sport: UpsetSport, g: { matchId: number; home: string; away: string; date: string }) => matchHref(sport, g.matchId, { home: g.home, away: g.away, date: g.date })!
 
@@ -99,7 +100,7 @@ export default function UpsetWatch({ sport = 'football' }: { sport?: UpsetSport 
   useEffect(() => {
     document.title = tt("Upset watch · SportLikely")
     setData(null); setError(null)
-    axios.get(`${API_URL}${API_OF[sport]}`).then(r => setData(r.data.data)).catch(e => setError(errorText(e)))
+    axios.get(`${API_URL}/${API_OF[sport]}`).then(r => setData(r.data.data)).catch(e => setError(errorText(e)))
   }, [sport])
 
   if (error) return <div className="max-w-5xl mx-auto px-4 py-10 text-loss">{error}</div>

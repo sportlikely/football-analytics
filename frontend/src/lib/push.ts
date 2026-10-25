@@ -54,5 +54,5 @@ export async function deviceId(endpoint: string): Promise<string> {
 /** A notification from this page (no server): shows the person what an alert looks like on this device. */
 export async function showTest(title: string, body: string) {
   const r = await registration()
-  await r.showNotification(title, { body, icon: '/icon-192.png', badge: '/icon-192.png', tag: 'test', data: { url: '/account#alerts' } })
+  await r.showNotification(title, { body, icon: '/icon-192.png', badge: '/icon-192.png', tag: 'test', data: { url: '/account/alerts' } })
 }
