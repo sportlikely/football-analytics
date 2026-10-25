@@ -8,6 +8,7 @@
  */
 import { phi, scoreP } from './nbaImpact';
 import { minimize, shrinkPenalty } from './leagueSettings';
+import { clampTop, TOP_LO, TOP_HI, WB_START, type BoxCoef } from './boxValue';
 
 /** The 13 rows (index = position in the value arrays). Bounds / steps for the tuner; `w0` = the starting weight. */
 export const GRID_ROWS = [
@@ -34,7 +35,13 @@ export const VOL = 11;
 /** bb-v3's walk-forward pieces of one game (bbModel.buildLeague). */
 export type GridBase = { p: number; m1: number; netH: number; netA: number; hca: number; haH: number; haA: number; b2bH: boolean; b2bA: boolean; sig: number };
 /** One finished game for the tuner / gate: row values (home side, away side), sigma, result, bb-v3's chance. */
-export type GridItem = { id: number; code: string; season: string; year: number; gp: number; y: number; v3: number; sig: number; hv: number[]; av: number[]; oracle: number | null; mg?: number | null };
+export type GridItem = {
+  id: number; code: string; season: string; year: number; gp: number; y: number; v3: number; sig: number; hv: number[]; av: number[]; oracle: number | null; mg?: number | null;
+  /** fix225: the impact rows under the two new rating sets (ALT layout); null on rows built before fix225 */
+  alt?: (number | null)[] | null;
+  /** fix225: the top-3 players' part of the oracle (home − away) and of #4 as the row stands (the star factor reads it) */
+  ot?: number | null; t4?: number;
+};
 /**
  * fix223 — a league's own settings (or its group's), on top of the shared ones: home edge (points added to #7 when the
  * court is not neutral), stretch (× the shared stretch), sigma (× the league's typical miss: its spread of results
@@ -47,7 +54,14 @@ export type GridParams = {
   league?: Record<string, LeagueSet>;
   /** fix228: row #4 frozen at its "who actually played" fit (services/bbTuner.ts runMissFit) */
   miss?: MissSet;
+  /** fix225: player impact = box-score value blended with on/off (services/bbTuner.ts runImpactFit); absent = on/off only */
+  impact?: ImpactSet;
 };
+/**
+ * fix225 — the player impact the rows #1 / #4 / #8 read: wb × box-score value + (1 − wb) × on/off rating (the on/off
+ * shrink scaled by minutes). box = the formula the values were made with (utils/boxValue.ts).
+ */
+export type ImpactSet = { wb: number; box: BoxCoef; fittedAt: string; train: number[]; test: number };
 /**
  * fix228 — row #4 (missing players) fitted on the oracle rows (who actually played vs the expected rotation, from the box
  * score: what the injury report / confirmed line-up gives live), then frozen: every tune fits the other rows around it.
@@ -56,7 +70,11 @@ export type GridParams = {
  * proxy = the weight of every other league (live input: missed the last 2 games + news / rest, fix224), fitted the same
  * way on its own rows and never above w.
  */
-export type MissSet = { w: number; star: number; proxy: number; fittedAt: string; train: number[]; test: number };
+export type MissSet = {
+  w: number; star: number; proxy: number; fittedAt: string; train: number[]; test: number;
+  /** fix225: star factor (1.0–1.6) on the top-3 players' part of an NBA team's loss (replaces `star` when set) */
+  top?: number;
+};
 /** row #4's index; the leagues whose live #4 is the injury report (oracle in history) */
 export const MISS = 3;
 export const ORACLE_CODES = ['NBA'];
@@ -105,22 +123,61 @@ export function weightsFor(p: GridParams, code: string): number[] {
  * unknown → 0), 'blind' = the NBA's #4 is 0 (no injury information: bb-v4 against bb-v3, which had none either); other
  * leagues keep the stored proxy (missed the last 2 games). Copies; the stored items stay as they are.
  */
-export function missInputs<T extends { code: string; hv: number[]; av: number[]; oracle: number | null }>(items: T[], mode: 'oracle' | 'blind'): T[] {
+export function missInputs<T extends { code: string; hv: number[]; av: number[]; oracle: number | null; ot?: number | null; t4?: number }>(items: T[], mode: 'oracle' | 'blind'): T[] {
   return items.map(x => {
     if (!usesOracle(x.code)) return x;
     const hv = [...x.hv], av = [...x.av];
-    hv[MISS] = mode === 'oracle' && x.oracle !== null ? x.oracle : 0; av[MISS] = 0;
-    return { ...x, hv, av };
+    const known = mode === 'oracle' && x.oracle !== null;
+    hv[MISS] = known ? x.oracle! : 0; av[MISS] = 0;
+    return { ...x, hv, av, t4: known ? x.ot ?? 0 : 0 };
   });
 }
+
+/* ---------- fix225: the impact variants of the stored rows ---------- */
+
+/**
+ * bb_grid_rows.alt (home view): for the on/off ratings with the minutes-scaled shrink (A, from 0) and the box-score
+ * values (B, from 10): #1 home / away, #4 home / away, #4's top-3 part home / away, #8 home / away (already faded by
+ * game 25), the oracle (home − away, null = unknown) and its top-3 part. The stored hv / av stay the fix219 values
+ * (on/off, one lambda): what live uses until runImpactFit's gate passes.
+ */
+export const ALT = { A: 0, B: 10, imp: 0, miss: 2, top: 4, stay: 6, oracle: 8, otop: 9, len: 20 };
+/**
+ * The rows as the impact setting reads them (wb = the box share): #1 / #4 / #8 and the oracle blended from the two
+ * rating sets (everything there is linear in the ratings: the rotation's minutes don't depend on them), t4 / ot = the
+ * top-3 parts. Without a setting (or a row without alt) the stored rows. Copies; the stored items stay as they are.
+ */
+export function impactInputs<T extends GridItem>(items: T[], imp: { wb: number } | null | undefined): T[] {
+  if (!imp) return items;
+  const wb = imp.wb;
+  const b = (x: (number | null)[], k: number) => { const a = x[ALT.A + k], c = x[ALT.B + k]; return a === null || c === null || a === undefined || c === undefined ? null : wb * c + (1 - wb) * a; };
+  return items.map(x => {
+    const a = x.alt;
+    if (!a || a.length < ALT.len) return x;
+    const hv = [...x.hv], av = [...x.av];
+    hv[0] = b(a, ALT.imp) ?? hv[0]; av[0] = b(a, ALT.imp + 1) ?? av[0];
+    hv[MISS] = b(a, ALT.miss) ?? hv[MISS]; av[MISS] = b(a, ALT.miss + 1) ?? av[MISS];
+    hv[7] = b(a, ALT.stay) ?? hv[7]; av[7] = b(a, ALT.stay + 1) ?? av[7];
+    const t4 = (b(a, ALT.top) ?? 0) - (b(a, ALT.top + 1) ?? 0);
+    return { ...x, hv, av, oracle: b(a, ALT.oracle), ot: b(a, ALT.otop), t4 };
+  });
+}
+/** share of rows with the fix225 values (the fit waits for the rebuild) */
+export const altShare = (items: GridItem[]) => (items.length ? items.filter(x => x.alt && x.alt.length >= ALT.len).length / items.length : 0);
 /** #7 is 0 for both teams only on a neutral court (final fours): no home edge there */
 const neutralOf = (it: { hv: number[]; av: number[] }) => !(it.hv[6] || 0) && !(it.av[6] || 0);
 /** margin in points (home − away), the contribution of each row, the sigma used and the home win chance */
-export function gridEval(p: GridParams, code: string, it: { hv: number[]; av: number[]; sig: number }, w = weightsFor(p, code)) {
+export function gridEval(p: GridParams, code: string, it: { hv: number[]; av: number[]; sig: number; t4?: number }, w = weightsFor(p, code)) {
   const parts = new Array<number>(N_ROWS).fill(0);
   let m = 0;
   const star = p.miss && usesOracle(code) ? p.miss.star : 0;
-  for (let i = 0; i < N_ROWS; i++) { if (i === VOL) continue; parts[i] = w[i] * (i === MISS && star ? starOf(diff(it, i), star) : diff(it, i)); m += parts[i]; }
+  const top = p.miss?.top && usesOracle(code) ? clampTop(p.miss.top) : 0;
+  for (let i = 0; i < N_ROWS; i++) {
+    if (i === VOL) continue;
+    // fix225: the top-3 part of the NBA's #4 counted `top` times (the fix228 star form only without it)
+    const d = i !== MISS ? diff(it, i) : top ? diff(it, i) + (top - 1) * (it.t4 || 0) : star ? starOf(diff(it, i), star) : diff(it, i);
+    parts[i] = w[i] * d; m += parts[i];
+  }
   const ls = p.league?.[code];
   if (ls?.home && !neutralOf(it)) { parts[6] += ls.home; m += ls.home; }
   const sig = it.sig * (ls?.sig ?? 1) * Math.min(1.5, Math.max(0.7, 1 + w[VOL] * volOf(it)));
@@ -142,7 +199,7 @@ export function fittedSplit(w: number[], sd: number[]): number[] {
   if (gap && tot > 0) { const k = out.indexOf(Math.max(...out)); out[k] += gap; }
   return out;
 }
-export function split1000(p: GridParams, code: string, it: { hv: number[]; av: number[]; sig: number }, sd: number[]): GridView {
+export function split1000(p: GridParams, code: string, it: { hv: number[]; av: number[]; sig: number; t4?: number }, sd: number[]): GridView {
   const w = weightsFor(p, code), e = gridEval(p, code, it, w);
   const home = Math.round(1000 * e.pHome), lean = home - 500;
   const rel = fittedSplit(w, sd);
@@ -212,7 +269,7 @@ async function patternSearch(p: GridParams, items: GridItem[], defs: { get: () =
  */
 export async function fitGrid(items: GridItem[], start: GridParams, opt: { rounds?: number; minOffsetGames?: number; offsetPenalty?: number; pause?: () => Promise<void> } = {}): Promise<{ params: GridParams; trainLL: number; startLL: number; offsetLeagues: string[] }> {
   const pause = opt.pause || (async () => undefined);
-  const p: GridParams = { w: [...start.w], stretch: { ...start.stretch }, offsets: {}, version: 'fit', fittedAt: new Date().toISOString(), train: null, ...(start.miss ? { miss: { ...start.miss } } : {}) };
+  const p: GridParams = { w: [...start.w], stretch: { ...start.stretch }, offsets: {}, version: 'fit', fittedAt: new Date().toISOString(), train: null, ...(start.miss ? { miss: { ...start.miss } } : {}), ...(start.impact ? { impact: start.impact } : {}) };
   const startLL = logLoss(start, items);
   // fix228: a frozen #4 is never moved (shared weight or league offset): the other rows are fitted around it
   const free = (i: number) => !(p.miss && i === MISS);
@@ -260,21 +317,25 @@ export const missFrom = (p: GridParams, code = 'NBA'): MissSet =>
  * by pattern search on log loss from `start` (the NBA's weights live now). Returns the #4 weight and the star factor;
  * the shared tune then fits the other rows around the frozen #4.
  */
-export async function fitMiss(items: GridItem[], start: GridParams, opt: { rounds?: number; pause?: () => Promise<void> } = {}) {
+export async function fitMiss(items: GridItem[], start: GridParams, opt: { rounds?: number; pause?: () => Promise<void>; form?: 'star' | 'top' } = {}) {
   const pause = opt.pause || (async () => undefined);
   const code = items[0]?.code || 'NBA';
   const m0 = missFrom(start, code);
+  // fix225 'top': the star factor on the top-3 players' part (1.0–1.6, start 1.2) in place of fix228's star form
+  if (opt.form === 'top') { m0.star = 0; m0.top = clampTop(m0.top ?? 1.2); } else delete m0.top;
   const p: GridParams = { w: [...weightsFor({ ...start, miss: undefined, league: undefined }, code)], stretch: { ...start.stretch }, offsets: {}, version: 'oracle fit', fittedAt: null, train: null, miss: { ...m0 } };
   p.w[MISS] = m0.w;
   const startLL = logLoss(p, items);
   const R = GRID_ROWS[MISS];
   const defs = [
     { get: () => p.miss!.w, set: (v: number) => { p.miss!.w = v; p.w[MISS] = v; }, lo: 0, hi: R.hi, step: R.step },
-    { get: () => p.miss!.star, set: (v: number) => { p.miss!.star = v; }, lo: 0, hi: 0.5, step: 0.02 },
+    opt.form === 'top'
+      ? { get: () => p.miss!.top!, set: (v: number) => { p.miss!.top = v; }, lo: TOP_LO, hi: TOP_HI, step: 0.05 }
+      : { get: () => p.miss!.star, set: (v: number) => { p.miss!.star = v; }, lo: 0, hi: 0.5, step: 0.02 },
     ...GRID_ROWS.map((r, i) => ({ i, get: () => p.w[i], set: (v: number) => { p.w[i] = v; }, lo: r.lo, hi: r.hi, step: r.step })).filter(d => d.i !== MISS)
   ];
   await patternSearch(p, items, defs, opt.rounds ?? 60, () => 0, pause);
-  return { w: r4(p.miss!.w), star: r4(p.miss!.star), params: p, startLL: r4(startLL), trainLL: r4(logLoss(p, items)) };
+  return { w: r4(p.miss!.w), star: r4(p.miss!.star), ...(opt.form === 'top' ? { top: r4(p.miss!.top!) } : {}), params: p, startLL: r4(startLL), trainLL: r4(logLoss(p, items)) };
 }
 
 /**
@@ -306,6 +367,42 @@ export function missGate(test: GridItem[], next: GridParams, cur: GridParams): M
   return { pass: ok1 && ok2, reason: ok1 && ok2 ? `who played known ${oracle.cur} → ${oracle.next}; whole season ${whole.cur} → ${whole.next}` : `kept as it is: ${why.join('; ')}`, oracle, whole };
 }
 
+/**
+ * fix225 gate on the test season: the new impact (and the settings fitted with it) against the settings live now, each
+ * on its own inputs as live has them (`curItems` / `nextItems`: NBA #4 = who played). Checks: NBA and Europe, the whole
+ * season and games 1–25, and the NBA's games with who played known. Passes when the NBA's whole season and its
+ * who-played-known games improve and no check is worse.
+ */
+export type ImpactCheck = { name: string; games: number; cur: number; next: number; better: boolean; worse: boolean };
+export type ImpactGate = { pass: boolean; reason: string; checks: ImpactCheck[] };
+export function impactGate(curItems: GridItem[], nextItems: GridItem[], cur: GridParams, next: GridParams, test: number): ImpactGate {
+  const r5 = (x: number) => Math.round(x * 1e5) / 1e5;
+  const ids = (l: GridItem[]) => l.map(x => x.id);
+  const by = new Map(nextItems.map(x => [x.id, x]));
+  const checks: ImpactCheck[] = [];
+  const add = (name: string, sel: (x: GridItem) => boolean, min: number) => {
+    const c = curItems.filter(x => x.year === test && sel(x));
+    const n = ids(c).map(id => by.get(id)).filter((x): x is GridItem => !!x);
+    if (c.length < min || n.length !== c.length) return;
+    const a = logLoss(cur, c), b = logLoss(next, n);
+    checks.push({ name, games: c.length, cur: r5(a), next: r5(b), better: b < a - 1e-9, worse: b > a + 1e-9 });
+  };
+  add('NBA whole season', x => x.code === 'NBA', 200);
+  add('NBA games 1–25', x => x.code === 'NBA' && x.gp < 25, 50);
+  add('NBA who played known', x => x.code === 'NBA' && x.oracle !== null && (by.get(x.id)?.oracle ?? null) !== null, 100);
+  add('Europe whole season', x => groupOf(x.code) === 'Europe', 200);
+  add('Europe games 1–25', x => groupOf(x.code) === 'Europe' && x.gp < 25, 50);
+  const need = ['NBA whole season', 'NBA who played known'];
+  const missing = need.filter(n => !checks.some(c => c.name === n));
+  const notBetter = checks.filter(c => need.includes(c.name) && !c.better), worse = checks.filter(c => c.worse);
+  const pass = !missing.length && !notBetter.length && !worse.length;
+  const f = (c: ImpactCheck) => `${c.name} ${c.cur} → ${c.next}`;
+  const reason = pass ? `the new values win: ${checks.map(f).join('; ')}`
+    : `today's values stay: ${[...missing.map(n => `${n}: too few test games`), ...notBetter.filter(c => !c.worse).map(c => `${f(c)} (not better)`), ...worse.map(c => `${f(c)} (worse)`)].join('; ')}`;
+  return { pass, reason, checks };
+}
+export { WB_START };
+
 /** log loss / Brier / hit rate of bb-v4 and bb-v3 on a set of games (+ "who actually played" in place of #4) */
 export function compare(p: GridParams, items: GridItem[]) {
   const ys = items.map(x => x.y);
@@ -314,7 +411,7 @@ export function compare(p: GridParams, items: GridItem[]) {
     games: items.length,
     v3: scoreP(items.map(x => x.v3), ys),
     v4: scoreP(items.map(x => gridEval(p, x.code, x).pHome), ys),
-    oracle: { games: known.length, v3: scoreP(known.map(x => x.v3), known.map(x => x.y)), v4: scoreP(known.map(x => gridEval(p, x.code, { ...x, hv: x.hv.map((v, i) => (i === 3 ? x.oracle! : v)), av: x.av.map((v, i) => (i === 3 ? 0 : v)) }).pHome), known.map(x => x.y)) }
+    oracle: { games: known.length, v3: scoreP(known.map(x => x.v3), known.map(x => x.y)), v4: scoreP(known.map(x => gridEval(p, x.code, { ...x, hv: x.hv.map((v, i) => (i === 3 ? x.oracle! : v)), av: x.av.map((v, i) => (i === 3 ? 0 : v)), t4: x.ot ?? 0 }).pHome), known.map(x => x.y)) }
   };
 }
 

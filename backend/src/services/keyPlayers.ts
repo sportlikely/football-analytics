@@ -18,8 +18,8 @@
 import logger from '../utils/logger';
 import { db } from '../db';
 import { yieldLoop, every, after, everyHeavy, afterHeavy } from './perf';
-import { gridSnap, setKeepHook, bumpGridVer, gameMinOf } from './bbGrid';
-import { gridLive, gridWeight } from './bbTuner';
+import { gridSnap, setKeepHook, bumpGridVer, gameMinOf, teamPlayers, plRating } from './bbGrid';
+import { gridLive, gridWeight, impactLive, topFactor } from './bbTuner';
 import { nbaKey, playerKey, nbaInjuryStatus } from './bbInjuries';
 import { bbTeamNames } from './news';
 import { photoUrl } from './playerPhotos';
@@ -336,7 +336,10 @@ function sideCard(g: { game_id: number; code: string; kickoff: string }, teamId:
   const t = snap?.teams.get(teamId);
   if (!snap || !t?.pl || !t.pl.length) return null;
   const L = snap.gameMin || gameMinOf(g.code);
-  const players: KpIn[] = t.pl.map(p => ({ id: p[0], rating: p[1], proj: p[2] }));
+  // fix225: the ratings live (box-score value blended with on/off once its gate passed) and the star factor's top 3
+  const tp = teamPlayers(g.code, teamId, impactLive()) || [];
+  const players: KpIn[] = tp.map(p => ({ id: p.id, rating: p.rating, proj: p.proj }));
+  const tops = { ids: new Set(tp.filter(p => p.top).map(p => p.id)), factor: impactLive() ? topFactor(g.code) : 1 };
   const since = new Map(t.pl.map(p => [p[0], p[3]]));
   const names = namesOf(t.pl.map(p => p[0]));
   const keep = new Map<number, number>(), st = new Map<number, Pick<KeyCard, 'status' | 'note' | 'noteKind' | 'link'>>();
@@ -368,7 +371,7 @@ function sideCard(g: { game_id: number; code: string; kickoff: string }, teamId:
     keep.set(id, Math.min(keep.get(id) ?? 1, r.keep));
     st.set(id, { status: 'may-rest', note: `${r.sat}/${r.chances}`, noteKind: r.kind, link: null });
   }
-  const list = keyList(players, keep, L, pointScale(g.code), 5);
+  const list = keyList(players, keep, L, pointScale(g.code), 5, tops);
   return {
     keep,
     side: {
@@ -406,8 +409,8 @@ export function playerImpact(playerId: number) {
     const me = snap?.teams.get(last.team_id)?.pl?.find(p => p[0] === playerId);
     if (!snap || !me) continue;
     const L = snap.gameMin || gameMinOf(code);
-    const pool: [number, number][] = [];
-    for (const t of snap.teams.values()) for (const p of t.pl || []) if (p[2] >= 15 && p[3] <= 9) pool.push([p[0], p[1]]);
+    const pool: [number, number][] = [], imp = impactLive();
+    for (const t of snap.teams.values()) for (const p of t.pl || []) if (p[2] >= 15 && p[3] <= 9) pool.push([p[0], plRating(p, imp)]);
     pool.sort((a, b) => b[1] - a[1]);
     const rank = pool.findIndex(p => p[0] === playerId) + 1;
     const games = db.prepare(`SELECT g.game_id, g.home_id, g.hs, g.as_ FROM bb_games g WHERE g.code = ? AND g.season = ? AND (g.home_id = ? OR g.away_id = ?) AND g.status IN ('FT','AOT') AND g.hs IS NOT NULL
@@ -420,8 +423,8 @@ export function playerImpact(playerId: number) {
       if (won) b.won++; else b.lost++;
     }
     return {
-      code, season: last.season, teamId: last.team_id, rating: Math.round(me[1] * 10) / 10, minutes: Math.round(me[2] * 10) / 10,
-      perGame: Math.round(((me[1] * me[2]) / L) * 10) / 10, rank: rank || null, of: pool.length, ...rec
+      code, season: last.season, teamId: last.team_id, rating: Math.round(plRating(me, imp) * 10) / 10, minutes: Math.round(me[2] * 10) / 10,
+      perGame: Math.round(((plRating(me, imp) * me[2]) / L) * 10) / 10, rank: rank || null, of: pool.length, ...rec
     };
   }
   return null;

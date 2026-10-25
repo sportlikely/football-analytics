@@ -293,3 +293,45 @@ confirmed line-ups (fix217 / fix224) could never earn weight in a tune on those 
   fit only from Admin → "#4 Missing players" (Preview / Fit, store if the gate passes) or `/api/bb/missing-fit`.
 - **Results**: not run on real data in the session that built it (no database copy). The weight, star, test gain and
   split before / after are in the admin card and the morning report after the worker's first run.
+
+## Key players count more: box-score value + on/off, star factor (fix225, 25 Oct 2026)
+Why (live test 25 Oct, 3 NBA seasons): game-level on/off ratings blur a star with his teammates (Jokić +3.0–4.4, Payton
+Pritchard #2, Kevin Huerter top 10) because we have minutes per game, not who shared the floor; public impact ratings put
+Jokić ~+10. Bulls–Wizards: the on/off model had the Bulls by 6 (Trae Young −0.7, Davis +1.5, the rest −1 to −4.5).
+- **Box-score value** (`utils/boxValue.ts`, BPM-style): points, shot attempts (FGA + 0.44 FTA: the efficiency term),
+  3-pointers made, rebounds, assists, per game length (48 NBA / CBA, 40 FIBA: one formula for every league) × league
+  pace / team pace, minus the league-season mean. Steals, blocks and turnovers are NOT in our player box scores
+  (API-Basketball gives them per team only): the team adjustment carries the team's share. Team adjustment: one constant
+  per team-season so Σ value × minutes / (games × L) = the team's opponent-adjusted net rating per game. The
+  coefficients are fitted on game margins with the players' season rates without that game (`fitBoxCoef`, every league
+  pooled, 2022-23 … 2024-25 only: `assertBoxTrain`), once per database by the model build before the replay
+  (`bbGrid.fitBoxFormula`, bb_tuned 'box'; code default 0.75 / −0.7 / 0.3 / 0.25 / 0.55). Last season's value carries
+  (traded players keep theirs, any team); this season blended in by minutes, full weight at 800 (40-min leagues 667).
+  No last season: NBA rookies (draft year = the season) from the draft slot (pick 1 ≈ 0, pick 30 ≈ −1.9, 2nd round −2;
+  balldontlie bios by name), everyone else −1 (as before).
+- **On/off with a minutes-scaled shrink**: the same ridge, each player's penalty lambda × 1,000 / his (season-weighted)
+  minutes, between 0.1 × and 3 × lambda (`shrinkLambda`, `ridgeFit(…, perPlayer)`): high-minute stars barely shrunk.
+- **Player impact** = wb × box value + (1 − wb) × on/off; wb by pattern search from 0.6 on the train seasons' log loss.
+  The replay (`bbGrid.replayLeague`) rates every player three ways per window (fix219 on/off = C, the scaled on/off = A,
+  box = B) and stores #1 / #4 / #4's top-3 part / #8 / the oracle / its top-3 part under A and B beside the fix219 rows
+  (`bb_grid_rows.alt`; everything there is linear in the ratings, so any wb is a blend: `impactInputs`). The live
+  snapshot keeps the three ratings per player ([id, C, minutes, since, A, B, top 3]) — the gate's answer applies without
+  a rebuild. `bb_grid_imp` version `imp2|…|<formula version>`: the first build after deploy recomputes every game once.
+- **Star factor (#4, NBA)**: the part of a team's lost impact that comes from its top 3 (by box value × minutes) counts ×
+  factor, 1.0–1.6 (`topLoss`, `MissSet.top`; replaces fix228's `star` form when set), fitted with #4's weight on the
+  fix228 oracle rows with the new values (`fitMiss(…, { form: 'top' })`), then frozen; the other leagues' proxy weight
+  refitted on their rows; the shared tune around them (#4 stays frozen in every later tune, the impact setting too).
+- **Gate** (`impactGate`, test 2025, each side on its own inputs as live has them — NBA #4 = who played): NBA whole
+  season, NBA games 1–25, NBA who-played-known, Europe whole season, Europe games 1–25. Passes when the NBA's whole
+  season and who-played-known improve and no check is worse; otherwise today's values stay (the report says why).
+  `runImpactFit` (job thread 'bb impact fit', `/api/bb/impact-fit?apply=gate|1|0`, the worker once a database after
+  the rows have the new values: `impactFitDue` + `impactRowsReady`), report in bb_tuned 'impact' either way.
+- Live: rows #1 / #4 / #8 from the blend (`liveRows(…, imp)`), the NBA's #4 from the injury report with the grid's
+  blended ratings and the top-3 part (`nbaV4.sideOf(…, gridRatings)`), the key players card / reasons / player page
+  Impact read the same ratings and the star factor (a star out ≈ his points a game × #4's weight × factor).
+- Admin card section "Key players count more" (formula, box share tried, #4 / star factor, the gate table, the 1,000
+  points split before → after, top 20 per league before / after — the NBA should read like an MVP ballot — and 5 NBA
+  teams' real with / without margin against what #4 implies before / after). Data health "Missing players row" names
+  the impact setting live. Morning report line. Tests: `npm run test:fix225` (7).
+- Real numbers: on the server after deploy (no basketball database copy here). If the gate keeps today's values, write
+  the report's reason here.

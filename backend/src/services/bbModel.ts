@@ -22,8 +22,8 @@ import type { RBase } from '../utils/nbaImpact';
 import type { GridBase, GridView } from '../utils/bbGridMath';
 import { bbCalibrated, bbCalibVer, bbStrongLine } from './sportCalibration';
 import { nbaV4Adjust, nbaV4Ver, buildNbaV4, saveShadow, nbaSameDay, type V4Result } from './nbaV4';
-import { replayLeague, storeRows, publishSnap, gridSnapVer } from './bbGrid';
-import { publishGridState, gridPredict, gridParamsVer, gridWeight } from './bbTuner';
+import { replayLeague, storeRows, publishSnap, gridSnapVer, boxFitDue, fitBoxFormula, storedBox } from './bbGrid';
+import { publishGridState, gridPredict, gridParamsVer, row4Points } from './bbTuner';
 
 export const BB_MODEL = 'bb-v3';
 const FINISHED = ['FT', 'AOT'];
@@ -633,10 +633,13 @@ export async function buildLeaguesHere(codes: string[]): Promise<{ built: string
   if (built.includes('NBA')) { try { await buildNbaV4(nbaBase); } catch (e: any) { logger.warn(`bb-v4: ${e.message}`); } }
   // fix219: bb-v4 grid rows of every league built now (stored for the tuner / gate), its teams' live values, then the gate
   let gridDone = 0;
+  // fix225: the box-score formula, fitted once per database on 2022-23 … 2024-25 (the replay's player values read it)
+  if (built.length && boxFitDue()) { try { await fitBoxFormula(); } catch (e: any) { logger.warn(`bb box-score formula: ${e.message}`); } }
+  const formula = storedBox();
   for (const c of built) {
     const gb = gridBases.get(c);
     if (!gb || !gb.size) continue;
-    try { const r = await replayLeague(c, gb); storeRows(c, r.items); publishSnap(r.snap); gridDone++; } catch (e: any) { logger.warn(`bb-v4 grid ${c}: ${e.message}`); }
+    try { const r = await replayLeague(c, gb, formula); storeRows(c, r.items); publishSnap(r.snap); gridDone++; } catch (e: any) { logger.warn(`bb-v4 grid ${c}: ${e.message}`); }
     await yieldLoop();
   }
   if (gridDone) { try { const s = publishGridState(); logger.info(`bb-v4 grid: ${gridDone} league(s), gate ${Object.values(s.gate).map(x => `${x.group} ${x.pass ? 'pass' : 'fail'}`).join(', ')}`); } catch (e: any) { logger.warn(`bb-v4 gate: ${e.message}`); } }
@@ -838,19 +841,19 @@ function predictRaw(g: Game, phIn?: number, paIn?: number): Pred | null {
     const cur = withInjuries(g, x, sigma);
     // fix219: bb-v4 grid where its league group passed the gate (NBA #4 = the injury report's lost impact)
     const sd = g.code === 'NBA' ? nbaSameDay(g) : null;
-    const gv = gridPredict(g, { p: x.pHome, hca: pr.hca, haH: pr.haH, haA: pr.haA, b2bHome: pr.b2bHome, b2bAway: pr.b2bAway }, sigma, sd ? { home: sd.home.sameDay, away: sd.away.sameDay } : undefined);
+    // fix225: + each side's top-3 part (the star factor)
+    const gv = gridPredict(g, { p: x.pHome, hca: pr.hca, haH: pr.haH, haA: pr.haA, b2bHome: pr.b2bHome, b2bAway: pr.b2bAway }, sigma, sd ? { home: sd.home.sameDay, away: sd.away.sameDay, homeTop: sd.home.sameDayTop || 0, awayTop: sd.away.sameDayTop || 0 } : undefined);
     if (gv) {
-      const w4 = gridWeight(g.code, 3);
-      const pts = (s: number) => Math.round(Math.max(0, -w4 * s) * 10) / 10;
+      const pts = (s: { sameDay: number; sameDayTop?: number }) => Math.round(Math.max(0, -row4Points(g.code, s.sameDay, s.sameDayTop || 0)) * 10) / 10;
       if (sd) {
-        v4Detail.set(g.game_id, { model: 'bb-v4', mode: 'grid', pHome: gv.pHome, margin: gv.margin, impact: 0, sameDay: sd.home.sameDay - sd.away.sameDay, home: sd.home, away: sd.away, points: { home: pts(sd.home.sameDay), away: pts(sd.away.sameDay) }, row4: Math.round(gv.parts[3] * 100) / 100 });
+        v4Detail.set(g.game_id, { model: 'bb-v4', mode: 'grid', pHome: gv.pHome, margin: gv.margin, impact: 0, sameDay: sd.home.sameDay - sd.away.sameDay, home: sd.home, away: sd.away, points: { home: pts(sd.home), away: pts(sd.away) }, row4: Math.round(gv.parts[3] * 100) / 100 });
         if (v4Detail.size > 2000) v4Detail.delete(v4Detail.keys().next().value as number);
       }
       const dm = gv.margin - x.margin;
       const out = (s: NonNullable<typeof sd>['home']) => s.removed.filter(p => p.keep < 1).map(p => p.name);
       return {
         ...x, pHome: gv.pHome, margin: gv.margin, home: x.home + dm / 2, away: x.away - dm / 2, model: 'bb-v4', pV3: cur.pHome, grid: gv.view,
-        ...(sd ? { injHome: pts(sd.home.sameDay), injAway: pts(sd.away.sameDay), injPlayersHome: out(sd.home), injPlayersAway: out(sd.away) } : {})
+        ...(sd ? { injHome: pts(sd.home), injAway: pts(sd.away), injPlayersHome: out(sd.home), injPlayersAway: out(sd.away) } : {})
       };
     }
     if (g.code !== 'NBA') return cur;

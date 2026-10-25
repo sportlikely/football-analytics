@@ -20,6 +20,8 @@ import { yieldLoop } from './perf';
 import { onState, publishState } from './shared';
 import { nbaKey, playerKey, bdlGet, refreshNbaInjuries, nbaInjuryStatus } from './bbInjuries';
 import { nbaRestKeep } from './keyPlayers';
+import { impactLive } from './bbTuner';
+import { teamPlayers } from './bbGrid';
 import {
   replayV4, rotation, strength, projMinutes, statusKeep, v4Margin, repriceOnly, scoreP, rowP, tuneV4, probit,
   V4_TUNED, V4_TEST_SEASON, TEAM_SCALE, type RBase, type RGame, type RLine, type RRow, type V4Params, type RotPlayer
@@ -186,11 +188,16 @@ function lineupOf(gameId: number, teamId: number, roster: number[], names: Map<n
   return { ids, starters, size: list.length };
 }
 
-export type V4Side = { strength: number; sameDay: number; removed: { id: number; name: string; status: string; min: number; keep: number }[]; lineup: boolean };
-function sideOf(s: State, gameId: number, teamId: number, teamName: string): V4Side {
+/** fix225: sameDayTop = the part of sameDay that comes from the team's top-3 players (the grid's star factor) */
+export type V4Side = { strength: number; sameDay: number; sameDayTop?: number; removed: { id: number; name: string; status: string; min: number; keep: number }[]; lineup: boolean };
+function sideOf(s: State, gameId: number, teamId: number, teamName: string, gridRatings = false): V4Side {
   const roster = s.rosters.get(teamId) || [];
   const players: RotPlayer[] = [];
-  for (const id of roster) { const m = s.proj.get(id); if (m) players.push({ id, min: m, rating: s.ratings.get(id) ?? s.params.rookie }); }
+  // fix225: for the grid's #4, with the box-score impact live, the ratings (and the top 3) come from the grid's NBA snapshot
+  const imp = gridRatings ? impactLive() : null;
+  const grid = imp ? teamPlayers('NBA', teamId, imp) : null;
+  const gr = new Map((grid || []).map(p => [p.id, p.rating])), top = new Set((grid || []).filter(p => p.top).map(p => p.id));
+  for (const id of roster) { const m = s.proj.get(id); if (m) players.push({ id, min: m, rating: gr.get(id) ?? s.ratings.get(id) ?? s.params.rookie }); }
   const base = strength(rotation(players));
   const keep = new Map<number, number>(), why = new Map<number, string>();
   for (const [id, x] of injuryKeep(teamName, roster, s.names)) { keep.set(id, x.keep); why.set(id, x.status); }
@@ -214,7 +221,9 @@ function sideOf(s: State, gameId: number, teamId: number, teamName: string): V4S
   const removed = players.filter(p => keep.has(p.id) && keep.get(p.id)! < 1)
     .map(p => ({ id: p.id, name: s.names.get(p.id) || String(p.id), status: why.get(p.id) || '', min: Math.round(p.min * 10) / 10, keep: keep.get(p.id)! }))
     .sort((a, b) => b.min - a.min);
-  return { strength: base, sameDay: after - base, removed, lineup };
+  const keepTop = new Map([...keep].filter(([id]) => top.has(id)));
+  const sameDayTop = keepTop.size ? strength(rotation(players, keepTop)) - base : 0;
+  return { strength: base, sameDay: after - base, sameDayTop, removed, lineup };
 }
 
 /** points: what the same-day information costs each side, in margin points (the game page's injury numbers) */
@@ -240,7 +249,7 @@ export function nbaV4Adjust(g: { game_id: number; season: string; home_id: numbe
 /** fix219: both teams' same-day sides (injury report + line-ups) for the bb-v4 grid's #4 (null = no v4 state yet) */
 export function nbaSameDay(g: { game_id: number; home_id: number; away_id: number; home_name?: string; away_name?: string }): { home: V4Side; away: V4Side } | null {
   if (!st || !g.home_name || !g.away_name || String(process.env.NBA_V4 || '').toLowerCase() === 'off') return null;
-  return { home: sideOf(st, g.game_id, g.home_id, g.home_name), away: sideOf(st, g.game_id, g.away_id, g.away_name) };
+  return { home: sideOf(st, g.game_id, g.home_id, g.home_name, true), away: sideOf(st, g.game_id, g.away_id, g.away_name, true) };
 }
 
 /** recordBbPredictions: both chances of each NBA game until tip-off (daily report "v4 vs current", 2 weeks). */

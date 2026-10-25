@@ -50,7 +50,7 @@ import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
 import { photosTick, photosBbPass } from './services/playerPhotos';
-import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune, missFitDue, runMissFit } from './services/bbTuner';
+import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune, missFitDue, runMissFit, impactFitDue, impactRowsReady, runImpactFit } from './services/bbTuner';
 import { threadJobsOn, inThread } from './services/threadJob';
 import { buildBbCalibration } from './services/sportCalibration';
 import { startKeyPlayersScheduler } from './services/keyPlayers';
@@ -106,6 +106,15 @@ export function startJobs() {
         const r: any = await heavy('bb miss fit', () => (threadJobsOn() ? inThread('bb miss fit', [opt]) : runMissFit(opt)));
         calib = !!r?.applied;
       } catch (e: any) { logger.warn(`bb-v4 #4 fit (${mwhy}): ${e?.message || e}`); }
+    }
+    // fix225: the box-score impact + star factor (once a database, after the model build stored the new values; through its gate)
+    const iwhy = impactFitDue();
+    if (iwhy && impactRowsReady()) {
+      try {
+        const opt = { auto: iwhy, apply: 'gate' as const };
+        const r: any = await heavy('bb impact fit', () => (threadJobsOn() ? inThread('bb impact fit', [opt]) : runImpactFit(opt)));
+        calib = calib || !!r?.applied;
+      } catch (e: any) { logger.warn(`bb-v4 box-score impact (${iwhy}): ${e?.message || e}`); }
     }
     const why = autoTuneDue();
     if (why) {

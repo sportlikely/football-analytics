@@ -76,7 +76,7 @@ import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
-import { runTune, tunedInfo, runLeagueTune, runMissFit } from './services/bbTuner';
+import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit } from './services/bbTuner';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
@@ -3606,6 +3606,16 @@ app.get('/api/bb/missing-fit', async (req, res) => {
     const r: any = await heavy('bb miss fit', () => (threadJobsOn() ? inThread('bb miss fit', [opt]) : runMissFit(opt)));
     res.json({ data: { ...r, params: undefined } });
   } catch (e) { sendError(res, e, 'Basketball #4 fit failed'); }
+});
+// fix225 (admin): player impact = box-score value blended with on/off + the star factor; ?apply=gate (default) | 1 | 0
+app.get('/api/bb/impact-fit', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
+    const opt = { apply };
+    const r: any = await heavy('bb impact fit', () => (threadJobsOn() ? inThread('bb impact fit', [opt]) : runImpactFit(opt)));
+    res.json({ data: { ...r, params: undefined } });
+  } catch (e) { sendError(res, e, 'Basketball impact fit failed'); }
 });
 // fix219 (admin): the stored bb-v4 settings, the last tune report and the gate; ?reload=1 publishes again, ?clear=1 = code defaults
 app.get('/api/bb/tuned', (req, res) => {

@@ -18,6 +18,22 @@ type Info = {
   leagues?: { at: string | null; stale: boolean; due: string | null; report: LeagueReport | null }
   /** fix228: row #4 fitted on who actually played, frozen in the shared tune */
   miss?: MissInfo
+  /** fix225: box-score value blended with on/off, the star factor */
+  impact?: ImpactInfo
+}
+type ImpactCheck = { name: string; games: number; cur: number; next: number; better: boolean; worse: boolean }
+type ImpactReport = {
+  at: string; why: string; train: number[]; test: number; seconds: number; applied: boolean; wb: number; tried: { wb: number; trainLL: number }[]
+  box: { c: number[]; version: string; games: number }; miss: MissSet & { top?: number }; before: { wb: number | null; nba: number; star: number; top: number | null; other: number }
+  gate: { pass: boolean; reason: string; checks: ImpactCheck[] }
+  split: { nba: { before: number[]; after: number[] }; other: { before: number[]; after: number[] } }
+}
+type ImpactPlayer = { id: number; name: string; rating: number; was?: number }
+type ImpactInfo = {
+  live: null | { wb: number; top: number | null; fittedAt: string }; due: string | null; report: ImpactReport | null; wb: number
+  feats: string[]; box: { c: number[]; version: string; fittedAt: string | null; train: number[] | null; games: number }
+  leagues: { code: string; before: ImpactPlayer[]; after: ImpactPlayer[] }[]
+  withWithout: { team: string; player: string; season: string; with: { games: number; margin: number }; without: { games: number; margin: number }; real: number; before: number; after: number | null }[]
 }
 type MissSet = { w: number; star: number; proxy: number; fittedAt: string; train: number[]; test: number }
 type MissTest = { games: number; cur: number; fit: number; gain: number }
@@ -61,6 +77,8 @@ export default function BbGridCard() {
   const [inMode, setInMode] = useState<{ mode: 'on' | 'off' | null; env: string | null }>({ mode: null, env: null })
   const [lsPreview, setLsPreview] = useState<LeagueReport | null>(null)
   const [missPreview, setMissPreview] = useState<MissReport | null>(null)
+  const [impPreview, setImpPreview] = useState<ImpactReport | null>(null)
+  const [impLeague, setImpLeague] = useState('NBA')
   const load = (q = '') => axios.get(`${API_URL}/bb/tuned${q}`).then(r => setD(r.data.data)).catch(() => setD(null))
   const loadCal = (q = '') => axios.get(`${API_URL}/admin/calibration?sport=basketball${q}`).then(r => { setCal(r.data.data.report); setInMode({ mode: r.data.data.inSeasonMode, env: r.data.data.inSeasonEnv }) }).catch(() => setCal(null))
   useEffect(() => { load(); loadCal() }, [])
@@ -87,6 +105,15 @@ export default function BbGridCard() {
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
   const mr = missPreview || d.miss?.report || null
+  // fix225: box-score value blended with on/off + the star factor (report, or stored through its gate)
+  const impactFit = (apply: 'gate' | '0') => {
+    setBusy(true); setMsg(apply === 'gate' ? 'Fitting the box-score impact (several minutes), stored if the gate passes…' : 'Fitting the box-score impact (preview, several minutes)…')
+    axios.get(`${API_URL}/bb/impact-fit?apply=${apply}`)
+      .then(r => { setImpPreview(r.data.data); setMsg(r.data.data.applied ? `Stored: ${r.data.data.gate.reason}` : `Not stored: ${r.data.data.gate.reason}`); load() })
+      .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
+  }
+  const ir = impPreview || d.impact?.report || null
+  const il = d.impact?.leagues.find(x => x.code === impLeague) || d.impact?.leagues[0] || null
   // the fitted split: points per row out of 1,000 (weight × spread of the row on the training games)
   const sd = d.stats?.sd || []
   const raw = d.params.w.map((w, i) => (i === 11 ? 0 : Math.abs(w) * (sd[i] || 0)))
@@ -268,6 +295,82 @@ export default function BbGridCard() {
               <p className="text-faint">#4 side won in {d.miss.examples.filter(x => x.fourRight).length} of {d.miss.examples.length}.</p>
             </div>
           ) : <p className="text-faint">None yet (logged at the 90 / 30 / 10 minute re-pricing).</p>}
+        </div>
+      )}
+      {d.impact && (
+        <div className="mt-4 text-xs">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="font-semibold text-ink">Key players count more: box-score value + on/off (fix225)</h3>
+            <span className="flex gap-2">
+              <button type="button" className={btn} disabled={busy} onClick={() => impactFit('0')}>Preview</button>
+              <button type="button" className={btn} disabled={busy} onClick={() => impactFit('gate')}>Fit, store if the gate passes</button>
+            </span>
+          </div>
+          <p className="text-faint">Player impact = box-score value (points, shot attempts, 3-pointers, rebounds, assists per game length, pace-adjusted; a team's players add up to its net rating) × share + on/off rating × the rest, the on/off shrink scaled by minutes. A top-3 player out counts × the star factor in #4 (NBA). Gate on {ir ? ir.test : 2025}: NBA and Europe, whole season and games 1–25, and the NBA's games with who played known.</p>
+          <p className={d.impact.live ? 'text-win' : 'text-loss'}>
+            {d.impact.live ? `Live since ${new Date(d.impact.live.fittedAt).toLocaleString('en-GB')}: box ×${d.impact.live.wb} + on/off ×${Math.round((1 - d.impact.live.wb) * 100) / 100}${d.impact.live.top ? ` · star factor ×${d.impact.live.top}` : ''}` : `Not live: today's on/off ratings${d.impact.due ? ` (due: ${d.impact.due}; the worker runs it once, after the model build stored the new values)` : ''}`}
+          </p>
+          <p className="text-faint num">Formula ({d.impact.box.version}{d.impact.box.train ? `, fitted on ${d.impact.box.train.join(', ')}, ${d.impact.box.games} games` : ''}): {d.impact.feats.map((f, i) => `${f} ${d.impact!.box.c[i]}`).join(' · ')}</p>
+          {ir && (
+            <>
+              <p className="text-faint num">
+                {impPreview ? 'Preview' : 'Last fit'} {new Date(ir.at).toLocaleString('en-GB')} (train {ir.train.join(', ')}, {ir.seconds} s): box share <b className="text-ink">{ir.wb}</b> (tried {ir.tried.map(t => `${t.wb}: ${t.trainLL}`).join(', ')}) · NBA #4 {ir.before.nba} → <b className="text-ink">{ir.miss.w}</b>, star factor <b className="text-ink">×{ir.miss.top}</b> · other leagues {ir.before.other} → {ir.miss.proxy}
+              </p>
+              <div className="mt-1 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Test {ir.test}</th><th className="pb-1 pr-3 font-normal">Games</th><th className="pb-1 font-normal">Log loss today → new</th></tr></thead>
+                  <tbody>
+                    {ir.gate.checks.map(c => (
+                      <tr key={c.name} className="border-t border-line/40">
+                        <td className="py-0.5 pr-3 text-ink">{c.name}</td>
+                        <td className="py-0.5 pr-3 num">{c.games}</td>
+                        <td className="py-0.5 num">{c.cur.toFixed(4)} → <b className={c.better ? 'text-win' : c.worse ? 'text-loss' : 'text-muted'}>{c.next.toFixed(4)}</b></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className={ir.gate.pass ? 'text-win' : 'text-loss'}>Gate: {ir.gate.reason}{ir.applied ? ' · stored' : ' · not stored'}</p>
+              <p className="text-faint num">1,000 points split, NBA before → after: {ROWS.map((n, i) => (i === 11 ? null : `${n.split(' ')[0]} ${ir.split.nba.before[i]}→${ir.split.nba.after[i]}`)).filter(Boolean).join(' · ')}</p>
+            </>
+          )}
+          {d.impact.leagues.length > 0 && il && (
+            <div className="mt-2">
+              <div className="flex flex-wrap gap-1 mb-1">
+                {d.impact.leagues.map(x => <button key={x.code} type="button" className={`px-2 py-0.5 rounded-full border ${x.code === il.code ? 'border-accent text-ink' : 'border-line text-muted'}`} onClick={() => setImpLeague(x.code)}>{x.code}</button>)}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-x-6">
+                <div>
+                  <div className="text-faint mb-0.5">Top 20 before (on/off, points per game length)</div>
+                  {il.before.map((p, i) => <div key={p.id} className="flex justify-between border-t border-line/40 py-0.5"><span className="text-ink">{i + 1}. {p.name}</span><span className="num">{p.rating > 0 ? '+' : ''}{p.rating}</span></div>)}
+                </div>
+                <div>
+                  <div className="text-faint mb-0.5">Top 20 after (box ×{d.impact.wb} + on/off)</div>
+                  {il.after.map((p, i) => <div key={p.id} className="flex justify-between border-t border-line/40 py-0.5"><span className="text-ink">{i + 1}. {p.name}</span><span className="num">{p.rating > 0 ? '+' : ''}{p.rating} <span className="text-faint">(was {p.was})</span></span></div>)}
+                </div>
+              </div>
+            </div>
+          )}
+          {d.impact.withWithout.length > 0 && (
+            <div className="mt-2 overflow-x-auto">
+              <div className="text-faint mb-0.5">With / without their top player this season (margin a game) vs what #4 implies</div>
+              <table className="w-full text-xs">
+                <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Team · player</th><th className="pb-1 pr-3 font-normal">With</th><th className="pb-1 pr-3 font-normal">Without</th><th className="pb-1 pr-3 font-normal">Real gap</th><th className="pb-1 font-normal">Model before → after</th></tr></thead>
+                <tbody>
+                  {d.impact.withWithout.map(x => (
+                    <tr key={x.team} className="border-t border-line/40">
+                      <td className="py-0.5 pr-3 text-ink">{x.team} · {x.player}</td>
+                      <td className="py-0.5 pr-3 num">{x.with.margin > 0 ? '+' : ''}{x.with.margin} ({x.with.games})</td>
+                      <td className="py-0.5 pr-3 num">{x.without.margin > 0 ? '+' : ''}{x.without.margin} ({x.without.games})</td>
+                      <td className="py-0.5 pr-3 num font-semibold">{x.real}</td>
+                      <td className="py-0.5 num">{x.before} → {x.after ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-faint">Small samples: a team's games without its star are few; read the direction, not the decimals.</p>
+            </div>
+          )}
         </div>
       )}
       {report && <p className="mt-2 text-[11px] text-faint num">Last fit: {report.trainGames} train games, log loss {report.startLL} → {report.trainLL}; per-league offsets: {(report.offsetLeagues || []).join(', ') || 'none'}.</p>}

@@ -19,9 +19,15 @@ export type ImpactFit = { ratings: Map<number, number>; home: number; players: n
  * Ridge fit by the normal equations ((XᵀWX + λI) β = XᵀWy, the home term not penalised), solved by Cholesky.
  * ~900 players over 3 seasons: one dense solve takes well under a second.
  */
-export function ridgeFit(games: FitGame[], lambda: number, gameMin = 48): ImpactFit {
+/**
+ * fix225: `perPlayer` = each player's penalty from his own (game-weighted) minutes in the fit (boxValue.shrinkLambda:
+ * lambda × 1,000 / minutes, capped) instead of one lambda for everyone: a high-minute star is barely shrunk.
+ */
+export function ridgeFit(games: FitGame[], lambda: number, gameMin = 48, perPlayer?: (lambda: number, minutes: number) => number): ImpactFit {
   const idx = new Map<number, number>();
   for (const g of games) for (const side of [g.home, g.away]) for (const [p] of side) if (!idx.has(p)) idx.set(p, idx.size);
+  const mins = perPlayer ? new Float64Array(idx.size) : null;
+  if (mins) for (const g of games) for (const side of [g.home, g.away]) for (const [p, m] of side) mins[idx.get(p)!] += g.w * m;
   const P = idx.size, n = P + 1; // last column = home term
   const A = new Float64Array(n * n), b = new Float64Array(n);
   const xi: number[] = [], xv: number[] = [];
@@ -36,7 +42,7 @@ export function ridgeFit(games: FitGame[], lambda: number, gameMin = 48): Impact
       for (let j = 0; j < xi.length; j++) A[xi[i] * n + xi[j]] += wi * xv[j];
     }
   }
-  for (let i = 0; i < P; i++) A[i * n + i] += lambda;
+  for (let i = 0; i < P; i++) A[i * n + i] += mins && perPlayer ? perPlayer(lambda, mins[i]) : lambda;
   A[P * n + P] += 1e-6;
   const beta = choleskySolve(A, b, n);
   const ratings = new Map<number, number>();

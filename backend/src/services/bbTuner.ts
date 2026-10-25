@@ -17,12 +17,14 @@ import { yieldLoop } from './perf';
 import {
   GRID_ROWS, GRID_DEFAULT, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, N_ROWS, VOL, assertTrainYears, fitGrid, compare, rowStats, fittedSplit,
   gridEval, split1000, groupOf, diff, volOf, weightsFor, logLoss, spreadOf, fitLeagueSet, regionGroup, LS_ROWS,
-  MISS, missInputs, missSplit, fitMiss, fitProxy, missGate, missFrom, usesOracle, starOf,
-  type GridItem, type GridParams, type GridView, type LeagueSet, type MissSet, type MissGate
+  MISS, missInputs, missSplit, fitMiss, fitProxy, missGate, missFrom, usesOracle, starOf, impactInputs, impactGate, altShare,
+  type GridItem, type GridParams, type GridView, type LeagueSet, type MissSet, type MissGate, type ImpactSet, type ImpactGate
 } from '../utils/bbGridMath';
+import { WB_START, topLoss, BOX_FEATS, type BoxCoef } from '../utils/boxValue';
+import { rotation, strength } from '../utils/nbaImpact';
 import type { Check } from './dataHealth';
 import { tuneLeagueSettings, LS_FIT, LS_REFIT, LS_REFIT_DAYS, type LsResult } from '../utils/leagueSettings';
-import { loadRows, liveRows } from './bbGrid';
+import { loadRows, liveRows, storedBox, gridSnap, plRating } from './bbGrid';
 
 db.exec(`CREATE TABLE IF NOT EXISTS bb_tuned (id TEXT PRIMARY KEY, params TEXT NOT NULL, report TEXT, at TEXT NOT NULL)`);
 
@@ -80,7 +82,7 @@ function perLeague(items: GridItem[], p: GridParams, year: (y: number) => boolea
  * (what the injury report gives live: the tunes, the split's spread), 'blind' = the NBA's #4 is 0 (the gate against
  * bb-v3, which had no injury information in those seasons either). Without it: the stored rows.
  */
-export const inputsFor = (items: GridItem[], p: GridParams, mode: 'oracle' | 'blind') => (p.miss ? missInputs(items, mode) : items);
+export const inputsFor = (items: GridItem[], p: GridParams, mode: 'oracle' | 'blind') => { const x = impactInputs(items, p.impact); return p.miss ? missInputs(x, mode) : x; };
 
 /** Gate + stats with the stored settings over every league's stored rows; published for every process. */
 export function publishGridState(items = loadRows(), p = storedParams()): GridState {
@@ -186,7 +188,7 @@ export function tunedInfo(action?: 'reload' | 'clear') {
   return {
     stored: !!r, at: r?.at || null, params: storedParams(), report, auto: lastAutoTune(), autoDue: autoTuneDue(), gate: gs?.gate || null, perLeague: gs?.perLeague || null, live: gs?.live || null, stats: gs?.stats || null,
     leagues: lg ? { at: lg.at, stale: lg.base !== baseKey(sharedParams()), due: leagueTuneDue(), report: lg.report } : { at: null, stale: false, due: leagueTuneDue(), report: null },
-    miss: missInfo()
+    miss: missInfo(), impact: impactInfo()
   };
 }
 
@@ -300,16 +302,18 @@ export async function runMissFit(opt: { train?: number[]; test?: number; apply?:
   const raw = loadRows();
   await yieldLoop();
   const cur = sharedParams(), at = new Date().toISOString();
-  const oracleAll = missInputs(raw, 'oracle');
+  // fix225: with the box-score impact live the rows are read the way it reads them, and #4 keeps its star factor form
+  const rows = impactInputs(raw, cur.impact);
+  const oracleAll = missInputs(rows, 'oracle');
   const nba = missSplit(oracleAll.filter(x => usesOracle(x.code) && x.oracle !== null), train, test);
   if (nba.train.length < 300) throw new Error(`only ${nba.train.length} NBA training games with who played known (build the basketball model first)`);
-  const om = await fitMiss(nba.train, cur, { rounds: opt.rounds, pause: yieldLoop });
+  const om = await fitMiss(nba.train, cur, { rounds: opt.rounds, pause: yieldLoop, form: cur.miss?.top ? 'top' : 'star' });
   const r5 = (x: number) => Math.round(x * 1e5) / 1e5;
   const testOf = (l: GridItem[], a: GridParams, b: GridParams) => (l.length ? { games: l.length, cur: r5(logLoss(a, l)), fit: r5(logLoss(b, l)), gain: r5(logLoss(a, l) - logLoss(b, l)) } : null);
-  const m0: MissSet = { w: om.w, star: om.star, proxy: Math.min(weightsFor(cur, '')[MISS], om.w), fittedAt: at, train, test };
+  const m0: MissSet = { w: om.w, star: om.star, ...(om.top ? { top: om.top } : {}), proxy: Math.min(weightsFor(cur, '')[MISS], om.w), fittedAt: at, train, test };
   const shared: GridParams = { ...cur, league: undefined };
   // 2. the other leagues' proxy weight, fitted the same way on their own (stored) rows
-  const others = missSplit(raw.filter(x => !usesOracle(x.code)), train, test);
+  const others = missSplit(rows.filter(x => !usesOracle(x.code)), train, test);
   const px = others.train.length >= 300 ? await fitProxy(others.train, { ...shared, miss: m0 }, { rounds: opt.rounds, pause: yieldLoop }) : null;
   const miss: MissSet = { ...m0, proxy: px ? px.proxy : m0.proxy };
   // 3. the shared tune around the frozen #4
@@ -318,7 +322,7 @@ export async function runMissFit(opt: { train?: number[]; test?: number; apply?:
   const params: GridParams = { ...fit.params, miss, version: `fit ${at.slice(0, 10)} (#4 frozen)`, fittedAt: at, train };
   // 4. the gate (inputs live has) + bb-v4 against bb-v3 per group (NBA blind: no injury information for either)
   const gate = missGate(all.test, params, cur);
-  const groups = gridGate(missInputs(raw, 'blind').filter(x => x.year === test), params);
+  const groups = gridGate(missInputs(rows, 'blind').filter(x => x.year === test), params);
   const apply = opt.apply === true || ((opt.apply === 'gate' || !!opt.auto) && gate.pass);
   const sdN = rowStats(nba.train).sd, sdO = rowStats(others.train).sd;
   const before = missFrom(cur, 'NBA');
@@ -396,6 +400,8 @@ export function missingRowHealth(now = Date.now()): Check[] {
     detail: `${p.miss ? `Frozen at the who-actually-played fit (${p.miss.fittedAt.slice(0, 10)})` : 'Not frozen: weight from history without injury reports'} · NBA ${w('NBA')} pts per point of lost impact${p.miss?.star ? ` (star ×${p.miss.star})` : ''}, other leagues ${w('')} · this week: NBA ${moved.length} of ${nba.length} priced game(s) moved 1+ point, other leagues ${other} game(s) with news / rest statuses`,
     items: [
       ...(m ? [`Last fit ${m.at.slice(0, 16).replace('T', ' ')} UTC: ${m.gate.reason}${m.applied ? '' : ' (not stored)'}`] : ['No #4 fit on this database yet (the worker runs it once)']),
+      // fix225: which player values #1 / #4 / #8 read
+      ((im = storedImpact()) => p.impact ? `Player impact: box score ×${p.impact.wb} + on/off, star factor ×${p.miss?.top ?? 1} (fix225, ${p.impact.fittedAt.slice(0, 10)})` : `Player impact: on/off only${im ? ` (fix225 fit ${im.at.slice(0, 10)}: ${im.gate.reason})` : ' (fix225 fit not run yet)'}`)(),
       ...moved.slice(0, 10).map(r => `${String(r.kickoff).slice(0, 10)} ${r.home_name} – ${r.away_name}: #4 ${Math.round(moveOf(r, p) * 10) / 10} pts`)
     ]
   }];
@@ -415,11 +421,11 @@ export function gridLive(code: string): boolean {
 /**
  * bb-v4 for an upcoming game from bb-v3's prediction (x.p: its chance before the injury points; home edges, rest; sigma) and, for the NBA, the injury report's lost impact (#4). null = not live for the league / no team values.
  */
-export function gridPredict(g: { code: string; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null }, x: { p: number; hca: number; haH?: number; haA?: number; b2bHome: boolean; b2bAway: boolean }, sigma: number, miss?: { home: number; away: number }): { pHome: number; margin: number; parts: number[]; view: GridView } | null {
+export function gridPredict(g: { code: string; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null }, x: { p: number; hca: number; haH?: number; haA?: number; b2bHome: boolean; b2bAway: boolean }, sigma: number, miss?: { home: number; away: number; homeTop?: number; awayTop?: number }): { pHome: number; margin: number; parts: number[]; view: GridView } | null {
   if (!gridLive(g.code) || !gs) return null;
-  const r = liveRows(g, { p: x.p, sig: sigma, hca: x.hca, haH: x.haH || 0, haA: x.haA || 0, b2bH: x.b2bHome, b2bA: x.b2bAway }, miss);
+  const r = liveRows(g, { p: x.p, sig: sigma, hca: x.hca, haH: x.haH || 0, haA: x.haA || 0, b2bH: x.b2bHome, b2bA: x.b2bAway }, miss, gs.params.impact);
   if (!r) return null;
-  const it = { hv: r.hv, av: r.av, sig: sigma };
+  const it = { hv: r.hv, av: r.av, sig: sigma, t4: r.t4 };
   const e = gridEval(gs.params, g.code, it);
   return { pHome: e.pHome, margin: e.margin, parts: e.parts, view: split1000(gs.params, g.code, it, gs.stats.sd) };
 }
@@ -466,3 +472,214 @@ export function rowSanity(rows: { label: string; hv: number[]; av: number[] }[])
   }
   return { checked: rows.length, bad };
 }
+
+/* ---------- fix225: key players count more (box-score value blended with on/off, the star factor) ---------- */
+
+export type ImpactReport = {
+  at: string; why: string; rule: string; train: number[]; test: number; seconds: number; applied: boolean;
+  box: BoxCoef; wb: number; tried: { wb: number; trainLL: number }[];
+  miss: MissSet; before: { wb: number | null; nba: number; star: number; top: number | null; other: number };
+  oracle: { trainGames: number; startLL: number; trainLL: number };
+  gate: ImpactGate; groups: Record<string, GroupGate>;
+  split: { nba: { before: number[]; after: number[] }; other: { before: number[]; after: number[] } };
+  params: GridParams;
+};
+const IMPACT_RULE = 'fix225';
+export function storedImpact(): ImpactReport | null {
+  const r = db.prepare(`SELECT report FROM bb_tuned WHERE id = 'impact'`).get() as any;
+  try { return r?.report ? JSON.parse(r.report) : null; } catch { return null; }
+}
+/** the stored rows have the fix225 values (the model build makes them; the fit waits for 90%) */
+export function impactRowsReady(): boolean {
+  const r = db.prepare(`SELECT COUNT(*) AS n, SUM(CASE WHEN alt IS NOT NULL THEN 1 ELSE 0 END) AS a FROM bb_grid_rows`).get() as any;
+  return !!r?.n && r.a / r.n >= 0.9;
+}
+/** the worker runs the fit once a database, after the rows were rebuilt with the box-score values */
+export function impactFitDue(): string | null {
+  const m = storedImpact();
+  return !m || m.rule !== IMPACT_RULE ? 'first fit of the box-score impact' : null;
+}
+
+/**
+ * fix225 — /api/bb/impact-fit (thread job 'bb impact fit'; the worker once a database): player impact = wb × box-score
+ * value + (1 − wb) × on/off (minutes-scaled shrink), read by rows #1 / #4 / #8 and the oracle.
+ *  1. wb by pattern search from 0.6 on the train seasons' log loss (each try: #4 + star factor on the NBA's oracle rows,
+ *     the other leagues' proxy weight, the shared tune around them, short rounds);
+ *  2. the full fit at that wb: #4's weight + the star factor (a top-3 player's loss × 1.0–1.6) on the oracle rows,
+ *     frozen, then the shared tune around it (like fix228);
+ *  3. gate on the test season against the settings live now (impactGate: NBA and Europe, whole season and games 1–25,
+ *     the NBA's who-played-known games). apply = true stores it; 'gate' (the worker, the admin's default) only when it
+ *     passes. The report is kept either way (bb_tuned 'impact').
+ */
+export async function runImpactFit(opt: { train?: number[]; test?: number; apply?: boolean | 'gate'; rounds?: number; auto?: string } = {}): Promise<ImpactReport> {
+  const train = opt.train && opt.train.length ? opt.train : GRID_TRAIN, test = opt.test ?? GRID_TEST;
+  assertTrainYears(train, test);
+  const t0 = Date.now();
+  const raw = loadRows();
+  await yieldLoop();
+  const share = altShare(raw);
+  if (share < 0.9) throw new Error(`only ${Math.round(share * 100)}% of the rows have the box-score values (the next basketball model build makes them)`);
+  const cur = sharedParams(), at = new Date().toISOString();
+  const shared: GridParams = { ...cur, league: undefined };
+  const fitAt = async (wb: number, rounds: number | undefined) => {
+    const impact: ImpactSet = { wb, box: storedBox(), fittedAt: at, train, test };
+    const rows = impactInputs(raw, impact);
+    const oracleAll = missInputs(rows, 'oracle');
+    const nba = missSplit(oracleAll.filter(x => usesOracle(x.code) && x.oracle !== null), train, test);
+    if (nba.train.length < 300) throw new Error(`only ${nba.train.length} NBA training games with who played known`);
+    const om = await fitMiss(nba.train, shared, { rounds, pause: yieldLoop, form: 'top' });
+    const m0: MissSet = { w: om.w, star: 0, top: om.top, proxy: Math.min(weightsFor(cur, '')[MISS], om.w), fittedAt: at, train, test };
+    const others = missSplit(rows.filter(x => !usesOracle(x.code)), train, test);
+    const px = others.train.length >= 300 ? await fitProxy(others.train, { ...shared, impact, miss: m0 }, { rounds, pause: yieldLoop }) : null;
+    const miss: MissSet = { ...m0, proxy: px ? px.proxy : m0.proxy };
+    const all = missSplit(oracleAll, train, test);
+    const fit = await fitGrid(all.train, { ...shared, miss, impact }, { rounds, pause: yieldLoop });
+    const params: GridParams = { ...fit.params, miss, impact, version: `fit ${at.slice(0, 10)} (box-score impact, wb ${wb})`, fittedAt: at, train };
+    return { params, trainLL: Math.round(fit.trainLL * 1e5) / 1e5, om, nbaTrain: nba.train, othersTrain: others.train };
+  };
+  // 1. wb: the box-score share (pattern search on the train seasons, short fits)
+  const tried: { wb: number; trainLL: number }[] = [];
+  const quick = new Map<number, number>();
+  const ll = async (wb: number) => {
+    const k = Math.round(wb * 100) / 100;
+    if (!quick.has(k)) { const r = await fitAt(k, Math.min(opt.rounds ?? 12, 12)); quick.set(k, r.trainLL); tried.push({ wb: k, trainLL: r.trainLL }); }
+    return quick.get(k)!;
+  };
+  let wb = WB_START, best = await ll(wb);
+  for (let step = 0.2; step >= 0.05 - 1e-9; step /= 2) {
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const dir of [1, -1]) {
+        const c = Math.min(1, Math.max(0, Math.round((wb + dir * step) * 100) / 100));
+        if (c === wb) continue;
+        const x = await ll(c);
+        if (x < best - 1e-6) { wb = c; best = x; moved = true; break; }
+      }
+    }
+  }
+  // 2. the full fit at that wb
+  const f = await fitAt(wb, opt.rounds);
+  const params = f.params;
+  // 3. the gate: each side on its own inputs as live has them
+  const curItems = inputsFor(raw, cur, 'oracle'), nextItems = inputsFor(raw, params, 'oracle');
+  const gate = impactGate(curItems, nextItems, cur, params, test);
+  const groups = gridGate(inputsFor(raw, params, 'blind').filter(x => x.year === test), params);
+  const apply = opt.apply === true || ((opt.apply === 'gate' || !!opt.auto) && gate.pass);
+  const curN = inputsFor(raw, cur, 'oracle'), sdN = rowStats(curN.filter(x => usesOracle(x.code) && train.includes(x.year))).sd, sdO = rowStats(curN.filter(x => !usesOracle(x.code) && train.includes(x.year))).sd;
+  const sdN2 = rowStats(f.nbaTrain).sd, sdO2 = rowStats(f.othersTrain).sd;
+  const bm = missFrom(cur, 'NBA');
+  const report: ImpactReport = {
+    at, why: opt.auto || 'admin', rule: IMPACT_RULE, train, test, seconds: Math.round((Date.now() - t0) / 1000), applied: apply,
+    box: storedBox(), wb, tried: tried.sort((a, b) => a.wb - b.wb), miss: params.miss!,
+    before: { wb: cur.impact?.wb ?? null, nba: Math.round(bm.w * 1e4) / 1e4, star: bm.star, top: cur.miss?.top ?? null, other: Math.round(weightsFor(cur, '')[MISS] * 1e4) / 1e4 },
+    oracle: { trainGames: f.nbaTrain.length, startLL: f.om.startLL, trainLL: f.om.trainLL },
+    gate, groups,
+    split: {
+      nba: { before: fittedSplit(weightsFor(cur, 'NBA'), sdN), after: fittedSplit(weightsFor(params, 'NBA'), sdN2) },
+      other: { before: fittedSplit(weightsFor(cur, ''), sdO), after: fittedSplit(weightsFor(params, ''), sdO2) }
+    },
+    params
+  };
+  db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('impact', ?, ?, ?)`).run(JSON.stringify(params.impact), JSON.stringify(report), at);
+  if (apply) {
+    db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('live', ?, ?, ?)`)
+      .run(JSON.stringify(params), JSON.stringify({ source: `fix225 box-score impact (${report.why})`, fittedAt: at, impact: gate, wb }), at);
+    publishGridState(raw, storedParams());
+  }
+  impactCache = null;
+  logger.info(`bb-v4 box-score impact (${report.why}${apply ? ', stored' : ', not stored'}): wb ${wb} (tried ${tried.map(t => `${t.wb}: ${t.trainLL}`).join(', ')}), NBA #4 ${report.before.nba} → ${params.miss!.w} (star factor ×${params.miss!.top}), other leagues ${report.before.other} → ${params.miss!.proxy}; ${gate.reason}`);
+  return report;
+}
+
+/** the morning report's line */
+export function impactFitLine(): string | null {
+  const m = storedImpact();
+  if (!m) return null;
+  return `Basketball player impact (box score × ${m.wb} + on/off × ${Math.round((1 - m.wb) * 100) / 100}, ${m.at.slice(0, 10)}): star factor ×${m.miss.top}, NBA #4 ${m.before.nba} → ${m.miss.w}; ${m.gate.reason}${m.applied ? '' : ' (not stored)'}.`;
+}
+
+/** the impact setting live (null = fix219's on/off ratings) */
+export const impactLive = (): ImpactSet | null => gs?.params.impact || null;
+/** the star factor live for a league (1 = none) */
+export const topFactor = (code: string) => (gs?.params.miss?.top && usesOracle(code) ? gs.params.miss.top : 1);
+/** a #4 loss in margin points under the settings live (the star factor on the top-3 part) */
+export const row4Points = (code: string, loss: number, lossTop = 0) => gridWeight(code, MISS) * topLoss(loss, lossTop, topFactor(code));
+
+const nameStmt = () => db.prepare(`SELECT name FROM bb_player_stats WHERE player_id = ? AND name IS NOT NULL LIMIT 1`);
+let impactCache: { at: number; v: any } | null = null;
+/**
+ * Admin card "Key players count more (fix225)": the stored fit, the top 20 per league before (fix219's on/off) and after
+ * (the blend the fit chose, or the start 0.6 before any fit), and 5 NBA teams' record with / without their top player
+ * this season against what the model implies (#4's points before / after).
+ */
+export function impactInfo() {
+  if (impactCache && Date.now() - impactCache.at < 5 * 60000) return impactCache.v;
+  const m = storedImpact(), live = impactLive();
+  const wb = live?.wb ?? m?.wb ?? WB_START;
+  const ns = nameStmt();
+  const name = (id: number) => String((ns.get(id) as any)?.name || id);
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  const leagues: { code: string; before: { id: number; name: string; rating: number }[]; after: { id: number; name: string; rating: number; was: number }[] }[] = [];
+  for (const code of ['NBA', 'EL', 'EC', 'ACB', 'LBA', 'BSL', 'LNB', 'BBL', 'ABA', 'GBL', 'LKL', 'BCL', 'NBL', 'CBA', 'JBL', 'NBB', 'BSN', 'FEC']) {
+    const snap = gridSnap(code);
+    if (!snap) continue;
+    const pool = new Map<number, [number, number, number, number, number?, number?, number?]>();
+    for (const t of snap.teams.values()) for (const p of t.pl || []) if (p[2] >= 15 && p[3] <= 9) pool.set(p[0], p);
+    if (pool.size < 20 || ![...pool.values()].some(p => typeof p[5] === 'number')) continue;
+    const list = [...pool.values()];
+    const before = [...list].sort((a, b) => b[1] - a[1]).slice(0, 20).map(p => ({ id: p[0], name: name(p[0]), rating: r1(p[1]) }));
+    const after = [...list].sort((a, b) => plRating(b, { wb }) - plRating(a, { wb })).slice(0, 20).map(p => ({ id: p[0], name: name(p[0]), rating: r1(plRating(p, { wb })), was: r1(p[1]) }));
+    leagues.push({ code, before, after });
+  }
+  const v = {
+    live: live ? { wb: live.wb, box: live.box, top: gs?.params.miss?.top ?? null, fittedAt: live.fittedAt } : null,
+    due: impactFitDue(), report: m ? { ...m, params: undefined } : null, wb, feats: BOX_FEATS, box: storedBox(),
+    leagues, withWithout: withWithout(m, wb)
+  };
+  impactCache = { at: Date.now(), v };
+  return v;
+}
+
+/** 5 NBA teams whose top player missed the most games this season: real margin with / without him against #4's points */
+function withWithout(m: ImpactReport | null, wb: number) {
+  const snap = gridSnap('NBA');
+  if (!snap) return [];
+  const p = gs?.params || storedParams();
+  const season = (db.prepare(`SELECT season FROM bb_games WHERE code = 'NBA' AND status IN ('FT','AOT') GROUP BY season HAVING COUNT(*) >= 100 ORDER BY season DESC LIMIT 1`).get() as any)?.season;
+  if (!season) return [];
+  const games = db.prepare(`SELECT g.game_id, g.home_id, g.away_id, g.hs, g.as_ FROM bb_games g WHERE g.code = 'NBA' AND g.season = ? AND g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND g.stats = 1`).all(season) as any[];
+  const playedBy = new Map<number, Set<number>>();
+  for (const r of db.prepare(`SELECT ps.game_id, ps.player_id FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.code = 'NBA' AND g.season = ? AND ps.minutes > 0`).all(season) as any[]) {
+    let s = playedBy.get(r.game_id); if (!s) playedBy.set(r.game_id, (s = new Set())); s.add(r.player_id);
+  }
+  const L = snap.gameMin;
+  const ns = nameStmt();
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  const beforeW = m ? m.before.nba : weightsFor(p, 'NBA')[MISS], beforeStar = m ? m.before.star : p.miss?.star || 0;
+  const afterW = m ? m.miss.w : null, afterTop = m ? m.miss.top ?? 1 : null;
+  const out: any[] = [];
+  for (const [teamId, t] of snap.teams) {
+    if (!t.pl?.length) continue;
+    const star = [...t.pl].filter(x => x[6] === 1).sort((a, b) => plRating(b, { wb }) * b[2] - plRating(a, { wb }) * a[2])[0];
+    if (!star) continue;
+    const mine = games.filter(g => g.home_id === teamId || g.away_id === teamId);
+    const marg = (g: any) => (g.home_id === teamId ? g.hs - g.as_ : g.as_ - g.hs);
+    const w = mine.filter(g => playedBy.get(g.game_id)?.has(star[0])), wo = mine.filter(g => !playedBy.get(g.game_id)?.has(star[0]));
+    if (w.length < 10 || wo.length < 3) continue;
+    const mean = (l: any[]) => l.reduce((s, g) => s + marg(g), 0) / l.length;
+    // what the team's strength loses without him (the rotation re-filled), under each rating set
+    const loss = (rate: (x: PlRowT) => number) => {
+      const pl = t.pl!.map(x => ({ id: x[0], min: x[2], rating: rate(x) })); // (all of the last 10 games: he may be out now)
+      const S = (k?: Map<number, number>) => strength(rotation(pl, k, L), L);
+      return S(new Map([[star[0], 0]])) - S();
+    };
+    const lb = loss(x => x[1]), la = loss(x => plRating(x, { wb }));
+    out.push({
+      team: (db.prepare(`SELECT home_name AS n FROM bb_games WHERE home_id = ? AND home_name IS NOT NULL ORDER BY kickoff DESC LIMIT 1`).get(teamId) as any)?.n || String(teamId),
+      player: String((ns.get(star[0]) as any)?.name || star[0]), season, with: { games: w.length, margin: r1(mean(w)) }, without: { games: wo.length, margin: r1(mean(wo)) },
+      real: r1(mean(w) - mean(wo)), before: r1(-beforeW * starOf(lb, beforeStar)), after: afterW === null ? null : r1(-afterW * topLoss(la, la, afterTop ?? 1))
+    });
+  }
+  return out.sort((a, b) => b.without.games - a.without.games).slice(0, 5);
+}
+type PlRowT = [number, number, number, number, number?, number?, number?];

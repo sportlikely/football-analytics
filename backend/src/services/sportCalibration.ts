@@ -19,7 +19,7 @@ import logger from '../utils/logger';
 import { onState, publishState } from './shared';
 import { yieldLoop } from './perf';
 import { buildLayer, applyLayer, inSeasonLayer, applyInSeason, type LeagueLayer, type LRow, type InSeasonFit } from '../utils/sportCalib';
-import { gridEval, groupOf, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, type GridParams } from '../utils/bbGridMath';
+import { gridEval, groupOf, impactInputs, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, type GridParams } from '../utils/bbGridMath';
 
 export const BB_CALIB_VERSION = 'fix222-1';
 /** the strong line before fix222 (and while no layer is fitted) */
@@ -79,10 +79,10 @@ export async function buildBbCalibrationHere(why: string) {
   const t0 = Date.now();
   const { loadRows } = await import('./bbGrid');
   const { storedParams, gridGate } = await import('./bbTuner');
-  const items = loadRows();
+  const params = storedParams();
+  const items = impactInputs(loadRows(), params.impact); // fix225: the rows as the live impact setting reads them
   await yieldLoop();
   if (items.length < 1000) { logger.info(`bb calibration: only ${items.length} walk-forward rows (the basketball model builds them first)`); return null; }
-  const params = storedParams();
   const gate = gridGate(items, params);
   const pass = Object.fromEntries(Object.values(gate).map(g => [g.group, g.pass]));
   const rows = shownRows(items, params, pass);

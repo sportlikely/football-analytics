@@ -20,16 +20,18 @@ export type KpOut = { id: number; rating: number; proj: number; perGame: number;
  * by `scale` = the model's points per strength point) and what his status costs in this game (`cost`: the strength
  * with everyone's statuses but his against all of them).
  */
-export function keyList(players: KpIn[], keep: Map<number, number>, L: number, scale: number, n = 5): KpOut[] {
+/** fix225: `top` = the team's top-3 players and the star factor (a top-3 player's loss counts × factor, like row #4) */
+export function keyList(players: KpIn[], keep: Map<number, number>, L: number, scale: number, n = 5, top?: { ids: Set<number>; factor: number }): KpOut[] {
   const pl: RotPlayer[] = players.filter(p => p.proj > 0).map(p => ({ id: p.id, min: p.proj, rating: p.rating }));
   const S = (k?: Map<number, number>) => strength(rotation(pl, k, L), L);
   const full = S(), now = S(keep);
   const r1 = (x: number) => Math.round(x * 10) / 10;
   return [...players].filter(p => p.proj > 0).sort((a, b) => b.rating * b.proj - a.rating * a.proj || a.id - b.id).slice(0, n).map(p => {
-    const without = full - S(new Map([[p.id, 0]]));
+    const f = top && top.ids.has(p.id) ? Math.max(1, top.factor) : 1;
+    const without = (full - S(new Map([[p.id, 0]]))) * f;
     const k = keep.has(p.id) ? keep.get(p.id)! : 1;
     let cost = 0;
-    if (k < 1) { const others = new Map(keep); others.delete(p.id); cost = S(others) - now; }
+    if (k < 1) { const others = new Map(keep); others.delete(p.id); cost = (S(others) - now) * f; }
     return { id: p.id, rating: r1(p.rating), proj: r1(p.proj), perGame: r1((p.rating * p.proj) / L), without: r1(-scale * without) || 0, cost: r1(-scale * cost) || 0, keep: k };
   });
 }
