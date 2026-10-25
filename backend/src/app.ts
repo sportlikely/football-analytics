@@ -133,6 +133,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth } from './services/dataHealth';
+import { gameExtras as gameExtrasB, teamExtras as teamExtrasB, gameExtrasAdmin, extrasTick } from './services/gameExtras';
 import { pushSettings, savePushPrefs, addPushSub, removePushSub, PushError, pushAdminStats, sendTestPush } from './services/pushAlerts';
 import { emailSettings, saveEmailPrefs, initEmailPrefs, EmailPrefsError, checkUnsub, unsubscribePicks, verifyWebhook, handleWebhookEvent, emailAdminStats, sendTestEmail, previewEmail, crestPath } from './services/pickEmails';
 import { moreForGame as moreForGameB, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, moreBacktestNow, MORE_SPORTS, gameIdOf, hasExtras, saveOne as saveOneB } from './services/morePredictions';
@@ -145,6 +146,8 @@ const searchPlayersRemote = builder('player search (provider)', searchPlayersRem
 const playerPage = builder('player page', playerPageB);
 const findPlayer = builder('player lookup', findPlayerB);
 const newsFor = builder('news', newsForB);
+const gameExtras = builder('game extras', gameExtrasB); // fix231
+const teamExtras = builder('team extras', teamExtrasB);
 const bbGame = builder('basketball game page', bbGameB);
 const bbTeam = builder('basketball team page', bbTeamB);
 const bbPlayer = builder('basketball player page', bbPlayerB);
@@ -583,7 +586,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|changelog$|hub(\/|$)|slugs\/|slug\/|slug-of\/|slug-route$|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|extras\/|changelog$|hub(\/|$)|slugs\/|slug\/|slug-of\/|slug-route$|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -2661,6 +2664,30 @@ app.get('/api/season-forecast/:sport/game/:id(\\d+)', (req, res) => {
     const open = isPaid(req.access || 'anon') || (!!req.user && unlockedIds(req.user.id).has(rid));
     res.set('Cache-Control', 'private, no-store').json({ data: open ? { ...m, extremes: extremesFor(sport) } : { locked: true, league: m.league, home: { id: m.home.id, name: m.home.name }, away: { id: m.away.id, name: m.away.name } } });
   } catch (e: any) { sendError(res, e, 'Season forecast failed'); }
+});
+/**
+ * fix231: the game-page extras (weather, referee, fixture difficulty, trends) and a team's next 5 games coloured by our
+ * win chance. Same for everyone (difficulty is a colour, never the number). Answered by the worker (fix210).
+ */
+const extrasOpen = (req: express.Request, sport: string) => sport === 'football' || req.access === 'admin'
+  || (sport === 'basketball' ? bbPublic() : sport === 'nfl' ? nflPublic() : tennisPublic());
+app.get('/api/extras/:sport(football|basketball|nfl|tennis)/game/:id(-?\\d+)', (req, res) => {
+  const sport = req.params.sport as 'football' | 'basketball' | 'nfl' | 'tennis';
+  if (!extrasOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
+  try { res.set('Cache-Control', 'public, max-age=300').json({ data: gameExtras(sport, Number(req.params.id)) }); } catch (e: any) { sendError(res, e, 'Game extras failed'); }
+});
+app.get('/api/extras/:sport(football|basketball|nfl|tennis)/team/:id(\\d+)', (req, res) => {
+  const sport = req.params.sport as 'football' | 'basketball' | 'nfl' | 'tennis';
+  if (!extrasOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
+  try { res.set('Cache-Control', 'public, max-age=600').json({ data: teamExtras(sport, Number(req.params.id)) }); } catch (e: any) { sendError(res, e, 'Team extras failed'); }
+});
+// fix231 (admin): coverage per sport, the last run, venues without coordinates; ?run=1 runs the job now
+app.get('/api/admin/game-extras', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (req.query.run === '1') await extrasTick();
+    res.json({ data: gameExtrasAdmin() });
+  } catch (e: any) { sendError(res, e, 'Game extras failed'); }
 });
 // admin: every league's run (rules used, runs, last run time), skipped leagues, last season's replay
 app.get('/api/admin/season-forecast', (_req, res) => {

@@ -39,6 +39,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'team.seasonForecast',
     'league.seasonForecast',
     'game.whatItMeans',
+    'game.trends', 'game.difficulty', 'game.weather', 'team.difficulty', // fix231: GameExtras / TeamDifficulty
     'team.ratingTiles',
     'team.scores',
     'team.rankOverTime',

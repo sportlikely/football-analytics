@@ -57,6 +57,7 @@ import { startKeyPlayersScheduler } from './services/keyPlayers';
 import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
 import { pushAlertsTick } from './services/pushAlerts';
 import { buildSlugs } from './services/slugs';
+import { startGameExtrasScheduler } from './services/gameExtras';
 
 let started = false;
 
@@ -146,6 +147,8 @@ export function startJobs() {
   everyHeavy('bb calibration', () => buildBbCalibration('6-hourly'), 6 * 3600 * 1000).unref();
   // fix224: basketball star-rest patterns (daily), injuries from news + what was applied to each game (every 30 min)
   startKeyPlayersScheduler();
+  // fix231: game-page extras — venues, weather (Open-Meteo) and referees for the next 72 h, every 3 h; coverage after
+  startGameExtrasScheduler();
   // fix216: the daily picks email and the weekly digest, at each person's own send hour (checked every 5 min)
   migrateMarketingOptIn(); // fix218: the old "Email updates" switch → weekly digest, once
   every('picks emails', () => picksEmailTick().catch(e => logger.warn(`picks emails: ${e?.message || e}`)), 5 * 60 * 1000).unref();

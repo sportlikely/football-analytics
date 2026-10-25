@@ -9,7 +9,7 @@ export interface ParityReport {
 }
 export const PARITY_REPORT: ParityReport = {
  "ok": true,
- "keys": 76,
+ "keys": 81,
  "gaps": [],
  "propGaps": [],
  "problems": [],
@@ -31,6 +31,31 @@ export const PARITY_REPORT: ParityReport = {
    "key": "game.keyPlayers",
    "sport": "tennis",
    "reason": "the player is the team (the match page is about the two players already)"
+  },
+  {
+   "key": "game.difficulty",
+   "sport": "tennis",
+   "reason": "the provider gives no draw positions, so the next round’s opponent can’t be told for sure (the player page colours the next matches)"
+  },
+  {
+   "key": "game.weather",
+   "sport": "basketball",
+   "reason": "indoor sport, no weather card"
+  },
+  {
+   "key": "game.referee",
+   "sport": "basketball",
+   "reason": "API-Basketball names no referees"
+  },
+  {
+   "key": "game.referee",
+   "sport": "nfl",
+   "reason": "the American-football provider sends no officials (no crew chief)"
+  },
+  {
+   "key": "game.referee",
+   "sport": "tennis",
+   "reason": "the provider names no chair umpire"
   },
   {
    "key": "game.lineups",

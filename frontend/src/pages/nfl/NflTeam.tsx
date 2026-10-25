@@ -11,6 +11,7 @@ import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
 import { NflGameRow, LeagueSwitch, StandTable } from './parts'
 import RecordLink from '../../components/RecordLink'
 import TeamForecast from '../../components/sport/forecast/TeamForecast'
+import { TeamDifficulty } from '../../components/sport/game/GameExtras'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { playerHref } from '../../lib/links'
 
@@ -85,6 +86,7 @@ export default function NflTeam() {
       left={<>
         {d.analysis && <TeamAnalysis a={d.analysis} d={d} />}
         <TeamForecast sport="nfl" id={tm.id} leagueHref={c => href.nflStandings(c)} />
+        <TeamDifficulty sport="nfl" id={tm.id} />
         {d.roster.length === 0 && d.leaders && d.leaders.length > 0 && (
           <Card title={t('Season leaders')} action={<span className="text-xs text-faint">{t('From the box scores')}</span>}>
             <ul className="divide-y divide-line/50">

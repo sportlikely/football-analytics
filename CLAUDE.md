@@ -162,6 +162,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
 - Push alerts (fix226): `pushAlerts.ts` (settings / devices on the web; detect + send only in the worker, after each live
   tick), rules in `utils/pushRules.ts`, Web Push crypto in `utils/webPush.ts` (no library), words `locales/push/<lang>.json`,
   keys `VAPID_PUBLIC` / `VAPID_PRIVATE` (never change them). Frontend `public/sw.js`, `lib/push.ts`, `components/AlertsCard.tsx`.
+- Game extras (fix231): `services/gameExtras.ts` (worker job every 3 h: venues → Open-Meteo weather, football referees from API-Football,
+  coverage; builders for `/api/extras/<sport>/game|team/<id>`), pure parts in `utils/gameExtras.ts` (weather rules, indoor venues, referee
+  shrinkage, difficulty bands, trend generator). Frontend `components/sport/game/GameExtras.tsx` (Trends, Next games, Weather, Referee; TeamDifficulty).
 - Season forecast (fix215): `utils/seasonSim.ts` (engine, pure), `utils/seasonRules.ts` (per-league rules), `utils/seasonFit.ts`
   (thread part), `services/seasonForecast.ts` (inputs, runs 10 min after each finished game + nightly, Free view, data health).
   Frontend `components/sport/forecast/*`, `lib/seasonForecast.ts`. Notes: docs/notes/season-forecast.md.

@@ -35,6 +35,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'team.rankOverTime', // ranking, last 12 months
     'team.ourRecord',
     'team.fixtures', // next match + recent results
+    'game.trends', 'game.weather', 'team.difficulty', // fix231: GameExtras (all matches / this surface; outdoors) / TeamDifficulty on the player page
     'team.miniTable', // the ranking around the player
     'team.news',
     'player.stats', // serve / return numbers (Player analysis)

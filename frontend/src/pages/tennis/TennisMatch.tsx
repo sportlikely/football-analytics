@@ -11,6 +11,7 @@ import { tennisRid, tennisRstatus, tennisHref, tennisPlayerFav, tennisTournament
 import { Skeleton } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import MorePredictions from '../../components/sport/game/MorePredictions'
+import GameExtras from '../../components/sport/game/GameExtras'
 import GamePage, { useGameTab, GameNews, Section, fmtGameDate, fmtGameTime, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
@@ -103,6 +104,8 @@ export default function TennisMatch() {
           {p && !p.locked && sets.length > 0 && <SetsCard m={m} p={p} />}
           {/* fix204: more predictions from the same chain (locked like the prediction) */}
           <MorePredictions sport="tennis" id={m.id} rid={tennisRid(m)} status={tennisRstatus(m)} home={m.home.name} away={m.away.name} />
+          {/* fix231: trends (all matches / this surface), next matches, weather (outdoors) */}
+          <GameExtras sport="tennis" id={m.id} />
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} title="Match preview" />}
           <GameNews home={{ sport: 'tennis', playerId: m.home.id ?? undefined }} away={{ sport: 'tennis', playerId: m.away.id ?? undefined }} title={t('News about both players')} />
         </>

@@ -12,6 +12,7 @@ import { StandingsTable, type Standings } from './BbLeague'
 import { teamPlace } from '../../lib/bbTable'
 import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
 import TeamForecast from '../../components/sport/forecast/TeamForecast'
+import { TeamDifficulty } from '../../components/sport/game/GameExtras'
 import { BbTeamAnalysisCard, TeamRecordCard, type BbAnalysis } from '../../components/TeamAnalysis'
 import { playerHref, leagueHref, matchHref } from '../../lib/links'
 
@@ -81,6 +82,7 @@ export default function BbTeam() {
         {/* fix126: Team analysis, like football (strengths & weaknesses, model rating, 1–10 scores, rank over time) */}
         <div id="analysis" className="scroll-mt-24"><BbTeamAnalysisCard a={d.teamAnalysis} full={!!d.teamAnalysis && !d.teamAnalysis.locked} /></div>
         <TeamForecast sport="basketball" id={id} leagueHref={c => leagueHref('basketball', c)!} />
+        <TeamDifficulty sport="basketball" id={Number(id)} />
         {an && (
           <>
               <Card title={t('Compared with the league')}>

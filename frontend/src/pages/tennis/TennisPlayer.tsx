@@ -15,6 +15,7 @@ import RecordLink from '../../components/RecordLink'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { tennisSGame } from '../../components/sport/games/tennis'
 import { FormList, type Played } from './parts'
+import { TeamDifficulty } from '../../components/sport/game/GameExtras'
 
 interface Measure { id: string; label: string; value: number | null; text: string | null; rank: number | null; of: number | null; score: number | null }
 interface Analysis { matches: number; measures: Measure[]; strengths: Measure[]; weaknesses: Measure[]; locked?: boolean; notesCount?: number }
@@ -120,6 +121,8 @@ export default function TennisPlayer() {
         </div>
         <div className="space-y-6 min-w-0">
           <RecordCard d={d} />
+          {/* fix231: the next matches coloured by our win chance */}
+          <TeamDifficulty sport="tennis" id={d.player.id} />
           {d.upcoming.length > 0 && (
             <Card title={t('Next match')}>
               <div className="-mx-5 sm:-mx-6 divide-y divide-line/50">{d.upcoming.map(m => <GameRow key={m.id} g={tennisSGame(m)} showComp showDay />)}</div>

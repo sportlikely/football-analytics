@@ -49,7 +49,8 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/tennis\/(player\/\d+|tournament\/[a-z0-9-]+)$/, freshMs: 10 * MIN },
   { re: /^\/api\/season-forecast\/(football|basketball|nfl)\/(league\/[A-Za-z0-9]+|team\/\d+|game\/\d+)$/, freshMs: 2 * MIN }, // fix215
   { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN },
-  { re: /^\/api\/slug-route$/, freshMs: 1 * MIN } // fix229: an address outside the web process's slug state
+  { re: /^\/api\/slug-route$/, freshMs: 1 * MIN }, // fix229: an address outside the web process's slug state
+  { re: /^\/api\/extras\/(football|basketball|nfl|tennis)\/(game\/-?\d+|team\/\d+)$/, freshMs: 5 * MIN } // fix231
 ];
 
 /**
@@ -107,6 +108,9 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   { path: '/api/season-forecast/:sport/league/:code([A-Za-z0-9]{1,12})', sport: 'all', by: 'worker', sample: '/api/season-forecast/football/league/PL' },
   { path: '/api/season-forecast/:sport/team/:id(\\d+)', sport: 'all', by: 'worker', sample: '/api/season-forecast/basketball/team/1' },
   { path: '/api/season-forecast/:sport/game/:id(\\d+)', sport: 'all', by: 'worker', sample: '/api/season-forecast/nfl/game/1' },
+  // fix231: game-page extras (weather, referee, fixture difficulty, trends) and a team's next 5 games
+  { path: '/api/extras/:sport(football|basketball|nfl|tennis)/game/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/extras/football/game/1' },
+  { path: '/api/extras/:sport(football|basketball|nfl|tennis)/team/:id(\\d+)', sport: 'all', by: 'worker', sample: '/api/extras/tennis/team/1' },
   // football
   { path: '/api/matches/upcoming', sport: 'football', by: 'stored', sample: '/api/matches/upcoming' },
   { path: '/api/matches/live', sport: 'football', by: 'stored', sample: '/api/matches/live' },

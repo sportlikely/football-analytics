@@ -63,6 +63,7 @@ The Railway build (Dockerfile) runs `vite build` only, so the check runs before 
 Every block was checked against the code on 18 Oct 2026 (fix175 audit).
 
 ## Not applicable ('na') — Yarin decides these
+- fix231, for Yarin to approve: `game.weather` · Basketball: indoor sport · `game.referee` · Basketball: API-Basketball names no referees; NFL: the American-football provider sends no officials (no crew chief); Tennis: no chair umpire in the data · `game.difficulty` · Tennis: no draw positions in the data, so the next round's opponent can't be told for sure (the player page colours the next matches)
 - fix215, for Yarin to approve: `league.seasonForecast`, `team.seasonForecast`, `game.whatItMeans` · Tennis: no league season table to simulate (tournaments and rankings only)
 - `game.beforeAfter` · Basketball: no line-up announcement to compare around (live 'was X%' is in the live chance)
 - `game.beforeAfter` · NFL: no line-up announcement to compare around

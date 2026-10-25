@@ -28,6 +28,7 @@ import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 import MorePredictions from '../../components/sport/game/MorePredictions'
 import GameMeaning from '../../components/sport/forecast/GameMeaning'
+import GameExtras from '../../components/sport/game/GameExtras'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { basketballScorers } from '../../lib/scorers'
 import PlayerPhoto from '../../components/sport/PlayerPhoto'
@@ -164,6 +165,8 @@ export default function BbGame() {
           {/* fix204: more predictions from the same model (locked like the prediction) */}
           <MorePredictions sport="basketball" id={g.id} rid={rid(g)} status={rstatus(g)} home={g.home.name} away={g.away.name} />
           <GameMeaning sport="basketball" id={g.id} />
+          {/* fix231: trends, next games (indoors: no weather; the provider names no referees) */}
+          <GameExtras sport="basketball" id={g.id} />
           {d.keyPlayers && <KeyPlayers home={bbKeySide(d.keyPlayers.home)} away={bbKeySide(d.keyPlayers.away)} />}
           {d.beforeAfter && (
             <NewsChange home={g.home.name} away={g.away.name} before={d.beforeAfter.before} after={d.beforeAfter.after}
