@@ -356,3 +356,31 @@ and data-centre visitors; a table scan per /api/nfl/config. Now: views with ETag
 never read on the web, big lists as one string per row (members' copies joined), the rest passed to the worker
 (`byWorker`), nfl-config and the crawler HTML stored. `npm run test:fix221`: 4.7 MB list in 6 ms (gzip 63 KB), member
 copy 6.5 ms, 304 in 1 ms, web JSON.parse 0 KB, event loop max 6 ms.
+
+## fix222: the stalls left after fix221 (25 Oct)
+
+Live 25 Oct 13:45 UTC: web stalls 22 / h; worst 6,558 ms "boot (scheduler start)", 3,432 ms "/api/basketball/games +
+/api/basketball/game/:id + /api/matches/upcoming", 2,545 ms /api/basketball/games, 1,221 ms "state load af".
+
+- **"boot (scheduler start)" on the web was not a scheduler.** The web process starts none; the label was set in the
+  listen callback, and the first stall tick after listen measured the whole module load before it (imports, table
+  checks: ~6.5 s on Railway) and named it after that label. Now: the label only exists where a scheduler starts
+  (WORKER=0); the stall clock starts at listen (`markListening`), and the module load is a start-up entry ("module load
+  before listen", in /api/perf `startup`). Start-up stalls (before the state is loaded) no longer go into the hourly
+  buckets that data health's "Web stalls" counts (they are still listed apart): nobody waited for them.
+- **"state load af" = one big v8.deserialize.** A shared state over 256 KB (STATE_PART_KB) is now stored in parts
+  (`shared_parts`): every big top-level list or Map is cut into ~256 KB slices; the web process reads and deserializes
+  one slice per turn and joins them. Test (fix222): a 38 MB state that takes 672 ms in one piece blocks the web loop at
+  most 14 ms. The worker's job threads (applyStored) join the parts in one go.
+- **The list routes, traced by phase.** sendStored is three perf entries: "stored <page>: read" (getPage), ": pick"
+  (the view / rows join), ": send" (res.send / gzip) — a stall now names the phase. A request passed on to the worker
+  (forwardToWorker, a worker route without a copy) is marked as waiting (`track(...).wait()`): it is no longer named in
+  a stall it did not cause (/api/basketball/game/:id is answered by the worker; it was named because it was in flight).
+  A member's joined list (unlocks) and a data-centre visitor's locked list are gzipped in zlib's thread pool (they were
+  sent as 5 MB of text); the unlock ETag reads only the etag column (not the 5 MB 'full' view and its gzip copy).
+- Checked locally: test:fix221 (member copy 15 ms with gzip), test:fix210 no-web-compute (127 URLs, slowest 32 ms).
+
+### Check after deploy (pending)
+/api/perf (web) an hour after the deploy: `startup` has "module load before listen" and no "boot (scheduler start)";
+`stallsLastHour` ≤ 5; `topStalls` — if a list route is still there, its label now says read / pick / send: send Claude
+the exact label. `shared` (applied): af:window loaded in parts (bytes = the whole). Data health "Web stalls" ≤ 5 / h.

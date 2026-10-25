@@ -11,7 +11,15 @@ type Info = {
   report: null | { split: { id: string; name: string; weight: number; points: number }[]; trainGames: number; testGames: number; trainLL: number; startLL: number; offsetLeagues: string[] }
   gate: Record<string, Gate> | null; perLeague: Record<string, { games: number; v3: Score; v4: Score }> | null; live: Record<string, { games: number; v3: Score; v4: Score }> | null
   stats: { mean: number[]; sd: number[] } | null
+  /** fix222: the worker's own tune on the live database (after the deploy, then monthly) */
+  auto: null | { why: string; at: string; applied: boolean; reason: string; before: number; after: number; passing: string[]; train: number[]; test: number; trainGames: number; testGames: number }
+  autoDue: string | null
 }
+type CalScore = { games: number; logLoss: number | null; brier: number | null; hit: number | null }
+type CalBand = { lo: number; hi: number; n: number; said: number | null; happened: number | null }
+type Calib = { at: string; source: string; test: { season: number; fitOn: number[]; raw: CalScore; ownFit: CalScore; sportFit: CalScore; sportKept: boolean; rawBands: CalBand[]; calBands: CalBand[] }
+  perLeague: { league: string; games: number; raw: CalScore; cal: CalScore; kept: boolean; why: string }[]; strong: Record<string, number>; strongSport: number
+  live: { games: number; raw: CalScore; cal: CalScore; rawBands: CalBand[]; calBands: CalBand[] } }
 const ROWS = ['#1 Player impact', '#2 Net rating / 100', '#3 Team rating (bb-v3)', '#4 Missing players', '#5 Four factors', '#6 Rest', '#7 Home court', '#8 Carry-over', '#9 Matchups', '#10 Form', '#11 Motivation', '#12 3-pt volatility (sigma)', '#13 Head-to-head']
 
 /** fix219 (admin): bb-v4 grid — the gate per group, the fitted split, the test table, the live period, tune / apply. */
@@ -20,8 +28,10 @@ export default function BbGridCard() {
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<any>(null)
+  const [cal, setCal] = useState<Calib | null>(null)
   const load = (q = '') => axios.get(`${API_URL}/bb/tuned${q}`).then(r => setD(r.data.data)).catch(() => setD(null))
-  useEffect(() => { load() }, [])
+  const loadCal = (q = '') => axios.get(`${API_URL}/admin/calibration?sport=basketball${q}`).then(r => setCal(r.data.data.report)).catch(() => setCal(null))
+  useEffect(() => { load(); loadCal() }, [])
   if (!d) return null
   const tune = (apply: boolean) => {
     setBusy(true); setMsg(apply ? 'Fitting and applying (in the job thread)…' : 'Fitting a preview…')
@@ -42,6 +52,11 @@ export default function BbGridCard() {
         <h2 className="font-display text-lg font-bold text-ink">Basketball model v4 (grid)</h2>
         <span className="text-xs text-faint">{slAdmin('bb-v4')} · 13 rows · settings: {d.params.version}{d.at ? ` · applied ${new Date(d.at).toLocaleString('en-GB')}` : ' (code defaults)'}</span>
       </div>
+      {d.auto ? (
+        <p className={`text-xs mb-1 ${d.auto.applied ? 'text-win' : 'text-muted'}`}>
+          Fitted on live data at {new Date(d.auto.at).toLocaleString('en-GB')} · train {d.auto.train.join(', ')} ({d.auto.trainGames} games) → test {d.auto.test} ({d.auto.testGames} games) · {d.auto.reason}
+        </p>
+      ) : <p className="text-xs text-loss mb-1">Not fitted on the live database yet{d.autoDue ? ` (due: ${d.autoDue}; the worker runs it ~20 min after a start, then monthly)` : ''}.</p>}
       <p className="text-sm text-muted">Gate on 2025-26 (or the 2025 season): bb-v4 must beat bb-v3 on log loss over the whole season and on games 1–25, per group; otherwise bb-v3 stays live there.</p>
       {d.gate && (
         <div className="mt-3 overflow-x-auto">
@@ -82,6 +97,24 @@ export default function BbGridCard() {
         <button type="button" className={btn} disabled={busy} onClick={() => { load('?clear=1'); setMsg('Back to the code defaults.') }}>Back to code defaults</button>
       </div>
       {msg && <p className="mt-2 text-xs text-accent">{msg}</p>}
+      {cal && (
+        <div className="mt-4 text-xs">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="font-semibold text-ink">Calibration layer (fix222)</h3>
+            <button type="button" className={btn} onClick={() => { loadCal('&rebuild=1'); setMsg('Building the calibration layer again (a minute)…') }}>Rebuild</button>
+          </div>
+          <p className="text-faint">{cal.source} · built {new Date(cal.at).toLocaleString('en-GB')} · fitted on {cal.test.fitOn.join(', ')}, tested on {cal.test.season}: log loss raw {cal.test.raw.logLoss} → own fits {cal.test.ownFit.logLoss} / one fit {cal.test.sportFit.logLoss} · strong line {Math.round(cal.strongSport * 100)}%</p>
+          <p className="text-faint">Live season (never fitted): {cal.live.games} games, log loss {cal.live.raw.logLoss} → {cal.live.cal.logLoss} · {cal.live.calBands.filter(b => b.n).map((b, i) => `${b.lo}%+: said ${cal.live.rawBands[i].said} → ${b.said}, happened ${b.happened} (${b.n})`).join(' · ')}</p>
+          <div className="mt-1 grid sm:grid-cols-2 gap-x-6">
+            {cal.perLeague.map(x => (
+              <div key={x.league} className="flex justify-between border-t border-line/40 py-0.5" title={x.why}>
+                <span className="text-ink">{x.league} <span className="text-faint">({x.games})</span></span>
+                <span className="num">{x.raw.logLoss ?? '—'} → <b className={x.kept ? 'text-win' : 'text-faint'}>{x.kept ? x.cal.logLoss : 'raw kept'}</b> · strong {Math.round((cal.strong[x.league] ?? cal.strongSport) * 100)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {report && <p className="mt-2 text-[11px] text-faint num">Last fit: {report.trainGames} train games, log loss {report.startLL} → {report.trainLL}; per-league offsets: {(report.offsetLeagues || []).join(', ') || 'none'}.</p>}
     </section>
   )

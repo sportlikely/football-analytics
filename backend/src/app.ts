@@ -1,4 +1,5 @@
 import express from 'express';
+import zlib from 'node:zlib';
 import { joinWaitlist, waitlistStats } from './services/waitlist';
 import { slimForList, clearPredictionCache } from './services/predCache';
 import { withLiveScore, liveBookStatus } from './services/liveScores';
@@ -75,6 +76,7 @@ import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
 import { runTune, tunedInfo } from './services/bbTuner';
+import { buildBbCalibration, calibReport } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
@@ -227,6 +229,7 @@ app.use(express.json({ verify: (req, _res, buf) => { if ((req as any).url?.start
 // fix167: every request, not only /api (search-engine pages and sitemaps are built on this thread too)
 app.use((req, res, next) => {
   const done = track(routeLabel(req.method, req.path), requestDetail(req.path, req.query as any));
+  (res.locals as any).perfDone = done; // fix222: services/forward.ts marks a request passed on to the worker as waiting
   res.on('finish', done);
   res.on('close', done);
   next();
@@ -478,6 +481,19 @@ function sendView(req: express.Request, res: express.Response, v: View) {
   if (v.gz && req.acceptsEncodings('gzip') === 'gzip') return res.set('Content-Encoding', 'gzip').send(v.gz);
   res.send(v.text);
 }
+/**
+ * fix222: a list joined for one reader (a member's unlocks, a data-centre visitor's locked rows) has no stored gzip copy:
+ * over 16 KB it is compressed in zlib's thread pool (the main thread only hands it over), else sent as it is.
+ */
+function sendJoined(req: express.Request, res: express.Response, text: string) {
+  res.type('application/json').vary('Accept-Encoding');
+  if (text.length < 16 * 1024 || req.acceptsEncodings('gzip') !== 'gzip') return res.send(text);
+  zlib.gzip(text, { level: 1 }, (err, gz) => {
+    if (res.headersSent || res.writableEnded) return;
+    if (err) return res.send(text);
+    res.set('Content-Encoding', 'gzip').send(gz);
+  });
+}
 /** fix221: the web process never builds a page itself: what needs the page (not a stored string) is answered by the worker */
 const byWorker = (req: express.Request, res: express.Response, here: () => unknown) => (isWeb ? forwardToWorker(req, res) : here());
 /**
@@ -485,26 +501,36 @@ const byWorker = (req: express.Request, res: express.Response, here: () => unkno
  * member's unlocked ids (row ids) — the list joined from its rows, those games in full, the rest teased.
  */
 async function sendStored(req: express.Request, res: express.Response, name: string, q: Query, view: string | null, keep?: Set<number>) {
-  const s = await getPage(name, q);
+  // fix222: each phase is its own perf entry ("stored bb-games: read / pick / send"), so a stall names the phase
+  const read = track(`stored ${name}: read`);
+  let s: Awaited<ReturnType<typeof getPage>>;
+  try { s = await getPage(name, q); } finally { read(); }
   if (!s) return res.status(503).set('Retry-After', '5').json({ error: 'Loading, please try again in a moment' });
+  const pick = track(`stored ${name}: pick`);
+  try { return sendStoredPick(req, res, s, view, keep, name); } finally { pick(); }
+}
+function sendStoredPick(req: express.Request, res: express.Response, s: NonNullable<Awaited<ReturnType<typeof getPage>>>, view: string | null, keep: Set<number> | undefined, name: string) {
+  const send = (f: () => unknown) => { const d = track(`stored ${name}: send`); try { return f(); } finally { d(); } };
   // fix199: a signed-out visitor from a data-centre network gets no prediction at all (finished games too)
   if ((req as any).proxyAnon) {
     const r = s.rows();
-    if (r) return res.type('application/json').send(joinRows(r, () => 'locked'));
+    if (r) { const text = joinRows(r, () => 'locked'); return send(() => sendJoined(req, res, text)); }
     const text = view ? s.variant(view) : undefined;
     return text !== undefined && text.length < 256 * 1024 ? res.json(JSON.parse(text)) : byWorker(req, res, () => res.json(s.body));
   }
   if (keep?.size) {
     const r = s.rows();
     if (!r) return byWorker(req, res, () => res.json(s.body));
-    const base = s.view('full')?.etag || String(s.builtAt);
+    // (fix222: the ETag without reading the whole 'full' view's text and gzip: s.etagOf)
+    const base = s.etagOf('full') || String(s.builtAt);
     res.set('ETag', `${base.slice(0, -1)}-${etagOf([...keep].sort((a, b) => a - b).join(',')).slice(1, 9)}"`).vary('Accept-Encoding');
     if (req.fresh) return res.status(304).end();
-    return res.type('application/json').send(joinRows(r, id => (keep.has(id) ? 'full' : 'tease')));
+    const text = joinRows(r, id => (keep.has(id) ? 'full' : 'tease'));
+    return send(() => sendJoined(req, res, text));
   }
   const v = view ? s.view(view) : undefined;
   if (!v) return byWorker(req, res, () => res.json(s.body));
-  sendView(req, res, v);
+  send(() => sendView(req, res, v));
 }
 
 // Cross-site guard: another website may not make a signed-in browser change anything here (POST / PUT / DELETE, or a
@@ -3501,6 +3527,17 @@ app.get('/api/bb/tune', async (req, res) => {
 app.get('/api/bb/tuned', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: tunedInfo(req.query.clear === '1' ? 'clear' : req.query.reload === '1' ? 'reload' : undefined) }); } catch (e) { sendError(res, e, 'Failed'); }
+});
+// fix222 (admin): the calibration layer of basketball / tennis — the test season raw vs calibrated, per league kept or
+// not, the strong lines and the live season (never fitted); ?rebuild=1 builds it again in the background
+app.get('/api/admin/calibration', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const sport = req.query.sport === 'tennis' ? 'tennis' : 'basketball';
+  if (req.query.rebuild === '1') {
+    if (sport === 'basketball') void heavy('bb calibration', () => buildBbCalibration('admin'));
+    else void tennisModelTick('report').catch(e => logger.warn(`tennis report: ${e?.message || e}`));
+  }
+  try { res.json({ data: { sport, rebuilding: req.query.rebuild === '1', report: calibReport(sport) } }); } catch (e) { sendError(res, e, 'Failed'); }
 });
 app.get('/api/bb/wf', (req, res) => res.json({ data: bbWalkForward(String(req.query.code || '').toUpperCase()), timestamp: new Date().toISOString() }));
 // Live scores: both providers' latest reading of every Football-Data.org match and the one shown (liveScores.ts)

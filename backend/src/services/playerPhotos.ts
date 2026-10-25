@@ -544,6 +544,66 @@ export async function photosTick(limit = Number(process.env.PHOTO_BATCH) || 60) 
   } finally { run.running = false; }
 }
 
+/**
+ * fix222: one pass over every basketball player now (NBA first, then EuroLeague, most minutes first) with the fix221
+ * matcher, instead of 30 a run beside tennis (~33 h for the requeued 3,000). Same pace (one Wikimedia call per
+ * PHOTO_GAP_MS), 20 players a slice with the run lock taken per slice (the 20-min tick can run between slices); a 429
+ * waits 10 min. Progress in photo_wd_cache '_bbPass' (data health "Player photos"); done once per matcher version.
+ */
+const BB_PASS = `${MATCHER}-pass`;
+export async function photosBbPass(): Promise<void> {
+  if (process.env.PLAYER_PHOTOS === '0') return;
+  const state = (db.prepare(`SELECT data FROM photo_wd_cache WHERE qid = '_bbPass'`).get() as any)?.data;
+  let p: { v: string; total: number; done: number; ok: number; at: string; end: string | null } | null = null;
+  try { p = state ? JSON.parse(state) : null; } catch { p = null; }
+  if (p?.v === BB_PASS && p.end) return;
+  requeueOnce();
+  const seen = () => new Map((db.prepare(`SELECT player_id, status, checked_at FROM player_photos WHERE sport = 'basketball'`).all() as any[]).map(r => [r.player_id, r]));
+  const stale = () => new Date(Date.now() - RECHECK_MS).toISOString();
+  // (each player once per pass: one that failed is not tried again until the next pass / the 20-min tick)
+  const tried = new Set<number>();
+  const todo = () => {
+    const s = seen(), st = stale();
+    const due = (r: any) => !r || ((r.status === 'ok' || r.status === 'none') && r.checked_at < st) || (r.status === 'review' && r.checked_at < '2001');
+    return basketballQueue().filter(x => !tried.has(x.id) && !abbreviated(x.name) && due(s.get(x.id))).sort((a, b) => a.prio - b.prio);
+  };
+  const first = todo();
+  const prog = { v: BB_PASS, total: (p?.v === BB_PASS ? p.done : 0) + first.length, done: p?.v === BB_PASS ? p.done : 0, ok: p?.v === BB_PASS ? p.ok : 0, at: new Date().toISOString(), end: null as string | null };
+  const save = () => db.prepare(`INSERT OR REPLACE INTO photo_wd_cache (qid, data, at) VALUES ('_bbPass', ?, ?)`).run(JSON.stringify(prog), new Date().toISOString());
+  save();
+  logger.info(`player photos: basketball pass (${MATCHER} matcher) — ${first.length} players to look at, NBA first`);
+  const step = yieldEvery(1, 50);
+  for (let list = first; list.length; list = todo()) {
+    for (let i = 0; i < list.length; i += PHOTO_SLICE) {
+      while (run.running) await new Promise(r => setTimeout(r, 5000));
+      run.running = true;
+      let wait = false;
+      try {
+        for (const x of list.slice(i, i + PHOTO_SLICE)) {
+          tried.add(x.id);
+          try {
+            const r = await photoFor(x);
+            prog.done++; run.done++;
+            if (r.status === 'ok') { prog.ok++; run.ok++; } else if (r.status === 'review') run.review++; else run.none++;
+          } catch (e: any) {
+            run.errors++; run.lastError = `basketball ${x.id} ${x.name}: ${e?.message || e}`;
+            if (/429/.test(String(e?.message))) { wait = true; break; }
+          }
+          await step();
+        }
+      } finally { run.running = false; }
+      save();
+      if (prog.done % 200 < PHOTO_SLICE) logger.info(`player photos: basketball pass ${prog.done} of ${prog.total} (${prog.ok} photos)`);
+      if (wait) { logger.warn(`player photos: ${run.lastError} — the basketball pass waits 10 min`); await new Promise(r => setTimeout(r, 10 * 60 * 1000)); break; }
+      await yieldLoop();
+    }
+  }
+  prog.end = new Date().toISOString();
+  save();
+  const c = bbCoverage();
+  logger.info(`player photos: basketball pass done — ${prog.done} looked at, ${prog.ok} photos; shown ${c.has} of ${c.n} (${c.leagues.filter(l => l.code === 'NBA' || l.code === 'EL').map(l => `${l.code} ${Math.round((100 * l.has) / Math.max(1, l.n))}%`).join(', ')})`);
+}
+
 /* ---------------- read side (pages) ---------------- */
 
 export interface Shown { url: string; author: string; licence: string; licenceUrl: string | null; source: string }
@@ -692,6 +752,7 @@ export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn'
   const missing = (db.prepare(`SELECT sport, player_id, name, path FROM player_photos WHERE status = 'ok'`).all() as any[]).filter(r => !r.path || !fs.existsSync(fileOf(r.sport, r.path)!));
   const review = (db.prepare(`SELECT COUNT(*) AS n FROM player_photos WHERE status = 'review'`).get() as any).n;
   const lastRun = (db.prepare(`SELECT at FROM photo_wd_cache WHERE qid = '_lastRun'`).get() as any)?.at || null;
+  const pass = (() => { try { return JSON.parse((db.prepare(`SELECT data FROM photo_wd_cache WHERE qid = '_bbPass'`).get() as any)?.data || 'null'); } catch { return null; } })();
   const nba = leagues.find(l => l.code === 'NBA'), el = leagues.find(l => l.code === 'EL');
   const items = [
     ...leagues.slice(0, 12).map(l => `basketball ${l.code}: ${pct(l.has, l.n)} (${l.has} of ${l.n})`),
@@ -703,7 +764,7 @@ export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn'
   const stale = process.env.PLAYER_PHOTOS !== '0' && (!lastRun || Date.parse(lastRun) < Date.now() - 2 * DAY);
   return {
     id: 'player-photos', label: 'Player photos', level: bad.length ? 'fail' : stale || missing.length || (nba && nba.n >= 50 && nba.has / nba.n < 0.85) || (el && el.n >= 50 && el.has / el.n < 0.6) ? 'warn' : 'ok',
-    detail: `tennis top 100 ${pct(top100, n100)} · top 500 ${pct(top500, n500)} · basketball ${pct(bbHas, bbN)} (${bbHas} of ${bbN}) · ${review} to review · last run ${lastRun ? lastRun.slice(0, 16).replace('T', ' ') : 'never'}`,
+    detail: `tennis top 100 ${pct(top100, n100)} · top 500 ${pct(top500, n500)} · basketball ${pct(bbHas, bbN)} (${bbHas} of ${bbN}) · ${review} to review · last run ${lastRun ? lastRun.slice(0, 16).replace('T', ' ') : 'never'}${pass ? ` · basketball pass (${pass.v}): ${pass.end ? `done ${String(pass.end).slice(0, 10)}` : `${pass.done} of ${pass.total} looked at`}, ${pass.ok} photos` : ''}`,
     items
   };
 }

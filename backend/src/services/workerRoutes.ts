@@ -17,7 +17,7 @@ import type express from 'express';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { isWeb } from './role';
-import { fetchFromWorker, forwardToWorker, type WorkerAnswer } from './forward';
+import { fetchFromWorker, forwardToWorker, waiting, type WorkerAnswer } from './forward';
 import { isWorker } from './role';
 import { deferred } from './deferredWrites';
 
@@ -240,6 +240,7 @@ export function workerRoutes(req: express.Request, res: express.Response, next: 
     return;
   }
   stats.forwarded++;
+  waiting(res);
   fetchCopy(k, req, true).then(x => {
     if (isCopy(x)) return sendCopy(res, x, 'new');
     res.status(x.status);

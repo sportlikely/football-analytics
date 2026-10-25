@@ -20,6 +20,7 @@ import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from 
 import { injuryLoss } from './bbInjuries';
 import type { RBase } from '../utils/nbaImpact';
 import type { GridBase, GridView } from '../utils/bbGridMath';
+import { bbCalibrated, bbCalibVer, bbStrongLine } from './sportCalibration';
 import { nbaV4Adjust, nbaV4Ver, buildNbaV4, saveShadow, nbaSameDay, type V4Result } from './nbaV4';
 import { replayLeague, storeRows, publishSnap, gridSnapVer } from './bbGrid';
 import { publishGridState, gridPredict, gridParamsVer, gridWeight } from './bbTuner';
@@ -34,7 +35,7 @@ type Game = {
 };
 type Params = { k: number; r: number; b2b: number };
 type Team = { o: number; d: number; season: string; games: number; last: number; sg: number; ha: number };
-type Pred = { pHome: number; margin: number; neutral?: number; netH?: number; netA?: number; haH?: number; haA?: number; sig?: number; grid?: GridView; model?: string; pV3?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
+type Pred = { pHome: number; margin: number; neutral?: number; netH?: number; netA?: number; haH?: number; haA?: number; sig?: number; grid?: GridView; model?: string; pV3?: number; pRaw?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
 /** fix192: how a team with no games in the league was rated ('other-league' = its rating there, moved to this league's level) */
 export type NewBasis = 'other-league' | 'bottom3';
 
@@ -791,7 +792,7 @@ function livePrior(code: string, id: number, now: number, v2: boolean) {
 export function predictGameCached(g: Game): Pred | null {
   if (!models.has(g.code)) return null;
   const ph = prevKickoff(g.home_id, g), pa = prevKickoff(g.away_id, g);
-  const key = `${modelStamp.get(g.code) || 0}|${talentVer}|${gridSnapVer()}.${gridParamsVer()}|${g.code === 'NBA' ? `${injuryVer}.${nbaV4Ver()}` : 0}|${g.kickoff}|${g.status || ''}|${g.home_id}|${g.away_id}|${ph || 0}|${pa || 0}`;
+  const key = `${modelStamp.get(g.code) || 0}|${talentVer}|${gridSnapVer()}.${gridParamsVer()}.${bbCalibVer()}|${g.code === 'NBA' ? `${injuryVer}.${nbaV4Ver()}` : 0}|${g.kickoff}|${g.status || ''}|${g.home_id}|${g.away_id}|${ph || 0}|${pa || 0}`;
   const c = predCache.get(g.game_id);
   if (c && c.key === key) return c.pred;
   const pred = predictGame(g, ph, pa);
@@ -803,7 +804,12 @@ export function predictGameCached(g: Game): Pred | null {
 /** fix217: the last v4 numbers of each NBA game (players removed, same-day move) for the re-pricing log */
 const v4Detail = new Map<number, V4Result>();
 
+/** fix222: the shown chance = the league's calibration layer (services/sportCalibration.ts) on the model's own (pRaw) */
 export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null {
+  const pr = predictRaw(g, phIn, paIn);
+  return pr ? { ...pr, pRaw: pr.pHome, pHome: bbCalibrated(g.code, pr.pHome) } : null;
+}
+function predictRaw(g: Game, phIn?: number, paIn?: number): Pred | null {
   const m = models.get(g.code);
   if (!m) return null;
   const L = m.L;
@@ -1049,6 +1055,8 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_bb_pred_kickoff ON bb_predictions(kickoff);
 `);
+// fix222: the model's own chance beside the calibrated one shown (null = saved before the layer)
+try { db.exec(`ALTER TABLE bb_predictions ADD COLUMN p_raw REAL`); } catch { /* there already */ }
 
 /** Save / refresh predictions for games in the next 7 days. A game's prediction is frozen at tip-off. */
 // fix210: async — 200 games a turn (predictions first, then one short transaction), a yield between turns
@@ -1060,16 +1068,16 @@ export async function recordBbPredictions(codes?: string[], ids?: number[], out?
   const onlyIds = ids && ids.length ? ` AND game_id IN (${ids.map(() => '?').join(',')})` : '';
   const rows = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week, home_name, away_name FROM bb_games
     WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS')${only}${onlyIds}`).all(now.toISOString(), new Date(now.getTime() + 7 * 86400000).toISOString(), ...(codes && codes.length ? codes : []), ...(ids || [])) as Game[];
-  const up = db.prepare(`INSERT OR REPLACE INTO bb_predictions (game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const up = db.prepare(`INSERT OR REPLACE INTO bb_predictions (game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at, p_raw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
   for (let i = 0; i < rows.length; i += 200) {
     const part = rows.slice(i, i + 200).map(g => ({ g, pr: predictGameCached(g) })).filter(x => x.pr); // fix159: also fills the cache the game lists read
     await yieldLoop();
     db.exec('BEGIN');
     try {
-      for (const { g, pr } of part) up.run(g.game_id, g.code, g.kickoff, pr!.model || BB_MODEL, pr!.pHome, pr!.margin, pr!.total, pr!.home, pr!.away, now.toISOString());
+      for (const { g, pr } of part) up.run(g.game_id, g.code, g.kickoff, pr!.model || BB_MODEL, pr!.pHome, pr!.margin, pr!.total, pr!.home, pr!.away, now.toISOString(), pr!.pRaw ?? null);
       // fix217: NBA — v4 and the current model side by side (daily report, admin NBA model check)
-      saveShadow(part.filter(x => x.pr!.pV3 !== undefined).map(({ g, pr }) => ({ game_id: g.game_id, kickoff: g.kickoff, mode: pr!.grid ? 'grid' : pr!.model === 'bb-v4' ? 'full' : 'reprice', p_v3: pr!.pV3!, p_v4: pr!.pHome })));
+      saveShadow(part.filter(x => x.pr!.pV3 !== undefined).map(({ g, pr }) => ({ game_id: g.game_id, kickoff: g.kickoff, mode: pr!.grid ? 'grid' : pr!.model === 'bb-v4' ? 'full' : 'reprice', p_v3: pr!.pV3!, p_v4: pr!.pRaw ?? pr!.pHome })));
       db.exec('COMMIT');
       if (out) for (const { g, pr } of part) out.set(g.game_id, { v3: pr!.pV3 ?? pr!.pHome, v4: v4Detail.get(g.game_id) ?? null });
     } catch (e) {
@@ -1146,7 +1154,8 @@ export function bbRecord(days = 3650, code?: string, recentLimit = 50) {
   const tot = { n: 0, hits: 0, strongN: 0, strongHits: 0 };
   for (const r of list) {
     const hit = (r.p_home >= 0.5) === (r.hs > r.as_);
-    const strong = Math.max(r.p_home, 1 - r.p_home) >= 0.7;
+    // fix222: the league's calibrated line for predictions made with the layer (p_raw saved), 70% as shown before it
+    const strong = Math.max(r.p_home, 1 - r.p_home) >= (r.p_raw == null ? 0.7 : bbStrongLine(r.code));
     const lg = by.get(r.code) || (by.set(r.code, { n: 0, hits: 0, strongN: 0, strongHits: 0 }), by.get(r.code)!);
     for (const b of [tot, lg]) {
       b.n++; if (hit) b.hits++;

@@ -70,8 +70,13 @@ export function publishGridState(items = loadRows(), p = storedParams()): GridSt
   return s;
 }
 
-/** /api/bb/tune: fit on `train`, report on `test` (+ the live period, never tuned); apply = store + publish. */
-export async function runTune(opt: { train?: number[]; test?: number; apply?: boolean; rounds?: number }) {
+/**
+ * /api/bb/tune: fit on `train`, report on `test` (+ the live period, never tuned); apply = store + publish.
+ * fix222: `auto` = the worker's own run on the live database (after the deploy, then monthly): applied only when at
+ * least one group passes the gate with the new weights and the test season is not worse than with the settings live
+ * now; the run is remembered either way (bb_tuned 'auto').
+ */
+export async function runTune(opt: { train?: number[]; test?: number; apply?: boolean; rounds?: number; auto?: string }) {
   const train = opt.train && opt.train.length ? opt.train : GRID_TRAIN, test = opt.test ?? GRID_TEST;
   assertTrainYears(train, test);
   const all = loadRows();
@@ -92,11 +97,47 @@ export async function runTune(opt: { train?: number[]; test?: number; apply?: bo
     live: { note: 'the live period: reported, never tuned', byLeague: perLeague(all, params, y => y >= GRID_LIVE_FROM) },
     params
   };
-  if (opt.apply) {
-    db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('live', ?, ?, ?)`).run(JSON.stringify(params), JSON.stringify({ ...report, params: undefined }), new Date().toISOString());
+  const fittedAt = new Date().toISOString();
+  let apply = !!opt.apply, auto: AutoTune | null = null;
+  if (opt.auto) {
+    const cur = storedParams();
+    const before = compare(cur, te).v4.logLoss, after = report.testTable.all.v4.logLoss;
+    const passing = Object.values(report.testTable.byGroup).filter(g => g.pass).map(g => g.group);
+    apply = passing.length > 0 && after <= before + 1e-6;
+    const reason = !passing.length ? `not applied: no group beats bb-v3 on ${test} with the new weights`
+      : !apply ? `not applied: test log loss ${after} vs ${before} with the settings live now (${cur.version})`
+        : `applied: test log loss ${before} → ${after}; bb-v4 live in ${passing.join(', ')}`;
+    auto = { why: opt.auto, at: fittedAt, applied: apply, reason, before, after, passing, train, test, trainGames: tr.length, testGames: te.length };
+    db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('auto', ?, ?, ?)`).run(JSON.stringify(params), JSON.stringify(auto), fittedAt);
+    logger.info(`bb-v4 tune on the live database (${opt.auto}): ${tr.length} train games, ${te.length} test games — ${reason}`);
+  }
+  if (apply) {
+    db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('live', ?, ?, ?)`)
+      .run(JSON.stringify(params), JSON.stringify({ ...report, params: undefined, source: opt.auto ? 'live database (worker)' : 'admin', fittedAt, auto }), fittedAt);
     publishGridState(all, params);
   }
-  return report;
+  return { ...report, auto };
+}
+
+/** fix222: the worker's own tune (bb_tuned 'auto'): when it ran, on what, and whether it was applied */
+export type AutoTune = { why: string; at: string; applied: boolean; reason: string; before: number; after: number; passing: string[]; train: number[]; test: number; trainGames: number; testGames: number };
+export const AUTO_TUNE_DAYS = 30;
+export function lastAutoTune(): AutoTune | null {
+  const r = db.prepare(`SELECT report FROM bb_tuned WHERE id = 'auto'`).get() as any;
+  try { return r?.report ? JSON.parse(r.report) : null; } catch { return null; }
+}
+/** why a tune on the live database is due now (null = not due): nothing tuned here yet, or the last one is 30+ days old */
+export function autoTuneDue(now = Date.now()): string | null {
+  const last = lastAutoTune();
+  if (!last) return 'first tune on the live database';
+  return now - Date.parse(last.at) > AUTO_TUNE_DAYS * 86400000 ? `monthly re-tune (last ${last.at.slice(0, 10)})` : null;
+}
+/** the morning report's line */
+export function autoTuneLine(): string | null {
+  const a = lastAutoTune();
+  if (!a) return null;
+  const next = new Date(Date.parse(a.at) + AUTO_TUNE_DAYS * 86400000).toISOString().slice(0, 10);
+  return `Basketball bb-v4 tune on the live database ${a.at.slice(0, 16).replace('T', ' ')} UTC (train ${a.train.join(', ')}, test ${a.test}; ${a.trainGames} / ${a.testGames} games): ${a.reason}. Next re-tune ${next}.`;
 }
 
 /** /api/bb/tuned: the stored settings and the last report; reload = publish again, clear = back to the code defaults. */
@@ -106,7 +147,7 @@ export function tunedInfo(action?: 'reload' | 'clear') {
   const r = db.prepare(`SELECT report, at FROM bb_tuned WHERE id = 'live'`).get() as any;
   let report: any = null;
   try { report = r?.report ? JSON.parse(r.report) : null; } catch { report = null; }
-  return { stored: !!r, at: r?.at || null, params: storedParams(), report, gate: gs?.gate || null, perLeague: gs?.perLeague || null, live: gs?.live || null, stats: gs?.stats || null };
+  return { stored: !!r, at: r?.at || null, params: storedParams(), report, auto: lastAutoTune(), autoDue: autoTuneDue(), gate: gs?.gate || null, perLeague: gs?.perLeague || null, live: gs?.live || null, stats: gs?.stats || null };
 }
 
 /** the live weight of row i for a league (shared + offset) */

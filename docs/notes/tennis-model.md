@@ -165,3 +165,25 @@ Defaults the search starts from:
 **Synthetic check** (18k made-up matches whose truth is a serve / return model, so it only checks the code): the point
 model beat Elo, the blend beat both (LL 0.576 vs 0.577 / 0.584), and every context group was rejected (they were noise
 there).
+
+## Calibration layer (fix222, 25 Oct 2026) — public "SL Tennis 1.1"
+
+Live 25 Oct (data health): 60–70% said 64.3%, happened 53.8% (78 matches); 80%+ said 84.8%, happened 93.1%.
+- Built inside the report (`buildTennisReport`, tennis worker thread) from its walk-forward chances (`pF`, the tested
+  tours: Slams, ATP, WTA, Challenger): utils/sportCalib.ts — a **symmetric** Platt per tour (p' = σ(a·logit p), b = 0:
+  who is listed first means nothing), each tour's fit shrunk toward the all-tours fit (150 matches' worth).
+- Seasons = calendar years: fit 2024, test 2025; a tour keeps its layer only when it beats the raw chances on its 2025
+  matches (100+; fewer = the all-tours verdict). Live layer fitted on 2024–2025; 2026 reported raw vs calibrated, never
+  fitted. Strong line per tour = where the calibrated picks were right ≥ 75% on 2025 (`tennisStrongLine`; the old
+  65 / 70 / 75 line when no layer is kept).
+- Applied in `predictRow` to every shown chance (sets and totals follow the shown chance); `tennis_predictions.p_raw`
+  keeps the model's own; predictions made before a new layer are recomputed on the next 30-min tick.
+- Stored: tennis_model_store 'calib' + sport_calib 'tennis' (the report's `calibration` block: per tour raw vs
+  calibrated, bands, the 2026 matches). The first tick after the deploy rebuilds the report once (no 'calib' of
+  version fix222-1 yet; the report also re-fits the live settings, as the monthly rebuild does). `/api/admin/calibration
+  ?sport=tennis` (`&rebuild=1` = the report again).
+- Data health "Calibration (Tennis)" counts only predictions made with the layer (p_raw saved): green needs 100 such
+  finished matches in 30 days with every band of 50+ within 5 points.
+- A Platt layer moves every band the same way per tour: it cannot fix "too sure at 60–70%" and "not sure enough at 80%+"
+  in the same tour at once. If the check stays red after a week, read the 2026 block of the report per tour first.
+- Numbers: on the server after deploy (no tennis tables in the 10 Oct local copy).

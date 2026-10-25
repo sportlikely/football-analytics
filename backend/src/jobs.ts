@@ -49,7 +49,10 @@ import { db } from './db';
 import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
-import { photosTick } from './services/playerPhotos';
+import { photosTick, photosBbPass } from './services/playerPhotos';
+import { autoTuneDue, runTune } from './services/bbTuner';
+import { threadJobsOn, inThread } from './services/threadJob';
+import { buildBbCalibration } from './services/sportCalibration';
 import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
 
 let started = false;
@@ -84,6 +87,26 @@ export function startJobs() {
   // fix211: player photos (tennis + basketball) from Wikidata / Commons, a small batch every 20 min (PLAYER_PHOTOS=0 = off)
   after('player photos', () => photosTick(), 4 * 60 * 1000).unref();
   every('player photos', () => photosTick(), 20 * 60 * 1000).unref();
+  // fix222: the basketball photo matcher (fix221) once over every basketball player, NBA first, 200 a turn
+  // (a plain timer, not a timed job: the pass takes hours at one Wikimedia call a second and would be named in every
+  // worker stall; each photo's own work is short and yields)
+  setTimeout(() => { photosBbPass().catch(e => logger.warn(`player photos: basketball pass: ${e?.message || e}`)); }, 6 * 60 * 1000).unref();
+  // fix222: bb-v4 tuned on this database (first run ~20 min after the start, once the grid rows are stored; then
+  // monthly), applied only through the gate (bbTuner.runTune auto); then the basketball calibration layer again
+  const bbAutoTune = async () => {
+    const why = autoTuneDue();
+    if (!why) return;
+    try {
+      const r: any = await heavy('bb tune', () => (threadJobsOn() ? inThread('bb tune', [{ auto: why }]) : runTune({ auto: why })));
+      if (r?.auto?.applied) await buildBbCalibration('after the bb-v4 tune');
+    } catch (e: any) { logger.warn(`bb-v4 tune (${why}): ${e?.message || e}`); }
+  };
+  after('bb tune (auto)', bbAutoTune, 20 * 60 * 1000).unref();
+  every('bb tune (auto)', bbAutoTune, 3600 * 1000).unref();
+  // fix222: the calibration layers of basketball (bb-v4's walk-forward rows) and tennis (tennis-v1's walk-forward months),
+  // ~25 min after the start, then daily (each kept only when it beats the raw chances on its test season)
+  afterHeavy('bb calibration', () => buildBbCalibration('start'), 25 * 60 * 1000).unref();
+  everyHeavy('bb calibration', () => buildBbCalibration('daily'), 24 * 3600 * 1000).unref();
   // fix216: the daily picks email and the weekly digest, at each person's own send hour (checked every 5 min)
   migrateMarketingOptIn(); // fix218: the old "Email updates" switch → weekly digest, once
   every('picks emails', () => picksEmailTick().catch(e => logger.warn(`picks emails: ${e?.message || e}`)), 5 * 60 * 1000).unref();

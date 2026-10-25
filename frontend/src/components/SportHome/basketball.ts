@@ -24,7 +24,7 @@ export function toGame(g: BbGame): HGame {
     id: g.id, href: `/basketball/game/${g.id}`, reveal: { id: rid(g), status: rstatus(g) }, kickoff: g.kickoff,
     competition: { name: g.league.name, href: `/basketball/league/${g.league.code}` }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: liveLabel(g, true), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
-    pred: winnerPred(g.prediction, bbShort(g.home.name, g.league.code), bbShort(g.away.name, g.league.code), STRONG)
+    pred: winnerPred(g.prediction, bbShort(g.home.name, g.league.code), bbShort(g.away.name, g.league.code), g.prediction?.strongAt ?? STRONG)
   }
 }
 

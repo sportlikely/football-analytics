@@ -26,7 +26,7 @@ import { onLive, loadLiveRows } from './services/liveState';
 import { noteGameView, onBox } from './services/gameViews';
 import { loadNewerStates, sharedStatus } from './services/shared';
 import { markReady } from './services/readiness';
-import { markStartupDone } from './services/perf';
+import { markStartupDone, markListening } from './services/perf';
 import { WORKER_PORT } from './services/forward';
 import { workerState, type WorkerReport } from './services/workerHealth';
 import { heapShareMb } from './utils/memLimit';
@@ -202,8 +202,12 @@ const loadState = async () => {
   logger.info(`start: ${Object.keys(sharedStatus()).length} shared state(s) loaded in ${Date.now() - t0} ms — ready`);
 };
 server.listen(PORT, () => {
+  // fix222: the stall clock starts now (the module loading before listen is its own start-up entry, not a stall)
+  markListening(process.uptime() * 1000);
   setImmediate(() => void loadState());
-  setJob('boot (scheduler start)'); setImmediate(() => setJob(null)); // fix165: the sync start-up work is named in /api/perf
+  // fix165: the sync start-up work is named in /api/perf; fix222: only where a scheduler starts (WORKER=0) — the web
+  // process starts none ("boot (scheduler start)" 6.5 s on the web was the module loading before listen)
+  if (!isWeb) { setJob('boot (scheduler start)'); setImmediate(() => setJob(null)); }
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
   startPerfHistory('web'); // fix210: this process's hourly stalls and memory (perf_hours)

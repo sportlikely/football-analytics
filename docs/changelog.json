@@ -3,6 +3,36 @@
  "entries": [
   {
    "date": "2026-10-25",
+   "sport": "basketball",
+   "kind": "model",
+   "version": "4.1",
+   "text": {
+    "en": "Basketball: honest percentages. Every league's chances are now checked against what really happened in past seasons and adjusted where they were too sure (or not sure enough), so 70% means about 7 in 10. The strong pick line is now set per league.",
+    "es": "Baloncesto: porcentajes honestos. Las probabilidades de cada liga se comparan ahora con lo que pasó de verdad en temporadas anteriores y se ajustan donde eran demasiado seguras (o poco seguras), así que 70 % significa unas 7 de cada 10. El pronóstico fuerte se fija ahora por liga.",
+    "pt": "Basquetebol: percentagens honestas. As probabilidades de cada liga são agora comparadas com o que aconteceu de facto em temporadas anteriores e ajustadas onde eram demasiado confiantes (ou pouco confiantes), por isso 70% significa cerca de 7 em 10. O palpite forte é agora definido por liga.",
+    "de": "Basketball: ehrliche Prozentzahlen. Die Wahrscheinlichkeiten jeder Liga werden jetzt mit dem abgeglichen, was in früheren Saisons wirklich passiert ist, und dort angepasst, wo sie zu sicher (oder zu unsicher) waren, also heißt 70 % etwa 7 von 10. Ein starker Tipp wird jetzt pro Liga festgelegt.",
+    "fr": "Basket : des pourcentages honnêtes. Les probabilités de chaque championnat sont maintenant comparées à ce qui s’est vraiment passé lors des saisons précédentes et corrigées là où elles étaient trop sûres (ou pas assez), donc 70 % veut dire environ 7 sur 10. Le pronostic fort est maintenant fixé par championnat.",
+    "it": "Basket: percentuali oneste. Le probabilità di ogni campionato ora sono confrontate con quello che è successo davvero nelle stagioni passate e corrette dove erano troppo sicure (o troppo poco), quindi 70% vuol dire circa 7 su 10. Il pronostico forte ora è fissato per campionato.",
+    "tr": "Basketbol: dürüst yüzdeler. Her ligin olasılıkları artık geçmiş sezonlarda gerçekten olanlarla karşılaştırılıyor ve fazla emin (ya da yeterince emin olmayan) oldukları yerde düzeltiliyor; yani %70, 10 maçta yaklaşık 7 demek. Güçlü tahmin artık her lig için ayrı belirleniyor."
+   }
+  },
+  {
+   "date": "2026-10-25",
+   "sport": "tennis",
+   "kind": "model",
+   "version": "1.1",
+   "text": {
+    "en": "Tennis: honest percentages. The chances of each tour (ATP, WTA, Challenger, Grand Slams) are now checked against what really happened in past matches and adjusted where they were too sure (or not sure enough), so 70% means about 7 in 10.",
+    "es": "Tenis: porcentajes honestos. Las probabilidades de cada circuito (ATP, WTA, Challenger, Grand Slams) se comparan ahora con lo que pasó de verdad en partidos anteriores y se ajustan donde eran demasiado seguras (o poco seguras), así que 70 % significa unas 7 de cada 10.",
+    "pt": "Ténis: percentagens honestas. As probabilidades de cada circuito (ATP, WTA, Challenger, Grand Slams) são agora comparadas com o que aconteceu de facto em jogos anteriores e ajustadas onde eram demasiado confiantes (ou pouco confiantes), por isso 70% significa cerca de 7 em 10.",
+    "de": "Tennis: ehrliche Prozentzahlen. Die Wahrscheinlichkeiten jeder Tour (ATP, WTA, Challenger, Grand Slams) werden jetzt mit dem abgeglichen, was in früheren Matches wirklich passiert ist, und dort angepasst, wo sie zu sicher (oder zu unsicher) waren, also heißt 70 % etwa 7 von 10.",
+    "fr": "Tennis : des pourcentages honnêtes. Les probabilités de chaque circuit (ATP, WTA, Challenger, Grand Chelem) sont maintenant comparées à ce qui s’est vraiment passé lors des matchs précédents et corrigées là où elles étaient trop sûres (ou pas assez), donc 70 % veut dire environ 7 sur 10.",
+    "it": "Tennis: percentuali oneste. Le probabilità di ogni circuito (ATP, WTA, Challenger, Slam) ora sono confrontate con quello che è successo davvero nelle partite passate e corrette dove erano troppo sicure (o troppo poco), quindi 70% vuol dire circa 7 su 10.",
+    "tr": "Tenis: dürüst yüzdeler. Her turun (ATP, WTA, Challenger, Grand Slam) olasılıkları artık geçmiş maçlarda gerçekten olanlarla karşılaştırılıyor ve fazla emin (ya da yeterince emin olmayan) oldukları yerde düzeltiliyor; yani %70, 10 maçta yaklaşık 7 demek."
+   }
+  },
+  {
+   "date": "2026-10-25",
    "sport": "american-football",
    "kind": "model",
    "version": "1.1",

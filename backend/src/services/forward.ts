@@ -10,6 +10,8 @@ import { workerConnected } from './ipc';
 
 export const WORKER_PORT = Number(process.env.WORKER_PORT) || (Number(process.env.PORT) || 3001) + 1;
 export const INTERNAL_HEADER = 'x-sl-internal';
+/** fix222: the request's perf entry (app.ts) stops counting as running work: it waits for the worker */
+export const waiting = (res: express.Response) => { (res.locals as any)?.perfDone?.wait?.(); };
 export const internalKey = () => process.env.SL_INTERNAL_KEY || '';
 
 const agent = new http.Agent({ keepAlive: true, maxSockets: 16 });
@@ -20,6 +22,7 @@ const busy = (res: express.Response) => {
 
 export function forwardToWorker(req: express.Request, res: express.Response) {
   if (!workerConnected()) return busy(res);
+  waiting(res);
   const headers: http.OutgoingHttpHeaders = { ...req.headers };
   // the worker trusts one proxy hop: the visitor's address and scheme as this process saw them
   headers['x-forwarded-for'] = req.ip || '';

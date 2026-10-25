@@ -92,7 +92,8 @@ if (isMainThread) setInterval(() => {
     const done = ended.slice(0, 4).map(r => `${r.label}${r.detail ? ` [${r.detail}]` : ''} ${Math.round(r.end - r.start)} ms`).join(' + ');
     const job = [logs, running, done].filter(Boolean).join(' + ') || null;
     stalls.push({ at: new Date(now).toISOString(), ms: lag, job, startup: !startupDone || undefined });
-    noteHour(lag, job);
+    // fix222: the hourly count (data health "Web stalls") is what visitors could wait for: start-up stalls are listed apart
+    if (startupDone) noteHour(lag, job);
     if (stalls.length > 100) stalls.shift();
     // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
     // fix202: the worker's own loop is allowed to be busy (no visitor waits for it): its stalls are logged from 2 s
@@ -278,11 +279,13 @@ export const setJob = (label: string | null) => {
  * fix158: an API request in flight counts as a running job ("http GET /api/nfl/games"), so a freeze inside a request
  * handler is named too. Ids in the path become ":id" (one label per route). Returns the "done" call.
  */
-export function track(label: string, detail?: string): () => void {
+export type Done = (() => void) & { wait: () => void };
+export function track(label: string, detail?: string): Done {
   active.set(label, (active.get(label) || 0) + 1);
   const t0 = Date.now();
-  let ended = false;
-  return () => {
+  let ended = false, waiting = false;
+  const off = () => { const n = (active.get(label) || 1) - 1; if (n > 0) active.set(label, n); else active.delete(label); };
+  const done = (() => {
     if (ended) return;
     ended = true;
     const ms = Date.now() - t0;
@@ -290,10 +293,14 @@ export function track(label: string, detail?: string): () => void {
     j.runs++; j.lastMs = ms; j.maxMs = Math.max(j.maxMs, ms); j.totalMs += ms; j.lastAt = new Date().toISOString();
     jobs.set(label, j);
     if (jobs.size > 400) for (const k of [...jobs.keys()].filter(k => k.startsWith('http ')).slice(0, 100)) jobs.delete(k);
-    const n = (active.get(label) || 1) - 1;
-    if (n > 0) active.set(label, n); else active.delete(label);
-    noteRun(label, t0, t0 + ms, detail);
-  };
+    if (!waiting) { off(); noteRun(label, t0, t0 + ms, detail); }
+  }) as Done;
+  /*
+   * fix222: a request passed on to the worker only waits from here on (the worker answers it): it is no longer named in
+   * a stall ("/api/basketball/game/:id" was named beside the real cause on 25 Oct while it waited for the worker)
+   */
+  done.wait = () => { if (!ended && !waiting) { waiting = true; off(); } };
+  return done;
 }
 /** fix175: the path of a request for the slow-request log: ids stay, query values only for c and n (team page). */
 export function requestDetail(path: string, query: Record<string, unknown>): string {
@@ -394,6 +401,16 @@ export function afterHeavy(label: string, fn: () => unknown, ms: number): NodeJS
 
 /** fix212b: the start-up load (before the process answers anything) is not a stall anyone waited for: listed apart */
 let startupDone = false;
+/**
+ * fix222: called when the server listens. The event-loop clock starts here: the module loading before listen (imports,
+ * table checks: ~6.5 s on Railway) was reported as the first stall, named after the label set in the listen callback
+ * ("boot (scheduler start)", 22 Oct–25 Oct on the web process, which starts no scheduler). It is kept as its own
+ * start-up entry instead ("module load before listen").
+ */
+export function markListening(loadMs: number) {
+  last = Date.now();
+  if (loadMs > 300) stalls.push({ at: new Date().toISOString(), ms: Math.round(loadMs), job: 'module load before listen', startup: true });
+}
 export const markStartupDone = () => { startupDone = true; };
 export const stallsSinceReady = () => stalls.filter(s => !s.startup && s.ms > 500).length;
 /** fix218: requests that took over 500 ms since the process was ready (http entries of the recent list) */

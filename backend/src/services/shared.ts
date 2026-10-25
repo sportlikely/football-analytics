@@ -20,6 +20,58 @@ import { onIpc, sendIpc } from './ipc';
 import { timed, yieldLoop, track } from './perf';
 
 db.exec(`CREATE TABLE IF NOT EXISTS shared_state (key TEXT PRIMARY KEY, ver INTEGER NOT NULL, at TEXT NOT NULL, bytes INTEGER NOT NULL, ms INTEGER NOT NULL, data BLOB NOT NULL)`);
+// fix222: the parts of a big state (see splitBig)
+db.exec(`CREATE TABLE IF NOT EXISTS shared_parts (key TEXT NOT NULL, i INTEGER NOT NULL, ver INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (key, i))`);
+
+/*
+ * fix222: a big state (the football window: "state load af" 1.2 s on the web, 25 Oct) is stored in parts: each big
+ * top-level list (an array or a Map over PART_BYTES) is cut into slices of ~PART_BYTES, one row each, and the web
+ * process reads and deserializes one slice per turn (a yield between), then joins them. The state row itself keeps
+ * the rest and a marker naming the parts.
+ */
+const PART_BYTES = Number(process.env.STATE_PART_KB || 256) * 1024;
+const PARTS = '__sharedParts';
+type Marker = { n: number; ver: number; fields: Record<string, 'a' | 'm'> };
+function splitBig(value: unknown): { head: unknown; parts: Buffer[]; fields: Record<string, 'a' | 'm'> } {
+  const parts: Buffer[] = [], fields: Record<string, 'a' | 'm'> = {};
+  if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) return { head: value, parts, fields };
+  let head: Record<string, unknown> | null = null;
+  for (const [f, v] of Object.entries(value as Record<string, unknown>)) {
+    const isA = Array.isArray(v), isM = v instanceof Map;
+    if (!(isA || isM)) continue;
+    const items: unknown[] = isA ? (v as unknown[]) : [...(v as Map<unknown, unknown>).entries()];
+    if (items.length < 50) continue;
+    const size = v8.serialize(items).length;
+    if (size <= PART_BYTES) continue;
+    const per = Math.max(1, Math.floor((items.length * PART_BYTES) / size));
+    for (let i = 0; i < items.length; i += per) parts.push(v8.serialize({ f, x: items.slice(i, i + per) }));
+    fields[f] = isA ? 'a' : 'm';
+    if (!head) head = { ...(value as Record<string, unknown>) };
+    head[f] = null;
+  }
+  return { head: head || value, parts, fields };
+}
+/** the whole value from its state row and parts (each part read when asked: `part(i)` → its bytes, or null = replaced) */
+async function joinParts(head: any, part: (i: number) => Buffer | null, pause: () => Promise<void>): Promise<unknown | null> {
+  const mk: Marker | undefined = head?.[PARTS];
+  if (!mk) return head;
+  const out: Record<string, any> = { ...head };
+  delete out[PARTS];
+  for (const [f, t] of Object.entries(mk.fields)) out[f] = t === 'a' ? [] : new Map();
+  for (let i = 0; i < mk.n; i++) {
+    const b = part(i);
+    if (!b) return null;
+    const { f, x } = v8.deserialize(b) as { f: string; x: any[] };
+    const dst = out[f];
+    if (Array.isArray(dst)) for (const it of x) dst.push(it); else for (const [k, v] of x) dst.set(k, v);
+    await pause();
+  }
+  return out;
+}
+const partReader = (key: string, ver: number) => {
+  const q = db.prepare(`SELECT data FROM shared_parts WHERE key = ? AND i = ? AND ver = ?`);
+  return (i: number) => { const r: any = q.get(key, i, ver); return r ? Buffer.from(r.data) : null; };
+};
 
 // fix210b: an applier may return a promise (its async part: the NFL engine joins its games); loads wait for it
 type Apply = (key: string, value: any) => void | Promise<void>;
@@ -43,12 +95,21 @@ export function publishState(key: string, value: unknown): void {
   const t0 = Date.now();
   const done = track(`state publish ${key.split(':').slice(0, 2).join(':')}`); // fix210b: named in /api/perf
   try {
-    const buf = v8.serialize(value);
     const ver = (lastVer = Math.max(lastVer + 1, t0));
-    db.prepare(`INSERT INTO shared_state (key, ver, at, bytes, ms, data) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET ver = excluded.ver, at = excluded.at, bytes = excluded.bytes, ms = excluded.ms, data = excluded.data`)
-      .run(key, ver, new Date(t0).toISOString(), buf.length, Date.now() - t0, buf);
-    published.set(key, { ver, at: t0, ms: Date.now() - t0, bytes: buf.length });
+    const { head, parts, fields } = splitBig(value);
+    const buf = v8.serialize(parts.length ? { ...(head as object), [PARTS]: { n: parts.length, ver, fields } satisfies Marker } : head);
+    const bytes = buf.length + parts.reduce((s, b) => s + b.length, 0);
+    db.exec('BEGIN');
+    try {
+      db.prepare(`DELETE FROM shared_parts WHERE key = ?`).run(key);
+      const ins = db.prepare(`INSERT INTO shared_parts (key, i, ver, data) VALUES (?, ?, ?, ?)`);
+      parts.forEach((b, i) => ins.run(key, i, ver, b));
+      db.prepare(`INSERT INTO shared_state (key, ver, at, bytes, ms, data) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET ver = excluded.ver, at = excluded.at, bytes = excluded.bytes, ms = excluded.ms, data = excluded.data`)
+        .run(key, ver, new Date(t0).toISOString(), bytes, Date.now() - t0, buf);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    published.set(key, { ver, at: t0, ms: Date.now() - t0, bytes });
     sendIpc({ t: 'state', key, ver });
   } catch (e: any) {
     logger.warn(`shared state ${key}: ${e?.message || e}`);
@@ -70,8 +131,25 @@ export function applyState(key: string, value: unknown) {
 }
 /** fix210 (job thread): the last published copies of these states, applied before a build (e.g. the other leagues' models) */
 export function applyStored(prefix: string) {
-  for (const r of db.prepare(`SELECT key, data FROM shared_state WHERE key LIKE ? ORDER BY key`).all(`${prefix}%`) as any[]) {
-    try { applyHere(r.key, v8.deserialize(Buffer.from(r.data))); } catch (e: any) { logger.warn(`shared state ${r.key}: ${e?.message || e}`); }
+  for (const r of db.prepare(`SELECT key, ver, data FROM shared_state WHERE key LIKE ? ORDER BY key`).all(`${prefix}%`) as any[]) {
+    try {
+      // (a job thread, before its build: the parts are joined in one go — nothing waits on this thread)
+      const head: any = v8.deserialize(Buffer.from(r.data));
+      const mk: Marker | undefined = head?.[PARTS];
+      if (!mk) { applyHere(r.key, head); continue; }
+      const read = partReader(r.key, mk.ver);
+      const out: Record<string, any> = { ...head };
+      delete out[PARTS];
+      for (const [f, t] of Object.entries(mk.fields)) out[f] = t === 'a' ? [] : new Map();
+      let whole = true;
+      for (let i = 0; i < mk.n && whole; i++) {
+        const b = read(i);
+        if (!b) { whole = false; break; }
+        const { f, x } = v8.deserialize(b) as { f: string; x: any[] };
+        if (Array.isArray(out[f])) for (const it of x) out[f].push(it); else for (const [k, v] of x) out[f].set(k, v);
+      }
+      if (whole) applyHere(r.key, out);
+    } catch (e: any) { logger.warn(`shared state ${r.key}: ${e?.message || e}`); }
   }
 }
 
@@ -95,7 +173,9 @@ async function loadNow(key: string) {
   const row: any = db.prepare(`SELECT ver, bytes, data FROM shared_state WHERE key = ?`).get(key);
   if (!row || (applied.get(key)?.ver || 0) >= row.ver) return;
   const t0 = Date.now();
-  const value = v8.deserialize(Buffer.from(row.data));
+  // fix222: a big state comes in parts, one deserialized per turn (null = the worker replaced it meanwhile: next round)
+  const value = await joinParts(v8.deserialize(Buffer.from(row.data)), partReader(key, row.ver), yieldLoop);
+  if (value === null) { setTimeout(() => queueLoad(key), 1000).unref(); return; }
   await yieldLoop();
   for (const a of appliers) if (key === a.prefix || key.startsWith(a.prefix)) { await a.apply(key, value); await yieldLoop(); }
   applied.set(key, { ver: row.ver, at: Date.now(), ms: Date.now() - t0, bytes: row.bytes });

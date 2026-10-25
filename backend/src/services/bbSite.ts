@@ -20,6 +20,7 @@ import { bbLiveFor, periodLen, bbLiveCurve } from './bbLive';
 import { bbProbableLineup, bbBeforeAfter } from './bbLineups';
 import { groupStandings, standingsIssues, type StandGroup } from '../utils/bbStandingsGroups';
 import { photoUrl } from './playerPhotos';
+import { bbStrongLine } from './sportCalibration';
 
 export const bbPublic = () => process.env.BASKETBALL_PUBLIC === '1';
 
@@ -103,6 +104,8 @@ function present(c: Core, full: boolean) {
         injHome: pred.injHome || 0, injAway: pred.injAway || 0,
         // fix192: a side with no games in this league, rated from another of our leagues
         newHome: pred.newHome || null, newAway: pred.newAway || null,
+        // fix222: the league's strong-pick line (calibrated picks right ≥ 75% in testing), %
+        strongAt: Math.round(bbStrongLine(g.code) * 100),
         live: c.live
       } : {}),
       hit: state === 'done' && g.hs !== null && !check ? (pick === 'H') === (g.hs > g.as_) : null

@@ -79,6 +79,38 @@ better in 10 of 15 leagues with games (small samples; BSN 245 games: 0.670 → 0
   from its training spread warns; rest / motivation flags skipped) + "NBA vs backtest" (fix217); the 07:00 report lists
   bb-v4 vs bb-v3 per league for 2 weeks (market favourite: no basketball odds feed, n/a).
 
+## Tuned on the live database + calibration layer (fix222, 25 Oct 2026) — public "SL Basketball 4.1"
+Live 25 Oct: /api/bb/tuned stored:false (the code defaults from the 10 Oct research ran live); data health "Calibration
+(Basketball)" failed: 60–70% said 64.7%, happened 58.4% (178 games).
+- **Tune on the live database (worker):** jobs.ts "bb tune (auto)" ~20 min after a start, then hourly checks: due when
+  nothing was tuned on this database yet, or the last automatic run is 30+ days old. runTune({ auto }) in the job thread:
+  train 2022–24, test 2025 (GRID_TRAIN / GRID_TEST), applied only when at least one group passes the gate with the new
+  weights and the 2025 log loss is not worse than with the settings live now; every run is kept in bb_tuned 'auto'
+  (applied or not, why). Admin card: "Fitted on live data at <time> · train … → test …"; the 07:00 report has the line
+  with the next re-tune date. Manual /api/bb/tune?apply=1 still works (the monthly clock follows the automatic runs).
+- **Calibration layer (utils/sportCalib.ts, services/sportCalibration.ts):** fix220's Platt layer per league (a ≥ 0.05:
+  monotone), each league's fit shrunk toward the all-leagues fit (150 games' worth). Rows: bb-v4's walk-forward rows
+  (bb_grid_rows) as the live model shows them (bb-v4 where the group passes the gate, else bb-v3). Fit 2022–2024 → test
+  2025; a league keeps its layer only when it beats raw on its 2025 games (100+; fewer = the all-leagues verdict); live
+  layer 2022–2025; 2026+ reported, never fitted. Applied in predictGame to every shown chance (pRaw kept;
+  bb_predictions.p_raw); built ~25 min after a start, after an applied tune, then daily (job thread 'bb calib'); state
+  'calib:bb'. Strong line per league (fix220's rule): the lowest chance from which the calibrated 2025 picks were right
+  ≥ 75% (bbStrongLine; the record, the lists, the game page and the picks email use it; predictions saved before the
+  layer keep 70%). /api/admin/calibration?sport=basketball (&rebuild=1), table on the admin card.
+- **On the 10 Oct copy (all 18 leagues built here, 88 s):** the auto tune passes all three groups (17,147 train, 6,454
+  test games; 2025 log loss 0.5774 → 0.5774, applied). bb-v4 is already calibrated on 2025: bands 50–60 said 55.0 /
+  happened 53.6, 60–70 65.0 / 65.6, 70–80 74.7 / 74.7, 80–90 84.8 / 81.6, 90+ 94.4 / 94.0; the layer moves log loss
+  0.5774 → 0.5771 (kept in 12 leagues, near identity). The live season (633 games to 10 Oct) is worse and over-confident
+  (log loss 0.630; 60–70 said 64.9 / happened 61.3) and the layer barely moves it (0.6296 → 0.6290). By games played,
+  past seasons' first games are calibrated too (2025 games 0–4: 60–70 said 65.1 / happened 66.4), so this is a
+  live-vs-backtest gap, not an early-season pattern a layer on past seasons could learn. **So the layer alone will not
+  turn "Calibration (Basketball)" green if the live gap stays.** Next step (needs Yarin's decision, it breaks fix220's
+  "the live season is never fitted"): an in-season layer fitted walk-forward on this season's own earlier games (fit on
+  games before day D, used after D, kept only if it beats the season layer on the later days); or find the input that
+  differs live (as fix220 suspected for college QBs). Strong lines on 2025 (fix220 rule): 60% in most leagues (picks of
+  60%+ were right ~76%), EL 70%, BBL 68%, ACB 67%, JBL 64%, EC 63%, LKL 76% — lower than the old 70%: if "Strong" should
+  stay rarer, change the rule in sportCalib.buildLayer (strongLine) for every sport at once.
+
 ## NBA model v4 — bb-v4 (fix217, 25 Oct 2026) — public "SL Basketball 4.0"
 (fix219: the grid above replaces this as the NBA base when the NBA group passes its gate; the re-pricing stays.)
 Why: live NBA 2026-27 started 14/30; the gap to the market is same-day information (injuries, rest, starters).

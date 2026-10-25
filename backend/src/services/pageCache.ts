@@ -59,6 +59,8 @@ export interface Stored {
   view: (v: string) => View | undefined;
   /** fix221: the page's rows (null = a page without rows) */
   rows: () => Rows | null;
+  /** fix222: a view's ETag alone (its text and gzip copy are not read) */
+  etagOf: (v: string) => string | undefined;
 }
 
 const SEP_ROW = '\x01', SEP_COL = '\x02'; // never inside JSON text (JSON.stringify escapes control characters)
@@ -164,6 +166,12 @@ function stored(key: string, m: Mem): Stored {
     builtAt: m.builtAt,
     view,
     variant: v => view(v)?.text,
+    etagOf: v => {
+      const have = m.variants.get(v);
+      if (have !== undefined) return have?.etag;
+      const r: any = db.prepare(`SELECT etag FROM page_cache WHERE key = ? AND built_at = ?`).get(`${key}#${v}`, m.builtAt);
+      return r ? r.etag || `"${m.builtAt.toString(36)}-${v}"` : undefined;
+    },
     rows: () => {
       if (m.rows === undefined) {
         const t = readView(key, 'rows', m.builtAt)?.text;

@@ -86,6 +86,8 @@ test('a full tick in the worker: predictions computed there, written back here i
   db.prepare(`INSERT OR REPLACE INTO tennis_meta (k, v) VALUES ('pkg:2023-01', '1')`).run();
   db.prepare(`INSERT OR REPLACE INTO tennis_model_store (k, v, at) VALUES ('report', ?, ?)`).run(JSON.stringify({ test: { to: last }, context: { kept: [] }, mode: 'elo', strong: {} }), now);
   db.prepare(`UPDATE tennis_model_store SET v = json_set(v, '$.at', ?) WHERE k = 'settings'`).run(now);
+  // fix222: the calibration layer of this version is stored too (none kept), so the tick does not rebuild the report
+  db.prepare(`INSERT OR REPLACE INTO tennis_model_store (k, v, at) VALUES ('calib', ?, ?)`).run(JSON.stringify({ at: now, version: tm.TENNIS_CALIB_VERSION, layer: null, strong: {}, strongSport: 0.75 }), now);
   const soon = t => new Date(Date.now() + t * 3600000).toISOString();
   const up = db.prepare(`INSERT INTO tennis_matches (id, tournament_id, tournament, tour, tier, surface, indoor, draw, round, round_code, is_qualifying, best_of, scheduled_at,
     status, p1_id, p1_name, p2_id, p2_name, source, updated_at) VALUES (?, 't99', 'Test Open 99', 'atp', 'atp_250', 'hard', 0, 'singles', 'R32', 'R32', 0, 3, ?, 'upcoming', ?, ?, ?, ?, 'test', ?)`);

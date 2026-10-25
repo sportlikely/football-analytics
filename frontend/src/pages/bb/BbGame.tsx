@@ -141,7 +141,7 @@ export default function BbGame() {
         <>
           <WinnerPrediction
             rid={rid(g)} status={rstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model={g.prediction?.model || 'bb-v3'} sport="basketball"
-            saved={t('Saved before tip-off')} updated={t('Updated until tip-off')} strongAt={70} showLockedPick
+            saved={t('Saved before tip-off')} updated={t('Updated until tip-off')} strongAt={g.prediction?.strongAt ?? 70} showLockedPick
             stats={[
               { label: t('Point spread'), value: spreadText(g) || '–' },
               { label: t('Predicted score'), value: p?.score ? `${p.score.home}–${p.score.away}` : '–' },

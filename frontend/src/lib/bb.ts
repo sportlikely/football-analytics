@@ -30,6 +30,8 @@ export interface BbPrediction {
   newAway?: string | null
   /** while the game is on: win chance now and the projected final score (from the prediction saved at tip-off) */
   live?: BbLiveChance | null
+  /** fix222: the league's strong-pick line, % (calibrated picks right ≥ 75% in testing) */
+  strongAt?: number
   hit: boolean | null
 }
 export interface BbLiveChance { pHome: number; pAway: number; score: { home: number; away: number }; total: number; left: number }

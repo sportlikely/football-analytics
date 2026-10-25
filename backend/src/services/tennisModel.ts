@@ -51,6 +51,7 @@ import { slicer, yieldLoop, timed, heavy, track } from './perf';
 import { isWeb, isWorker } from './role';
 import { onState, publishState } from './shared';
 import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
+import { buildLayer, applyLayer, type LeagueLayer } from '../utils/sportCalib';
 
 export const TENNIS_MODEL = 'tennis-v1';
 const DAY = 86400000;
@@ -66,7 +67,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tennis_pred_time ON tennis_predictions(scheduled_at);
   CREATE TABLE IF NOT EXISTS tennis_model_store (k TEXT PRIMARY KEY, v TEXT, at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS tennis_market_bench (match_id INTEGER PRIMARY KEY, p1 REAL, at TEXT, rows INTEGER, fetched_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS sport_calib (sport TEXT PRIMARY KEY, at TEXT NOT NULL, version TEXT NOT NULL, state TEXT NOT NULL, report TEXT);
 `);
+// fix222: the model's own chance beside the calibrated one shown (null = saved before the layer)
+try { db.exec(`ALTER TABLE tennis_predictions ADD COLUMN p_raw REAL`); } catch { /* there already, or a read-only connection */ }
 /*
  * fix200: in the worker thread every write is collected (`sink`) and sent to the main thread, which applies them in one
  * transaction; what the worker stored itself is read back from `overlay` until then.
@@ -1117,6 +1121,17 @@ export async function buildTennisReport(): Promise<any> {
     }
     strong[CAT_NAME[cat]] = { line: found ?? 75, reached: found !== null };
   }
+  // fix222: the calibration layer per tour on these walk-forward chances (symmetric Platt: who is listed first means
+  // nothing): fit 2024, test 2025, live layer 2024–2025; 2026 on is reported, never fitted. A tour keeps its layer only
+  // when it beats the raw chances on 2025; the strong line per tour = where the calibrated picks were right ≥ 75%.
+  setPhase('calibration layer');
+  const calRows = testIdx.filter(i => R.cat[i] <= 3).map(i => ({ p: pF(i), y: yArr[i], season: new Date(R.t[i]).getUTCFullYear(), league: CAT_NAME[R.cat[i]] as string }));
+  const cal = buildLayer(calRows, { first: CALIB_FIRST_YEAR, test: CALIB_TEST_YEAR, last: CALIB_TEST_YEAR, symmetric: true, strongDefault: 0.75 });
+  const calib: TennisCalib = { at: new Date().toISOString(), version: TENNIS_CALIB_VERSION, layer: cal.layer, strong: cal.strong, strongSport: cal.strongSport };
+  store.set('calib', calib);
+  write(`INSERT OR REPLACE INTO sport_calib (sport, at, version, state, report) VALUES ('tennis', ?, ?, ?, ?)`, [calib.at, TENNIS_CALIB_VERSION, JSON.stringify(calib), JSON.stringify({ ...cal, source: `${TENNIS_MODEL} walk-forward months`, rows: calRows.length })]);
+  logger.info(`${TENNIS_MODEL} calibration: test ${CALIB_TEST_YEAR} LL raw ${cal.test.raw.logLoss} → ${cal.test.ownFit.logLoss} (own fits) / ${cal.test.sportFit.logLoss} (one fit); layer ${cal.layer ? `kept in ${cal.perLeague.filter(x => x.kept).map(x => x.league).join(', ')}` : 'not kept'}; 2026 ${cal.live.games} matches LL ${cal.live.raw.logLoss} → ${cal.live.cal.logLoss}`);
+  calibCache = null; strongCache = null;
   const months = testMonths.map(M => {
     const ix = Array.from(byMonth[M]);
     const m = metrics(ix, pF, y) as any;
@@ -1134,7 +1149,7 @@ export async function buildTennisReport(): Promise<any> {
     model: TENNIS_MODEL, builtAt: new Date().toISOString(), minutes: r1((Date.now() - t0) / 60000),
     test: { from: monthName(FIRST_TEST), to: monthName(lastM), months: testMonths.length, matches: testIdx.length },
     mode, walkForwardLogLoss: { eloOnly: r4(llA), pointModelOnly: r4(llB), blend: r4(best.ll) }, context: { tried, kept },
-    rankToElo: rmTest, tours, surfaces, strong, months,
+    rankToElo: rmTest, tours, surfaces, strong, months, calibration: cal,
     settingsTried: { elo: memoA.size, pointModel: memoB.size },
     data: {
       matches: R.n, players: c.reg.size, withStats: countWhere(R.n, i => R.cov[i] > 0),
@@ -1345,7 +1360,7 @@ export async function applyNewResults(): Promise<number> {
 }
 
 export interface TennisPred {
-  p1: number; p2: number; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
+  p1: number; p2: number; p1Raw: number; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
   sets: Record<string, number>; games: ReturnType<typeof gamesSummary>; why: string[];
   numbers: { eloSurface: [number, number]; eloOverall: [number, number]; servePoint: [number, number]; pElo: number; pPoint: number; mode: string; bo?: number; rule?: number }
 }
@@ -1358,13 +1373,16 @@ function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): 
     const val = (name: string) => (name === 'elo' ? a.logit : name === 'point' ? logit(pP) : f[FEAT.indexOf(name as any)]);
     p = sigma(s.blend.cols.reduce((acc, name, j) => acc + (val(name) / s.blend!.sd[j]) * s.blend!.w[j], 0));
   }
+  const cat = CAT_NAME[R.cat[i]];
+  // fix222: the shown chance = the tour's calibration layer on the model's own (sets and totals follow the shown one)
+  const pRaw = p;
+  p = applyLayer(tennisCalib()?.layer, cat, p);
   const sc = rescale(b.pa, b.pb, R.bo[i], R.rule[i], p);
   const d = matchDist(sc.pa, sc.pb, R.bo[i], R.rule[i], true);
-  const cat = CAT_NAME[R.cat[i]];
-  const line = (s.strong[cat]?.line ?? 75) / 100;
+  const line = tennisStrongLine(cat) / 100;
   const pct = (x: number) => Math.round(x * 1000) / 10;
   return {
-    p1: pct(p), p2: pct(1 - p), pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
+    p1: pct(p), p2: pct(1 - p), p1Raw: pct(pRaw), pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
     firstSetP1: pct(d.first), sets: Object.fromEntries(Object.entries(d.sets).sort().map(([k, v]) => [k, pct(v)])), games: gamesSummary(d.games!, R.bo[i]),
     why: whyLines(L, R, i, names, a, b, f),
     numbers: { eloSurface: [Math.round(a.a.s), Math.round(a.b.s)], eloOverall: [Math.round(a.a.o), Math.round(a.b.o)], servePoint: [pct(b.pa), pct(b.pb)], pElo: pct(pE), pPoint: pct(pP), mode: s.mode, bo: R.bo[i], rule: R.rule[i] }
@@ -1422,15 +1440,15 @@ export async function saveTennisPredictions(): Promise<number> {
     if (!parseInto(L.c, R, { ...r, winner: 0 }, true)) continue;
     const i = R.n - 1;
     const prev = Date.parse((madeAt.get(r.id) as any)?.made_at || '');
-    const moved = Math.max(L.builtAt, L.changed.get(R.p1[i]) || 0, L.changed.get(R.p2[i]) || 0);
+    const moved = Math.max(L.builtAt, Date.parse(tennisCalib()?.at || '') || 0, L.changed.get(R.p1[i]) || 0, L.changed.get(R.p2[i]) || 0);
     if (Number.isFinite(prev) && prev > moved && now.getTime() - prev < 6 * 3600000) { R.n--; predsSkipped++; continue; } // unchanged
     names.push([r.p1_name || 'Player 1', r.p2_name || 'Player 2']);
   }
   applyRules(L.c, R);
   grow(L);
-  const UP = `INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET model = excluded.model, scheduled_at = excluded.scheduled_at, cat = excluded.cat,
-    p1 = excluded.p1, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
+  const UP = `INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at, p_raw)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET model = excluded.model, scheduled_at = excluded.scheduled_at, cat = excluded.cat,
+    p1 = excluded.p1, p_raw = excluded.p_raw, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
     WHERE tennis_predictions.scheduled_at IS NULL OR tennis_predictions.scheduled_at > excluded.made_at`;
   const out: { id: number; at: string; pr: TennisPred }[] = [];
   for (let i = 0; i < R.n; i++) {
@@ -1440,7 +1458,7 @@ export async function saveTennisPredictions(): Promise<number> {
   const at = new Date().toISOString();
   // a match that started while we were computing keeps the prediction it had at the start (and the SQL guard above)
   const params = (o: typeof out[number]) => [o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
-    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at];
+    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at, o.pr.p1Raw / 100];
   if (sink) { for (const o of out) if (Date.parse(o.at) > Date.now()) sink.push({ sql: UP, params: params(o) }); return out.length; } // fix200: the worker
   const up = db.prepare(UP);
   for (let k = 0; k < out.length; k += 200) {
@@ -1543,7 +1561,7 @@ async function tickHere(force: 'report' | 'retune' | null): Promise<{ reportBuil
     const il = israelNow();
     const weekly = il.day === 'Mon' && il.hour >= 4 && (!settings || Date.now() - Date.parse(settings.at) > 5 * DAY);
     const newMonth = report && report.test?.to !== monthName(lastFullMonth());
-    if (force === 'report' || !report || !settings || (weekly && newMonth)) {
+    if (force === 'report' || !report || !settings || (weekly && newMonth) || tennisCalib()?.version !== TENNIS_CALIB_VERSION) {
       await timed('tennis model report', buildTennisReport);
       reportBuilt = true; // fix200: the benchmark (provider calls) runs on the main thread after the write-back
     } else if (force === 'retune' || weekly) {
@@ -1841,9 +1859,20 @@ let strongCache: { at: number; v: Record<string, number> } | null = null;
 export function tennisStrongLine(cat: string): number {
   if (!strongCache || Date.now() - strongCache.at > 60 * 1000) {
     const st: Settings | null = store.get('settings');
-    strongCache = { at: Date.now(), v: Object.fromEntries(CAT_NAME.map(c => [c, st?.strong?.[c]?.line ?? 75])) };
+    // fix222: with a calibration layer, the line where the calibrated picks were right ≥ 75% on the test year
+    const c = tennisCalib();
+    strongCache = { at: Date.now(), v: Object.fromEntries(CAT_NAME.map(k => [k, c?.layer && c.strong[k] ? Math.round(c.strong[k] * 100) : st?.strong?.[k]?.line ?? 75])) };
   }
   return strongCache.v[cat] ?? 75;
+}
+/** fix222: the tennis calibration layer (built with the report; tennis_model_store 'calib'), read once a minute */
+export const TENNIS_CALIB_VERSION = 'fix222-1';
+const CALIB_FIRST_YEAR = 2024, CALIB_TEST_YEAR = 2025;
+export interface TennisCalib { at: string; version: string; layer: LeagueLayer | null; strong: Record<string, number>; strongSport: number }
+let calibCache: { at: number; v: TennisCalib | null } | null = null;
+export function tennisCalib(): TennisCalib | null {
+  if (!calibCache || Date.now() - calibCache.at > 60 * 1000) calibCache = { at: Date.now(), v: store.get('calib') };
+  return calibCache.v;
 }
 /** when the public record starts (TENNIS_PUBLIC day, else the model's deploy day) */
 export const tennisRecordSince = (): string => process.env.TENNIS_PUBLIC_SINCE || store.get('deploy_day') || '2026-10-19';

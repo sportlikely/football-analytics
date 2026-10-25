@@ -35,6 +35,7 @@ import { publicRecord } from './tracking';
 import { bbRecord, isPreseason } from './bbModel';
 import { nflAccuracy, nflRecord } from './nflModel';
 import { strongLineOf } from './afCalibState';
+import { bbStrongLine } from './sportCalibration';
 import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
 import { doubleChance, DC_STRONG, type DC } from '../utils/doubleChance';
@@ -358,7 +359,6 @@ function footballCands(from: string, to: string): Cand[] {
   return out;
 }
 
-const BB_STRONG = 0.7; // = frontend components/SportHome/basketball.ts STRONG and the record's strong line
 function basketballCands(from: string, to: string): Cand[] {
   if (!tableExists('bb_games') || !tableExists('bb_predictions')) return [];
   const names = tableExists('bb_leagues') ? new Map((db.prepare(`SELECT code, name FROM bb_leagues`).all() as any[]).map(l => [l.code, l.name])) : new Map();
@@ -370,7 +370,7 @@ function basketballCands(from: string, to: string): Cand[] {
     return {
       sport: 'basketball' as const, id: r.game_id, rid: -r.game_id, start: r.kickoff, league: names.get(r.code) || r.code, home: r.home_name, away: r.away_name,
       homeImg: r.home_logo || null, awayImg: r.away_logo || null, path: `/basketball/game/${r.game_id}`,
-      pick: { side: (r.p_home >= 0.5 ? 'H' : 'A') as 'H' | 'A' }, pct: r1(100 * p), strong: p >= BB_STRONG,
+      pick: { side: (r.p_home >= 0.5 ? 'H' : 'A') as 'H' | 'A' }, pct: r1(100 * p), strong: p >= bbStrongLine(r.code), // fix222: the league's calibrated line
       teamIds: [r.home_id, r.away_id], size: (r.code === 'NBA' ? 6 : r.code === 'EL' || /euroleague/i.test(names.get(r.code) || '') ? 4 : 1)
     };
   });
