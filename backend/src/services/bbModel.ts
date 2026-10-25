@@ -843,7 +843,7 @@ function predictRaw(g: Game, phIn?: number, paIn?: number): Pred | null {
       const w4 = gridWeight(g.code, 3);
       const pts = (s: number) => Math.round(Math.max(0, -w4 * s) * 10) / 10;
       if (sd) {
-        v4Detail.set(g.game_id, { model: 'bb-v4', mode: 'grid', pHome: gv.pHome, margin: gv.margin, impact: 0, sameDay: sd.home.sameDay - sd.away.sameDay, home: sd.home, away: sd.away, points: { home: pts(sd.home.sameDay), away: pts(sd.away.sameDay) } });
+        v4Detail.set(g.game_id, { model: 'bb-v4', mode: 'grid', pHome: gv.pHome, margin: gv.margin, impact: 0, sameDay: sd.home.sameDay - sd.away.sameDay, home: sd.home, away: sd.away, points: { home: pts(sd.home.sameDay), away: pts(sd.away.sameDay) }, row4: Math.round(gv.parts[3] * 100) / 100 });
         if (v4Detail.size > 2000) v4Detail.delete(v4Detail.keys().next().value as number);
       }
       const dm = gv.margin - x.margin;

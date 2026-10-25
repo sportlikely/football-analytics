@@ -50,7 +50,7 @@ import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
 import { photosTick, photosBbPass } from './services/playerPhotos';
-import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune } from './services/bbTuner';
+import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune, missFitDue, runMissFit } from './services/bbTuner';
 import { threadJobsOn, inThread } from './services/threadJob';
 import { buildBbCalibration } from './services/sportCalibration';
 import { startKeyPlayersScheduler } from './services/keyPlayers';
@@ -96,9 +96,18 @@ export function startJobs() {
   // fix222: bb-v4 tuned on this database (first run ~20 min after the start, once the grid rows are stored; then
   // monthly), applied only through the gate (bbTuner.runTune auto); then the basketball calibration layer again
   // fix223: then the per-league settings on top of the stored shared tune (first run, after an applied shared tune, monthly)
+  // fix228: first the #4 fit on who actually played (once a database; stored through its gate), the tunes keep it frozen
   const bbAutoTune = async () => {
-    const why = autoTuneDue();
     let calib = false;
+    const mwhy = missFitDue();
+    if (mwhy) {
+      try {
+        const opt = { auto: mwhy, apply: 'gate' as const };
+        const r: any = await heavy('bb miss fit', () => (threadJobsOn() ? inThread('bb miss fit', [opt]) : runMissFit(opt)));
+        calib = !!r?.applied;
+      } catch (e: any) { logger.warn(`bb-v4 #4 fit (${mwhy}): ${e?.message || e}`); }
+    }
+    const why = autoTuneDue();
     if (why) {
       try {
         const r: any = await heavy('bb tune', () => (threadJobsOn() ? inThread('bb tune', [{ auto: why }]) : runTune({ auto: why })));

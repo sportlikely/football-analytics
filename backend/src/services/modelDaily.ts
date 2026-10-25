@@ -30,7 +30,7 @@ import { clearPredictionCache } from './predCache';
 import { sendEmail, emailEnabled, SITE, esc } from './email';
 import { lastDataHealth } from './dataHealth';
 import { nbaV4ReportLines } from './nbaV4';
-import { gridReportLines, autoTuneLine, leagueTuneLine } from './bbTuner';
+import { gridReportLines, autoTuneLine, leagueTuneLine, missFitLine } from './bbTuner';
 import { timed, slicer, yieldLoop, heavy } from './perf';
 import {
   buildFeatures, buildFeaturesAsync, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
@@ -343,6 +343,7 @@ export function buildReport(date = localParts().date): string {
     // fix222: the monthly bb-v4 tune on the live database (the worker's jobs.ts runs it; applied only through the gate)
     ...(() => { const l = autoTuneLine(); return l ? [l, ''] : []; })(),
     ...(() => { const l = leagueTuneLine(); return l ? [l, ''] : []; })(),
+    ...(() => { const l = missFitLine(); return l ? [l, ''] : []; })(),
     'Next challengers:',
     ...(queued.length ? queued.map((c: any, i: number) => `  ${i + 1}. ${c.label}: ${c.dW >= 0 ? '+' : ''}${c.dW.toFixed(4)} vs champion over ${c.W.n} games — ${c.why}`) : ['  none scored today']),
     '',

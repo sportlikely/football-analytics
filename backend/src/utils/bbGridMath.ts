@@ -45,7 +45,24 @@ export type GridParams = {
   w: number[]; stretch: Record<string, number>; offsets: Record<string, number[]>; version: string; fittedAt: string | null; train: number[] | null;
   /** fix223: per-league settings that passed their gate (services/bbTuner.ts runLeagueTune) */
   league?: Record<string, LeagueSet>;
+  /** fix228: row #4 frozen at its "who actually played" fit (services/bbTuner.ts runMissFit) */
+  miss?: MissSet;
 };
+/**
+ * fix228 — row #4 (missing players) fitted on the oracle rows (who actually played vs the expected rotation, from the box
+ * score: what the injury report / confirmed line-up gives live), then frozen: every tune fits the other rows around it.
+ * w = the NBA weight (live input: injury report + confirmed starters, never the "missed the last games" proxy);
+ * star = how much more a big loss counts (value × (1 + star × |value|): a star out costs more than two role players);
+ * proxy = the weight of every other league (live input: missed the last 2 games + news / rest, fix224), fitted the same
+ * way on its own rows and never above w.
+ */
+export type MissSet = { w: number; star: number; proxy: number; fittedAt: string; train: number[]; test: number };
+/** row #4's index; the leagues whose live #4 is the injury report (oracle in history) */
+export const MISS = 3;
+export const ORACLE_CODES = ['NBA'];
+export const usesOracle = (code: string) => ORACLE_CODES.includes(code);
+/** a #4 difference with the star factor (signed: bigger losses count more than in proportion) */
+export const starOf = (d: number, star: number) => d * (1 + star * Math.abs(d));
 
 /** Live numbers until the first /api/bb/tune?apply=1 (fix219 research, 10 Oct database, train 2022-23 … 2024-25). */
 /** the starting weights of a fit from nothing (GRID_ROWS.w0) */
@@ -76,7 +93,25 @@ export const volOf = (it: { hv: number[]; av: number[] }) => (it.hv[VOL] || 0) +
 export function weightsFor(p: GridParams, code: string): number[] {
   const off = p.offsets[code], ls = p.league?.[code];
   const w = off ? p.w.map((w, i) => w + (off[i] || 0)) : p.w;
-  return ls ? w.map((x, i) => x + (ls.off[i] || 0)) : w;
+  const out = ls ? w.map((x, i) => x + (ls.off[i] || 0)) : w;
+  // fix228: #4 frozen — no league offset moves it; the NBA's injury-report weight, the proxy weight elsewhere
+  if (!p.miss) return out;
+  const fr = out === p.w ? [...out] : out;
+  fr[MISS] = usesOracle(code) ? p.miss.w : p.miss.proxy;
+  return fr;
+}
+/**
+ * fix228: the #4 inputs as live has them. 'oracle' = the NBA's #4 is who actually played (the injury report's stand-in;
+ * unknown → 0), 'blind' = the NBA's #4 is 0 (no injury information: bb-v4 against bb-v3, which had none either); other
+ * leagues keep the stored proxy (missed the last 2 games). Copies; the stored items stay as they are.
+ */
+export function missInputs<T extends { code: string; hv: number[]; av: number[]; oracle: number | null }>(items: T[], mode: 'oracle' | 'blind'): T[] {
+  return items.map(x => {
+    if (!usesOracle(x.code)) return x;
+    const hv = [...x.hv], av = [...x.av];
+    hv[MISS] = mode === 'oracle' && x.oracle !== null ? x.oracle : 0; av[MISS] = 0;
+    return { ...x, hv, av };
+  });
 }
 /** #7 is 0 for both teams only on a neutral court (final fours): no home edge there */
 const neutralOf = (it: { hv: number[]; av: number[] }) => !(it.hv[6] || 0) && !(it.av[6] || 0);
@@ -84,7 +119,8 @@ const neutralOf = (it: { hv: number[]; av: number[] }) => !(it.hv[6] || 0) && !(
 export function gridEval(p: GridParams, code: string, it: { hv: number[]; av: number[]; sig: number }, w = weightsFor(p, code)) {
   const parts = new Array<number>(N_ROWS).fill(0);
   let m = 0;
-  for (let i = 0; i < N_ROWS; i++) { if (i === VOL) continue; parts[i] = w[i] * diff(it, i); m += parts[i]; }
+  const star = p.miss && usesOracle(code) ? p.miss.star : 0;
+  for (let i = 0; i < N_ROWS; i++) { if (i === VOL) continue; parts[i] = w[i] * (i === MISS && star ? starOf(diff(it, i), star) : diff(it, i)); m += parts[i]; }
   const ls = p.league?.[code];
   if (ls?.home && !neutralOf(it)) { parts[6] += ls.home; m += ls.home; }
   const sig = it.sig * (ls?.sig ?? 1) * Math.min(1.5, Math.max(0.7, 1 + w[VOL] * volOf(it)));
@@ -176,9 +212,12 @@ async function patternSearch(p: GridParams, items: GridItem[], defs: { get: () =
  */
 export async function fitGrid(items: GridItem[], start: GridParams, opt: { rounds?: number; minOffsetGames?: number; offsetPenalty?: number; pause?: () => Promise<void> } = {}): Promise<{ params: GridParams; trainLL: number; startLL: number; offsetLeagues: string[] }> {
   const pause = opt.pause || (async () => undefined);
-  const p: GridParams = { w: [...start.w], stretch: { ...start.stretch }, offsets: {}, version: 'fit', fittedAt: new Date().toISOString(), train: null };
+  const p: GridParams = { w: [...start.w], stretch: { ...start.stretch }, offsets: {}, version: 'fit', fittedAt: new Date().toISOString(), train: null, ...(start.miss ? { miss: { ...start.miss } } : {}) };
   const startLL = logLoss(start, items);
-  const wDefs = GRID_ROWS.map((r, i) => ({ get: () => p.w[i], set: (v: number) => { p.w[i] = v; }, lo: r.lo, hi: r.hi, step: r.step }));
+  // fix228: a frozen #4 is never moved (shared weight or league offset): the other rows are fitted around it
+  const free = (i: number) => !(p.miss && i === MISS);
+  if (p.miss) p.w[MISS] = p.miss.w;
+  const wDefs = GRID_ROWS.map((r, i) => ({ i, get: () => p.w[i], set: (v: number) => { p.w[i] = v; }, lo: r.lo, hi: r.hi, step: r.step })).filter(d => free(d.i));
   await patternSearch(p, items, wDefs, opt.rounds ?? 60, () => 0, pause);
   const byCode = new Map<string, GridItem[]>();
   for (const it of items) { let l = byCode.get(it.code); if (!l) byCode.set(it.code, (l = [])); l.push(it); }
@@ -195,13 +234,76 @@ export async function fitGrid(items: GridItem[], start: GridParams, opt: { round
     if (list.length < minN) continue;
     const off = new Array<number>(N_ROWS).fill(0);
     p.offsets[code] = off;
-    const defs = GRID_ROWS.map((r, i) => ({ get: () => off[i], set: (v: number) => { off[i] = v; }, lo: r.lo - p.w[i], hi: r.hi - p.w[i], step: r.step }));
+    const defs = GRID_ROWS.map((r, i) => ({ i, get: () => off[i], set: (v: number) => { off[i] = v; }, lo: r.lo - p.w[i], hi: r.hi - p.w[i], step: r.step })).filter(d => free(d.i));
     // pulled toward 0: an offset has to pay for itself (lam per step², like v3Tuner's lambda)
     await patternSearch(p, list, defs, opt.rounds ?? 60, () => lam * off.reduce((s, x, i) => s + (x / GRID_ROWS[i].step) ** 2, 0) / 100, pause);
     if (off.every(x => Math.abs(x) < 1e-9)) delete p.offsets[code]; else offsetLeagues.push(code);
   }
   await fitStretch();
   return { params: p, trainLL: logLoss(p, items), startLL, offsetLeagues };
+}
+
+/* ---------- fix228: row #4 fitted on who actually played ---------- */
+
+/** train / test games of the #4 fit (assertTrainYears: never the live period, never the test season in train) */
+export function missSplit<T extends { year: number }>(items: T[], train: number[], test: number): { train: T[]; test: T[] } {
+  assertTrainYears(train, test);
+  return { train: items.filter(x => train.includes(x.year) && x.year < GRID_LIVE_FROM), test: items.filter(x => x.year === test) };
+}
+const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+/** a MissSet from the shared settings (the #4 weight live now, no star) */
+export const missFrom = (p: GridParams, code = 'NBA'): MissSet =>
+  p.miss ? { ...p.miss } : { w: weightsFor(p, code)[MISS], star: 0, proxy: p.w[MISS], fittedAt: '', train: [], test: GRID_TEST };
+
+/**
+ * The oracle fit: the NBA's games with #4 = who actually played (missInputs 'oracle'), every weight + the star factor
+ * by pattern search on log loss from `start` (the NBA's weights live now). Returns the #4 weight and the star factor;
+ * the shared tune then fits the other rows around the frozen #4.
+ */
+export async function fitMiss(items: GridItem[], start: GridParams, opt: { rounds?: number; pause?: () => Promise<void> } = {}) {
+  const pause = opt.pause || (async () => undefined);
+  const code = items[0]?.code || 'NBA';
+  const m0 = missFrom(start, code);
+  const p: GridParams = { w: [...weightsFor({ ...start, miss: undefined, league: undefined }, code)], stretch: { ...start.stretch }, offsets: {}, version: 'oracle fit', fittedAt: null, train: null, miss: { ...m0 } };
+  p.w[MISS] = m0.w;
+  const startLL = logLoss(p, items);
+  const R = GRID_ROWS[MISS];
+  const defs = [
+    { get: () => p.miss!.w, set: (v: number) => { p.miss!.w = v; p.w[MISS] = v; }, lo: 0, hi: R.hi, step: R.step },
+    { get: () => p.miss!.star, set: (v: number) => { p.miss!.star = v; }, lo: 0, hi: 0.5, step: 0.02 },
+    ...GRID_ROWS.map((r, i) => ({ i, get: () => p.w[i], set: (v: number) => { p.w[i] = v; }, lo: r.lo, hi: r.hi, step: r.step })).filter(d => d.i !== MISS)
+  ];
+  await patternSearch(p, items, defs, opt.rounds ?? 60, () => 0, pause);
+  return { w: r4(p.miss!.w), star: r4(p.miss!.star), params: p, startLL: r4(startLL), trainLL: r4(logLoss(p, items)) };
+}
+
+/**
+ * The proxy weight of the other leagues, fitted the same way (log loss, train seasons) on their own rows (#4 = missed the
+ * last 2 games), every other weight as `base` has it; between 0 and the oracle weight (a guess is never worth more than
+ * knowing who played).
+ */
+export async function fitProxy(items: GridItem[], base: GridParams & { miss: MissSet }, opt: { rounds?: number; pause?: () => Promise<void> } = {}) {
+  const p: GridParams & { miss: MissSet } = { ...base, miss: { ...base.miss } };
+  p.miss.proxy = Math.min(p.miss.proxy, p.miss.w);
+  const startLL = logLoss(p, items);
+  await patternSearch(p, items, [{ get: () => p.miss.proxy, set: v => { p.miss.proxy = v; }, lo: 0, hi: p.miss.w, step: 0.05 }], opt.rounds ?? 30, () => 0, opt.pause || (async () => undefined));
+  return { proxy: r4(p.miss.proxy), startLL: r4(startLL), trainLL: r4(logLoss(p, items)) };
+}
+
+export type MissGate = { pass: boolean; reason: string; oracle: { games: number; cur: number; next: number }; whole: { games: number; cur: number; next: number } };
+/**
+ * fix228 gate on the test season (`test` = missInputs 'oracle': the inputs live has): the NBA's games with who played
+ * known must improve (log loss) and every game of every league must be no worse, against the settings live now.
+ */
+export function missGate(test: GridItem[], next: GridParams, cur: GridParams): MissGate {
+  const known = test.filter(x => usesOracle(x.code) && x.oracle !== null);
+  const r5 = (x: number) => Math.round(x * 1e5) / 1e5;
+  const oracle = { games: known.length, cur: r5(logLoss(cur, known)), next: r5(logLoss(next, known)) };
+  const whole = { games: test.length, cur: r5(logLoss(cur, test)), next: r5(logLoss(next, test)) };
+  const ok1 = known.length >= 100 && logLoss(next, known) < logLoss(cur, known) - 1e-9;
+  const ok2 = test.length > 0 && logLoss(next, test) <= logLoss(cur, test) + 1e-9;
+  const why = [!ok1 && (known.length < 100 ? `only ${known.length} test games with who played known` : `who played known ${oracle.next} vs ${oracle.cur} now`), !ok2 && `whole season ${whole.next} vs ${whole.cur} now`].filter(Boolean);
+  return { pass: ok1 && ok2, reason: ok1 && ok2 ? `who played known ${oracle.cur} → ${oracle.next}; whole season ${whole.cur} → ${whole.next}` : `kept as it is: ${why.join('; ')}`, oracle, whole };
 }
 
 /** log loss / Brier / hit rate of bb-v4 and bb-v3 on a set of games (+ "who actually played" in place of #4) */
@@ -254,7 +356,7 @@ export async function fitLeagueSet(items: GridItem[], base: GridParams, all: { r
   const defs = [
     { get: () => set.home, set: (v: number) => { set.home = v; }, lo: -4, hi: 4, step: 0.25, tau: 1, at: 0 },
     { get: () => set.str, set: (v: number) => { set.str = v; }, lo: 0.7, hi: 1.4, step: 0.02, tau: 0.1, at: 1 },
-    ...LS_ROWS.map(i => ({ get: () => set.off[i], set: (v: number) => { set.off[i] = v; }, lo: GRID_ROWS[i].lo - base.w[i], hi: GRID_ROWS[i].hi - base.w[i], step: GRID_ROWS[i].step, tau: LS_TAU[i], at: 0 }))
+    ...LS_ROWS.filter(i => !(base.miss && i === MISS)).map(i => ({ get: () => set.off[i], set: (v: number) => { set.off[i] = v; }, lo: GRID_ROWS[i].lo - base.w[i], hi: GRID_ROWS[i].hi - base.w[i], step: GRID_ROWS[i].step, tau: LS_TAU[i], at: 0 }))
   ];
   await minimize(() => logLoss(p, items) + shrinkPenalty(defs, items.length, opt.shrink ?? 1), defs, { rounds: opt.rounds ?? 30, pause: opt.pause });
   const r4 = (x: number) => Math.round(x * 1e4) / 1e4;

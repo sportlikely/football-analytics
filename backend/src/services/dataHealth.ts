@@ -41,6 +41,7 @@ import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdT
 import { bestLive } from './liveScores';
 import { calibrationHealth } from './calibrationHealth';
 import { leagueSettingsHealth } from './leagueSettingsHealth';
+import { missingRowHealth } from './bbTuner';
 import { afIdOfFd } from './afMatches';
 import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
@@ -430,6 +431,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...leagueSettingsHealth(now)); } catch (e: any) { logger.warn(`league settings health: ${e?.message || e}`); }
   // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
   try { checks.push(...keyPlayersHealth(now)); } catch (e: any) { logger.warn(`key players health: ${e?.message || e}`); }
+  // fix228: basketball row #4 — the weight live (frozen at the who-actually-played fit) and the games it moved this week
+  try { checks.push(...missingRowHealth(now)); } catch (e: any) { logger.warn(`missing players row health: ${e?.message || e}`); }
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts

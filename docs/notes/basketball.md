@@ -270,3 +270,26 @@ lineups (published after tip-off), play-by-play, odds/props (never), fantasy. Ta
   NBB by 0.004–0.008: noise fitted on two seasons). All leagues: 2024 0.56959 → 0.56941, 2025 0.57741 → 0.57732, live
   0.62958 → 0.62981. So the shared model already carries most of what differs between leagues (per-league stretch,
   NBA / JBL offsets); the server's own run decides there.
+
+## Row #4 missing players on who actually played (fix228, 25 Oct 2026)
+
+Why: the first tune on the live database (25 Oct) gave #4 18 of 1,000 points (fix219 default 150). 2022-25 have no injury
+reports, so in history #4 is only "rotation players who missed the last 2 games" — a weak proxy. The live injury feed and
+confirmed line-ups (fix217 / fix224) could never earn weight in a tune on those rows.
+
+- **Oracle rows**: every finished game already keeps `oracle` in bb_grid_rows (fix219): the strength of the rotation of
+  the players who actually played (box score) minus the expected rotation's, home − away, in points (impact ratings ×
+  projected minutes). That is what the injury report + confirmed line-up tell us before tip-off.
+- **Fit** (`bbTuner.runMissFit`, maths `bbGridMath.fitMiss / fitProxy / missGate`): NBA oracle rows of 2022-23 … 2024-25
+  → #4 weight + star factor (value × (1 + star × |value|), 0 … 0.5); every weight refitted, only #4 and the star kept.
+  Other leagues (no injury feed): the proxy weight fitted the same way on their own stored rows, capped by the NBA's.
+  Then the shared tune around the frozen #4 (`GridParams.miss`). Test 2025-26; 2026-27+ never in train.
+- **Gate**: NBA 2025-26 games with who played known better than the settings live now, the whole 2025-26 season of
+  every league no worse (inputs as live has them). The bb-v4 vs bb-v3 gate per group reads the NBA with #4 = 0 (fair:
+  bb-v3 had no injury information in history).
+- **Live**: NBA #4 = injury report + confirmed starters (+ the fix224 rest pattern before the report confirms), 0
+  without them — never the "missed the last games" proxy. Other leagues: proxy + news / rest at their own weight.
+- **Frozen**: no league offset or league setting moves #4; the monthly re-tune and the league settings keep it. A new
+  fit only from Admin → "#4 Missing players" (Preview / Fit, store if the gate passes) or `/api/bb/missing-fit`.
+- **Results**: not run on real data in the session that built it (no database copy). The weight, star, test gain and
+  split before / after are in the admin card and the morning report after the worker's first run.

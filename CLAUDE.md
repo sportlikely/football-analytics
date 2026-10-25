@@ -117,6 +117,8 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   fix223: per-league settings like football's league tune (`utils/leagueSettings.ts`: own / group / shared, fit 2022-23 + 2023-24 →
   kept only if better on 2024-25 → refit; 2025-26 untouched check): basketball in `bbTuner.runLeagueTune` (bb_tuned 'leagues'),
   American football per level (NFL / FBS / G5 / FCS) and tennis per tour × surface inside their calibration builds.
+  fix228: bb-v4 row #4 (missing players) weight fitted on who actually played (oracle rows) and frozen in every tune
+  (`GridParams.miss`, `bbTuner.runMissFit`, /api/bb/missing-fit); NBA live #4 = injury report + confirmed starters only.
   fix222: the same layer per league for basketball (`services/sportCalibration.ts`, on bb-v4's walk-forward rows) and tennis
   (inside the tennis report), maths in `utils/sportCalib.ts`; bb-v4 re-tuned on the live database monthly by the worker (gated).
 - Tennis (fix184, admin only, no pages or model yet): `tennis.ts` — data from Live Tennis API **Pro** (key `TENNIS_API_KEY`, 10,000 calls a day, reserve `TENNIS_RESERVE` 1,500), **singles only**, market prices (`tennis_prices`) are an **admin-only** benchmark, never on a public route. Stats computed from the point tape (`tennis_match_stats`). Admin: `/api/admin/tennis-probe`, `/api/admin/tennis/status`. Notes: `docs/notes/tennis-data.md`.

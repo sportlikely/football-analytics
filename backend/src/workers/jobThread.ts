@@ -13,6 +13,8 @@ async function run(): Promise<unknown> {
   if (job === 'bb tune') return (await import('../services/bbTuner')).runTune(args[0] as any);
   // fix223: the per-league settings on top of the stored shared tune
   if (job === 'bb league tune') return (await import('../services/bbTuner')).runLeagueTune(args[0] as any);
+  // fix228: row #4's weight from who actually played, frozen in the shared tune
+  if (job === 'bb miss fit') return (await import('../services/bbTuner')).runMissFit(args[0] as any);
   // fix222: the basketball calibration layer (reads the stored rows; stored + published from here)
   if (job === 'bb calib') return (await import('../services/sportCalibration')).buildBbCalibrationHere(args[0] as string);
   if (job === 'national elo') return (await import('../services/nationalElo')).buildNationalEloHere();

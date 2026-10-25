@@ -76,7 +76,7 @@ import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
-import { runTune, tunedInfo, runLeagueTune } from './services/bbTuner';
+import { runTune, tunedInfo, runLeagueTune, runMissFit } from './services/bbTuner';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
@@ -3595,6 +3595,17 @@ app.get('/api/bb/league-tune', async (req, res) => {
     const r = await heavy('bb league tune', () => (threadJobsOn() ? inThread('bb league tune', [opt]) : runLeagueTune(opt)));
     res.json({ data: r });
   } catch (e) { sendError(res, e, 'Basketball league settings failed'); }
+});
+// fix228 (admin): row #4 (missing players) fitted on who actually played (NBA; the other leagues' proxy weight the same
+// way), frozen in a shared tune around it; ?apply=gate (default) stores it when the gate passes, apply=1 always, apply=0 report only
+app.get('/api/bb/missing-fit', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
+    const opt = { apply };
+    const r: any = await heavy('bb miss fit', () => (threadJobsOn() ? inThread('bb miss fit', [opt]) : runMissFit(opt)));
+    res.json({ data: { ...r, params: undefined } });
+  } catch (e) { sendError(res, e, 'Basketball #4 fit failed'); }
 });
 // fix219 (admin): the stored bb-v4 settings, the last tune report and the gate; ?reload=1 publishes again, ?clear=1 = code defaults
 app.get('/api/bb/tuned', (req, res) => {

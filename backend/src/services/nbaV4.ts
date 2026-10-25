@@ -46,6 +46,9 @@ db.exec(`
   );
 `);
 
+// fix228: #4's move of the margin (points, home view) at each checkpoint (admin examples, data health)
+try { db.exec(`ALTER TABLE bb_v4_log ADD COLUMN row4 REAL`); } catch { /* there already */ }
+
 type Gate = {
   at: string; pass: boolean; reason: string;
   test: { season: string; whole: { v3: any; v4: any }; first25: { v3: any; v4: any }; withLineups: any; passWhole: boolean; passFirst25: boolean };
@@ -215,7 +218,7 @@ function sideOf(s: State, gameId: number, teamId: number, teamName: string): V4S
 }
 
 /** points: what the same-day information costs each side, in margin points (the game page's injury numbers) */
-export type V4Result = { model: string; mode: V4Mode; pHome: number; margin: number; impact: number; sameDay: number; home: V4Side; away: V4Side; points: { home: number; away: number } };
+export type V4Result = { model: string; mode: V4Mode; pHome: number; margin: number; impact: number; sameDay: number; home: V4Side; away: V4Side; points: { home: number; away: number }; row4?: number };
 /**
  * v4 for an upcoming NBA game from bb-v3's chance (without bb-v3's own injury points: v4 prices the injury report itself).
  * null = v4 off or not built yet (bb-v3 and its injury handling stay).
@@ -320,14 +323,14 @@ export async function nbaRepriceTick(price: (ids: number[]) => Promise<Map<numbe
     const before = new Map<number, number | null>();
     for (const { g } of due) { const r = db.prepare(`SELECT margin FROM bb_predictions WHERE game_id = ?`).get(g.game_id) as any; before.set(g.game_id, r ? r.margin : null); }
     const res = await price(due.map(d => d.g.game_id));
-    const ins = db.prepare(`INSERT OR REPLACE INTO bb_v4_log (game_id, checkpoint, at, mode, p_v3, p_v4, margin_before, margin_after, same_day, removed, lineups, injuries_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const ins = db.prepare(`INSERT OR REPLACE INTO bb_v4_log (game_id, checkpoint, at, mode, p_v3, p_v4, margin_before, margin_after, same_day, removed, lineups, injuries_at, row4) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const at = new Date().toISOString(), injAt = nbaInjuryStatus().lastFetch;
     for (const { g, cp } of due) {
       const x = res.get(g.game_id);
       if (!x || !x.v4) continue;
       const v = x.v4;
       const removed = { home: v.home.removed, away: v.away.removed, lineupHome: v.home.lineup, lineupAway: v.away.lineup };
-      ins.run(g.game_id, cp, at, v.mode, x.v3, v.pHome, before.get(g.game_id) ?? null, v.margin, v.sameDay, JSON.stringify(removed), v.home.lineup || v.away.lineup ? 1 : 0, injAt);
+      ins.run(g.game_id, cp, at, v.mode, x.v3, v.pHome, before.get(g.game_id) ?? null, v.margin, v.sameDay, JSON.stringify(removed), v.home.lineup || v.away.lineup ? 1 : 0, injAt, typeof v.row4 === 'number' ? v.row4 : null);
     }
     return { games: due.length, lineups };
   } finally { repricing = false; }

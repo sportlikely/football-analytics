@@ -9,7 +9,8 @@
  *     pre-season × 0.7), top 10 scaled to 5L; rookies −1.0; pre-season box scores never rate anyone.
  *  #2 net rating per 100 possessions: ridge on team indicators (same windows) × the league's pace.
  *  #3 team rating: bb-v3's whole prediction as a margin (bb-v1 alone lost on the training seasons) · #4 missing players: lost impact of rotation players who missed the last 2 games
- *     (live NBA: the injury report + confirmed starters, services/nbaV4.ts) · #5 four factors for / against (eFG%, TOV%,
+ *     (live NBA: only the injury report + confirmed starters, services/nbaV4.ts; fix228: its weight from "who actually
+ *     played" = the oracle value kept per game, bbTuner.runMissFit) · #5 four factors for / against (eFG%, TOV%,
  *     OREB%, FT rate; Dean Oliver weights), shrunk to the league mean · #6 rest: −1 back-to-back, −0.5 third game in 4
  *     days · #7 home court: league edge + the team's own (neutral final fours 0) · #8 carry-over: strength of the players
  *     who stayed from last season, fading to 0 by game 25 · #9 matchups: style against style (shooting, rebounds,
@@ -373,6 +374,8 @@ export function liveRows(g: { code: string; game_id?: number; home_id: number; a
   if (!h || !a) return null;
   const gpOf = (t: TeamSnap) => (t.season === g.season ? t.gp : 0);
   const hh = { ...h, gp: gpOf(h), wins: h.season === g.season ? h.wins : 0 }, aa = { ...a, gp: gpOf(a), wins: a.season === g.season ? a.wins : 0 };
+  // fix228: the NBA's #4 is only the injury report + confirmed starters (nbaV4.sideOf, passed in): never "missed the last games"
+  if (!miss && g.code === 'NBA') miss = { home: 0, away: 0 };
   if (!miss && keepHook) { // fix224: news / rest statuses outside the NBA (the NBA passes its own, nbaV4.sideOf)
     const mh = missWithHook(s, g, g.home_id, h), ma = missWithHook(s, g, g.away_id, a);
     if (mh !== undefined || ma !== undefined) miss = { home: mh ?? h.miss, away: ma ?? a.miss };

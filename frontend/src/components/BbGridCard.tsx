@@ -16,6 +16,21 @@ type Info = {
   autoDue: string | null
   /** fix223: the per-league settings on top of the shared ones */
   leagues?: { at: string | null; stale: boolean; due: string | null; report: LeagueReport | null }
+  /** fix228: row #4 fitted on who actually played, frozen in the shared tune */
+  miss?: MissInfo
+}
+type MissSet = { w: number; star: number; proxy: number; fittedAt: string; train: number[]; test: number }
+type MissTest = { games: number; cur: number; fit: number; gain: number }
+type MissReport = {
+  at: string; why: string; train: number[]; test: number; seconds: number; applied: boolean; miss: MissSet; before: { nba: number; other: number; star: number }
+  oracle: { trainGames: number; startLL: number; trainLL: number; test: MissTest }
+  proxy: null | { trainGames: number; startLL: number; trainLL: number; test: MissTest | null }
+  gate: { pass: boolean; reason: string; oracle: { games: number; cur: number; next: number }; whole: { games: number; cur: number; next: number } }
+  split: { nba: { before: number[]; after: number[] }; other: { before: number[]; after: number[] } }
+}
+type MissInfo = {
+  frozen: MissSet | null; live: { nba: number; other: number }; due: string | null; report: MissReport | null
+  examples: { gameId: number; kickoff: string; home: string; away: string; score: string; move: number; pHome: number; pickRight: boolean; fourRight: boolean }[]
 }
 type LsLL = number | null
 type LeagueRow = {
@@ -45,6 +60,7 @@ export default function BbGridCard() {
   const [cal, setCal] = useState<Calib | null>(null)
   const [inMode, setInMode] = useState<{ mode: 'on' | 'off' | null; env: string | null }>({ mode: null, env: null })
   const [lsPreview, setLsPreview] = useState<LeagueReport | null>(null)
+  const [missPreview, setMissPreview] = useState<MissReport | null>(null)
   const load = (q = '') => axios.get(`${API_URL}/bb/tuned${q}`).then(r => setD(r.data.data)).catch(() => setD(null))
   const loadCal = (q = '') => axios.get(`${API_URL}/admin/calibration?sport=basketball${q}`).then(r => { setCal(r.data.data.report); setInMode({ mode: r.data.data.inSeasonMode, env: r.data.data.inSeasonEnv }) }).catch(() => setCal(null))
   useEffect(() => { load(); loadCal() }, [])
@@ -63,6 +79,14 @@ export default function BbGridCard() {
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
   const ls = lsPreview || d.leagues?.report || null
+  // fix228: row #4 on who actually played (report, or stored through its gate)
+  const missFit = (apply: 'gate' | '0') => {
+    setBusy(true); setMsg(apply === 'gate' ? 'Fitting #4 on who actually played, stored if the gate passes…' : 'Fitting #4 on who actually played (preview)…')
+    axios.get(`${API_URL}/bb/missing-fit?apply=${apply}`)
+      .then(r => { setMissPreview(r.data.data); setMsg(r.data.data.applied ? `Stored: ${r.data.data.gate.reason}` : `Not stored: ${r.data.data.gate.reason}`); load() })
+      .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
+  }
+  const mr = missPreview || d.miss?.report || null
   // the fitted split: points per row out of 1,000 (weight × spread of the row on the training games)
   const sd = d.stats?.sd || []
   const raw = d.params.w.map((w, i) => (i === 11 ? 0 : Math.abs(w) * (sd[i] || 0)))
@@ -186,6 +210,66 @@ export default function BbGridCard() {
           </>
         )}
       </div>
+      {d.miss && (
+        <div className="mt-4 text-xs">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="font-semibold text-ink">#4 Missing players: who actually played (fix228)</h3>
+            <span className="flex gap-2">
+              <button type="button" className={btn} disabled={busy} onClick={() => missFit('0')}>Preview</button>
+              <button type="button" className={btn} disabled={busy} onClick={() => missFit('gate')}>Fit, store if the gate passes</button>
+            </span>
+          </div>
+          <p className="text-faint">The weight comes from past games' box scores (who played against the expected rotation: what the injury report and confirmed line-ups tell us live), not from history without injury reports. NBA: injury report + confirmed starters only. Other leagues: missed the last 2 games + news, at their own smaller weight.</p>
+          <p className={d.miss.frozen ? 'text-win' : 'text-loss'}>
+            {d.miss.frozen ? `Frozen since ${new Date(d.miss.frozen.fittedAt).toLocaleString('en-GB')}` : `Not frozen${d.miss.due ? ` (due: ${d.miss.due}; the worker runs it once)` : ''}`} · live weight NBA <b className="num">{d.miss.live.nba}</b>{d.miss.frozen?.star ? ` (star ×${d.miss.frozen.star})` : ''} · other leagues <b className="num">{d.miss.live.other}</b>
+          </p>
+          {mr && (
+            <>
+              <p className="text-faint num">
+                {missPreview ? 'Preview' : 'Last fit'} {new Date(mr.at).toLocaleString('en-GB')} (train {mr.train.join(', ')}, test {mr.test}): NBA weight {mr.before.nba} → <b className="text-ink">{mr.miss.w}</b>, star {mr.before.star} → {mr.miss.star} · other leagues {mr.before.other} → <b className="text-ink">{mr.miss.proxy}</b>
+              </p>
+              <p className="text-faint num">
+                Who played known (NBA {mr.test}, {mr.oracle.test.games} games): {mr.oracle.test.cur} → {mr.oracle.test.fit} (gain {mr.oracle.test.gain}){mr.proxy?.test ? ` · other leagues ${mr.proxy.test.cur} → ${mr.proxy.test.fit} (gain ${mr.proxy.test.gain})` : ''}
+              </p>
+              <p className={mr.gate.pass ? 'text-win' : 'text-loss'}>Gate: {mr.gate.reason}{mr.applied ? ' · stored' : ' · not stored'}</p>
+              <div className="mt-1 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">1,000 points split</th><th className="pb-1 pr-3 font-normal">NBA before → after</th><th className="pb-1 font-normal">Other leagues before → after</th></tr></thead>
+                  <tbody>
+                    {ROWS.map((name, i) => (i === 11 ? null : (
+                      <tr key={name} className={`border-t border-line/40 ${i === 3 ? 'text-ink font-semibold' : ''}`}>
+                        <td className="py-0.5 pr-3">{name}</td>
+                        <td className="py-0.5 pr-3 num">{mr.split.nba.before[i]} → {mr.split.nba.after[i]}</td>
+                        <td className="py-0.5 num">{mr.split.other.before[i]} → {mr.split.other.after[i]}</td>
+                      </tr>
+                    )))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          <div className="mt-2 text-faint">Last 20 NBA games where #4 moved the margin 2+ points</div>
+          {d.miss.examples.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Game</th><th className="pb-1 pr-3 font-normal">#4 (home view)</th><th className="pb-1 pr-3 font-normal">Home chance</th><th className="pb-1 pr-3 font-normal">Result</th><th className="pb-1 font-normal">#4 side won</th></tr></thead>
+                <tbody>
+                  {d.miss.examples.map(x => (
+                    <tr key={x.gameId} className="border-t border-line/40">
+                      <td className="py-0.5 pr-3 text-ink">{x.kickoff.slice(0, 10)} {x.home} – {x.away}</td>
+                      <td className="py-0.5 pr-3 num">{x.move > 0 ? '+' : ''}{x.move}</td>
+                      <td className="py-0.5 pr-3 num">{Math.round(x.pHome * 100)}%</td>
+                      <td className={`py-0.5 pr-3 num ${x.pickRight ? 'text-win' : 'text-loss'}`}>{x.score}</td>
+                      <td className={`py-0.5 ${x.fourRight ? 'text-win' : 'text-loss'}`}>{x.fourRight ? 'yes' : 'no'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-faint">#4 side won in {d.miss.examples.filter(x => x.fourRight).length} of {d.miss.examples.length}.</p>
+            </div>
+          ) : <p className="text-faint">None yet (logged at the 90 / 30 / 10 minute re-pricing).</p>}
+        </div>
+      )}
       {report && <p className="mt-2 text-[11px] text-faint num">Last fit: {report.trainGames} train games, log loss {report.startLL} → {report.trainLL}; per-league offsets: {(report.offsetLeagues || []).join(', ') || 'none'}.</p>}
     </section>
   )
