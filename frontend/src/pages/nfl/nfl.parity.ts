@@ -34,6 +34,10 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.howItWorks', // fix206: "How does this work?" in ModelName + the sport's how-it-works page (components/sport/HowItWorks)
     'game.modelName', // fix191: ModelName in the shared WinnerPrediction
     'team.analysis',
+    // fix215: season forecast (components/sport/forecast/*)
+    'team.seasonForecast',
+    'league.seasonForecast',
+    'game.whatItMeans',
     'team.ratingTiles',
     'team.scores',
     'team.rankOverTime',

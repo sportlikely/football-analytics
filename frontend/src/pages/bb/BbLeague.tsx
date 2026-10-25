@@ -6,6 +6,7 @@ import { t } from '../../lib/i18n'
 import { hubFor } from '../../lib/hubs'
 import { useBbConfig, bbLeagueFav, type BbGame } from '../../lib/bb'
 import { GameList, Skeleton, TeamLogo, LiveRow } from './parts'
+import SeasonForecast from '../../components/sport/forecast/SeasonForecast'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { hasDivisions, tablesToShow, type Standings } from '../../lib/bbTable'
@@ -134,6 +135,7 @@ export default function BbLeague() {
       hub={hub ? { to: `/predictions/${hub.slug}`, label: t("This week's predictions →") } : null}
       fav={league ? bbLeagueFav(league) : null}
       record={record}
+      forecast={<SeasonForecast sport="basketball" code={code} teamHref={id => `/basketball/team/${id}`} />}
       left={<>
         <Card title={t('Table')}>
           {table === undefined ? <Skeleton rows={10} h="h-7" /> : table ? <StandingsTable data={table} /> : <p className="text-sm text-faint">{t('No table yet.')}</p>}

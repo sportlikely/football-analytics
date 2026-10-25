@@ -38,6 +38,7 @@ import { photoHealth } from './playerPhotos';
 import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdTwinless } from './fdReconcile';
 import { bestLive } from './liveScores';
 import { afIdOfFd } from './afMatches';
+import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
 
 type Level = 'ok' | 'warn' | 'fail';
@@ -391,6 +392,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // fix216: picks emails — every person due today got one (or a skip reason), bounces, record lines = the public record
   try { checks.push(...emailHealth(now)); } catch (e: any) { logger.warn(`email health: ${e?.message || e}`); }
   try { checks.push(photoHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
+  // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
+  try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts
   try { checks.push(...perfChecks(now)); } catch (e: any) { logger.warn(`perf checks: ${e?.message || e}`); }

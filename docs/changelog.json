@@ -3,6 +3,21 @@
  "entries": [
   {
    "date": "2026-10-25",
+   "sport": "all",
+   "kind": "site",
+   "version": null,
+   "text": {
+    "en": "New: the season forecast. Every league page has a \"Season forecast\" tab: the rest of the season played 20,000 times with our match model, with each team's chance of the title, Europe, the play-offs or relegation and of every final position. Team pages show how those chances moved, and game pages what a win, a draw or a loss would change.",
+    "es": "Nuevo: el pronóstico de la temporada. Cada página de liga tiene una pestaña \"Pronóstico de la temporada\": el resto de la temporada jugado 20.000 veces con nuestro modelo de partidos, con la probabilidad de cada equipo de ganar el título, ir a Europa, a los play-offs o descender, y de cada posición final. Las páginas de equipo muestran cómo cambiaron esas probabilidades y las de partido qué cambiaría una victoria, un empate o una derrota.",
+    "pt": "Novo: a previsão da temporada. Cada página de liga tem um separador \"Previsão da temporada\": o resto da temporada jogado 20.000 vezes com o nosso modelo de jogos, com a probabilidade de cada equipa conquistar o título, ir à Europa, aos play-offs ou descer, e de cada posição final. As páginas de equipa mostram como essas probabilidades mudaram e as de jogo o que mudaria uma vitória, um empate ou uma derrota.",
+    "de": "Neu: die Saisonprognose. Jede Ligaseite hat einen Tab \"Saisonprognose\": der Rest der Saison 20.000-mal mit unserem Spielmodell durchgespielt, mit der Chance jedes Teams auf den Titel, Europa, die Play-offs oder den Abstieg und auf jeden Endplatz. Teamseiten zeigen, wie sich diese Chancen verändert haben, Spielseiten, was ein Sieg, ein Remis oder eine Niederlage ändern würde.",
+    "fr": "Nouveau : la prévision de la saison. Chaque page de championnat a un onglet « Prévision de la saison » : le reste de la saison joué 20 000 fois avec notre modèle de matchs, avec la chance de chaque équipe pour le titre, l’Europe, les play-offs ou la relégation, et pour chaque place finale. Les pages d’équipe montrent comment ces chances ont évolué, et les pages de match ce que changerait une victoire, un nul ou une défaite.",
+    "it": "Novità: la previsione della stagione. Ogni pagina di campionato ha una scheda \"Previsione della stagione\": il resto della stagione giocato 20.000 volte con il nostro modello delle partite, con la probabilità di ogni squadra per il titolo, l’Europa, i play-off o la retrocessione e per ogni posizione finale. Le pagine delle squadre mostrano come sono cambiate queste probabilità, quelle delle partite cosa cambierebbe una vittoria, un pareggio o una sconfitta.",
+    "tr": "Yeni: sezon tahmini. Her lig sayfasında bir \"Sezon tahmini\" sekmesi var: sezonun kalanı maç modelimizle 20.000 kez oynanıyor; her takımın şampiyonluk, Avrupa, play-off veya küme düşme olasılığı ve her son sıra için olasılığı. Takım sayfaları bu olasılıkların nasıl değiştiğini, maç sayfaları ise galibiyet, beraberlik veya yenilginin neyi değiştireceğini gösteriyor."
+   }
+  },
+  {
+   "date": "2026-10-25",
    "sport": "american-football",
    "kind": "site",
    "version": "1.0",

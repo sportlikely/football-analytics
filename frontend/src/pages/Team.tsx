@@ -10,6 +10,7 @@ import { nameKey } from '../lib/favorites'
 import { t, LOCALE } from '../lib/i18n'
 import { slModel } from '../lib/modelNames'
 import NameLink, { href } from '../components/sport/NameLink'
+import TeamForecast from '../components/sport/forecast/TeamForecast'
 
 interface Side { id: number; name: string; logo: string }
 interface Fixture { matchId: number | null; date: string; status: string; comp: string; compCode?: string | null; home: Side; away: Side; hg: number | null; ag: number | null }
@@ -178,6 +179,8 @@ export default function Team() {
       left={<>
           {/* Team analysis: model's view, form & trends, strengths & weaknesses (paid); locked preview for free */}
           <TeamAnalysisCard a={data.analysis} full={full} />
+          {/* fix215: the season forecast of the team's league (chances, average place, how they moved) */}
+          <TeamForecast sport="football" id={Number(id)} leagueHref={c => href.league(c) || `/league/${c}`} />
 
           {nextMatch && (
             <Card title={t("Next match")} action={<NameLink to={href.league(nextMatch.compCode)} className="text-xs text-faint">{nextMatch.comp}</NameLink>}>

@@ -122,6 +122,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   `dataAudit.ts`, `seo.ts`, `proxyGuard.ts` + `proxyScrapers.ts` (fix199: data-centre / proxy scrapers, rules in docs/notes/security.md).
 - Player photos (fix211): `playerPhotos.ts` (worker job every 20 min, Wikidata match → Commons licence → 256 px WebP in
   DATA_DIR/player-photos, `/media/players/…`, admin review / remove + block list, data-health "Player photos").
+- Season forecast (fix215): `utils/seasonSim.ts` (engine, pure), `utils/seasonRules.ts` (per-league rules), `utils/seasonFit.ts`
+  (thread part), `services/seasonForecast.ts` (inputs, runs 10 min after each finished game + nightly, Free view, data health).
+  Frontend `components/sport/forecast/*`, `lib/seasonForecast.ts`. Notes: docs/notes/season-forecast.md.
 - `OPEN_API` in `app.ts` lists the public routes; everything else is admin/staff only (answered by the worker).
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):

@@ -25,6 +25,7 @@ import { SwingChart } from '../../components/sport/game/LiveChance'
 import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 import MorePredictions from '../../components/sport/game/MorePredictions'
+import GameMeaning from '../../components/sport/forecast/GameMeaning'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { basketballScorers } from '../../lib/scorers'
 import PlayerPhoto from '../../components/sport/PlayerPhoto'
@@ -150,6 +151,7 @@ export default function BbGame() {
           />
           {/* fix204: more predictions from the same model (locked like the prediction) */}
           <MorePredictions sport="basketball" id={g.id} rid={rid(g)} status={rstatus(g)} home={g.home.name} away={g.away.name} />
+          <GameMeaning sport="basketball" id={g.id} />
           {d.beforeAfter && (
             <NewsChange home={g.home.name} away={g.away.name} before={d.beforeAfter.before} after={d.beforeAfter.after}
               players={d.beforeAfter.players.map(p => ({ id: p.id, name: p.name, side: p.side, href: href.bbPlayer(p.id), detail: `${p.status} · −${p.points.toFixed(1)} ${t('pts')}` }))} />

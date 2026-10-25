@@ -23,6 +23,7 @@ import { tNodes } from '../lib/tNodes'
 import { slModel } from '../lib/modelNames'
 import { ModelName } from '../components/sport/game/ModelName'
 import MorePredictions from '../components/sport/game/MorePredictions'
+import GameMeaning from '../components/sport/forecast/GameMeaning'
 import { footballScorers } from '../lib/scorers'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
@@ -878,6 +879,7 @@ function MatchDetail() {
 
               {/* fix204: more predictions from the same score grid (locked like the prediction) */}
               <MorePredictions sport="football" id={m.id} rid={m.id} status={m.status} home={home.shortName || home.name} away={away.shortName || away.name} />
+              <GameMeaning sport="football" id={m.id} />
 
               <YourPicks sport="fb" gameId={m.id} home={home.shortName || home.name} away={away.shortName || away.name} />
               <GameNews home={{ team: home.name, short: home.shortName }} away={{ team: away.name, short: away.shortName }} />

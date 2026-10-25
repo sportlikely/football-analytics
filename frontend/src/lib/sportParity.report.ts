@@ -9,7 +9,7 @@ export interface ParityReport {
 }
 export const PARITY_REPORT: ParityReport = {
  "ok": true,
- "keys": 70,
+ "keys": 73,
  "gaps": [],
  "propGaps": [],
  "problems": [],
@@ -26,9 +26,24 @@ export const PARITY_REPORT: ParityReport = {
    "reason": "individual sport, no line-ups"
   },
   {
+   "key": "game.whatItMeans",
+   "sport": "tennis",
+   "reason": "tennis has no league season table (tournaments and rankings), nothing to simulate"
+  },
+  {
+   "key": "team.seasonForecast",
+   "sport": "tennis",
+   "reason": "tennis has no league season table (tournaments and rankings), nothing to simulate"
+  },
+  {
    "key": "team.squad",
    "sport": "tennis",
    "reason": "individual sport, no squad (the player page is the team page)"
+  },
+  {
+   "key": "league.seasonForecast",
+   "sport": "tennis",
+   "reason": "tennis has no league season table (tournaments and rankings), nothing to simulate"
   },
   {
    "key": "league.leaders",

@@ -4,6 +4,7 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth, type User } from '../lib/auth'
 import DataHealth from '../components/DataHealth'
+import SeasonForecastAdminCard from '../components/SeasonForecastAdminCard'
 import VisitorsCard from '../components/VisitorsCard'
 import LeaguesCard from '../components/LeaguesCard'
 import PlayerPhotosCard from '../components/PlayerPhotosCard'
@@ -100,6 +101,7 @@ export default function Admin() {
         <>
           <VisitorsCard />
           <ModelDailyCard />
+          <SeasonForecastAdminCard />
           <SiteErrorsCard />
           <LinkCheckCard />
           <BackupsCard />

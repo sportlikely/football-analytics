@@ -74,6 +74,18 @@ export const HIW_TEXT = {
     'No model knows everything: late injuries, weather, motivation and news after we save the pick can change a game.',
     'Our numbers are probabilities, not promises.'
   ],
+  // fix215: the season forecast (football, basketball, American football; tennis has no league season)
+  hSeason: 'How the season forecast works',
+  season: [
+    'We play the rest of the season 20,000 times, game by game, with the same model as our match predictions.',
+    'Each game uses our prediction for it: the chance of each result and, in football, the likely score, so goal difference counts too.',
+    'Each run also moves every team’s strength a little, because form changes over a season.',
+    'The league’s own rules decide the final table: points, tie-breaks, split seasons, play-ins and play-offs.',
+    'A team’s chance of the title, Europe, the play-offs or relegation is the share of runs where it happened.',
+    'The forecast runs again 10 minutes after every finished game of the league, and every night.'
+  ],
+  seasonCheck: 'We replay last season week by week with only what was known then. Its accuracy appears here once it beats simply reading the table as it stands.',
+  seasonAccuracy: 'Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.',
   hModel: 'Model and version',
   live: '{0} went live on {1}.',
   notLive: '{0} is not live yet.',

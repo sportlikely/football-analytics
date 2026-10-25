@@ -47,6 +47,7 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/tennis\/match\/-?\d+(\/highlights)?$/, freshMs: 20 * S },
   { re: /^\/api\/tennis\/(matches|rankings|accuracy|upset-watch)$/, freshMs: 2 * MIN },
   { re: /^\/api\/tennis\/(player\/\d+|tournament\/[a-z0-9-]+)$/, freshMs: 10 * MIN },
+  { re: /^\/api\/season-forecast\/(football|basketball|nfl)\/(league\/[A-Za-z0-9]+|team\/\d+|game\/\d+)$/, freshMs: 2 * MIN }, // fix215
   { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN }
 ];
 
@@ -94,6 +95,10 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   { path: '/api/public/summary', sport: 'football', by: 'stored', sample: '/api/public/summary' },
   { path: '/api/more/:sport(football|basketball|nfl|tennis)/record', sport: 'all', by: 'stored', sample: '/api/more/basketball/record' },
   { path: '/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/more/nfl/1' },
+  // fix215: season forecast (league table, team card, what a game means)
+  { path: '/api/season-forecast/:sport/league/:code([A-Za-z0-9]{1,12})', sport: 'all', by: 'worker', sample: '/api/season-forecast/football/league/PL' },
+  { path: '/api/season-forecast/:sport/team/:id(\\d+)', sport: 'all', by: 'worker', sample: '/api/season-forecast/basketball/team/1' },
+  { path: '/api/season-forecast/:sport/game/:id(\\d+)', sport: 'all', by: 'worker', sample: '/api/season-forecast/nfl/game/1' },
   // football
   { path: '/api/matches/upcoming', sport: 'football', by: 'stored', sample: '/api/matches/upcoming' },
   { path: '/api/matches/live', sport: 'football', by: 'stored', sample: '/api/matches/live' },

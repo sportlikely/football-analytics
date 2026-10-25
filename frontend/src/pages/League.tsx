@@ -10,7 +10,8 @@ import RecentResults from '../components/RecentResults'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { hubFor } from '../lib/hubs'
 import { footballTeamHref } from '../lib/teamLink'
-import NameLink from '../components/sport/NameLink'
+import NameLink, { href } from '../components/sport/NameLink'
+import SeasonForecast from '../components/sport/forecast/SeasonForecast'
 import { NewsPic } from '../components/NewsList'
 
 /**
@@ -220,6 +221,7 @@ function League() {
       hub={hub ? { to: `/predictions/${hub.slug}`, label: tt("This week's predictions →") } : null}
       fav={comp?.name && code ? { kind: 'league', ref: code, code, name: comp.name, img: comp.emblem || null } : null}
       record={record && record.hitRate !== null && record.n > 0 ? { hitRate: record.hitRate, n: record.n } : null}
+      forecast={code ? <SeasonForecast sport="football" code={code} teamHref={(id, name) => href.team(Number(id), code, name) || `/team/${id}`} /> : null}
       left={<>
           <Card title={tt("Table")}>
             {!tables ? (

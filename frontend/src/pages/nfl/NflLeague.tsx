@@ -8,6 +8,7 @@ import type { Favorite } from '../../lib/favorites'
 import { Skeleton, TeamLogo } from '../bb/parts'
 import NameLink, { href } from '../../components/sport/NameLink'
 import { useNews, NewsRows } from '../../components/NewsList'
+import SeasonForecast from '../../components/sport/forecast/SeasonForecast'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import { StandingsBlock, LeagueSwitch, NflGameRow } from './parts'
 
@@ -52,6 +53,7 @@ export default function NflLeague() {
       name={name}
       sub={d ? (league === 2 ? t('{0} season · by conference, FBS first', { 0: d.season }) : t('{0} season · regular season', { 0: d.season })) : null}
       record={record}
+      forecast={<SeasonForecast sport="nfl" code={league === 2 ? 'NCAA' : 'NFL'} teamHref={id => `/american-football/team/${id}`} />}
       // fix175 (parity) + fix174: favorite star and the weekly hub, like football and basketball
       fav={fav}
       hub={{ to: `/predictions/${league === 2 ? 'college-football' : 'nfl'}`, label: t("This week's predictions →") }}

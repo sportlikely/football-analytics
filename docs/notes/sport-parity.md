@@ -51,6 +51,7 @@ The Railway build (Dockerfile) runs `vite build` only, so the check runs before 
 Every block was checked against the code on 18 Oct 2026 (fix175 audit).
 
 ## Not applicable ('na') — Yarin decides these
+- fix215, for Yarin to approve: `league.seasonForecast`, `team.seasonForecast`, `game.whatItMeans` · Tennis: no league season table to simulate (tournaments and rankings only)
 - `game.beforeAfter` · Basketball: no line-up announcement to compare around (live 'was X%' is in the live chance)
 - `game.beforeAfter` · NFL: no line-up announcement to compare around
 - `game.lineups` · Basketball: the providers have no line-ups (basketball box scores only flag starters; American football only the starting QB, shown in the reasons)

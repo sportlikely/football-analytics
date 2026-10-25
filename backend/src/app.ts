@@ -116,6 +116,7 @@ import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, dailyRunn
 import { nflProbe, nflCurrentSeason, asLeague, asLeagues, LEAGUES } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
 import { withNflPrediction, nflRatings, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
+import { leagueForecast, leagueView, visibleIds, teamForecastCodes, teamHistory, gameMeaning, seasonForecastAdmin, allLeagues, runSeasonForecast, runSeasonAccuracy, type FcSport } from './services/seasonForecast';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame as nflGameB, nflStandings, nflTeam as nflTeamB, nflPlayer as nflPlayerB, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury, nflTeamRow } from './services/nflSite';
 import { nflLiveNow, nflLiveCurve } from './services/nflLive';
 import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents } from './services/nflGameExtras';
@@ -475,7 +476,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -2411,6 +2412,64 @@ app.get('/api/how-it-works/:sport', (req, res) => {
   if (!HIW_SPORTS.includes(sport) || (!hiwPublic(sport) && req.access !== 'admin')) return res.status(404).json({ error: 'Not found' });
   try { res.set('Cache-Control', 'public, max-age=600').json({ data: howItWorks(sport) }); }
   catch (e: any) { sendError(res, e, 'How it works failed'); }
+});
+// fix215: season forecast — every league simulated to the end 20,000 times with our match model. Free: the forecast's
+// top three and bottom three of each table + the visitor's favourite teams; Pro / admin: everything (like matchView).
+const FC_FAV: Record<FcSport, string> = { football: 'team', basketball: 'bb-team', nfl: 'nfl-team' };
+const fcOpen = (req: express.Request, sport: string): sport is FcSport =>
+  (sport === 'football' || sport === 'basketball' || sport === 'nfl') && (sport === 'football' || req.access === 'admin' || (sport === 'basketball' ? bbPublic() : nflPublic()));
+// a favourite team: its ref, and every id it carries (football keys teams by name, ids = its Football-Data / API-Football ids)
+const fcFavs = (req: express.Request, sport: FcSport) => new Set(req.user ? listFavorites(req.user.id).filter(f => f.kind === FC_FAV[sport])
+  .flatMap(f => [String(f.ref), ...(((f as any).ids || []) as unknown[]).map(String)]) : []);
+app.get('/api/season-forecast/:sport/league/:code([A-Za-z0-9]{1,12})', (req, res) => {
+  const sport = String(req.params.sport);
+  if (!fcOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
+  try {
+    const lg = leagueForecast(sport, String(req.params.code));
+    res.set('Cache-Control', 'private, no-store').json({ data: lg ? leagueView(lg, canSeeFull(req.access || 'anon'), fcFavs(req, sport)) : null });
+  } catch (e: any) { sendError(res, e, 'Season forecast failed'); }
+});
+app.get('/api/season-forecast/:sport/team/:id(\\d+)', (req, res) => {
+  const sport = String(req.params.sport);
+  if (!fcOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
+  try {
+    const id = String(req.params.id), full = canSeeFull(req.access || 'anon'), favs = fcFavs(req, sport);
+    const out = teamForecastCodes(sport, id).map(code => {
+      const lg = leagueForecast(sport, code);
+      const row = lg?.teams.find(t => t.id === id);
+      if (!lg || !row) return null;
+      const open = full || visibleIds(lg, favs).has(id);
+      return { code, league: lg.name, season: lg.season, runAt: lg.runAt, runs: lg.runs, known: lg.known, zones: lg.zones, size: row.pos.length,
+        team: open ? row : { id: row.id, name: row.name, now: row.now, locked: true },
+        history: open ? teamHistory(sport, code, lg.season, id) : [] };
+    }).filter(Boolean);
+    res.set('Cache-Control', 'private, no-store').json({ data: out });
+  } catch (e: any) { sendError(res, e, 'Season forecast failed'); }
+});
+app.get('/api/season-forecast/:sport/game/:id(\\d+)', (req, res) => {
+  const sport = String(req.params.sport);
+  if (!fcOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
+  try {
+    const id = Number(req.params.id), m = gameMeaning(sport, String(id));
+    if (!m) return res.set('Cache-Control', 'private, no-store').json({ data: null });
+    // the same rule as the game's prediction: paid plans, or a free pick spent on this game
+    const rid = sport === 'football' ? id : sport === 'basketball' ? -id : -(2e9 + id);
+    const open = isPaid(req.access || 'anon') || (!!req.user && unlockedIds(req.user.id).has(rid));
+    res.set('Cache-Control', 'private, no-store').json({ data: open ? m : { locked: true, league: m.league, home: { id: m.home.id, name: m.home.name }, away: { id: m.away.id, name: m.away.name } } });
+  } catch (e: any) { sendError(res, e, 'Season forecast failed'); }
+});
+// admin: every league's run (rules used, runs, last run time), skipped leagues, last season's replay
+app.get('/api/admin/season-forecast', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: seasonForecastAdmin() }); } catch (e) { sendError(res, e, 'Failed'); }
+});
+// ?sport=&code= one league, else all; ?accuracy=1 replays last season (runs in the heavy queue, in a job thread)
+app.post('/api/admin/season-forecast/run', (req, res) => {
+  const sport = String(req.query.sport || ''), code = String(req.query.code || '');
+  const refs = allLeagues().filter(r => (!sport || r.sport === sport) && (!code || r.code === code));
+  if (req.query.accuracy === '1') void heavy('season forecast accuracy', () => runSeasonAccuracy()).catch(e => logger.warn(`season accuracy: ${e.message}`));
+  else void heavy('season forecast', () => runSeasonForecast(refs, 'admin')).catch(e => logger.warn(`season forecast: ${e.message}`));
+  res.json({ data: { started: true, leagues: req.query.accuracy === '1' ? 'last season' : refs.length } });
 });
 app.get('/api/changelog', (req, res) => {
   try { res.set('Cache-Control', 'private, max-age=600').json({ data: changelog(req.access === 'admin') }); }

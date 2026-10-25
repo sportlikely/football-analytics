@@ -39,6 +39,7 @@ import { startNflScheduler, backfillPlayerGames } from './services/nfl';
 import { markFresh, markFailed } from './services/freshness';
 import { startDataHealthScheduler } from './services/dataHealth';
 import { startMorePredictionsScheduler } from './services/morePredictions';
+import { startSeasonForecastScheduler } from './services/seasonForecast';
 import { resolveUnsettled, resolveUnsettledOnce, Providers as SettleProviders } from './services/unsettled';
 import { startApiFootballScheduler, rebuildAfFeaturesAsync, afGet, afRemaining } from './services/apiFootball';
 import { prepareModelV3Async } from './services/gridModel';
@@ -147,7 +148,9 @@ export function startJobs() {
     // Daily database backup (services/backup.ts)
     ['backups', () => startBackups()],
     // fix204: More predictions — saved before the start, checked after the game; league fits + backtests (the public gates) daily
-    ['more predictions', () => startMorePredictionsScheduler()]
+    ['more predictions', () => startMorePredictionsScheduler()],
+    // fix215: season forecast — every league simulated to the end, 10 min after each finished game and nightly
+    ['season forecast', () => startSeasonForecastScheduler()]
   ];
   STARTS.forEach(([label, start], i) => after(`start ${label}`, start, Math.round((i * 120_000) / STARTS.length)));
   // fix202: the stored pages (match list, records, basketball / NFL / tennis home …): built once the windows and models

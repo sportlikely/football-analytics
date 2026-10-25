@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && npm run parity && vite build",
-    "parity": "node --experimental-strip-types --no-warnings scripts/parity-check.ts && node --experimental-strip-types --no-warnings scripts/scorers-check.ts && node --experimental-strip-types --no-warnings scripts/web-routes-check.ts && node --experimental-strip-types --no-warnings scripts/layout-check.ts",
+    "parity": "node --experimental-strip-types --no-warnings scripts/parity-check.ts && node --experimental-strip-types --no-warnings scripts/scorers-check.ts && node --experimental-strip-types --no-warnings scripts/web-routes-check.ts && node --experimental-strip-types --no-warnings scripts/layout-check.ts && node --experimental-strip-types --no-warnings scripts/forecast-layout-check.ts",
     "preview": "vite preview",
     "type-check": "tsc --noEmit && npm run parity",
     "lint": "eslint src/**/*.{ts,tsx}"

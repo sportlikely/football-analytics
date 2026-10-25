@@ -10,6 +10,7 @@ import { GameList, Skeleton } from './parts'
 import { StandingsTable, type Standings } from './BbLeague'
 import { teamPlace } from '../../lib/bbTable'
 import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
+import TeamForecast from '../../components/sport/forecast/TeamForecast'
 import { BbTeamAnalysisCard, TeamRecordCard, type BbAnalysis } from '../../components/TeamAnalysis'
 
 interface Profile { games: number; fgPct: number | null; threePct: number | null; threeAttempts: number | null; ftPct: number | null; rebounds: number | null; assists: number | null; turnovers: number | null; steals: number | null; blocks: number | null }
@@ -77,6 +78,7 @@ export default function BbTeam() {
       left={<>
         {/* fix126: Team analysis, like football (strengths & weaknesses, model rating, 1–10 scores, rank over time) */}
         <div id="analysis" className="scroll-mt-24"><BbTeamAnalysisCard a={d.teamAnalysis} full={!!d.teamAnalysis && !d.teamAnalysis.locked} /></div>
+        <TeamForecast sport="basketball" id={id} leagueHref={c => `/basketball/league/${c}`} />
         {an && (
           <>
               <Card title={t('Compared with the league')}>

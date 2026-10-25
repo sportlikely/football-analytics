@@ -27,6 +27,8 @@ interface HowData {
   inputs: { key: string; label: string; detail: string }[]
   accuracy: { rows: Row[]; total: { n: number; hitRate: number | null } }
   faq: Faq[]
+  /** fix215: how the season forecast works (null in tennis) */
+  season: { points: string[]; check: string; accuracy: { sim: number; base: number } | null } | null
 }
 
 const ACCURACY_PATH: Record<HowSport, string> = { football: '/accuracy', basketball: '/basketball/accuracy', 'american-football': '/american-football/accuracy', tennis: '/tennis/accuracy' }
@@ -120,6 +122,14 @@ export default function HowItWorks({ sport }: { sport: HowSport }) {
           {bullets(d.cant)}
         </Card>
       </div>
+
+      {d.season && (
+        <Card>
+          <h2 className="font-display text-xl font-bold text-ink">{t('How the season forecast works')}</h2>
+          {bullets(d.season.points)}
+          <p className="mt-2 text-sm text-muted">{d.season.accuracy ? t('Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.', { 0: d.season.accuracy.sim, 1: d.season.accuracy.base }) : t(d.season.check)}</p>
+        </Card>
+      )}
 
       <Card>
         <h2 className="font-display text-xl font-bold text-ink">{t('Model and version')}</h2>

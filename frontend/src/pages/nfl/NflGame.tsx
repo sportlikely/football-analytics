@@ -11,6 +11,7 @@ import { NFL_STATUS, weekLabel, nick, nflTeamFav, nflRid, nflRstatus, setNflLeag
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import MorePredictions from '../../components/sport/game/MorePredictions'
+import GameMeaning from '../../components/sport/forecast/GameMeaning'
 import YourPicks from '../../components/YourPicks'
 import { newerWinnerLive } from '../../lib/liveState'
 import { StatBars, LeagueSwitch, StandTable } from './parts'
@@ -126,6 +127,7 @@ export default function NflGame() {
           />
           {/* fix204: more predictions from the same model (locked like the prediction) */}
           <MorePredictions sport="nfl" id={g.id} rid={nflRid(g)} status={nflRstatus(g)} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />
+          <GameMeaning sport="nfl" id={g.id} />
           {d.beforeAfter && <ChangeCard g={g} x={d.beforeAfter} />}
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
           {d.starters && (d.starters.home.length > 0 || d.starters.away.length > 0) && <Starters g={g} data={d.starters} />}

@@ -52,12 +52,14 @@ export const PARITY = [
   { key: 'game.scorers', label: 'Scorers under the score, live and final, and in a list row opened with its arrow (fix209: football goals / own goals / penalties / red cards, basketball top scorer, NFL scoring plays, tennis set scores + the game score while live)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'game.whatItMeans', label: 'What this game means: season chances by result (fix215)', football: true, basketball: true, nfl: true, tennis: 'na: tennis has no league season table (tournaments and rankings), nothing to simulate' },
   { key: 'game.morePredictions', label: 'More predictions block under the prediction (fix204)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'record.morePredictions', label: 'More predictions section on the record page (fix204)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'seo.crawler.moreSentence', label: 'Crawler game page: one More predictions sentence (fix204)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.modelName', label: 'Public model name + version line under the prediction (ModelName, fix191)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.howItWorks', label: 'How-it-works link under the prediction + the how-it-works page of the sport (fix206)', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- team page ---------- */
+  { key: 'team.seasonForecast', label: 'Season forecast card + chart (fix215)', football: true, basketball: true, nfl: true, tennis: 'na: tennis has no league season table (tournaments and rankings), nothing to simulate' },
   { key: 'team.analysis', label: 'Strengths & weaknesses', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'team.ratingTiles', label: 'Model rating tiles', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'team.scores', label: '1–10 league scores', football: true, basketball: true, nfl: true, tennis: true },
@@ -73,6 +75,7 @@ export const PARITY = [
   { key: 'player.photo', label: 'Player photo in the header, initials / number when there is none (football + NFL: the data provider; basketball + tennis: Wikimedia Commons, free licences, credited under the photo and on /credits, fix211)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'player.injuries', label: 'Injury history', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- league page ---------- */
+  { key: 'league.seasonForecast', label: 'Season forecast tab: zones, average place, every position (fix215)', football: true, basketball: true, nfl: true, tennis: 'na: tennis has no league season table (tournaments and rankings), nothing to simulate' },
   { key: 'league.table', label: 'Table', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'league.leaders', label: 'Leaders', football: true, basketball: true, nfl: true, tennis: 'na: individual sport, no player leaders inside a tournament (the Rankings page lists the top players)' },
   { key: 'league.favoriteStar', label: 'Favorite star', football: true, basketball: true, nfl: true, tennis: true },

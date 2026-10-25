@@ -9,6 +9,7 @@ import { Skeleton, LockIcon } from '../bb/parts'
 import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
 import { NflGameRow, LeagueSwitch, StandTable } from './parts'
 import RecordLink from '../../components/RecordLink'
+import TeamForecast from '../../components/sport/forecast/TeamForecast'
 import { useNews, NewsRows } from '../../components/NewsList'
 
 interface Measure { id: string; label: string; better: 'high' | 'low'; value: number | null; text: string | null; rank: number | null; of: number | null; score: number | null }
@@ -81,6 +82,7 @@ export default function NflTeam() {
       form={form}
       left={<>
         {d.analysis && <TeamAnalysis a={d.analysis} d={d} />}
+        <TeamForecast sport="nfl" id={tm.id} leagueHref={c => href.nflStandings(c)} />
         {d.roster.length === 0 && d.leaders && d.leaders.length > 0 && (
           <Card title={t('Season leaders')} action={<span className="text-xs text-faint">{t('From the box scores')}</span>}>
             <ul className="divide-y divide-line/50">

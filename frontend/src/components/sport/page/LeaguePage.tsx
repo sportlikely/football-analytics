@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { t } from '../../../lib/i18n'
 import { FavStar, type Favorite } from '../../../lib/favorites'
@@ -21,6 +21,8 @@ export interface LeaguePageProps {
   record?: { hitRate: number; n: number } | null
   left: ReactNode
   right: ReactNode
+  /** fix215: the "Season forecast" tab (components/sport/forecast/SeasonForecast), full width; #forecast in the address */
+  forecast?: ReactNode
 }
 
 export function LCard({ title, action, children, className = '' }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
@@ -39,7 +41,24 @@ export const Lines = ({ n = 5, h = 'h-8' }: { n?: number; h?: string }) => (
   <div className="space-y-2">{Array.from({ length: n }).map((_, i) => <div key={i} className={`${h} rounded-lg bg-surface2/60 animate-pulse`} />)}</div>
 )
 
+/** fix215: Overview | Season forecast, the tab kept in the address (#forecast) so a team page can link to it */
+function useLeagueTab(): ['overview' | 'forecast', (x: 'overview' | 'forecast') => void] {
+  const read = () => (typeof window !== 'undefined' && window.location.hash === '#forecast' ? 'forecast' : 'overview')
+  const [tab, setTab] = useState<'overview' | 'forecast'>(read)
+  useEffect(() => {
+    const on = () => setTab(read())
+    window.addEventListener('hashchange', on)
+    return () => window.removeEventListener('hashchange', on)
+  }, [])
+  const pick = (x: 'overview' | 'forecast') => {
+    setTab(x)
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}${x === 'forecast' ? '#forecast' : ''}`)
+  }
+  return [tab, pick]
+}
+
 export default function LeaguePage(p: LeaguePageProps) {
+  const [tab, setTab] = useLeagueTab()
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 pb-28 xl:pb-10">
       {p.top}
@@ -72,10 +91,19 @@ export default function LeaguePage(p: LeaguePageProps) {
         </div>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-start">
-        <div className="space-y-6 min-w-0">{p.left}</div>
-        <div className="space-y-6 min-w-0">{p.right}</div>
-      </div>
+      {p.forecast && <nav className="flex gap-2 overflow-x-auto no-scrollbar" aria-label={t("League sections")}>
+        {([['overview', t("Overview")], ['forecast', t("Season forecast")]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}
+            className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap border ${tab === id ? 'bg-accent text-bg border-accent' : 'border-line text-muted hover:text-ink'}`}>{label}</button>
+        ))}
+      </nav>}
+
+      {tab === 'forecast' && p.forecast ? <div className="min-w-0">{p.forecast}</div> : (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-start">
+          <div className="space-y-6 min-w-0">{p.left}</div>
+          <div className="space-y-6 min-w-0">{p.right}</div>
+        </div>
+      )}
     </div>
   )
 }

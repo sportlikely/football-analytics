@@ -23,6 +23,7 @@ import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
 import { BB_LEAGUES } from './basketball';
 import logger from '../utils/logger';
+import { db } from '../db';
 import { SPORT_TEXT, HIW_TEXT, HIW_SPORTS, type HiwSport } from './howItWorks.text';
 import { MODEL_INPUTS as FOOTBALL_INPUTS } from './gridModel.inputs';
 import { MODEL_INPUTS as BASKETBALL_INPUTS } from './bbModel.inputs';
@@ -142,8 +143,24 @@ export function howItWorks(sport: HiwSport) {
   return {
     sport, path: HIW_PATH[sport],
     model: { name: model, version: m.version, since: m.since },
-    title: x.title, mainPick: x.mainPick, predicts: x.predicts, test: HIW_TEXT.test, cant: HIW_TEXT.cant, inputs, accuracy, faq
+    title: x.title, mainPick: x.mainPick, predicts: x.predicts, test: HIW_TEXT.test, cant: HIW_TEXT.cant, inputs, accuracy, faq,
+    // fix215: the season forecast (no league season in tennis); the replay's Brier only once it beats the table order
+    season: sport === 'tennis' ? null : { points: HIW_TEXT.season, check: HIW_TEXT.seasonCheck, accuracy: seasonAccuracy(sport) }
   };
+}
+
+/** fix215: last season's replay for a sport (services/seasonForecast.ts writes it), shown only when it beats the table order */
+function seasonAccuracy(sport: HiwSport): { sim: number; base: number } | null {
+  const key = sport === 'american-football' ? 'nfl' : sport;
+  try {
+    let sim = 0, base = 0, n = 0;
+    for (const r of db.prepare(`SELECT json FROM season_forecast_accuracy WHERE sport = ?`).all(key) as any[]) {
+      const j = JSON.parse(r.json);
+      if (j.n) { sim += j.simAll * j.n; base += j.baseAll * j.n; n += j.n; }
+    }
+    if (!n || sim / n >= base / n) return null;
+    return { sim: Math.round((sim / n) * 1000) / 1000, base: Math.round((base / n) * 1000) / 1000 };
+  } catch { return null; } // the table is made by the worker on its first start
 }
 
 /** A FAQ answer in one language (dates and lists filled in). */
@@ -207,6 +224,7 @@ export function howItWorksSeo(pathname: string, lang: HiwLang): HiwSeo | null {
     + `<h2>${T(HIW_TEXT.hInputs)}</h2><ul>${d.inputs.map(i => `<li><strong>${T(i.label)}</strong>: ${T(i.detail)}</li>`).join('')}</ul>`
     + `<h2>${T(HIW_TEXT.hTest)}</h2>${ul(HIW_TEXT.test)}`
     + `<h2>${T(HIW_TEXT.hCant)}</h2>${ul(HIW_TEXT.cant)}`
+    + (d.season ? `<h2>${T(HIW_TEXT.hSeason)}</h2>${ul(d.season.points)}<p>${d.season.accuracy ? T(HIW_TEXT.seasonAccuracy, { 0: d.season.accuracy.sim, 1: d.season.accuracy.base }) : T(HIW_TEXT.seasonCheck)}</p>` : '')
     + `<h2>${T(HIW_TEXT.hModel)}</h2><p>${d.model.since ? T(HIW_TEXT.live, { 0: d.model.name, 1: hiwDate(d.model.since, lang) }) : T(HIW_TEXT.notLive, { 0: d.model.name })} <a href="${link(lang, '/changelog')}">${T(HIW_TEXT.changelogLink)}</a></p>`
     + `<h2>${T(HIW_TEXT.hAccuracy)}</h2><p>${T(HIW_TEXT.accuracyNote)} ${T(d.mainPick)}</p>`
     + (rows.length
