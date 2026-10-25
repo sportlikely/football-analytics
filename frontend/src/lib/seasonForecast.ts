@@ -11,7 +11,7 @@ import { useAuth } from './auth'
  */
 export type FcSport = 'football' | 'basketball' | 'nfl'
 export type ZoneKey = 'title' | 'cl' | 'europe' | 'promotion' | 'promo_po' | 'releg_po' | 'relegation'
-  | 'playoffs' | 'playin' | 'bye' | 'div_title' | 'conf_title' | 'final'
+  | 'playoffs' | 'playin' | 'bye' | 'div_title' | 'conf_title' | 'final' | 'shield' | 'top_group'
 
 export interface FcNow { rank: number; pts: number; played: number; w: number; d: number; l: number; diff: number }
 export interface FcTeam {
@@ -22,6 +22,8 @@ export interface FcTeam {
 export interface FcExtremes { hi: boolean; lo: boolean }
 export interface FcLeague {
   sport: FcSport; code: string; name: string; season: string; runAt: string; runs: number; known: boolean
+  /** fix230: no zones because the format waits for last season's replay check ('replay') or is not added ('format') */
+  pending?: 'replay' | 'format'
   zones: ZoneKey[]; groups: string[]; teams: FcTeam[]; gamesLeft: number; full: boolean; locked: number; extremes?: FcExtremes
 }
 export interface FcTeamCard {
@@ -50,6 +52,8 @@ export function zoneLabel(z: ZoneKey, sport: FcSport): string {
     case 'europe': return t('Europe')
     case 'releg_po': return t('Relegation play-off')
     case 'relegation': return t('Relegation')
+    case 'shield': return t('Top of the table')
+    case 'top_group': return t('Top group')
   }
 }
 /** zones where a high number is bad news */

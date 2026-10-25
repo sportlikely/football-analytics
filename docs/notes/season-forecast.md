@@ -20,8 +20,9 @@ No bookmaker, odds or "bet" wording anywhere. Past seasons (the accuracy replay)
   - "What this game means": for each watched game (next 10 days) the zone chances of both teams in the runs with each
     result. In-process runs pause every 250 runs (`simulateSeasonAsync`).
 - `backend/src/utils/seasonRules.ts` — one config: points, tie-breaks, zones, splits, post-seasons per competition
-  (`FOOTBALL_RULES`, `BASKETBALL_RULES`, `NFL_RULES`), `FOOTBALL_SKIP` (MLS, Argentina, Liga MX: format not modelled),
-  `SIM_PARAMS`. Unknown league → position chances only, no zone columns, data health lists it.
+  (`FOOTBALL_RULES`, `BASKETBALL_RULES`, `NFL_RULES`), `FOOTBALL_SKIP` (formats not modelled at all; empty since fix230),
+  `SIM_PARAMS`. Unknown league → position chances only, no zone columns, data health lists it. fix230: each rule
+  added since carries `source` (the league's own site) + `season`, and `gate: true` (see "Formats (fix230)").
 - `backend/src/utils/seasonFit.ts` — pure helpers (ratings least squares, table from results, the batch run and the
   replay) — the only code the job thread ('season sim') loads.
 - `backend/src/services/seasonForecast.ts` — inputs, runs, storage, scheduler, reads, Free view, admin, data health.
@@ -82,8 +83,47 @@ The fit + replay run ~8 min after a start when none is stored or it is over 7 da
 ">99%" / "<1%" on the pages only when the replay found ≥ 20 forecasts at that level and 98.5 %+ of them came true
 (`extremesFor`); else "99%" / "1%". Fitted values on the server: not yet run — write them here after the first fit.
 
+## Formats (fix230)
+- Post-seasons (`PostSeason` in seasonSim.ts): `bracket` with `playIn: true` (NBA style on places playInFrom … +3, for
+  the last two seeds: NBA / EuroLeague / BBL / LNB 7–10, NBL 3–6) or `'wildcard'` (N v N+1 for seed N: MLS); `bestOf`
+  per round: 0 neutral, 1 one game at the better seed, 3 / 5 / 7 series, −2 two legs (level → the better seed: Liga MX),
+  −3 two legs (level → extra time + penalties: A-League semis, Liga MX final); `byes` (A-League 2, CBA 4: round one
+  outside-in, then re-seeded); `reseed`; `cross` = two groups crossed (Argentina 1A v 8B, 4A v 5B, 2B v 7A, 3B v 6A +
+  mirror). Two legs: goals per leg from the teams' ratings (Poisson), the better seed at home second.
+- Zones: `from` / `to` negative = from the bottom (−1 = last: leagues whose size changes); `over: 'league'` (Supporters'
+  Shield in a conference league) or `'annual'` (Argentina: earlier tournament + this one, `SimTeam.annual`); `shield`
+  ("Top of the table"), `top_group` ("Top group": the split's top group, ABA's Top 8); `noTitle` for group leagues whose
+  later rounds are drawn (EuroCup, BCL, ABA).
+- Tournaments (`rounds: 'tournament'`: Liga MX, Argentina): fixtures from our own copy (sf_fixtures keeps the round
+  names; the twin's v3 names joined in), numbered rounds "<name> - N"; the current tournament = the one of the next game
+  not played; the season label is "2026 Apertura".
+- Table groups (`groupsFrom`): the provider's table where its groups split our teams exactly (MLS, USL conferences),
+  else (`'schedule'`) from who plays whom (`inferGroups`: an edge whose teams share under half their opponents is not a
+  group edge, the rest fall into groups) — Argentina's zones, EuroCup / BCL / ABA groups, also for last season's replay.
+- Split seasons once the split is played: `applySplit` rebuilds the split groups from the table after `after` games and
+  applies the halving to those points (+ `rounded`, tie key 'rounded': Belgium-style up = below on a tie, Austria down =
+  above); before the split the engine plays only the games up to the split (the real post-split fixtures are not
+  played twice). At exactly `after` games with no fixtures out yet the runs make the groups.
+- Gate: a rule with `gate: true` shows zones only when its own replay row beats the table order; else the stored row
+  is `known = 0` with `rules.gateNote`, the page says "Play-off format added: … final positions only", data health
+  names the reason. New gated leagues without a replay are replayed ~8 min after a start (no noise re-fit).
+- Replay: post-season leagues are scored on places (play-offs, top of the table), never on the title drawn in the
+  "what happened" run; zones over the annual table are not scored (one tournament doesn't decide them); last season =
+  the newest season whose last game is over a week old; own-feed leagues fetch last season once (1 call).
+- Sources checked 25 Oct 2026: MLS 2026 play-off format (mlssoccer.com), Liga MX Apertura 2026 without play-in
+  (ligamx.net; Fox Sports 15 Oct), Argentina 2026 (ligaprofesional.ar: two zones of 15, top 8, two relegated: annual +
+  averages), Belgium 2026-27 one table of 18 (proleague.be), Série B 2026 play-off 3–6 (cbf.com.br), Greece 2025-26
+  play-offs 1–4 / 5–8 / play-out 9–14, K League 1 2026 (Gimcheon Sangmu down regardless), A-League 2025-26 finals, USL
+  2026 (13 East / 12 West, top 8 each), EuroCup 2026-27 (4 × 8, top 4, best of 3), BCL 2026-27 (8 × 4, play-ins 2–3),
+  ABA 2026-27 (2 × 10, top 4 to the Top 8), BSL 2025-26 (top 8, 3-5-5, no play-in, last two down), LNB 2025-26
+  (play-in 7–10, 3-5-5, 15th relegation play-off, 16th down), LKL 2025-26 (9 teams, 3-5-5), NBL 2025-26 (play-in 3–6,
+  3-5), CBA 2025-26 (top 12, "3-3-5-7"), NBB 2025-26 (top 16, best of 5, last two down). Where the 2026-27 format was
+  not published the rule says the season it was checked for: re-check when the league publishes it.
+- Replay numbers per new league: not run on the server yet — write them here after the first start.
+
 ## Not done / to decide
-- Cups' group stages (Champions League league phase), MLS / Argentina / Liga MX formats, college CFP bracket.
-- Basketball leagues other than NBA, EuroLeague, ACB, LBA, BBL: position chances only (their play-off formats differ by
-  season — add them to `BASKETBALL_RULES` when checked).
-- The Belgian / Greek / Swiss post-split zones are the places every season gives; cup-winner places are not modelled.
+- Cups' group stages (Champions League league phase), college CFP bracket.
+- Argentina's second relegation place (the three-season average table) and Liga MX's cup-winner / CONCACAF places.
+- EuroCup / BCL / ABA later rounds (drawn or set by the league each season): next-round places only, no title.
+- K League 1 2026: Gimcheon Sangmu goes down whatever its place — no relegation zone this season.
+- The Greek / Swiss / Austrian post-split zones are the places every season gives; cup-winner places are not modelled.

@@ -2548,5 +2548,9 @@
  "His rating × his expected minutes": "Su valoración × sus minutos esperados",
  "Points a game for his team": "Puntos por partido para su equipo",
  "Team with him": "Equipo con él",
- "Team without him": "Equipo sin él"
+ "Team without him": "Equipo sin él",
+ "Play-off format added: its chances appear once our check on last season passes. Until then, final positions only.": "Formato de play-offs añadido: sus probabilidades aparecen cuando supere nuestra prueba con la temporada pasada. Hasta entonces, solo las posiciones finales.",
+ "Play-off format not added yet: final positions only.": "Formato de play-offs aún no añadido: solo las posiciones finales.",
+ "Top of the table": "Primero de la tabla",
+ "Top group": "Grupo de arriba"
 }

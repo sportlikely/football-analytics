@@ -26,11 +26,12 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { yieldLoop, yieldEvery, every, after, heavy } from './perf';
 import { threadJobsOn, inThread } from './threadJob';
-import { simulateSeason, simulateSeasonAsync, probitOf, marginOf, hashSeed, type LeagueRules, type SimGame, type SimPlayed, type SimParams, type SimOut, type ZoneKey, type SimSport } from '../utils/seasonSim';
-import { fitRatings, tableOf, rankNow, median, r4, type LeagueInput, type ReplayLeague, type ReplayOut, replayHere, fitNoiseHere } from '../utils/seasonFit';
+import { simulateSeason, simulateSeasonAsync, probitOf, marginOf, hashSeed, type LeagueRules, type SimGame, type SimPlayed, type SimParams, type SimOut, type ZoneKey, type SimSport, type SimTeam } from '../utils/seasonSim';
+import { fitRatings, tableOf, rankNow, median, r4, applySplit, inferGroups, type LeagueInput, type ReplayLeague, type ReplayOut, replayHere, fitNoiseHere } from '../utils/seasonFit';
 import { FD_TWIN, FOOTBALL_RULES, FOOTBALL_SKIP, BASKETBALL_RULES, NFL_RULES, rulesFor, SIM_PARAMS } from '../utils/seasonRules';
 import { AF_LEAGUES, afGet, afBudgetLeft, afConfigured } from './apiFootball';
-import { AF_OFFSET, EXTRA_COMPETITIONS, currentSeason, afStandingsCached } from './afMatches';
+import { AF_OFFSET, EXTRA_COMPETITIONS, currentSeason, afStandingsCached, getAfStandings } from './afMatches';
+import { leagueVisitors } from './visitors';
 import footballDataAPI from './footballDataAPI';
 import { mainRank } from './tracking';
 import { predictV3ByNames } from './gridModel';
@@ -91,6 +92,8 @@ function footballLeagues(): { code: string; afId: number; own: boolean }[] {
   for (const [code, id] of Object.entries(FD_TWIN)) out.set(code, { code, afId: id, own: false });
   for (const l of AF_LEAGUES) if (!twin.has(l.id)) out.set(`AF${l.id}`, { code: `AF${l.id}`, afId: l.id, own: false });
   for (const c of EXTRA_COMPETITIONS) if (c.kind === 'league' && !out.has(`AF${c.id}`)) out.set(`AF${c.id}`, { code: `AF${c.id}`, afId: c.id, own: true });
+  // fix230: tournament seasons (Apertura / Clausura) need the round names, which only our own fixture copy keeps
+  for (const L of out.values()) if (FOOTBALL_RULES[L.code]?.rounds === 'tournament') L.own = true;
   return [...out.values()];
 }
 
@@ -101,6 +104,11 @@ async function syncOwnFixtures(afId: number): Promise<number | null> {
   if (!afConfigured() || afBudgetLeft() < 1000) return last?.season ?? null;
   const season = await currentSeason(afId);
   if (!season) return last?.season ?? null;
+  await storeFixtures(afId, season);
+  return season;
+}
+/** one season's fixtures of a league into sf_fixtures (1 call) */
+async function storeFixtures(afId: number, season: number): Promise<void> {
   const json: any = await afGet('/fixtures', { league: afId, season });
   const up = db.prepare(`INSERT INTO sf_fixtures (fixture_id, league_id, season, round, kickoff, status, home_id, away_id, home_name, away_name, hg, ag, at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(fixture_id) DO UPDATE SET round = excluded.round, kickoff = excluded.kickoff,
@@ -115,20 +123,74 @@ async function syncOwnFixtures(afId: number): Promise<number | null> {
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
-  return season;
 }
 
-/** the regular season of a league: a round name that is a play-off / final is left out */
-const NOT_REGULAR = /play.?off|final|relegation|promotion|qualif|knock/i;
+/** the regular season of a league: a round name that is a play-off / final is left out (fix230: a split's
+ *  "Championship Round" / "Relegation Round" is part of the season, a play-in / Liguilla / wild card is not) */
+const NOT_REGULAR = /play.?off|play.?in|final|qualif|knock|liguilla|reclasific|wild.?card|barrage|decider|^relegation$|^promotion$/i;
+/** fix230: a numbered round "Apertura - 12" / "Regular Season - 30": the tournament's name and the round */
+const NUMBERED = /^(.*?)\s*-\s*(\d+)\s*$/;
+const prefixOf = (round: string | null) => (NUMBERED.exec(round || '')?.[1] || '').trim();
+
+/**
+ * fix230: the current tournament of a season of tournaments (Liga MX, Argentina): the numbered rounds of the
+ * tournament of the next game not played; `earlier` = the season's tournaments before it (the annual table).
+ */
+export function tournamentSplit<T extends { round: string | null; kickoff: string; status: string | null }>(rows: T[]): { name: string; cur: T[]; earlier: T[] } | null {
+  const numbered = rows.filter(r => NUMBERED.test(r.round || ''));
+  if (!numbered.length) return null;
+  const open = numbered.filter(r => !FINAL.has(String(r.status || 'NS')) && !GONE.has(String(r.status || 'NS'))).sort((a, b) => a.kickoff.localeCompare(b.kickoff));
+  const last = numbered.slice().sort((a, b) => b.kickoff.localeCompare(a.kickoff))[0];
+  const name = prefixOf((open[0] || last).round);
+  const cur = numbered.filter(r => prefixOf(r.round) === name);
+  const start = cur.reduce((m, r) => (r.kickoff < m ? r.kickoff : m), '9999');
+  const earlier = numbered.filter(r => prefixOf(r.round) !== name && r.kickoff < start);
+  return { name, cur, earlier };
+}
+
+/** fix230: table groups (conferences, zones) from the provider's table: groups that split our teams exactly */
+function providerGroups(st: any, ids: string[]): Map<string, string> | null {
+  const out = new Map<string, string>(), want = new Set(ids);
+  for (const t of st?.standings || []) {
+    if (t.type !== 'TOTAL' || !t.group || !(t.table?.length < ids.length)) continue;
+    for (const row of t.table) { const id = String(row.team?.id); if (want.has(id) && !out.has(id)) out.set(id, String(t.group).replace(/^.*?:\s*/, '')); }
+  }
+  return out.size === ids.length && new Set(out.values()).size >= 2 ? out : null;
+}
+async function footballGroups(code: string, rules: LeagueRules, ids: string[], games: { home: string; away: string }[]): Promise<Map<string, string> | null> {
+  const st = afStandingsCached(code) || await getAfStandings(code).catch(() => null);
+  return providerGroups(st, ids) || (rules.groupsFrom === 'schedule' ? inferGroups(ids, games) : null);
+}
+
+/**
+ * fix230: a newly modelled league shows its zones only once last season's replay beats the "current table order"
+ * baseline (season_forecast_accuracy, per league); until then the same simulation, position chances only.
+ */
+export function gatedRules(sport: FcSport, code: string, rules: LeagueRules): LeagueRules {
+  if (!rules.gate || !rules.known) return rules;
+  const r: any = db.prepare(`SELECT json FROM season_forecast_accuracy WHERE sport = ? AND code = ?`).get(sport, code);
+  const j = r ? JSON.parse(r.json) : null;
+  if (j?.n > 0 && j.simAll < j.baseAll) return rules;
+  return { ...rules, known: false, gateNote: !j ? 'replay of last season not run yet' : !j.n ? 'replay found nothing to score' : `replay failed the calibration check (Brier ${j.simAll} vs table order ${j.baseAll})` };
+}
 
 async function footballInput(L: { code: string; afId: number; own: boolean }, nowIso: string): Promise<LeagueInput | Skip> {
   const name = (db.prepare(`SELECT competition_name n FROM predictions WHERE competition_code = ? ORDER BY utc_date DESC LIMIT 1`).get(L.code) as any)?.n || L.code;
   if (FOOTBALL_SKIP[L.code]) return { sport: 'football', code: L.code, name, reason: FOOTBALL_SKIP[L.code] };
+  const fullRules = rulesFor('football', L.code);
   let rows: any[];
   let season: number | null;
+  let tournament: string | null = null, earlier: any[] = [];
   if (L.own) {
     season = await syncOwnFixtures(L.afId).catch(e => { logger.warn(`season forecast: fixtures ${L.code}: ${e?.message || e}`); return null; });
-    rows = season ? (db.prepare(`SELECT fixture_id, kickoff, status, home_id, away_id, home_name, away_name, hg, ag, round, NULL grp, NULL fh, NULL fa FROM sf_fixtures WHERE league_id = ? AND season = ?`).all(L.afId, season) as any[]).filter(r => !NOT_REGULAR.test(r.round || '')) : [];
+    // the API-Football twin's names (v3 for games without a saved prediction) where the league is in that feed too
+    rows = season ? db.prepare(`SELECT s.fixture_id, s.kickoff, s.status, s.home_id, s.away_id, s.home_name, s.away_name, s.hg, s.ag, s.round, f.grp, th.fd_name fh, ta.fd_name fa
+      FROM sf_fixtures s LEFT JOIN af_fixtures f ON f.fixture_id = s.fixture_id LEFT JOIN af_teams th ON th.grp = f.grp AND th.team_id = s.home_id LEFT JOIN af_teams ta ON ta.grp = f.grp AND ta.team_id = s.away_id
+      WHERE s.league_id = ? AND s.season = ?`).all(L.afId, season) as any[] : [];
+    if (fullRules.rounds === 'tournament') {
+      const t = tournamentSplit(rows);
+      if (t) { tournament = t.name; rows = t.cur; earlier = t.earlier; } else rows = rows.filter(r => !NOT_REGULAR.test(r.round || ''));
+    } else rows = rows.filter(r => !NOT_REGULAR.test(r.round || ''));
   } else {
     const s: any = db.prepare(`SELECT season FROM af_fixtures WHERE league_id = ? AND COALESCE(status, 'NS') IN ('NS','TBD','PST') AND kickoff >= ? ORDER BY kickoff LIMIT 1`).get(L.afId, new Date(Date.now() - 7 * DAY).toISOString());
     season = s?.season ?? null;
@@ -158,9 +220,9 @@ async function footballInput(L: { code: string; afId: number; own: boolean }, no
   // settled results arrive before the fixture feed's next sync
   const resOf = db.prepare(`SELECT home_goals, away_goals, outcome FROM results WHERE match_id = ?`);
   const names = new Map<string, string>();
-  const played: SimPlayed[] = [], remaining: any[] = [];
+  const played: (SimPlayed & { kickoff: string })[] = [], remaining: any[] = [];
   let lastFinal: string | null = null;
-  for (const r of rows) {
+  for (const r of rows.slice().sort((a: any, b: any) => String(a.kickoff).localeCompare(String(b.kickoff)))) {
     if (!r.home_id || !r.away_id) continue;
     const h = tid(r.home_id), a = tid(r.away_id);
     names.set(h, r.home_name); names.set(a, r.away_name);
@@ -174,15 +236,29 @@ async function footballInput(L: { code: string; afId: number; own: boolean }, no
         hg = sw ? res.away_goals : res.home_goals; ag = sw ? res.home_goals : res.away_goals; done = true;
       }
     }
-    if (done) { played.push({ home: h, away: a, hg, ag }); if (!lastFinal || r.kickoff > lastFinal) lastFinal = r.kickoff; }
+    if (done) { played.push({ home: h, away: a, hg, ag, kickoff: r.kickoff }); if (!lastFinal || r.kickoff > lastFinal) lastFinal = r.kickoff; }
     else remaining.push({ ...r, h, a });
   }
-  if (!remaining.length) return { sport: 'football', code: L.code, name, reason: 'season finished (no games left)' };
   const ids = [...names.keys()];
+  // a split season exactly at the split with the groups' fixtures not out yet: the runs make them
+  const atSplit = !!fullRules.split && Math.max(0, ...[...tableOf(ids, played, 'football').values()].map(t => t.played)) === fullRules.split.after;
+  if (!remaining.length && !atSplit) return { sport: 'football', code: L.code, name, reason: 'season finished (no games left)' };
+  // fix230: table groups (MLS conferences, Argentina's zones)
+  let groupOf: Map<string, string> | null = null;
+  if (fullRules.groupBy === 'group') {
+    groupOf = await footballGroups(L.code, fullRules, ids, [...played, ...remaining.map(r => ({ home: r.h, away: r.a }))]);
+    if (!groupOf) return { sport: 'football', code: L.code, name, reason: 'table groups not known yet (provider table)' };
+  }
+  // fix230: the annual table before this tournament (earlier tournaments of the season, finished games)
+  const annual = new Map<string, { pts: number; gd: number; gf: number }>();
+  if (earlier.length) {
+    const ep = earlier.filter(r => FINAL.has(String(r.status)) && r.hg != null && r.home_id && r.away_id).map(r => ({ home: tid(r.home_id), away: tid(r.away_id), hg: r.hg, ag: r.ag }));
+    for (const [id, t] of tableOf(ids, ep, 'football')) annual.set(id, { pts: t.pts, gd: t.gf - t.ga, gf: t.gf });
+  }
   // a points deduction: the provider's table, where it has played the same games
   const adj = new Map<string, number>();
   const prov: any = afStandingsCached(L.code) || (footballDataAPI as any).standings?.get?.(L.code);
-  const ours = tableOf(ids, played, 'football');
+  const ours = new Map(applySplit([...tableOf(ids, played, 'football').values()], played, fullRules).map(t => [t.id, t] as [string, SimTeam]));
   const total = prov?.standings?.find((s: any) => s.type === 'TOTAL' && !s.group) || prov?.standings?.find((s: any) => s.type === 'TOTAL');
   for (const row of total?.table || []) {
     const id = String(row.team?.id), t = ours.get(id);
@@ -190,7 +266,7 @@ async function footballInput(L: { code: string; afId: number; own: boolean }, no
   }
 
   // our predictions this season: the main model per match (played + upcoming), for the ratings and the games
-  const start = rows.reduce((m: string, r: any) => (r.kickoff < m ? r.kickoff : m), '9999');
+  const start = [...rows, ...earlier].reduce((m: string, r: any) => (r.kickoff < m ? r.kickoff : m), '9999');
   const best = new Map<number, any>();
   for (const p of db.prepare(`SELECT match_id, model, p_home, p_draw, p_away, xg_home, xg_away, utc_date, home_team_id, away_team_id FROM predictions WHERE competition_code = ? AND utc_date >= ?`).all(L.code, start) as any[]) {
     const cur = best.get(p.match_id);
@@ -231,7 +307,7 @@ async function footballInput(L: { code: string; afId: number; own: boolean }, no
   }
   const base = SIM_PARAMS.football;
   const fit = fitRatings(ids, obs, base.home);
-  const ownTable = tableOf(ids, played, 'football', adj);
+  const ownTable = new Map(applySplit([...tableOf(ids, played, 'football').values()], played, fullRules).map(t => [t.id, { ...t, pts: t.pts + (adj.get(t.id) || 0) }] as [string, SimTeam]));
   const gp = played.length || 1;
   const params: SimParams = {
     runs: SIM_PARAMS.runs, seed: hashSeed(`football|${L.code}|${nowIso.slice(0, 10)}`), home: fit.home,
@@ -239,10 +315,10 @@ async function footballInput(L: { code: string; afId: number; own: boolean }, no
     goalsH: played.length >= 20 ? played.reduce((s, g) => s + g.hg, 0) / gp : base.goalsH,
     goalsA: played.length >= 20 ? played.reduce((s, g) => s + g.ag, 0) / gp : base.goalsA
   };
-  const teams = ids.map(id => ({ ...ownTable.get(id)!, name: names.get(id) || id, rating: fit.r.get(id) || 0 }));
+  const teams: SimTeam[] = ids.map(id => ({ ...ownTable.get(id)!, name: names.get(id) || id, rating: fit.r.get(id) || 0, group: groupOf?.get(id), annual: annual.get(id) }));
   const rank = rankNow(teams, 'football');
   return {
-    sport: 'football', code: L.code, name, season: `${season}`, rules: rulesFor('football', L.code), teams, played, games, params,
+    sport: 'football', code: L.code, name, season: tournament ? `${season} ${tournament}` : `${season}`, rules: gatedRules('football', L.code, fullRules), teams, played: played.map(({ home, away, hg, ag }) => ({ home, away, hg, ag })), games, params,
     meta: Object.fromEntries(ids.map(id => [id, { rank: rank.get(id) || 0 }])), lastFinal
   };
 }
@@ -270,13 +346,19 @@ async function basketballInput(L: { code: string; name: string }, nowIso: string
     else if (!['CANC', 'ABD', 'AWD'].includes(g.status)) remaining.push(g);
   }
   if (!remaining.length) return { sport: 'basketball', code: L.code, name: L.name, reason: 'no regular-season games left' };
-  const rules = rulesFor('basketball', L.code);
+  const fullRules = rulesFor('basketball', L.code), rules = gatedRules('basketball', L.code, fullRules);
   const ids = [...names.keys()];
-  const groupOf = new Map<string, string>();
+  let groupOf = new Map<string, string>();
   if (rules.groupBy === 'group') {
-    const st: any = await bbStandings(L.code).catch(() => null);
-    for (const gr of st?.groups || []) if (gr.level === 'conference' && gr.kind !== 'pre') for (const row of gr.rows) groupOf.set(String(row.team?.id), gr.name || '');
-    if (ids.some(id => !groupOf.has(id))) return { sport: 'basketball', code: L.code, name: L.name, reason: 'conferences not known yet (provider table)' };
+    if (rules.groupsFrom === 'schedule') {
+      // fix230: EuroCup / BCL / ABA groups: the teams that play each other this regular season
+      groupOf = inferGroups(ids, rows.map(g => ({ home: String(g.home_id), away: String(g.away_id) }))) || new Map();
+      if (ids.some(id => !groupOf.has(id))) return { sport: 'basketball', code: L.code, name: L.name, reason: 'groups not known yet (schedule)' };
+    } else {
+      const st: any = await bbStandings(L.code).catch(() => null);
+      for (const gr of st?.groups || []) if (gr.level === 'conference' && gr.kind !== 'pre') for (const row of gr.rows) groupOf.set(String(row.team?.id), gr.name || '');
+      if (ids.some(id => !groupOf.has(id))) return { sport: 'basketball', code: L.code, name: L.name, reason: 'conferences not known yet (provider table)' };
+    }
   }
   const saved = new Map<number, any>();
   for (const p of db.prepare(`SELECT game_id, p_home, margin FROM bb_predictions WHERE code = ? AND kickoff >= ?`).all(L.code, new Date(Date.now() - DAY).toISOString()) as any[]) saved.set(p.game_id, p);
@@ -552,12 +634,25 @@ export function startSeasonForecastScheduler() {
     const d = new Date();
     if (!force && (d.getUTCDay() !== 1 || d.getUTCHours() !== 3)) return;
     const last: any = db.prepare(`SELECT MAX(at) at FROM season_forecast_accuracy`).get();
-    if (last?.at && Date.now() - Date.parse(last.at) < (force ? 7 : 5) * DAY) return;
+    if (last?.at && Date.now() - Date.parse(last.at) < (force ? 7 : 5) * DAY) {
+      // fix230: new (gated) rules without a replay yet: just those, at the start, so their zones need not wait a week
+      const missing = force ? waitingReplay() : new Set<string>();
+      if (!missing.size) return;
+      const n = await heavy('season forecast accuracy', () => runSeasonAccuracy(missing));
+      if (n) await heavy('season forecast', () => runSeasonForecast(allLeagues().filter(r => missing.has(`${r.sport}|${r.code}`)), 'after the replay check'));
+      return;
+    }
     const n = await heavy('season forecast accuracy', () => runSeasonAccuracy());
     if (n) await heavy('season forecast', () => runSeasonForecast(allLeagues(), 'after the noise fit'));
   };
   after('season forecast accuracy', () => replay(true), 8 * MIN);
   every('season forecast accuracy', () => replay(false), 30 * MIN);
+}
+
+/** fix230: gated leagues we run that have no replay row yet */
+function waitingReplay(): Set<string> {
+  const have = new Set((db.prepare(`SELECT sport, code FROM season_forecast_accuracy`).all() as any[]).map(r => `${r.sport}|${r.code}`));
+  return new Set(allLeagues().filter(r => rulesFor(r.sport, r.code).gate && !have.has(`${r.sport}|${r.code}`)).map(r => `${r.sport}|${r.code}`));
 }
 
 /* ---------- reads for the pages ---------- */
@@ -567,7 +662,8 @@ export interface FcTeamRow {
   now: { rank: number; pts: number; played: number; w: number; d: number; l: number; diff: number };
   avgPts: number; avgPos: number; zones: Partial<Record<ZoneKey, number>>; pos: number[];
 }
-export interface FcLeague { sport: FcSport; code: string; name: string; season: string; runAt: string; runs: number; known: boolean; zones: ZoneKey[]; groups: string[]; teams: FcTeamRow[]; gamesLeft: number }
+/** pending (fix230): 'replay' = the format is added, its zones wait for last season's replay check; 'format' = not added */
+export interface FcLeague { sport: FcSport; code: string; name: string; season: string; runAt: string; runs: number; known: boolean; pending?: 'replay' | 'format'; zones: ZoneKey[]; groups: string[]; teams: FcTeamRow[]; gamesLeft: number }
 
 export function leagueForecast(sport: FcSport, code: string): FcLeague | null {
   const r: any = db.prepare(`SELECT * FROM season_forecast WHERE sport = ? AND code = ?`).get(sport, code);
@@ -575,6 +671,7 @@ export function leagueForecast(sport: FcSport, code: string): FcLeague | null {
   const teams: FcTeamRow[] = JSON.parse(r.teams).filter((t: FcTeamRow) => t.group !== 'other');
   return {
     sport, code, name: r.name, season: r.season, runAt: r.run_at, runs: r.runs, known: !!r.known, gamesLeft: r.games_left,
+    pending: r.known ? undefined : JSON.parse(r.rules || '{}')?.gateNote ? 'replay' : 'format',
     zones: JSON.parse(r.zones || '[]'), groups: (JSON.parse(r.groups_ || '[]') as string[]).filter(g => g !== 'other'),
     teams: teams.sort((a, b) => (a.group || '').localeCompare(b.group || '') || a.avgPos - b.avgPos)
   };
@@ -605,7 +702,7 @@ export function seasonForecastAdmin() {
 
 /** "Season forecast fresh" / "rules" / "sums" (services/dataHealth.ts) */
 export function seasonForecastChecks(): { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items?: string[] }[] {
-  const rows = db.prepare(`SELECT sport, code, name, run_at, last_final, final_seen, games_left, known, teams FROM season_forecast`).all() as any[];
+  const rows = db.prepare(`SELECT sport, code, name, run_at, last_final, final_seen, games_left, known, teams, rules FROM season_forecast`).all() as any[];
   const finals = lastFinals();
   const late: string[] = [], bad: string[] = [];
   for (const r of rows) {
@@ -623,8 +720,12 @@ export function seasonForecastChecks(): { id: string; label: string; level: 'ok'
       if (Math.abs(s - 1) > (t.psum != null ? 1e-6 : 0.002)) bad.push(`${r.sport} ${r.code} ${t.name}: positions add up to ${(s * 100).toFixed(2)}%`);
     }
   }
-  const unknown = rows.filter(r => !r.known).map(r => `${r.sport} ${r.name || r.code} (${r.code}): no zone rules — position chances only`);
-  const skips = (db.prepare(`SELECT sport, code, name, reason FROM season_forecast_skips`).all() as any[]).filter(s => /not modelled/.test(s.reason)).map(s => `${s.sport} ${s.name || s.code}: ${s.reason}`);
+  // fix230: what is still missing, the leagues people look at first (visitors to the league's page, 30 days)
+  const seen = leagueVisitors(30), vis = (r: any) => seen.get(`${r.sport}|${r.code}`) || 0;
+  const gateOf = (r: any) => { try { return JSON.parse(r.rules || '{}')?.gateNote || null; } catch { return null; } };
+  const unknown = rows.filter(r => !r.known).sort((a, b) => vis(b) - vis(a) || `${a.sport}${a.code}`.localeCompare(`${b.sport}${b.code}`))
+    .map(r => `${r.sport} ${r.name || r.code} (${r.code}, ${vis(r)} visitor${vis(r) === 1 ? '' : 's'} in 30 days): ${gateOf(r) ? `format added, zones waiting — ${gateOf(r)}` : 'no zone rules — position chances only'}`);
+  const skips = (db.prepare(`SELECT sport, code, name, reason FROM season_forecast_skips`).all() as any[]).filter(s => /not modelled|not known yet/.test(s.reason)).map(s => `${s.sport} ${s.name || s.code}: ${s.reason}`);
   return [
     { id: 'season-forecast-fresh', label: 'Season forecast fresh', level: !rows.length ? 'warn' : late.length ? 'fail' : 'ok', detail: !rows.length ? 'No season forecast stored yet (first run ~5 min after start)' : late.length ? `${late.length} league(s) not re-run within 30 min of a finished game` : `${rows.length} leagues, each run after its last finished game`, items: late.slice(0, 30) },
     { id: 'season-forecast-rules', label: 'Season forecast rules', level: unknown.length + skips.length ? 'warn' : 'ok', detail: unknown.length + skips.length ? `${unknown.length} league(s) without zone rules, ${skips.length} not simulated` : 'Every league has its rules', items: [...skips, ...unknown].slice(0, 40) },
@@ -648,27 +749,64 @@ export function seasonForecastChecks(): { id: string; label: string; level: 'ok'
  */
 const REPLAY_RUNS = 2000;
 
-function pastFootball(): ReplayLeague[] {
+/** fix230: the last finished season of a league: the newest season whose last game is over a week old */
+const DONE_AGO = 7 * DAY;
+async function pastFootball(only?: Set<string>): Promise<ReplayLeague[]> {
   const out: ReplayLeague[] = [];
+  const base = SIM_PARAMS.football;
   for (const L of footballLeagues()) {
-    if (L.own || !FOOTBALL_RULES[L.code]) continue;
-    const s: any = db.prepare(`SELECT MAX(season) s FROM af_fixtures WHERE league_id = ? AND kickoff < ? AND status IN ('FT','AET','PEN')`).get(L.afId, new Date(Date.now() - 120 * DAY).toISOString());
-    if (!s?.s) continue;
-    const rows = db.prepare(`SELECT kickoff, home_id, away_id, home_name, away_name, hg, ag, status FROM af_fixtures WHERE league_id = ? AND season = ? ORDER BY kickoff`).all(L.afId, s.s) as any[];
+    const rules = FOOTBALL_RULES[L.code];
+    if (!rules || (only && !only.has(`football|${L.code}`))) continue;
+    let rows: any[];
+    if (L.own) {
+      // fix230: our own fixture copy (round names): the season before the current one, fetched once (1 call)
+      const cur = await currentSeason(L.afId).catch(() => null);
+      if (!cur) continue;
+      if (!db.prepare(`SELECT 1 FROM sf_fixtures WHERE league_id = ? AND season = ? LIMIT 1`).get(L.afId, cur - 1) && afConfigured() && afBudgetLeft() >= 1000) {
+        await storeFixtures(L.afId, cur - 1).catch(e => logger.warn(`season forecast: last season's fixtures ${L.code}: ${e?.message || e}`));
+      }
+      const all = db.prepare(`SELECT season, round, kickoff, status, home_id, away_id, home_name, away_name, hg, ag FROM sf_fixtures WHERE league_id = ? AND season IN (?, ?) ORDER BY kickoff`).all(L.afId, cur - 1, cur) as any[];
+      if (rules.rounds === 'tournament') {
+        // the newest tournament played to the end (Argentina: the Apertura of this year; Liga MX: the last Clausura)
+        const by = new Map<string, any[]>();
+        for (const r of all) if (NUMBERED.test(r.round || '')) { const k = `${r.season}|${prefixOf(r.round)}`; (by.get(k) || by.set(k, []).get(k)!).push(r); }
+        const done = [...by.values()].filter(t => t.every(r => FINAL.has(String(r.status)) || GONE.has(String(r.status))) && Date.parse(t[t.length - 1].kickoff) < Date.now() - DONE_AGO);
+        rows = done.sort((x, y) => y[y.length - 1].kickoff.localeCompare(x[x.length - 1].kickoff))[0] || [];
+      } else {
+        const last = [...new Set(all.map(r => r.season))].filter(se => { const k = all.filter(r => r.season === se); return Date.parse(k[k.length - 1].kickoff) < Date.now() - DONE_AGO; }).sort((x, y) => y - x)[0];
+        rows = all.filter(r => r.season === last && !NOT_REGULAR.test(r.round || ''));
+      }
+    } else {
+      const seasons = db.prepare(`SELECT season, MAX(kickoff) k FROM af_fixtures WHERE league_id = ? GROUP BY season ORDER BY season DESC`).all(L.afId) as any[];
+      const s = seasons.find(x => Date.parse(x.k) < Date.now() - DONE_AGO);
+      if (!s) continue;
+      rows = db.prepare(`SELECT kickoff, home_id, away_id, home_name, away_name, hg, ag, status FROM af_fixtures WHERE league_id = ? AND season = ? ORDER BY kickoff`).all(L.afId, s.season) as any[];
+    }
     const games = rows.filter(r => FINAL.has(r.status) && r.hg != null).map(r => ({ home: String(r.home_id), away: String(r.away_id), hg: r.hg, ag: r.ag, kickoff: r.kickoff }));
     if (games.length < 100) continue;
     const names = new Map<string, string>(); for (const r of rows) { names.set(String(r.home_id), r.home_name); names.set(String(r.away_id), r.away_name); }
-    const base = SIM_PARAMS.football;
-    out.push({ sport: 'football', code: L.code, name: L.code, season: String(s.s), rules: FOOTBALL_RULES[L.code], teams: [...names].map(([id, name]) => ({ id, name })), games, preds: [],
+    // fix230: table groups — the provider's (this season's conferences: ids carry the offset) or the schedule's
+    let group: Map<string, string> | null = null;
+    if (rules.groupBy === 'group') {
+      const ids = [...names.keys()];
+      const st = afStandingsCached(L.code) || await getAfStandings(L.code).catch(() => null);
+      const pg = providerGroups(st, ids.map(id => String(AF_OFFSET + Number(id))));
+      group = pg ? new Map(ids.map(id => [id, pg.get(String(AF_OFFSET + Number(id)))!] as [string, string])) : rules.groupsFrom === 'schedule' ? inferGroups(ids, games) : null;
+      if (!group) { logger.info(`season forecast replay ${L.code}: last season's table groups not known, skipped`); continue; }
+    }
+    out.push({ sport: 'football', code: L.code, name: L.code, season: String(rows[0]?.season ?? ''), rules, teams: [...names].map(([id, name]) => ({ id, name, group: group?.get(id) })), games, preds: [],
       base: { runs: REPLAY_RUNS, seed: hashSeed(`acc|${L.code}`), home: base.home, drawBand: base.drawBand, sigma: 1, noise: base.noise, goalsH: base.goalsH, goalsA: base.goalsA } });
+    await yieldLoop();
   }
   return out;
 }
-function pastBasketball(): ReplayLeague[] {
+function pastBasketball(only?: Set<string>): ReplayLeague[] {
   const out: ReplayLeague[] = [];
   for (const L of BB_LEAGUES) {
     const rules = BASKETBALL_RULES[L.code];
-    if (!rules || rules.groupBy) continue; // NBA conferences: not stored for past seasons (provider table)
+    if (only && !only.has(`basketball|${L.code}`)) continue;
+    // NBA conferences: not stored for past seasons (provider table); fix230: groups from the schedule are
+    if (!rules || (rules.groupBy && rules.groupsFrom !== 'schedule')) continue;
     const lg: any = db.prepare(`SELECT seasons FROM bb_leagues WHERE code = ?`).get(L.code);
     const seasons: string[] = lg ? JSON.parse(lg.seasons || '[]') : [];
     const season = seasons[seasons.length - 2];
@@ -677,8 +815,10 @@ function pastBasketball(): ReplayLeague[] {
     const games = rows.filter(g => ['FT', 'AOT'].includes(g.status) && g.hs != null).map(g => ({ home: String(g.home_id), away: String(g.away_id), hg: g.hs, ag: g.as_, kickoff: g.kickoff }));
     if (games.length < 100) continue;
     const names = new Map<string, string>(); for (const r of rows) { names.set(String(r.home_id), r.home_name); names.set(String(r.away_id), r.away_name); }
+    const group = rules.groupBy ? inferGroups([...names.keys()], games) : null;
+    if (rules.groupBy && !group) continue;
     const b = SIM_PARAMS.basketball;
-    out.push({ sport: 'basketball', code: L.code, name: L.name, season, rules, teams: [...names].map(([id, name]) => ({ id, name })), games, preds: [],
+    out.push({ sport: 'basketball', code: L.code, name: L.name, season, rules, teams: [...names].map(([id, name]) => ({ id, name, group: group?.get(id) })), games, preds: [],
       base: { runs: REPLAY_RUNS, seed: hashSeed(`acc|${L.code}`), home: b.home, drawBand: 0, sigma: b.sigma, noise: b.noise, goalsH: 0, goalsA: 0 } });
   }
   return out;
@@ -697,12 +837,13 @@ function pastNfl(): ReplayLeague[] {
 }
 
 
-export async function runSeasonAccuracy(): Promise<number> {
-  const leagues = [...pastFootball(), ...pastBasketball(), ...pastNfl()];
+/** fix230: `only` = replay just these leagues ('sport|code': new rules waiting for their check), no noise fit */
+export async function runSeasonAccuracy(only?: Set<string>): Promise<number> {
+  const leagues = [...await pastFootball(only), ...pastBasketball(only), ...(only && !only.has('nfl|NFL') ? [] : pastNfl())];
   // fix218: 1. the noise fit per league (matchweeks 5 / 10 / 20, 600 runs a pair) → one (noise, walk) a sport: the
   // pair with the best mean Brier over its leagues, weighted by forecasts; stored and used by every forecast from now
   const fits = new Map<FcSport, { noise: number; walk: number; brier: number; n: number }[]>();
-  for (const L of leagues) {
+  for (const L of only ? [] : leagues) {
     try {
       const f = threadJobsOn() ? await inThread<ReturnType<typeof fitNoiseHere>>('season sim', [null, L, 'fit']) : fitNoiseHere(L);
       const list = fits.get(L.sport) || []; fits.set(L.sport, list);
@@ -711,7 +852,7 @@ export async function runSeasonAccuracy(): Promise<number> {
     } catch (e: any) { logger.warn(`season noise fit ${L.code}: ${e?.message || e}`); }
     await yieldLoop();
   }
-  for (const [sport, list] of fits) {
+  for (const [sport, list] of only ? [] : fits) {
     // mean Brier per pair over the sport's leagues
     const by = new Map<string, { noise: number; walk: number; sum: number; n: number }>();
     for (const t of list) { const k = `${t.noise}|${t.walk}`; const x = by.get(k) || { noise: t.noise, walk: t.walk, sum: 0, n: 0 }; x.sum += t.brier; x.n++; by.set(k, x); }

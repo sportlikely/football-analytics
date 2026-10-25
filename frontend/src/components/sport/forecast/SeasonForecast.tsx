@@ -33,6 +33,14 @@ export default function SeasonForecast({ sport, code, teamHref }: { sport: FcSpo
         {t('The rest of the season played {0} times with our match model. Probabilities, not promises.', { 0: data.runs.toLocaleString(LOCALE) })}{' '}
         <span className="text-faint">{t('Updated {0}', { 0: new Date(data.runAt).toLocaleString(LOCALE, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) })}</span>
       </p>
+      {!data.known && (
+        // fix230: say why there are no title / play-off / relegation columns
+        <p data-testid="forecast-no-zones" className="-mt-2 mb-4 text-xs text-muted rounded-lg border border-line px-3 py-2">
+          {data.pending === 'replay'
+            ? t('Play-off format added: its chances appear once our check on last season passes. Until then, final positions only.')
+            : t('Play-off format not added yet: final positions only.')}
+        </p>
+      )}
       <div className="space-y-6">
         {groups.map(g => {
           const rows = data.teams.filter(x => (x.group || '') === g)
@@ -50,7 +58,6 @@ export default function SeasonForecast({ sport, code, teamHref }: { sport: FcSpo
           <Link to="/premium" className="px-3 py-1.5 rounded-lg bg-accent text-bg text-xs font-bold">{t('See Pro')}</Link>
         </div>
       )}
-      {!data.known && <p className="mt-3 text-xs text-faint">{t('This league’s zones (titles, play-offs, relegation) are not set yet: only the final positions are shown.')}</p>}
     </LCard>
     </div>
   )

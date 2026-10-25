@@ -56,6 +56,60 @@ export function tableOf(ids: string[], played: SimPlayed[], sport: FcSport, adj:
   }
   return t;
 }
+/**
+ * fix230: a split season whose split is played (a team past `after` games): each team's split group from the table
+ * after the first `after` games of everyone (points, goal difference, goals), and the halving (Belgium up, Austria
+ * down) applied to those points, with `rounded` set where a half point was rounded. `played` in kick-off order. The
+ * provider's table only shows the halved points, our table from results would not. Mutates and returns `teams`.
+ */
+export function applySplit(teams: SimTeam[], played: (SimPlayed & { kickoff?: string })[], rules: LeagueRules): SimTeam[] {
+  const sp = rules.split;
+  if (!sp || rules.groupBy || !teams.some(t => t.played > sp.after)) return teams;
+  const cnt = new Map<string, number>(), pre = new Map<string, { pts: number; gd: number; gf: number }>();
+  for (const t of teams) { cnt.set(t.id, 0); pre.set(t.id, { pts: 0, gd: 0, gf: 0 }); }
+  const pt = rules.points || { win: 3, draw: 1, loss: 0 };
+  for (const g of played) {
+    const h = cnt.get(g.home), a = cnt.get(g.away);
+    if (h === undefined || a === undefined || h >= sp.after || a >= sp.after) continue;
+    cnt.set(g.home, h + 1); cnt.set(g.away, a + 1);
+    const H = pre.get(g.home)!, A = pre.get(g.away)!;
+    H.gd += g.hg - g.ag; A.gd += g.ag - g.hg; H.gf += g.hg; A.gf += g.ag;
+    H.pts += g.hg > g.ag ? pt.win : g.hg === g.ag ? pt.draw : pt.loss; A.pts += g.ag > g.hg ? pt.win : g.hg === g.ag ? pt.draw : pt.loss;
+  }
+  const order = teams.slice().sort((x, y) => { const X = pre.get(x.id)!, Y = pre.get(y.id)!; return Y.pts - X.pts || Y.gd - X.gd || Y.gf - X.gf; });
+  sp.groups.forEach((grp, k) => { for (const t of order.slice(grp.from - 1, grp.to)) t.splitGroup = k; });
+  if (sp.halve) for (const t of teams) {
+    const before = pre.get(t.id)!.pts, half = sp.halve === 'up' ? Math.ceil(before / 2) : Math.floor(before / 2);
+    t.pts += half - before; t.rounded = before % 2 ? 1 : 0;
+  }
+  return teams;
+}
+
+/**
+ * fix230: table groups from the schedule — teams of a group play each other, so an edge whose two teams share few
+ * opponents (Argentina's one interzonal game a team) is not a group edge; the rest fall apart into the groups. Null
+ * when that gives fewer than two groups or a group under three teams.
+ */
+export function inferGroups(ids: string[], games: { home: string; away: string }[]): Map<string, string> | null {
+  const nb = new Map(ids.map(i => [i, new Set<string>()] as [string, Set<string>]));
+  for (const g of games) { if (g.home === g.away || !nb.has(g.home) || !nb.has(g.away)) continue; nb.get(g.home)!.add(g.away); nb.get(g.away)!.add(g.home); }
+  const parent = new Map(ids.map(i => [i, i] as [string, string]));
+  const find = (x: string): string => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x)!)!); x = parent.get(x)!; } return x; };
+  for (const [a, A] of nb) for (const b of A) {
+    if (a >= b) continue;
+    const B = nb.get(b)!;
+    let common = 0; for (const c of A) if (B.has(c)) common++;
+    if (common >= 0.5 * Math.min(A.size, B.size) - 1) parent.set(find(a), find(b));
+  }
+  const comp = new Map<string, string[]>();
+  for (const i of ids) { if (!nb.get(i)!.size) continue; const r = find(i); (comp.get(r) || comp.set(r, []).get(r)!).push(i); }
+  const list = [...comp.values()].sort((x, y) => y.length - x.length || x.slice().sort()[0].localeCompare(y.slice().sort()[0]));
+  if (list.length < 2 || list.some(c => c.length < 3)) return null;
+  const out = new Map<string, string>();
+  list.forEach((c, k) => c.forEach(i => out.set(i, `Group ${String.fromCharCode(65 + k)}`)));
+  return out;
+}
+
 export function rankNow(teams: SimTeam[], sport: FcSport): Map<string, number> {
   const key = (x: SimTeam) => sport === 'football' ? x.pts : (x.w + 0.5 * x.d) / Math.max(1, x.w + x.d + x.l);
   const out = new Map<string, number>();
@@ -94,12 +148,20 @@ export function fitNoiseHere(L: ReplayLeague): { noise: number; walk: number; br
   return { ...best, tried };
 }
 
-/** the zones scored in the replay: title, the first "good" zone, relegation */
+/**
+ * the zones scored in the replay: title, the first "good" zone, relegation. fix230: a title won in a post-season is
+ * not in the regular-season data (the "what happened" run would draw it), so leagues with a post-season are scored on
+ * the places (play-offs, top of the table); a zone over the annual table is not decided by one tournament.
+ */
 export function scoredZones(rules: LeagueRules): ZoneKey[] {
-  const keys: ZoneKey[] = ['title'];
-  const good = rules.zones.find(z => ['cl', 'promotion'].includes(z.key))?.key || (rules.post?.kind === 'bracket' || rules.post?.kind === 'nfl' ? 'playoffs' : undefined);
+  const keys: ZoneKey[] = [];
+  if (!rules.post && !rules.noTitle) keys.push('title');
+  const own = rules.zones.filter(z => z.over !== 'annual');
+  const good = own.find(z => ['cl', 'promotion'].includes(z.key))?.key
+    || (rules.post?.kind === 'bracket' || rules.post?.kind === 'nfl' || rules.post?.kind === 'cross' || own.some(z => z.key === 'playoffs') ? 'playoffs' : own.find(z => z.key === 'top_group')?.key);
   if (good) keys.push(good);
-  if (rules.zones.some(z => z.key === 'relegation')) keys.push('relegation');
+  if (own.some(z => z.key === 'shield')) keys.push('shield');
+  if (own.some(z => z.key === 'relegation')) keys.push('relegation');
   return keys;
 }
 
@@ -110,7 +172,7 @@ export function replayHere(L: ReplayLeague): ReplayOut {
   // what happened: one run over the whole season with no games left (post-season by the same rules, the playoffs
   // themselves aren't in our regular-season data, so play-off zones are scored on the places)
   const finalTab = tableOf(ids, L.games, sport);
-  const finalTeams = ids.map(id => ({ ...finalTab.get(id)!, name: meta.get(id)!.name, group: meta.get(id)!.group, div: meta.get(id)!.div }));
+  const finalTeams = applySplit(ids.map(id => ({ ...finalTab.get(id)!, name: meta.get(id)!.name, group: meta.get(id)!.group, div: meta.get(id)!.div })), L.games, L.rules);
   const actual = simulateSeason(L.rules, finalTeams, L.games, [], { ...L.base, runs: 1, noise: 0 });
   const truth = new Map(actual.teams.map(t => [t.id, t.zones]));
   const first = Date.parse(L.games[0].kickoff), last = Date.parse(L.games[L.games.length - 1].kickoff);
@@ -128,7 +190,9 @@ export function replayHere(L: ReplayLeague): ReplayOut {
     const obs = known.map(g => ({ h: g.home, a: g.away, m: sport === 'football' ? 0.3 * Math.max(-3, Math.min(3, g.hg - g.ag)) : Math.max(-30, Math.min(30, g.hg - g.ag)), w: Math.exp(-(t - Date.parse(g.kickoff)) / (90 * DAY)) }));
     const fit = fitRatings(ids, obs, L.base.home, sport === 'football' ? 4 : 3);
     const tab = tableOf(ids, known, sport);
-    const teams = ids.map(id => ({ ...tab.get(id)!, name: meta.get(id)!.name, rating: fit.r.get(id) || 0, group: meta.get(id)!.group, div: meta.get(id)!.div }));
+    const teams = applySplit(ids.map(id => ({ ...tab.get(id)!, name: meta.get(id)!.name, rating: fit.r.get(id) || 0, group: meta.get(id)!.group, div: meta.get(id)!.div })), known, L.rules);
+    // fix230: a split still to come is made by each run (the engine drops the real post-split games); a split already
+    // played keeps the groups the table gave (applySplit)
     const out = simulateSeason(L.rules, teams, known, rest.map((g, k) => ({ id: String(k), home: g.home, away: g.away })), { ...L.base, runs, home: fit.home, seed: L.base.seed + steps });
     // baseline: the table as it stands, run with no games left
     const now = simulateSeason(L.rules, teams, known, [], { ...L.base, runs: 1, noise: 0 });

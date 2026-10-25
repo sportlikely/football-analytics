@@ -38,6 +38,9 @@ db.exec(`
   if (!cols.has('ua_bot')) db.exec('ALTER TABLE visits ADD COLUMN ua_bot INTEGER NOT NULL DEFAULT 0');
 }
 db.exec(`CREATE TABLE IF NOT EXISTS visit_meta (k TEXT PRIMARY KEY, v TEXT)`);
+// fix230: which league pages a visitor opened (the hashed visitor id, as in visits; 90 days): data health orders the
+// leagues still missing season-forecast rules by their visitors
+db.exec(`CREATE TABLE IF NOT EXISTS league_visits (day TEXT NOT NULL, sport TEXT NOT NULL, code TEXT NOT NULL, vid TEXT NOT NULL, PRIMARY KEY (day, sport, code, vid))`);
 db.prepare(`INSERT OR IGNORE INTO visit_meta (k, v) VALUES ('people_since', ?)`).run(new Date().toISOString().slice(0, 10));
 const peopleSince = (): string => (db.prepare(`SELECT v FROM visit_meta WHERE k = 'people_since'`).get() as any)?.v || '';
 
@@ -66,6 +69,17 @@ const upsert = deferred(`
 `);
 const markHuman = deferred(`UPDATE visits SET human = 1, bot = NULL WHERE day = ? AND vid = ?`);
 const markBot = deferred(`UPDATE visits SET bot = ? WHERE day = ? AND vid = ? AND human = 0`);
+const leagueHit = deferred(`INSERT OR IGNORE INTO league_visits (day, sport, code, vid) VALUES (?, ?, ?, ?)`);
+const leagueSeen = new Map<string, number>(); // vid|day|sport|code → written
+/** fix230: the API call every league page makes (its table) → the league */
+function leaguePageOf(path: string): { sport: string; code: string } | null {
+  let m = /^\/leagues\/([A-Za-z0-9]{1,12})\/standings$/.exec(path);
+  if (m) return { sport: 'football', code: m[1] };
+  m = /^\/basketball\/standings\/([A-Za-z0-9]{2,8})$/.exec(path);
+  if (m) return { sport: 'basketball', code: m[1] };
+  if (path === '/nfl/standings') return { sport: 'nfl', code: 'NFL' };
+  return null;
+}
 
 /** Express middleware: counts every caller of the API (the site calls it on every page); people are told apart later. */
 export function trackVisit(req: express.Request, _res: express.Response, next: express.NextFunction) {
@@ -88,6 +102,11 @@ export function trackVisit(req: express.Request, _res: express.Response, next: e
       const iso = new Date(now).toISOString();
       const dc = uaBot ? null : dataCentreOf(ip);
       upsert.run(day, vid, signedIn ? 1 : 0, iso, iso, countryOf(ip), signedIn ? 1 : 0, uaBot ? 'ua' : dc ? 'datacentre' : null, uaBot ? 1 : 0);
+    }
+    const lp = uaBot ? null : leaguePageOf(req.path);
+    if (lp) {
+      const lk = `${k}|${lp.sport}|${lp.code}`;
+      if (!leagueSeen.has(lk)) { leagueSeen.set(lk, now); leagueHit.run(day, lp.sport, lp.code, vid); }
     }
   } catch { /* counting never breaks a request */ }
   next();
@@ -131,9 +150,11 @@ every('visitors flush', () => {
   const now = Date.now();
   for (const [k, v] of online) if (v.at < now - ONLINE_MS) online.delete(k);
   for (const [k, t] of written) if (t < now - 2 * 86400000) written.delete(k);
+  for (const [k, t] of leagueSeen) if (t < now - 2 * 86400000) leagueSeen.delete(k);
 }, 60000).unref();
 if (!isWeb) every('visitors cleanup', () => {
   try { db.prepare("DELETE FROM visits WHERE day < date('now', '-90 days')").run(); } catch { /* ignore */ }
+  try { db.prepare("DELETE FROM league_visits WHERE day < date('now', '-90 days')").run(); } catch { /* ignore */ }
 }, 6 * 3600000).unref();
 
 const since = (days: number) => new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
@@ -172,4 +193,14 @@ export function visitorStats() {
     daily, countingSince: first,
     countries: { last7: byCountry(7), last30: byCountry(30), since: countriesSince, geo: geoStatus() }
   };
+}
+
+/** fix230: people (beacon or signed in) who opened each league's page in the last `days` days: 'sport|code' → count */
+export function leagueVisitors(days = 30): Map<string, number> {
+  const out = new Map<string, number>();
+  try {
+    for (const r of db.prepare(`SELECT lv.sport, lv.code, COUNT(DISTINCT lv.vid) n FROM league_visits lv JOIN visits v ON v.day = lv.day AND v.vid = lv.vid AND v.human = 1
+      WHERE lv.day >= ? GROUP BY lv.sport, lv.code`).all(since(days)) as any[]) out.set(`${r.sport}|${r.code}`, r.n);
+  } catch { /* not there yet */ }
+  return out;
 }

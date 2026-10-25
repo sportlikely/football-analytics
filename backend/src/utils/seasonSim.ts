@@ -23,11 +23,17 @@
 import { normCdf, normInv } from './moreMath';
 
 export type SimSport = 'football' | 'basketball' | 'nfl';
-export type TieKey = 'pts' | 'gd' | 'gf' | 'h2h' | 'h2hgd' | 'h2hgf' | 'wins' | 'pd' | 'div' | 'conf' | 'h2hpd';
-/** zones by final position; the post-season adds title / final / playoffs / playin / bye / div_title / conf_title */
+/** fix230: 'rounded' = a split's halving (rounded up ranks below on a tie: Belgium; rounded down ranks above: Austria);
+ *  'apts' / 'agd' / 'agf' = the annual table (earlier tournaments of the year + this one: Argentina's relegation) */
+export type TieKey = 'pts' | 'gd' | 'gf' | 'h2h' | 'h2hgd' | 'h2hgf' | 'wins' | 'pd' | 'div' | 'conf' | 'h2hpd' | 'rounded' | 'apts' | 'agd' | 'agf';
+/** zones by final position; the post-season adds title / final / playoffs / playin / bye / div_title / conf_title;
+ *  fix230: shield = top of the whole table (Supporters' Shield, Premiers, Argentina's annual table), top_group = the
+ *  top group of a split season (championship round, Final A, Top 8) */
 export type ZoneKey = 'title' | 'cl' | 'europe' | 'promotion' | 'promo_po' | 'releg_po' | 'relegation'
-  | 'playoffs' | 'playin' | 'bye' | 'div_title' | 'conf_title' | 'final';
-export interface Zone { key: ZoneKey; from: number; to: number }
+  | 'playoffs' | 'playin' | 'bye' | 'div_title' | 'conf_title' | 'final' | 'shield' | 'top_group';
+/** places from / to (1 = first; fix230: negative = from the bottom, −1 = last); over = ranked over the whole league
+ *  (conference leagues: the Supporters' Shield) or over the annual table, instead of the team's own table group */
+export interface Zone { key: ZoneKey; from: number; to: number; over?: 'league' | 'annual' }
 export interface SplitRule {
   /** games per team before the split */
   after: number;
@@ -37,9 +43,15 @@ export interface SplitRule {
   groups: { from: number; to: number; rounds: 1 | 2 }[];
 }
 export type PostSeason =
-  /** seeds 1..N per table group (perGroup) or the whole league; play-in 7–10 for seeds 7 and 8; bestOf per round
-   *  (0 = one game on neutral ground: Final Four); final = the two group winners (perGroup) best of `final` */
-  | { kind: 'bracket'; seeds: number; bestOf: number[]; playIn?: boolean; perGroup?: boolean; final?: number }
+  /** seeds 1..N per table group (perGroup) or the whole league; play-in 7–10 for seeds 7 and 8 (playInFrom moves it:
+   *  NBL 3–6 for seeds 3 and 4), 'wildcard' = N v N+1 in one game for seed N (MLS); bestOf per round: 0 = one game on
+   *  neutral ground (Final Four), 1 = one game at the better seed, 3 / 5 / 7 = a series, −2 = two legs, level on
+   *  aggregate → the better seed (Liga MX), −3 = two legs, level → extra time and penalties; byes = the top seeds wait
+   *  out round one (A-League top two, CBA top four); reseed = the best seed left meets the worst each round;
+   *  final = the two group winners (perGroup) best of `final` */
+  | { kind: 'bracket'; seeds: number; bestOf: number[]; playIn?: boolean | 'wildcard'; playInFrom?: number; perGroup?: boolean; final?: number; byes?: number; reseed?: boolean }
+  /** fix230: two table groups crossed: 1A v 8B, 4A v 5B, 2B v 7A … (Argentina), bestOf per round as above */
+  | { kind: 'cross'; seeds: number; bestOf: number[] }
   | { kind: 'nfl' }
   /** college: the top two of every conference play a title game on neutral ground */
   | { kind: 'confTitle' };
@@ -57,6 +69,19 @@ export interface LeagueRules {
   /** false = no zone rules known for this league: only the position chances */
   known: boolean;
   label?: string;
+  /** fix230: no title zone (cups whose later rounds are drawn: BCL, EuroCup groups) */
+  noTitle?: boolean;
+  /** fix230: where the table groups come from — the provider's table (MLS conferences), or the schedule itself (teams
+   *  that play each other: Argentina's zones, EuroCup / BCL groups) when the provider has none */
+  groupsFrom?: 'provider' | 'schedule';
+  /** fix230: the season is tournaments (Apertura / Clausura): only the current one's rounds are this table */
+  rounds?: 'tournament';
+  /** fix230: new rules show their zones only once last season's replay beats the table order (else positions only) */
+  gate?: boolean;
+  /** fix230: the rule's source (the league's own site) and the season it was checked for */
+  source?: string; season?: string;
+  /** set by the service when a gated league is shown without zones (why) */
+  gateNote?: string;
 }
 
 export interface SimTeam {
@@ -67,6 +92,9 @@ export interface SimTeam {
   rating: number;
   /** table group (conference) and division (NFL) */
   group?: string; div?: string;
+  /** fix230: the annual table before this tournament (Argentina), the split group once the split is played (index
+   *  into split.groups; set by applySplit), 1 = the points were rounded at the split's halving */
+  annual?: { pts: number; gd: number; gf: number }; splitGroup?: number; rounded?: number;
 }
 export interface SimPlayed { home: string; away: string; hg: number; ag: number }
 export interface SimGame {
@@ -175,6 +203,17 @@ function scoreTables(xh: number, xa: number): { cum: Float64Array[]; hg: Int8Arr
   return { cum, hg, ag };
 }
 function pick(c: Float64Array, u: number): number { let k = 0; while (k < c.length - 1 && c[k] < u) k++; return k; }
+/** fix230: a zone's places in a table of `len` (negative = from the bottom), 0-based [a, b) */
+export function zoneSpan(z: Zone, len: number): [number, number] {
+  const at = (x: number) => x < 0 ? len + 1 + x : x;
+  return [Math.max(0, at(z.from) - 1), Math.min(len, at(z.to))];
+}
+/** Poisson draw (Knuth; small means only: goals) */
+function poissonDraw(rng: Rng, lam: number): number {
+  const L = Math.exp(-Math.max(0.02, lam)); let k = 0, p = 1;
+  do { k++; p *= rng.next(); } while (p > L && k < 20);
+  return k - 1;
+}
 
 /* ---------- prepared league ---------- */
 
@@ -217,15 +256,27 @@ function prepare(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[], game
   }
   const prepped = [] as Prep['games'];
   const left = new Float64Array(n);
+  // fix230: before the split only the games up to the split count (each run makes the groups' games itself); a fixture
+  // list that already holds the post-split rounds (or last season's replay) would otherwise be played twice
+  const preSplit = splitPending(rules, teams);
+  const cnt = Float64Array.from(teams.map(t => t.played));
   for (const g of games) {
     const h = idx.get(g.home), a = idx.get(g.away);
     if (h === undefined || a === undefined || h === a) continue;
+    if (preSplit) { if (cnt[h] >= rules.split!.after || cnt[a] >= rules.split!.after) continue; cnt[h]++; cnt[a]++; }
     prepped.push(gameOf(rules, teams, h, a, !!g.neutral, P, g));
     left[h]++; left[a]++;
   }
   const walkStep = new Float64Array(n);
   for (let i = 0; i < n; i++) walkStep[i] = (P.walk || 0) / Math.sqrt(Math.max(1, left[i]));
   return { n, teams, idx, groupOf, groups, divOf, divs, games: prepped, h2hPts, h2hGd, h2hGf, h2hW, h2hG, divW, divG, confW, confG, walkStep };
+}
+
+/** fix230: the split is still to come (no team has a split group yet, nobody past the split's games) */
+export function splitPending(rules: LeagueRules, teams: SimTeam[]): boolean {
+  if (!rules.split || rules.groupBy) return false;
+  if (teams.some(t => t.splitGroup != null)) return false;
+  return Math.max(0, ...teams.map(t => t.played)) <= rules.split.after;
 }
 
 function gameOf(rules: LeagueRules, teams: SimTeam[], h: number, a: number, neutral: boolean, P: SimParams, g?: SimGame): Prep['games'][number] {
@@ -253,16 +304,18 @@ interface Run {
   /** split-season extra games (made per run) */
   extra: { h: number; a: number; rh: number; ra: number }[];
   noise: Float64Array; tieRand: Float64Array;
+  /** fix230: points rounded at the split's halving (1) */
+  rounded: Float64Array;
 }
 
 function newRun(p: Prep, nGames: number): Run {
   const n = p.n, f = () => new Float64Array(n);
-  return { pts: f(), w: f(), d: f(), l: f(), gf: f(), ga: f(), g: f(), divW: f(), divG: f(), confW: f(), confG: f(), rh: new Float64Array(nGames), ra: new Float64Array(nGames), extra: [], noise: f(), tieRand: f() };
+  return { pts: f(), w: f(), d: f(), l: f(), gf: f(), ga: f(), g: f(), divW: f(), divG: f(), confW: f(), confG: f(), rh: new Float64Array(nGames), ra: new Float64Array(nGames), extra: [], noise: f(), tieRand: f(), rounded: f() };
 }
 function resetRun(p: Prep, R: Run, rng: Rng, P: SimParams) {
   p.teams.forEach((t, i) => {
     R.pts[i] = t.pts; R.w[i] = t.w; R.d[i] = t.d; R.l[i] = t.l; R.gf[i] = t.gf; R.ga[i] = t.ga; R.g[i] = t.played;
-    R.noise[i] = P.noise * rng.normal(); R.tieRand[i] = rng.next();
+    R.noise[i] = P.noise * rng.normal(); R.tieRand[i] = rng.next(); R.rounded[i] = t.rounded || 0;
   });
   R.divW.set(p.divW); R.divG.set(p.divG); R.confW.set(p.confW); R.confG.set(p.confG);
   R.extra.length = 0;
@@ -311,6 +364,12 @@ function primary(rules: LeagueRules, R: Run, i: number): number {
   return gp > 0 ? (R.w[i] + 0.5 * R.d[i]) / gp : 0.5;
 }
 
+/** fix230: the annual table's points (football) — earlier tournaments of the year + this one */
+function primaryAnnual(rules: LeagueRules, p: Prep, R: Run, i: number): number {
+  return rules.sport === 'football' ? R.pts[i] + (p.teams[i].annual?.pts || 0) : primary(rules, R, i);
+}
+const ANNUAL: TieKey[] = ['apts', 'agd', 'agf'];
+
 /** mini-league of `set` among themselves: played games + this run's simulated ones */
 function miniTable(rules: LeagueRules, p: Prep, R: Run, set: number[], pairs: Map<number, number[]>): { pts: Map<number, number>; gd: Map<number, number>; gf: Map<number, number>; w: Map<number, number> } {
   const n = p.n, pt = rules.points || { win: 3, draw: 1, loss: 0 };
@@ -346,6 +405,10 @@ function rankSet(rules: LeagueRules, p: Prep, R: Run, set: number[], keys: TieKe
   else if (k === 'wins') val = i => R.w[i];
   else if (k === 'div') val = i => share(R.divW[i], R.divG[i]);
   else if (k === 'conf') val = i => share(R.confW[i], R.confG[i]);
+  else if (k === 'rounded') val = i => (rules.split?.halve === 'down' ? 1 : -1) * R.rounded[i];
+  else if (k === 'apts') val = i => primaryAnnual(rules, p, R, i);
+  else if (k === 'agd') val = i => R.gf[i] - R.ga[i] + (p.teams[i].annual?.gd || 0);
+  else if (k === 'agf') val = i => R.gf[i] + (p.teams[i].annual?.gf || 0);
   else {
     const mt = miniTable(rules, p, R, set, pairs);
     val = k === 'h2h' ? i => mt.pts.get(i)! : k === 'h2hgd' || k === 'h2hpd' ? i => mt.gd.get(i)! : i => mt.gf.get(i)!;
@@ -383,38 +446,106 @@ function series(rules: LeagueRules, p: Prep, R: Run, rng: Rng, hi: number, lo: n
   return a >= need ? hi : lo;
 }
 
+/** fix230: two legs (the better seed at home second): the aggregate on goals from the teams' strengths; level → the
+ *  better seed (mode −2: Liga MX) or extra time and penalties at its ground (−3). Winner sports: one game at `hi`. */
+function twoLegs(rules: LeagueRules, p: Prep, R: Run, rng: Rng, hi: number, lo: number, mode: number, P: SimParams): number {
+  if (rules.sport !== 'football') return series(rules, p, R, rng, hi, lo, 1, P);
+  let gh = 0, gl = 0;
+  for (const [home, away] of [[lo, hi], [hi, lo]]) {
+    const d = p.teams[home].rating - p.teams[away].rating + P.home + R.noise[home] - R.noise[away];
+    const x = poissonDraw(rng, P.goalsH * Math.exp(0.42 * (d - P.home / 2))), y = poissonDraw(rng, P.goalsA * Math.exp(-0.42 * (d - P.home / 2)));
+    if (home === hi) { gh += x; gl += y; } else { gl += x; gh += y; }
+  }
+  if (gh !== gl) return gh > gl ? hi : lo;
+  if (mode === -2) return hi;
+  return rng.next() < winProb(rules, p, R, hi, lo, false, P) ? hi : lo;
+}
+/** one knockout tie by its round code (see PostSeason) */
+function tie(rules: LeagueRules, p: Prep, R: Run, rng: Rng, hi: number, lo: number, bo: number, P: SimParams): number {
+  return bo < 0 ? twoLegs(rules, p, R, rng, hi, lo, bo, P) : series(rules, p, R, rng, hi, lo, bo, P);
+}
+
 /** standard bracket order for N seeds (1 v N, then the winner meets 4 v 5's …) */
 function bracketOrder(N: number): number[] {
   let o = [1, 2];
   while (o.length < N) { const m = o.length * 2 + 1; o = o.flatMap(s => [s, m - s]); }
   return o;
 }
+/** best seed left v the worst, the second v the second worst … (in that order, so pairs are next to each other) */
+function reseeded(alive: number[], rank: (i: number) => number): number[] {
+  const s = alive.slice().sort((x, y) => rank(x) - rank(y)), out: number[] = [];
+  for (let k = 0; k < s.length / 2; k++) out.push(s[k], s[s.length - 1 - k]);
+  return out;
+}
 
 interface PostOut { set: (i: number, z: ZoneKey) => void }
 
 function playBracket(rules: LeagueRules, p: Prep, R: Run, rng: Rng, P: SimParams, order: number[], post: Extract<PostSeason, { kind: 'bracket' }>, out: PostOut): number {
   // order = teams by final standing in this table; returns the bracket winner
-  let seeds = order.slice(0, post.seeds);
-  if (post.playIn && order.length >= 10 && post.seeds >= 8) {
-    const [s7, s8, s9, s10] = order.slice(6, 10);
-    for (const t of [s7, s8, s9, s10]) out.set(t, 'playin');
-    const w78 = series(rules, p, R, rng, s7, s8, 1, P), l78 = w78 === s7 ? s8 : s7;
-    const w910 = series(rules, p, R, rng, s9, s10, 1, P);
-    const eighth = series(rules, p, R, rng, l78, w910, 1, P);
-    seeds = [...order.slice(0, 6), w78, eighth];
+  const S = post.seeds;
+  let seeds = order.slice(0, S);
+  if (post.playIn === 'wildcard' && order.length > S) {
+    // MLS: N v N+1, one game at N, for the last seed
+    const a = order[S - 1], b = order[S];
+    out.set(a, 'playin'); out.set(b, 'playin');
+    seeds = [...order.slice(0, S - 1), series(rules, p, R, rng, a, b, 1, P)];
+  } else if (post.playIn === true) {
+    // NBA style on places f+1 … f+4 for the last two seeds (7–10 for seeds 7 and 8; NBL 3–6 for 3 and 4)
+    const f = (post.playInFrom || S - 1) - 1;
+    if (order.length >= f + 4 && f + 2 === S) {
+      const [s7, s8, s9, s10] = order.slice(f, f + 4);
+      for (const t of [s7, s8, s9, s10]) out.set(t, 'playin');
+      const w78 = series(rules, p, R, rng, s7, s8, 1, P), l78 = w78 === s7 ? s8 : s7;
+      const w910 = series(rules, p, R, rng, s9, s10, 1, P);
+      const eighth = series(rules, p, R, rng, l78, w910, 1, P);
+      seeds = [...order.slice(0, f), w78, eighth];
+    }
   }
   for (const t of seeds) out.set(t, 'playoffs');
-  const ord = bracketOrder(seeds.length);
-  let alive = ord.map(s => seeds[s - 1]);
-  let round = 0;
+  const rank = (i: number) => order.indexOf(i);
+  let alive: number[], round = 0;
+  const byes = Math.min(post.byes || 0, seeds.length - 2);
+  if (byes > 0) {
+    // round one without the top seeds: the rest outside-in (A-League 3 v 6, 4 v 5)
+    const first = seeds.slice(byes), winners: number[] = [];
+    for (let k = 0; k < first.length / 2; k++) winners.push(tie(rules, p, R, rng, first[k], first[first.length - 1 - k], post.bestOf[0], P));
+    alive = [...seeds.slice(0, byes), ...winners]; round = 1;
+  } else alive = bracketOrder(seeds.length).map(s => seeds[s - 1]).filter(x => x !== undefined);
   while (alive.length > 1) {
+    if (post.reseed || byes > 0) alive = reseeded(alive, rank);
     if (alive.length === 2 && !post.perGroup) { out.set(alive[0], 'final'); out.set(alive[1], 'final'); }
     const bo = post.bestOf[Math.min(round, post.bestOf.length - 1)];
     const next: number[] = [];
-    for (let k = 0; k < alive.length; k += 2) {
+    for (let k = 0; k + 1 < alive.length; k += 2) {
       const x = alive[k], y = alive[k + 1];
-      const hi = order.indexOf(x) < order.indexOf(y) ? x : y, lo = hi === x ? y : x;
-      next.push(series(rules, p, R, rng, hi, lo, bo, P));
+      const hi = rank(x) < rank(y) ? x : y, lo = hi === x ? y : x;
+      next.push(tie(rules, p, R, rng, hi, lo, bo, P));
+    }
+    if (alive.length % 2) next.push(alive[alive.length - 1]);
+    alive = next; round++;
+  }
+  return alive[0];
+}
+
+/** fix230: two groups crossed (Argentina): half one 1A–8B, 4A–5B, 2B–7A, 3B–6A, half two the mirror; the better
+ *  place hosts (the same place: the more points); returns the winner */
+function playCross(rules: LeagueRules, p: Prep, R: Run, rng: Rng, P: SimParams, A: number[], B: number[], post: Extract<PostSeason, { kind: 'cross' }>, out: PostOut): number {
+  const S = Math.min(post.seeds, A.length, B.length);
+  const seedOf = new Map<number, number>();
+  A.slice(0, S).forEach((t, k) => { seedOf.set(t, k); out.set(t, 'playoffs'); });
+  B.slice(0, S).forEach((t, k) => { seedOf.set(t, k); out.set(t, 'playoffs'); });
+  const ord = bracketOrder(S), pairs: [number, number][] = [];
+  for (let k = 0; k < ord.length; k += 2) pairs.push([ord[k], ord[k + 1]]);
+  const half = (X: number[], Y: number[]) => pairs.flatMap(([s, t], k) => k < Math.floor(pairs.length / 2) ? [X[s - 1], Y[t - 1]] : [Y[s - 1], X[t - 1]]);
+  let alive = [...half(A, B), ...half(B, A)], round = 0;
+  const better = (x: number, y: number) => seedOf.get(x)! !== seedOf.get(y)! ? seedOf.get(x)! < seedOf.get(y)! : primary(rules, R, x) >= primary(rules, R, y);
+  while (alive.length > 1) {
+    if (alive.length === 2) { out.set(alive[0], 'final'); out.set(alive[1], 'final'); }
+    const bo = post.bestOf[Math.min(round, post.bestOf.length - 1)];
+    const next: number[] = [];
+    for (let k = 0; k + 1 < alive.length; k += 2) {
+      const x = alive[k], y = alive[k + 1], hi = better(x, y) ? x : y, lo = hi === x ? y : x;
+      next.push(tie(rules, p, R, rng, hi, lo, bo, P));
     }
     alive = next; round++;
   }
@@ -436,6 +567,7 @@ export async function simulateSeasonAsync(rules: LeagueRules, teams: SimTeam[], 
 function* seasonSteps(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[], games: SimGame[], P: SimParams): Generator<void, SimOut> {
   const p = prepare(rules, teams, played, games, P);
   const n = p.n, rng = new Rng(P.seed);
+  const preSplit = splitPending(rules, teams);
   const pts = rules.points || { win: 3, draw: 1, loss: 0 };
   const pairs = new Map<number, number[]>();
   p.games.forEach((g, gi) => { const k = Math.min(g.h, g.a) * n + Math.max(g.h, g.a); (pairs.get(k) || pairs.set(k, []).get(k)!).push(gi); });
@@ -471,14 +603,16 @@ function* seasonSteps(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[],
     let order: number[];
     const split = rules.split;
     if (split && !perGroup) {
-      const maxPlayed = Math.max(...teams.map(t => t.played));
       const all = Array.from({ length: n }, (_, i) => i);
-      if (maxPlayed < split.after) {
+      if (preSplit) {
         const pre = rankSet(rules, p, R, all, rules.tiebreaks, pairs);
         order = [];
         for (const grp of split.groups) {
           const members = pre.slice(grp.from - 1, grp.to);
-          if (split.halve) for (const i of members) R.pts[i] = split.halve === 'up' ? Math.ceil(R.pts[i] / 2) : Math.floor(R.pts[i] / 2);
+          if (split.halve) for (const i of members) {
+            R.rounded[i] = R.pts[i] % 2 ? 1 : 0;
+            R.pts[i] = split.halve === 'up' ? Math.ceil(R.pts[i] / 2) : Math.floor(R.pts[i] / 2);
+          }
           for (let x = 0; x < members.length; x++) for (let y = x + 1; y < members.length; y++) {
             const legs: [number, number][] = grp.rounds === 2 ? [[members[x], members[y]], [members[y], members[x]]] : [rng.next() < 0.5 ? [members[x], members[y]] : [members[y], members[x]]];
             for (const [h, a] of legs) {
@@ -490,10 +624,11 @@ function* seasonSteps(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[],
           order.push(...rankSet(rules, p, R, members, rules.tiebreaks, pairs));
         }
       } else {
-        // after the split: the groups are the current table's ranges, kept apart
+        // after the split: each team stays in its split group (applySplit); else the current table's ranges
         const nowRank = all.slice().sort((x, y) => (teams[y].pts - teams[x].pts) || ((teams[y].gf - teams[y].ga) - (teams[x].gf - teams[x].ga)) || (teams[y].gf - teams[x].gf));
+        const known = teams.every(t => t.splitGroup != null);
         order = [];
-        for (const grp of split.groups) order.push(...rankSet(rules, p, R, nowRank.slice(grp.from - 1, grp.to), rules.tiebreaks, pairs));
+        split.groups.forEach((grp, gk) => order.push(...rankSet(rules, p, R, known ? all.filter(i => teams[i].splitGroup === gk) : nowRank.slice(grp.from - 1, grp.to), rules.tiebreaks, pairs)));
       }
     } else if (perGroup || rules.post?.kind === 'nfl') {
       order = [];
@@ -501,17 +636,19 @@ function* seasonSteps(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[],
       order = rankSet(rules, p, R, Array.from({ length: n }, (_, i) => i), rules.tiebreaks, pairs);
     }
 
-    // positions + zones by position
+    // positions + zones by position (fix230: a zone `over` the league or the annual table is ranked over every team)
     const posOf = new Int32Array(n);
+    const own = rules.zones.filter(z => !z.over), wide = rules.zones.filter(z => z.over);
     if (rules.post?.kind === 'nfl') {
       nflSeason(rules, p, R, rng, P, pairs, posOf, setZone);
     } else if (perGroup) {
-      const champs: number[] = [];
+      const champs: number[] = [], ords: number[][] = [];
       for (let gi = 0; gi < p.groups.length; gi++) {
         const members = Array.from({ length: n }, (_, i) => i).filter(i => p.groupOf[i] === gi);
         const ord = rankSet(rules, p, R, members, rules.tiebreaks, pairs);
+        ords.push(ord);
         ord.forEach((i, k) => { posOf[i] = k; });
-        for (const z of rules.zones) for (let k = z.from - 1; k < Math.min(z.to, ord.length); k++) setZone(ord[k], z.key);
+        for (const z of own) { const [x, y] = zoneSpan(z, ord.length); for (let k = x; k < y; k++) setZone(ord[k], z.key); }
         const post = rules.post;
         if (post?.kind === 'bracket' && post.perGroup) {
           const c = playBracket(rules, p, R, rng, P, ord, post, { set: setZone });
@@ -526,14 +663,22 @@ function* seasonSteps(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[],
         const [x, y] = champs;
         const hi = primary(rules, R, x) >= primary(rules, R, y) ? x : y, lo = hi === x ? y : x;
         setZone(x, 'final'); setZone(y, 'final');
-        setZone(series(rules, p, R, rng, hi, lo, post.final || 7, P), 'title');
+        setZone(series(rules, p, R, rng, hi, lo, post.final ?? 7, P), 'title');
+      } else if (post?.kind === 'cross' && ords.length === 2) {
+        setZone(playCross(rules, p, R, rng, P, ords[0], ords[1], post, { set: setZone }), 'title');
       }
     } else {
       order.forEach((i, k) => { posOf[i] = k; });
-      for (const z of rules.zones) for (let k = z.from - 1; k < Math.min(z.to, n); k++) setZone(order[k], z.key);
+      for (const z of own) { const [x, y] = zoneSpan(z, n); for (let k = x; k < y; k++) setZone(order[k], z.key); }
       const post = rules.post;
       if (post?.kind === 'bracket') setZone(playBracket(rules, p, R, rng, P, order, post, { set: setZone }), 'title');
       else if (order.length) setZone(order[0], 'title');
+    }
+    if (wide.length) {
+      const all = Array.from({ length: n }, (_, i) => i);
+      const lg = wide.some(z => z.over === 'league') ? rankSet(rules, p, R, all, rules.tiebreaks, pairs) : [];
+      const an = wide.some(z => z.over === 'annual') ? rankSet(rules, p, R, all, ANNUAL, pairs) : [];
+      for (const z of wide) { const o = z.over === 'annual' ? an : lg, [x, y] = zoneSpan(z, n); for (let k = x; k < y; k++) setZone(o[k], z.key); }
     }
 
     for (let i = 0; i < n; i++) {
@@ -573,15 +718,16 @@ function* seasonSteps(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[],
 /** the zone keys a league reports: its position zones + what its post-season adds */
 export function zoneList(rules: LeagueRules): ZoneKey[] {
   const z = new Set<ZoneKey>();
-  if (rules.sport === 'football' || !rules.post) if (rules.known) z.add('title');
+  if ((rules.sport === 'football' || !rules.post) && rules.known && !rules.noTitle) z.add('title');
   for (const x of rules.zones) z.add(x.key);
   const post = rules.post;
   if (post?.kind === 'bracket') { z.add('playoffs'); if (post.playIn) z.add('playin'); z.add('final'); z.add('title'); if (post.perGroup) z.add('conf_title'); }
+  if (post?.kind === 'cross') ['playoffs', 'final', 'title'].forEach(k => z.add(k as ZoneKey));
   if (post?.kind === 'nfl') ['div_title', 'playoffs', 'bye', 'conf_title', 'title'].forEach(k => z.add(k as ZoneKey));
   if (post?.kind === 'confTitle') z.add('conf_title');
   if (!rules.known) z.clear();
   // a fixed order: best first
-  const ORDER: ZoneKey[] = ['title', 'final', 'conf_title', 'div_title', 'bye', 'playoffs', 'playin', 'promotion', 'promo_po', 'cl', 'europe', 'releg_po', 'relegation'];
+  const ORDER: ZoneKey[] = ['title', 'final', 'shield', 'conf_title', 'div_title', 'bye', 'playoffs', 'playin', 'top_group', 'promotion', 'promo_po', 'cl', 'europe', 'releg_po', 'relegation'];
   return ORDER.filter(k => z.has(k));
 }
 

@@ -29,7 +29,8 @@
     "test:fix214": "tsc && node --no-warnings --test --test-force-exit scripts/photo-matcher.test.mjs scripts/web-log.test.mjs",
     "test:fix216": "tsc && node --no-warnings --test --test-force-exit scripts/pick-emails.test.mjs",
     "test:fix217": "tsc && node --no-warnings --test --test-force-exit scripts/nba-v4.test.mjs",
-    "test:fix219": "tsc && node --no-warnings --test --test-force-exit scripts/bb-grid.test.mjs",
+    "test:fix219": "tsc && node --no-warnings --test --test-force-exit scripts/bb-grid.test.mjs"
+,
     "test:fix220": "tsc && node --no-warnings --test --test-force-exit scripts/af-calib.test.mjs",
     "test:fix222": "tsc && node --no-warnings --test --test-force-exit scripts/fix222.test.mjs",
     "test:fix221": "tsc && node --no-warnings --test --test-force-exit scripts/big-lists.test.mjs scripts/photo-matcher.test.mjs",
@@ -38,7 +39,8 @@
     "test:fix224": "tsc && node --no-warnings --test --test-force-exit scripts/key-players.test.mjs",
     "test:fix223": "tsc && node --no-warnings --test --test-force-exit scripts/fix223.test.mjs",
     "test:fix228": "tsc && node --no-warnings --test --test-force-exit scripts/fix228.test.mjs",
-    "test:fix225": "tsc && node --no-warnings --test --test-force-exit scripts/fix225.test.mjs"
+    "test:fix225": "tsc && node --no-warnings --test --test-force-exit scripts/fix225.test.mjs",
+    "test:fix230": "tsc && node --no-warnings --test --test-force-exit scripts/season-formats.test.mjs scripts/season-sim.test.mjs scripts/season-forecast.test.mjs"
   },
   "keywords": [
     "football",
