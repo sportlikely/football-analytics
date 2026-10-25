@@ -76,7 +76,7 @@ import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
-import { runTune, tunedInfo } from './services/bbTuner';
+import { runTune, tunedInfo, runLeagueTune } from './services/bbTuner';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
@@ -3579,10 +3579,22 @@ app.get('/api/bb/tune', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const nums = (s: unknown) => String(s || '').split(',').map(x => parseInt(x, 10)).filter(Number.isFinite);
-    const opt = { train: nums(req.query.train), test: req.query.test ? parseInt(String(req.query.test), 10) : undefined, apply: req.query.apply === '1' };
+    // fix223: apply=gate stores the fit when the gate passes (the first store on a database; later: not worse than live)
+    const apply = req.query.apply === '1' ? true : req.query.apply === 'gate' ? 'gate' as const : false;
+    const opt = { train: nums(req.query.train), test: req.query.test ? parseInt(String(req.query.test), 10) : undefined, apply };
     const r = await heavy('bb tune', () => (threadJobsOn() ? inThread('bb tune', [opt]) : runTune(opt)));
     res.json({ data: r });
   } catch (e) { sendError(res, e, 'Basketball tune failed'); }
+});
+// fix223 (admin): the per-league settings on top of the stored shared tune — a report; &apply=1 stores the leagues that
+// passed their gate (fit 2022-23 + 2023-24, test 2024-25, refit on the three; 2025-26 the untouched check). Job thread.
+app.get('/api/bb/league-tune', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const opt = { apply: req.query.apply === '1' };
+    const r = await heavy('bb league tune', () => (threadJobsOn() ? inThread('bb league tune', [opt]) : runLeagueTune(opt)));
+    res.json({ data: r });
+  } catch (e) { sendError(res, e, 'Basketball league settings failed'); }
 });
 // fix219 (admin): the stored bb-v4 settings, the last tune report and the gate; ?reload=1 publishes again, ?clear=1 = code defaults
 app.get('/api/bb/tuned', (req, res) => {

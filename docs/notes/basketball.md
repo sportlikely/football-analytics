@@ -239,3 +239,34 @@ lineups (published after tip-off), play-by-play, odds/props (never), fantasy. Ta
 - Live win chance: check `/api/bb/live-test?tune=1` on the server (all leagues). Player photos and 10 missing team logos
   (licensed source needed).
 - Points line for users' picks = average total of both teams' last 10 games, rounded to .5 (not the model's total).
+
+## Per-league settings (fix223, 25 Oct 2026) — like football's league tune
+- **What:** a league's own home edge (points added to #7 off a neutral court), stretch (× the shared stretch), sigma (× its
+  typical miss: the league's spread of results against the model's margin relative to every league's, shrunk toward 1
+  with 400 games' worth) and offsets for the 4 big rows (#1 impact, #3 team rating — bb-v3's points rating + possessions +
+  talent, the grid's "points rating" —, #4 missing, #6 rest), pulled toward the shared settings by a ridge prior
+  Σ((θ − θ₀)/τ)² / 2n (τ: home 1 pt, stretch 0.1, rows 2 steps), so the fewer games, the stronger the pull.
+- **Gate (utils/leagueSettings.ts, used by every sport):** leagues with 400+ games in 2022-23 … 2024-25: fit 2022-23 +
+  2023-24, kept only when it beats the shared model on 2024-25 by 0.0005 log loss (100+ games), then refitted on all
+  three; 2025-26 = the untouched check (reported), 2026-27+ reported, never tuned (assertLsYears throws). Smaller
+  leagues pooled by group (Europe second tier, Asia, Americas, Oceania, Africa: from bb_leagues.country, Israel like any
+  country), fitted and gated the same way; members use the group's settings when the group passed.
+- **Code:** `utils/bbGridMath.ts` (LeagueSet, fitLeagueSet, spreadOf, regionGroup; gridEval / split1000 apply it),
+  `services/bbTuner.ts` runLeagueTune (job thread 'bb league tune'; bb_tuned 'leagues' = the kept settings + the shared
+  settings they were fitted on: a later shared tune makes them stale, not used, until the refit), `/api/bb/league-tune
+  [?apply=1]`, admin card "League settings (fix223)", data health "League settings fresh (Basketball)". Worker
+  (jobs.ts "bb tune (auto)"): shared tune when due → league settings when due (first run, shared settings changed, 30+
+  days) → the calibration layer again. 07:00 report line.
+- **Shared tune first-store rule:** the server still showed stored:false / "default (fix219 research, 10 Oct database)"
+  on 25 Oct — fix222's run is not applied when the 2025 log loss is not ≤ the code defaults', and those defaults were
+  fitted on the 10 Oct copy. Now, while nothing is stored on a database, the first run is applied when the gate passes;
+  "not worse than live" from the second run on; the fix222 run that stored nothing is due again once (rule 'fix223').
+  `/api/bb/tune?apply=gate` does the same by hand.
+- **10 Oct copy (24,234 rows, 18 leagues, every league 400+ train games, so no group used):** shared tune (17,147 train /
+  6,454 test games) applied under the first-store rule: 2025 log loss 0.5774 → 0.5774, gate NBA 0.5952 → 0.5945, Europe
+  0.5820 → 0.5794, rest of the world 0.5651 → 0.5639 (games 1–25 all better too). League settings on top: **only BSN
+  kept** (2024 0.6719 → 0.6701; untouched 2025 0.6601 → 0.6577; live 245 games 0.6641 → 0.6648): home +1 pt, stretch
+  ×0.98, sigma ×1.007, offsets #1 −0.04, #3 −0.04, #6 −0.125. Every other league's own fit lost on 2024 (ABA, BCL, LBA,
+  NBB by 0.004–0.008: noise fitted on two seasons). All leagues: 2024 0.56959 → 0.56941, 2025 0.57741 → 0.57732, live
+  0.62958 → 0.62981. So the shared model already carries most of what differs between leagues (per-league stretch,
+  NBA / JBL offsets); the server's own run decides there.

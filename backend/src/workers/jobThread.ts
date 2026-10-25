@@ -11,6 +11,8 @@ async function run(): Promise<unknown> {
   if (job === 'bb model') return (await import('../services/bbModel')).buildLeaguesHere(args[0] as string[]);
   // fix219: the bb-v4 grid tuner (reads the stored rows; apply = stored + published from here)
   if (job === 'bb tune') return (await import('../services/bbTuner')).runTune(args[0] as any);
+  // fix223: the per-league settings on top of the stored shared tune
+  if (job === 'bb league tune') return (await import('../services/bbTuner')).runLeagueTune(args[0] as any);
   // fix222: the basketball calibration layer (reads the stored rows; stored + published from here)
   if (job === 'bb calib') return (await import('../services/sportCalibration')).buildBbCalibrationHere(args[0] as string);
   if (job === 'national elo') return (await import('../services/nationalElo')).buildNationalEloHere();

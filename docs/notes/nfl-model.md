@@ -109,3 +109,14 @@ Backtest: admins only. NFL itself stays admin-only until `NFL_PUBLIC=1`.
 
 ## Live ratings (fix156, 17 Oct 2026)
 The live engine is built once (background, with yields) and each newly finished game is added on top with `pre` + `update` — the same steps a full replay does, so the numbers match (checked: 0.000 points). A full replay still runs in the background every 6 h, after a re-tune, and when a result arrives more than 12 h out of order. Games and box-score lines are cached (`loadGames` signature, rowid-incremental `loadCtx` / `loadEffBox`).
+
+## Level settings (fix223, 25 Oct 2026)
+- Per level — NFL, FBS (both teams in the power conferences), G5 (other FBS games), FCS (an FCS team plays, FBS-vs-FCS
+  included) — a home edge (probit units, off a neutral field only) and a stretch on the live model's walk-forward
+  chance: p' = Φ(stretch · Φ⁻¹(p) + home), shrunk toward the shared model (home 0, stretch 1). Same gate as basketball
+  (utils/leagueSettings.ts): 400+ games in 2022–2024 → fit 2022 + 2023, kept only when it beats the shared model on
+  2024, refit 2022–2024; 2025 the untouched check, 2026 reported, never tuned; small levels pooled as "College".
+  No row offsets: nfl-v1 / ncaa-v1 / v2 have no grid rows (their weights are tuned in their own walk-forward).
+- Built inside the calibration build (services/afCalibration.ts, AF_VERSION fix223-1 forces one rebuild): the layer is
+  then fitted on the chances with the settings and applied after them (afCalibState.calibrated(league, p, seg, game)).
+  Report: /api/admin/nfl-model → calib report `settings`. Not run locally (no current American football copy here).

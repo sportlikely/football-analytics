@@ -14,6 +14,19 @@ type Info = {
   /** fix222: the worker's own tune on the live database (after the deploy, then monthly) */
   auto: null | { why: string; at: string; applied: boolean; reason: string; before: number; after: number; passing: string[]; train: number[]; test: number; trainGames: number; testGames: number }
   autoDue: string | null
+  /** fix223: the per-league settings on top of the shared ones */
+  leagues?: { at: string | null; stale: boolean; due: string | null; report: LeagueReport | null }
+}
+type LsLL = number | null
+type LeagueRow = {
+  league: string; group: string | null; used: 'own' | 'group' | 'shared'; games: { train: number; test: number; check: number; live: number }
+  test: { shared: LsLL; own: LsLL; group: LsLL; gain: LsLL }; check: { shared: LsLL; used: LsLL }; live: { shared: LsLL; used: LsLL }; why: string
+  settings: null | { src: string; group: string | null; home: number; str: number; sig: number; off: number[] }; split: number[]
+}
+type LeagueReport = {
+  at: string; base: string; years: { fit: number[]; test: number; refit: number[]; check: number; liveFrom: number }; leagues: LeagueRow[]
+  groups: { group: string; members: string[]; pass: boolean; why: string }[]; sharedSplit: number[]; own: string[]; group: string[]; applied: boolean
+  total: { test: { games: number; shared: LsLL; used: LsLL }; check: { games: number; shared: LsLL; used: LsLL }; live: { games: number; shared: LsLL; used: LsLL } }
 }
 type CalScore = { games: number; logLoss: number | null; brier: number | null; hit: number | null }
 type CalBand = { lo: number; hi: number; n: number; said: number | null; happened: number | null }
@@ -31,16 +44,25 @@ export default function BbGridCard() {
   const [preview, setPreview] = useState<any>(null)
   const [cal, setCal] = useState<Calib | null>(null)
   const [inMode, setInMode] = useState<{ mode: 'on' | 'off' | null; env: string | null }>({ mode: null, env: null })
+  const [lsPreview, setLsPreview] = useState<LeagueReport | null>(null)
   const load = (q = '') => axios.get(`${API_URL}/bb/tuned${q}`).then(r => setD(r.data.data)).catch(() => setD(null))
   const loadCal = (q = '') => axios.get(`${API_URL}/admin/calibration?sport=basketball${q}`).then(r => { setCal(r.data.data.report); setInMode({ mode: r.data.data.inSeasonMode, env: r.data.data.inSeasonEnv }) }).catch(() => setCal(null))
   useEffect(() => { load(); loadCal() }, [])
   if (!d) return null
-  const tune = (apply: boolean) => {
-    setBusy(true); setMsg(apply ? 'Fitting and applying (in the job thread)…' : 'Fitting a preview…')
-    axios.get(`${API_URL}/bb/tune?train=2022,2023,2024&test=2025${apply ? '&apply=1' : ''}`)
-      .then(r => { setPreview(r.data.data); setMsg(apply ? 'Applied: live predictions use the new weights.' : 'Preview below (not applied).'); load() })
+  const tune = (apply: boolean | 'gate') => {
+    setBusy(true); setMsg(apply ? 'Fitting (in the job thread)…' : 'Fitting a preview…')
+    axios.get(`${API_URL}/bb/tune?train=2022,2023,2024&test=2025${apply === 'gate' ? '&apply=gate' : apply ? '&apply=1' : ''}`)
+      .then(r => { setPreview(r.data.data); setMsg(r.data.data.auto ? r.data.data.auto.reason : apply ? 'Applied: live predictions use the new weights.' : 'Preview below (not applied).'); load() })
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
+  // fix223: the per-league settings (report, or stored when apply)
+  const leagueTune = (apply: boolean) => {
+    setBusy(true); setMsg(apply ? 'Fitting the league settings and storing the ones that pass…' : 'Fitting the league settings (preview)…')
+    axios.get(`${API_URL}/bb/league-tune${apply ? '?apply=1' : ''}`)
+      .then(r => { setLsPreview(r.data.data); setMsg(apply ? `Stored: own ${r.data.data.own.join(', ') || 'none'}, group ${r.data.data.group.join(', ') || 'none'}.` : 'League settings preview below (not stored).'); load() })
+      .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
+  }
+  const ls = lsPreview || d.leagues?.report || null
   // the fitted split: points per row out of 1,000 (weight × spread of the row on the training games)
   const sd = d.stats?.sd || []
   const raw = d.params.w.map((w, i) => (i === 11 ? 0 : Math.abs(w) * (sd[i] || 0)))
@@ -95,6 +117,7 @@ export default function BbGridCard() {
       </div>
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
         <button type="button" className={btn} disabled={busy} onClick={() => tune(false)}>Fit preview (2022–24 → 2025)</button>
+        <button type="button" className={btn} disabled={busy} onClick={() => tune('gate')}>Fit, apply if the gate passes</button>
         <button type="button" className={btn} disabled={busy} onClick={() => tune(true)}>Fit and apply</button>
         <button type="button" className={btn} disabled={busy} onClick={() => { load('?clear=1'); setMsg('Back to the code defaults.') }}>Back to code defaults</button>
       </div>
@@ -130,6 +153,39 @@ export default function BbGridCard() {
           </div>
         </div>
       )}
+      <div className="mt-4 text-xs">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="font-semibold text-ink">League settings (fix223)</h3>
+          <span className="flex gap-2">
+            <button type="button" className={btn} disabled={busy} onClick={() => leagueTune(false)}>Preview</button>
+            <button type="button" className={btn} disabled={busy} onClick={() => leagueTune(true)}>Fit and store</button>
+          </span>
+        </div>
+        <p className="text-faint">Per league: home edge, stretch, sigma and offsets for #1 / #3 / #4 / #6, pulled toward the shared settings. Fit {ls ? ls.years.fit.join(' + ') : '2022 + 2023'}, kept only when it beats the shared model on {ls ? ls.years.test : 2024}, refitted on all three; {ls ? ls.years.check : 2025} is the untouched check, {ls ? ls.years.liveFrom : 2026}+ reported, never tuned. Leagues under 400 train games share their group's (Europe second tier, Asia, Americas, Oceania).</p>
+        {d.leagues && <p className={`text-faint ${d.leagues.stale ? 'text-loss' : ''}`}>{d.leagues.at ? `Stored ${new Date(d.leagues.at).toLocaleString('en-GB')} on ${d.leagues.report?.base || '—'}` : 'Not stored yet'}{d.leagues.stale ? ' · stale (fitted on other shared settings: not used)' : ''}{d.leagues.due ? ` · due: ${d.leagues.due}` : ''}</p>}
+        {ls && (
+          <>
+            <p className="text-faint num">All leagues: {ls.years.test} {ls.total.test.shared} → {ls.total.test.used} ({ls.total.test.games}) · untouched {ls.years.check} {ls.total.check.shared} → {ls.total.check.used} ({ls.total.check.games}) · live {ls.total.live.shared} → {ls.total.live.used} ({ls.total.live.games}){lsPreview ? ' · preview' : ''}</p>
+            <div className="mt-1 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">League</th><th className="pb-1 pr-3 font-normal">Used</th><th className="pb-1 pr-3 font-normal">Test gain</th><th className="pb-1 pr-3 font-normal">Check shared → used</th><th className="pb-1 pr-3 font-normal">Home · stretch · sigma</th><th className="pb-1 font-normal">Split #1 / #3 / #4 / #6 / #7</th></tr></thead>
+                <tbody>
+                  {ls.leagues.map(r => (
+                    <tr key={r.league} className="border-t border-line/50" title={r.why}>
+                      <td className="py-1 pr-3 text-ink font-semibold">{r.league} <span className="text-faint font-normal">({r.games.train})</span></td>
+                      <td className={`py-1 pr-3 ${r.used === 'shared' ? 'text-faint' : 'text-win font-semibold'}`}>{r.used}{r.used === 'group' && r.group ? ` (${r.group})` : ''}</td>
+                      <td className="py-1 pr-3 num">{r.test.gain ?? '—'}</td>
+                      <td className="py-1 pr-3 num">{r.check.shared ?? '—'} → {r.check.used ?? '—'}</td>
+                      <td className="py-1 pr-3 num">{r.settings ? `${r.settings.home > 0 ? '+' : ''}${r.settings.home} · ×${r.settings.str} · ×${r.settings.sig}` : '—'}</td>
+                      <td className="py-1 num">{[0, 2, 3, 5, 6].map(i => r.split[i]).join(' / ')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
       {report && <p className="mt-2 text-[11px] text-faint num">Last fit: {report.trainGames} train games, log loss {report.startLL} → {report.trainLL}; per-league offsets: {(report.offsetLeagues || []).join(', ') || 'none'}.</p>}
     </section>
   )

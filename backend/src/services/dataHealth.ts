@@ -40,6 +40,7 @@ import { photoHealth } from './playerPhotos';
 import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdTwinless } from './fdReconcile';
 import { bestLive } from './liveScores';
 import { calibrationHealth } from './calibrationHealth';
+import { leagueSettingsHealth } from './leagueSettingsHealth';
 import { afIdOfFd } from './afMatches';
 import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
@@ -425,6 +426,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // fix220: calibration, every sport — said vs happened per band of the last 30 days' picks (error: a band of 50+
   // games more than 5 points off, 100+ games in all)
   try { checks.push(...calibrationHealth(now)); } catch (e: any) { logger.warn(`calibration health: ${e?.message || e}`); }
+  // fix223: the per-league settings of every sport refitted in the last 35 days (and, basketball, on the live shared tune)
+  try { checks.push(...leagueSettingsHealth(now)); } catch (e: any) { logger.warn(`league settings health: ${e?.message || e}`); }
   // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
   try { checks.push(...keyPlayersHealth(now)); } catch (e: any) { logger.warn(`key players health: ${e?.message || e}`); }
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }

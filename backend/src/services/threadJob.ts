@@ -19,7 +19,7 @@ import { isWeb } from './role';
 import { applyState } from './shared';
 import { yieldLoop, track } from './perf';
 
-export type ThreadJob = 'bb model' | 'bb tune' | 'bb calib' | 'national elo' | 'more backtest' | 'sitemap' | 'photo crop' | 'season sim';
+export type ThreadJob = 'bb model' | 'bb tune' | 'bb league tune' | 'bb calib' | 'national elo' | 'more backtest' | 'sitemap' | 'photo crop' | 'season sim';
 
 function threadFile(): { file: string; execArgv?: string[] } | null {
   const js = path.join(__dirname, '../workers/jobThread.js');

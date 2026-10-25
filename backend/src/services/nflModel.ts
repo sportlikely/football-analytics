@@ -830,7 +830,7 @@ export function predictNfl(gameId: number): NflPred | null {
   if (league === 2 && ncaaV2Live()) { const q = afc().ncaaV2Prob(g.id, pr.p); if (q !== null) { p = q; margin = marginFromP(q); model = afc().NCAA_V2; } }
   // fix220: the calibration layer (honest percentages); the margin stays the model's (More predictions calibrates it)
   const pRaw = p;
-  p = calibrated(league, p, league === 2 ? collegeSeg(g.h, g.a) : null);
+  p = calibrated(league, p, league === 2 ? collegeSeg(g.h, g.a) : null, { h: g.h, a: g.a, neutral: g.neutral });
   const r1 = (v: number) => Math.round(v * 10) / 10;
   const pHome = Math.round(p * 1000) / 10;
   return {

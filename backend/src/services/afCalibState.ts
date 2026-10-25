@@ -7,6 +7,8 @@
 import { db } from '../db';
 import { onState, publishState } from './shared';
 import { applyCalib, segOfTeams, type Calib, type Seg } from '../utils/afCalib';
+import { applyUsed, type UsedProbSet } from '../utils/leagueSettings';
+import { POWER } from '../utils/ncaaV2';
 
 export type AfLeague = 1 | 2;
 export interface AfCalibState {
@@ -14,6 +16,8 @@ export interface AfCalibState {
   leagues: Record<AfLeague, { calib: Calib | null; strong: number | null; source: string; fitSeasons: number[] }>;
   /** ncaa-v2 passed its gate and is the live college model */
   ncaaV2: boolean;
+  /** fix223: per-level settings (NFL / FBS / G5 / FCS: home edge + stretch) that beat the shared model, applied before the layer */
+  settings?: Record<string, UsedProbSet>;
 }
 /** The lines before fix220 (and while no layer is fitted). */
 export const STRONG_DEFAULT: Record<AfLeague, number> = { 1: 0.7, 2: 0.75 };
@@ -36,11 +40,24 @@ export function setAfCalib(v: AfCalibState) {
 }
 export const afCalibState = () => cur();
 
-/** The calibrated home win chance of a game of `league` (seg: college only). */
-export function calibrated(league: AfLeague, p: number, seg?: Seg | null): number {
-  const c = cur()?.leagues?.[league]?.calib;
-  return c ? applyCalib(c, p, league === 2 ? seg : null) : p;
+/**
+ * The calibrated home win chance of a game of `league` (seg: college only). fix223: with the game, its level's own
+ * settings first (home edge only off a neutral field), then the layer (fitted on the chances with those settings).
+ */
+export function calibrated(league: AfLeague, p: number, seg?: Seg | null, game?: { h: number; a: number; neutral?: boolean } | null): number {
+  const s = cur();
+  const q = game && s?.settings ? applyUsed(s.settings, afLevel(league, game.h, game.a), p, !game.neutral) : p;
+  const c = s?.leagues?.[league]?.calib;
+  return c ? applyCalib(c, q, league === 2 ? seg : null) : q;
 }
+
+/** fix223: a game's level for the settings — NFL; FBS = both teams in the power conferences; G5 = other FBS games; FCS = an FCS team plays */
+export type AfLevel = 'NFL' | 'FBS' | 'G5' | 'FCS';
+export function levelOfTeams(h?: { conf: string | null; level: string | null } | null, a?: { conf: string | null; level: string | null } | null): AfLevel {
+  if (!h || !a || h.level !== 'FBS' || a.level !== 'FBS') return 'FCS';
+  return POWER.test(h.conf || '') && POWER.test(a.conf || '') ? 'FBS' : 'G5';
+}
+export const afLevel = (league: AfLeague, home: number, away: number): AfLevel => (league === 1 ? 'NFL' : levelOfTeams(collegeTeams().get(home), collegeTeams().get(away)));
 export const strongLineOf = (league: AfLeague): number => cur()?.leagues?.[league]?.strong ?? STRONG_DEFAULT[league];
 export const ncaaV2Live = () => !!cur()?.ncaaV2;
 

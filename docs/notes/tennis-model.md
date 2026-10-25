@@ -187,3 +187,11 @@ Live 25 Oct (data health): 60–70% said 64.3%, happened 53.8% (78 matches); 80%
 - A Platt layer moves every band the same way per tour: it cannot fix "too sure at 60–70%" and "not sure enough at 80%+"
   in the same tour at once. If the check stays red after a week, read the 2026 block of the report per tour first.
 - Numbers: on the server after deploy (no tennis tables in the 10 Oct local copy).
+
+## Tour × surface settings (fix223, 25 Oct 2026)
+- Per tour × surface (slam / atp / wta / challenger × hard / clay / grass) a stretch on tennis-v1's walk-forward chance
+  (symmetric: no "home", who is listed first means nothing), shrunk toward 1; small segments share their tour's. The
+  walk-forward months start in 2024, so the periods are half-years: fit 2024, kept only when better than the shared
+  model on 2025 H1, refit 2024 – 2025 H1; 2025 H2 = the untouched check; 2026 reported, never fitted
+  (TENNIS_LS_YEARS). Built with the report (TENNIS_CALIB_VERSION fix223-1 forces one rebuild); the calibration layer is
+  fitted on the chances with the settings and applied after them (predictRow). Report: sport_calib 'tennis' → settings.

@@ -35,7 +35,8 @@
     "test:fix221": "tsc && node --no-warnings --test --test-force-exit scripts/big-lists.test.mjs scripts/photo-matcher.test.mjs",
     "test:fix226": "tsc && node --no-warnings --test --test-force-exit scripts/push-alerts.test.mjs",
     "test:fix227": "tsc && node --no-warnings --test --test-force-exit scripts/deploy-restart.test.mjs",
-    "test:fix224": "tsc && node --no-warnings --test --test-force-exit scripts/key-players.test.mjs"
+    "test:fix224": "tsc && node --no-warnings --test --test-force-exit scripts/key-players.test.mjs",
+    "test:fix223": "tsc && node --no-warnings --test --test-force-exit scripts/fix223.test.mjs"
   },
   "keywords": [
     "football",

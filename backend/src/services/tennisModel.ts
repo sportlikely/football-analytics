@@ -52,6 +52,7 @@ import { isWeb, isWorker } from './role';
 import { onState, publishState } from './shared';
 import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
 import { buildLayer, applyLayer, type LeagueLayer } from '../utils/sportCalib';
+import { probSettings, applyUsed, type UsedProbSet, type LsYears } from '../utils/leagueSettings';
 
 export const TENNIS_MODEL = 'tennis-v1';
 const DAY = 86400000;
@@ -1125,11 +1126,20 @@ export async function buildTennisReport(): Promise<any> {
   // nothing): fit 2024, test 2025, live layer 2024–2025; 2026 on is reported, never fitted. A tour keeps its layer only
   // when it beats the raw chances on 2025; the strong line per tour = where the calibrated picks were right ≥ 75%.
   setPhase('calibration layer');
-  const calRows = testIdx.filter(i => R.cat[i] <= 3).map(i => ({ p: pF(i), y: yArr[i], season: new Date(R.t[i]).getUTCFullYear(), league: CAT_NAME[R.cat[i]] as string }));
+  // fix223: settings per tour × surface first (stretch only: who is listed first means nothing), like basketball's league
+  // settings, by half-year (the walk-forward months start in 2024): fit 2024, kept only when better than the shared model
+  // on 2025 H1, refit 2024 – 2025 H1; 2025 H2 = the untouched check; 2026 reported, never fitted. A small tour × surface
+  // shares its tour's. The layer is then fitted on the chances with the settings (and applied after them).
+  const half = (t: number) => { const d = new Date(t); return d.getUTCFullYear() + (d.getUTCMonth() >= 6 ? 0.5 : 0); };
+  const setIdx = testIdx.filter(i => R.cat[i] <= 3);
+  const S = await probSettings(setIdx.map(i => ({ league: tennisSegment(CAT_NAME[R.cat[i]], R.surf[i]), year: half(R.t[i]), p: pF(i), y: yArr[i], home: false })),
+    { groupOf: seg => seg.split('·')[0], symmetric: true, years: TENNIS_LS_YEARS, pause: yieldLoop });
+  logger.info(`${TENNIS_MODEL} tour × surface settings: ${S.leagues.map(l => `${l.league} ${l.used}`).join(', ')}; 2025 H1 LL ${S.total.test.shared} → ${S.total.test.used}, untouched 2025 H2 ${S.total.check.shared} → ${S.total.check.used}`);
+  const calRows = setIdx.map(i => ({ p: applyUsed(S.used, tennisSegment(CAT_NAME[R.cat[i]], R.surf[i]), pF(i), false), y: yArr[i], season: new Date(R.t[i]).getUTCFullYear(), league: CAT_NAME[R.cat[i]] as string }));
   const cal = buildLayer(calRows, { first: CALIB_FIRST_YEAR, test: CALIB_TEST_YEAR, last: CALIB_TEST_YEAR, symmetric: true, strongDefault: 0.75 });
-  const calib: TennisCalib = { at: new Date().toISOString(), version: TENNIS_CALIB_VERSION, layer: cal.layer, strong: cal.strong, strongSport: cal.strongSport };
+  const calib: TennisCalib = { at: new Date().toISOString(), version: TENNIS_CALIB_VERSION, layer: cal.layer, strong: cal.strong, strongSport: cal.strongSport, settings: S.used };
   store.set('calib', calib);
-  write(`INSERT OR REPLACE INTO sport_calib (sport, at, version, state, report) VALUES ('tennis', ?, ?, ?, ?)`, [calib.at, TENNIS_CALIB_VERSION, JSON.stringify(calib), JSON.stringify({ ...cal, source: `${TENNIS_MODEL} walk-forward months`, rows: calRows.length })]);
+  write(`INSERT OR REPLACE INTO sport_calib (sport, at, version, state, report) VALUES ('tennis', ?, ?, ?, ?)`, [calib.at, TENNIS_CALIB_VERSION, JSON.stringify(calib), JSON.stringify({ ...cal, source: `${TENNIS_MODEL} walk-forward months`, rows: calRows.length, settings: { at: calib.at, leagues: S.leagues, groups: S.groups, years: S.years, total: S.total, used: S.used } })]);
   logger.info(`${TENNIS_MODEL} calibration: test ${CALIB_TEST_YEAR} LL raw ${cal.test.raw.logLoss} → ${cal.test.ownFit.logLoss} (own fits) / ${cal.test.sportFit.logLoss} (one fit); layer ${cal.layer ? `kept in ${cal.perLeague.filter(x => x.kept).map(x => x.league).join(', ')}` : 'not kept'}; 2026 ${cal.live.games} matches LL ${cal.live.raw.logLoss} → ${cal.live.cal.logLoss}`);
   calibCache = null; strongCache = null;
   const months = testMonths.map(M => {
@@ -1376,6 +1386,7 @@ function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): 
   const cat = CAT_NAME[R.cat[i]];
   // fix222: the shown chance = the tour's calibration layer on the model's own (sets and totals follow the shown one)
   const pRaw = p;
+  p = applyUsed(tennisCalib()?.settings, tennisSegment(cat, R.surf[i]), p, false); // fix223: the tour × surface settings first
   p = applyLayer(tennisCalib()?.layer, cat, p);
   const sc = rescale(b.pa, b.pb, R.bo[i], R.rule[i], p);
   const d = matchDist(sc.pa, sc.pb, R.bo[i], R.rule[i], true);
@@ -1866,9 +1877,12 @@ export function tennisStrongLine(cat: string): number {
   return strongCache.v[cat] ?? 75;
 }
 /** fix222: the tennis calibration layer (built with the report; tennis_model_store 'calib'), read once a minute */
-export const TENNIS_CALIB_VERSION = 'fix222-1';
+export const TENNIS_CALIB_VERSION = 'fix223-1';
+/** fix223: a match's settings segment (tour · surface) and the half-year periods of its settings (2024.5 = 2024 H2) */
+export const tennisSegment = (cat: string, surf: number) => `${cat}·${SURF_NAME[surf] ?? 'hard'}`;
+export const TENNIS_LS_YEARS: LsYears = { fit: [2024, 2024.5], test: 2025, refit: [2024, 2024.5, 2025], check: 2025.5, liveFrom: 2026 };
 const CALIB_FIRST_YEAR = 2024, CALIB_TEST_YEAR = 2025;
-export interface TennisCalib { at: string; version: string; layer: LeagueLayer | null; strong: Record<string, number>; strongSport: number }
+export interface TennisCalib { at: string; version: string; layer: LeagueLayer | null; strong: Record<string, number>; strongSport: number; settings?: Record<string, UsedProbSet> }
 let calibCache: { at: number; v: TennisCalib | null } | null = null;
 export function tennisCalib(): TennisCalib | null {
   if (!calibCache || Date.now() - calibCache.at > 60 * 1000) calibCache = { at: Date.now(), v: store.get('calib') };

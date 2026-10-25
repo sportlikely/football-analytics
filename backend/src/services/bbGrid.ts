@@ -318,9 +318,11 @@ export function storeRows(code: string, items: GridItem[]) {
 }
 /** Every league's stored rows (the tuner and the gate) */
 export function loadRows(codes?: string[]): GridItem[] {
-  const q = codes && codes.length ? ` WHERE code IN (${codes.map(() => '?').join(',')})` : '';
-  return (db.prepare(`SELECT * FROM bb_grid_rows${q}`).all(...(codes || [])) as any[]).map(r => ({
-    id: r.game_id, code: r.code, season: r.season, year: startYear(r.season), gp: r.gp, y: r.y, v3: r.v3, sig: r.sig, hv: JSON.parse(r.hv), av: JSON.parse(r.av), oracle: r.oracle
+  const q = codes && codes.length ? ` WHERE r.code IN (${codes.map(() => '?').join(',')})` : '';
+  // fix223: + the final margin (mg: the league settings' spread of results)
+  return (db.prepare(`SELECT r.*, g.hs - g.as_ AS mg FROM bb_grid_rows r LEFT JOIN bb_games g ON g.game_id = r.game_id${q}`).all(...(codes || [])) as any[]).map(r => ({
+    id: r.game_id, code: r.code, season: r.season, year: startYear(r.season), gp: r.gp, y: r.y, v3: r.v3, sig: r.sig, hv: JSON.parse(r.hv), av: JSON.parse(r.av), oracle: r.oracle,
+    mg: typeof r.mg === 'number' ? r.mg : null
   }));
 }
 

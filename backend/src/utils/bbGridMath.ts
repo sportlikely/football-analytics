@@ -7,6 +7,7 @@
  * The game page shows the "1,000 points split" (split1000) like football.
  */
 import { phi, scoreP } from './nbaImpact';
+import { minimize, shrinkPenalty } from './leagueSettings';
 
 /** The 13 rows (index = position in the value arrays). Bounds / steps for the tuner; `w0` = the starting weight. */
 export const GRID_ROWS = [
@@ -33,8 +34,18 @@ export const VOL = 11;
 /** bb-v3's walk-forward pieces of one game (bbModel.buildLeague). */
 export type GridBase = { p: number; m1: number; netH: number; netA: number; hca: number; haH: number; haA: number; b2bH: boolean; b2bA: boolean; sig: number };
 /** One finished game for the tuner / gate: row values (home side, away side), sigma, result, bb-v3's chance. */
-export type GridItem = { id: number; code: string; season: string; year: number; gp: number; y: number; v3: number; sig: number; hv: number[]; av: number[]; oracle: number | null };
-export type GridParams = { w: number[]; stretch: Record<string, number>; offsets: Record<string, number[]>; version: string; fittedAt: string | null; train: number[] | null };
+export type GridItem = { id: number; code: string; season: string; year: number; gp: number; y: number; v3: number; sig: number; hv: number[]; av: number[]; oracle: number | null; mg?: number | null };
+/**
+ * fix223 — a league's own settings (or its group's), on top of the shared ones: home edge (points added to #7 when the
+ * court is not neutral), stretch (× the shared stretch), sigma (× the league's typical miss: its spread of results
+ * against the model's margin, relative to every league's) and offsets for the 4 big rows (LS_ROWS).
+ */
+export type LeagueSet = { src: 'own' | 'group'; group: string | null; home: number; str: number; sig: number; off: number[]; n: number };
+export type GridParams = {
+  w: number[]; stretch: Record<string, number>; offsets: Record<string, number[]>; version: string; fittedAt: string | null; train: number[] | null;
+  /** fix223: per-league settings that passed their gate (services/bbTuner.ts runLeagueTune) */
+  league?: Record<string, LeagueSet>;
+};
 
 /** Live numbers until the first /api/bb/tune?apply=1 (fix219 research, 10 Oct database, train 2022-23 … 2024-25). */
 /** the starting weights of a fit from nothing (GRID_ROWS.w0) */
@@ -63,16 +74,21 @@ export const diff = (it: { hv: number[]; av: number[] }, i: number) => (it.hv[i]
 export const volOf = (it: { hv: number[]; av: number[] }) => (it.hv[VOL] || 0) + (it.av[VOL] || 0);
 
 export function weightsFor(p: GridParams, code: string): number[] {
-  const off = p.offsets[code];
-  return off ? p.w.map((w, i) => w + (off[i] || 0)) : p.w;
+  const off = p.offsets[code], ls = p.league?.[code];
+  const w = off ? p.w.map((w, i) => w + (off[i] || 0)) : p.w;
+  return ls ? w.map((x, i) => x + (ls.off[i] || 0)) : w;
 }
+/** #7 is 0 for both teams only on a neutral court (final fours): no home edge there */
+const neutralOf = (it: { hv: number[]; av: number[] }) => !(it.hv[6] || 0) && !(it.av[6] || 0);
 /** margin in points (home − away), the contribution of each row, the sigma used and the home win chance */
 export function gridEval(p: GridParams, code: string, it: { hv: number[]; av: number[]; sig: number }, w = weightsFor(p, code)) {
   const parts = new Array<number>(N_ROWS).fill(0);
   let m = 0;
   for (let i = 0; i < N_ROWS; i++) { if (i === VOL) continue; parts[i] = w[i] * diff(it, i); m += parts[i]; }
-  const sig = it.sig * Math.min(1.5, Math.max(0.7, 1 + w[VOL] * volOf(it)));
-  const pHome = clampP(phi(((p.stretch[code] ?? 1) * m) / sig));
+  const ls = p.league?.[code];
+  if (ls?.home && !neutralOf(it)) { parts[6] += ls.home; m += ls.home; }
+  const sig = it.sig * (ls?.sig ?? 1) * Math.min(1.5, Math.max(0.7, 1 + w[VOL] * volOf(it)));
+  const pHome = clampP(phi(((p.stretch[code] ?? 1) * (ls?.str ?? 1) * m) / sig));
   return { margin: m, parts, sigma: sig, pHome };
 }
 
@@ -95,7 +111,8 @@ export function split1000(p: GridParams, code: string, it: { hv: number[]; av: n
   const home = Math.round(1000 * e.pHome), lean = home - 500;
   const rel = fittedSplit(w, sd);
   // each row's edge = its share of the margin × the points the margin moves away from 500 (sums to home − 500)
-  const used = GRID_ROWS.map((r, i) => ({ r, i })).filter(({ i }) => i !== VOL && Math.abs(w[i]) > 1e-9);
+  const homeEdge = !!p.league?.[code]?.home;
+  const used = GRID_ROWS.map((r, i) => ({ r, i })).filter(({ i }) => i !== VOL && (Math.abs(w[i]) > 1e-9 || (i === 6 && homeEdge)));
   const tot = e.margin;
   const edges = used.map(({ i }) => (Math.abs(tot) > 1e-6 ? (e.parts[i] / tot) * lean : 0));
   const rounded = edges.map(x => Math.round(x));
@@ -105,7 +122,7 @@ export function split1000(p: GridParams, code: string, it: { hv: number[]; av: n
   return {
     rows: used.map(({ r, i }, j) => ({ id: r.id, key: r.key, home: r2(it.hv[i] || 0), away: r2(it.av[i] || 0), rel: rel[i], edge: rounded[j] })),
     points: { home, away: 1000 - home },
-    unused: GRID_ROWS.filter((_, i) => i !== VOL && Math.abs(w[i]) <= 1e-9).map(r => r.key),
+    unused: GRID_ROWS.filter((_, i) => i !== VOL && Math.abs(w[i]) <= 1e-9 && !(i === 6 && homeEdge)).map(r => r.key),
     volatility: w[VOL] > 0 ? r2(volOf(it)) : null, margin: Math.round(e.margin * 10) / 10, sigma: Math.round(e.sigma * 10) / 10
   };
 }
@@ -202,3 +219,60 @@ export function compare(p: GridParams, items: GridItem[]) {
 /** League groups for the gate (fix219 brief: the NBA, the European leagues pooled; the rest pooled too). */
 export const EUROPE = ['EL', 'EC', 'BCL', 'FEC', 'ACB', 'LBA', 'BSL', 'LNB', 'BBL', 'GBL', 'LKL', 'ABA'];
 export const groupOf = (code: string) => (code === 'NBA' ? 'NBA' : EUROPE.includes(code) ? 'Europe' : 'Rest of the world');
+
+/* ---------- fix223: per-league settings (the selection and gate: utils/leagueSettings.ts) ---------- */
+
+/** the 4 big rows a league may move: #1 player impact, #3 team rating (bb-v3's points rating + possessions + talent), #4 missing players, #6 rest */
+export const LS_ROWS = [0, 2, 3, 5];
+/** shrinkage scale per offset row (a prior worth one game per unit of τ², see utils/leagueSettings.ts) */
+export const LS_TAU: Record<number, number> = { 0: 0.1, 2: 0.1, 3: 0.2, 5: 0.5 };
+const SIG_N0 = 400;
+
+/** the miss of the model's margin in sigma units (√ mean ((result − margin) / sigma)²), games with a final margin */
+export function spreadOf(p: GridParams, items: GridItem[]): { r: number; n: number } {
+  let s = 0, n = 0;
+  for (const it of items) {
+    if (typeof it.mg !== 'number' || !Number.isFinite(it.mg)) continue;
+    const e = gridEval(p, it.code, it);
+    s += ((it.mg - e.margin) / (e.sigma || 1)) ** 2; n++;
+  }
+  return { r: n ? Math.sqrt(s / n) : 1, n };
+}
+
+/**
+ * One league's (or group's) settings fitted on `items` (fit years only: the caller filters): sigma = the items' spread
+ * relative to every league's (`all`, same years), shrunk toward 1 with 400 games' worth; then home edge, stretch and the
+ * LS_ROWS offsets by pattern search on log loss + the shrinkage toward the shared settings.
+ */
+export async function fitLeagueSet(items: GridItem[], base: GridParams, all: { r: number }, src: 'own' | 'group', group: string | null,
+  opt: { rounds?: number; shrink?: number; pause?: () => Promise<void> } = {}): Promise<LeagueSet> {
+  const shared: GridParams = { ...base, league: undefined };
+  const sp = spreadOf(shared, items);
+  const kRaw = all.r > 0 ? sp.r / all.r : 1;
+  const set: LeagueSet = { src, group, home: 0, str: 1, sig: Math.round(((sp.n * kRaw + SIG_N0) / (sp.n + SIG_N0)) * 1e4) / 1e4, off: new Array<number>(N_ROWS).fill(0), n: items.length };
+  const p: GridParams = { ...shared, league: Object.fromEntries([...new Set(items.map(x => x.code))].map(c => [c, set])) };
+  const defs = [
+    { get: () => set.home, set: (v: number) => { set.home = v; }, lo: -4, hi: 4, step: 0.25, tau: 1, at: 0 },
+    { get: () => set.str, set: (v: number) => { set.str = v; }, lo: 0.7, hi: 1.4, step: 0.02, tau: 0.1, at: 1 },
+    ...LS_ROWS.map(i => ({ get: () => set.off[i], set: (v: number) => { set.off[i] = v; }, lo: GRID_ROWS[i].lo - base.w[i], hi: GRID_ROWS[i].hi - base.w[i], step: GRID_ROWS[i].step, tau: LS_TAU[i], at: 0 }))
+  ];
+  await minimize(() => logLoss(p, items) + shrinkPenalty(defs, items.length, opt.shrink ?? 1), defs, { rounds: opt.rounds ?? 30, pause: opt.pause });
+  const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+  set.home = r4(set.home); set.str = r4(set.str); set.off = set.off.map(r4);
+  return set;
+}
+
+/** groups for small leagues (< 400 train games), by the league's country (every country alike) */
+const ASIA = /japan|china|korea|philippines|taiwan|taipei|indonesia|lebanon|iran|jordan|qatar|saudi|emirates|uae|bahrain|india|thailand|vietnam|malaysia|hong kong|mongolia|syria|iraq|kuwait|asia/i;
+const AMERICAS = /usa|united states|canada|mexico|puerto rico|brazil|argentina|uruguay|chile|venezuela|colombia|dominican|panama|cuba|peru|paraguay|ecuador|bolivia|america/i;
+const OCEANIA = /australia|new zealand|oceania/i;
+const AFRICA = /africa|egypt|morocco|tunisia|nigeria|senegal|angola|algeria|cameroon/i;
+export function regionGroup(country: string | null | undefined): string | null {
+  const c = String(country || '').trim();
+  if (!c || /^world$/i.test(c)) return null;
+  if (OCEANIA.test(c)) return 'Oceania';
+  if (ASIA.test(c)) return 'Asia';
+  if (AMERICAS.test(c)) return 'Americas';
+  if (AFRICA.test(c)) return 'Africa';
+  return 'Europe second tier';
+}

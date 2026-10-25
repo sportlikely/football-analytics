@@ -50,7 +50,7 @@ import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
 import { photosTick, photosBbPass } from './services/playerPhotos';
-import { autoTuneDue, runTune } from './services/bbTuner';
+import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune } from './services/bbTuner';
 import { threadJobsOn, inThread } from './services/threadJob';
 import { buildBbCalibration } from './services/sportCalibration';
 import { startKeyPlayersScheduler } from './services/keyPlayers';
@@ -95,13 +95,25 @@ export function startJobs() {
   setTimeout(() => { photosBbPass().catch(e => logger.warn(`player photos: basketball pass: ${e?.message || e}`)); }, 6 * 60 * 1000).unref();
   // fix222: bb-v4 tuned on this database (first run ~20 min after the start, once the grid rows are stored; then
   // monthly), applied only through the gate (bbTuner.runTune auto); then the basketball calibration layer again
+  // fix223: then the per-league settings on top of the stored shared tune (first run, after an applied shared tune, monthly)
   const bbAutoTune = async () => {
     const why = autoTuneDue();
-    if (!why) return;
-    try {
-      const r: any = await heavy('bb tune', () => (threadJobsOn() ? inThread('bb tune', [{ auto: why }]) : runTune({ auto: why })));
-      if (r?.auto?.applied) await buildBbCalibration('after the bb-v4 tune');
-    } catch (e: any) { logger.warn(`bb-v4 tune (${why}): ${e?.message || e}`); }
+    let calib = false;
+    if (why) {
+      try {
+        const r: any = await heavy('bb tune', () => (threadJobsOn() ? inThread('bb tune', [{ auto: why }]) : runTune({ auto: why })));
+        calib = !!r?.auto?.applied;
+      } catch (e: any) { logger.warn(`bb-v4 tune (${why}): ${e?.message || e}`); }
+    }
+    const lwhy = leagueTuneDue();
+    if (lwhy) {
+      try {
+        const opt = { auto: lwhy, apply: true };
+        await heavy('bb league tune', () => (threadJobsOn() ? inThread('bb league tune', [opt]) : runLeagueTune(opt)));
+        calib = true;
+      } catch (e: any) { logger.warn(`bb-v4 league settings (${lwhy}): ${e?.message || e}`); }
+    }
+    if (calib) await buildBbCalibration('after the bb-v4 tune');
   };
   after('bb tune (auto)', bbAutoTune, 20 * 60 * 1000).unref();
   every('bb tune (auto)', bbAutoTune, 3600 * 1000).unref();

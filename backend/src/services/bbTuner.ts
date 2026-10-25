@@ -16,8 +16,10 @@ import { onState, publishState } from './shared';
 import { yieldLoop } from './perf';
 import {
   GRID_ROWS, GRID_DEFAULT, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, N_ROWS, VOL, assertTrainYears, fitGrid, compare, rowStats, fittedSplit,
-  gridEval, split1000, groupOf, diff, volOf, weightsFor, type GridItem, type GridParams, type GridView
+  gridEval, split1000, groupOf, diff, volOf, weightsFor, logLoss, spreadOf, fitLeagueSet, regionGroup, LS_ROWS,
+  type GridItem, type GridParams, type GridView, type LeagueSet
 } from '../utils/bbGridMath';
+import { tuneLeagueSettings, LS_FIT, LS_REFIT, LS_REFIT_DAYS, type LsResult } from '../utils/leagueSettings';
 import { loadRows, liveRows } from './bbGrid';
 
 db.exec(`CREATE TABLE IF NOT EXISTS bb_tuned (id TEXT PRIMARY KEY, params TEXT NOT NULL, report TEXT, at TEXT NOT NULL)`);
@@ -30,11 +32,24 @@ onState('bb:grid:p', (_k, v: any) => { gs = v as GridState; ver++; });
 export const gridParamsVer = () => ver;
 export const gridState = () => gs;
 
-/** The stored settings (or the code defaults). */
-export function storedParams(): GridParams {
+/** The stored shared settings (or the code defaults), without any league's own settings. */
+export function sharedParams(): GridParams {
   const r = db.prepare(`SELECT params FROM bb_tuned WHERE id = 'live'`).get() as any;
-  if (r) { try { return JSON.parse(r.params) as GridParams; } catch (e: any) { logger.warn(`bb_tuned: ${e.message}`); } }
+  if (r) { try { const p = JSON.parse(r.params) as GridParams; delete p.league; return p; } catch (e: any) { logger.warn(`bb_tuned: ${e.message}`); } }
   return GRID_DEFAULT;
+}
+/** fix223: the shared settings a league fit was made on (a new shared tune makes the league settings stale) */
+export const baseKey = (p: GridParams) => `${p.version}|${p.fittedAt || ''}`;
+/** fix223: the stored league settings (bb_tuned 'leagues'): used only while their shared base is the one live */
+export function storedLeagues(): { base: string; at: string; league: Record<string, LeagueSet>; report: any } | null {
+  const r = db.prepare(`SELECT params, report, at FROM bb_tuned WHERE id = 'leagues'`).get() as any;
+  if (!r) return null;
+  try { const v = JSON.parse(r.params); return { base: v.base, at: r.at, league: v.league || {}, report: r.report ? JSON.parse(r.report) : null }; } catch { return null; }
+}
+/** The settings live: the shared ones + the leagues' own (fix223) when they were fitted on these shared ones. */
+export function storedParams(): GridParams {
+  const p = sharedParams(), l = storedLeagues();
+  return l && l.base === baseKey(p) && Object.keys(l.league).length ? { ...p, league: l.league } : p;
 }
 
 /** The gate of every group on the test season with these settings. */
@@ -75,8 +90,12 @@ export function publishGridState(items = loadRows(), p = storedParams()): GridSt
  * fix222: `auto` = the worker's own run on the live database (after the deploy, then monthly): applied only when at
  * least one group passes the gate with the new weights and the test season is not worse than with the settings live
  * now; the run is remembered either way (bb_tuned 'auto').
+ * fix223: while nothing is stored on this database (the code defaults were fitted on the 10 Oct copy), the first run is
+ * applied when the gate passes (a group beats bb-v3 on the test season) — "not worse than the settings live" only from
+ * the second run on; always compared with the shared settings (the leagues' own are refitted after an applied tune:
+ * runLeagueTune). apply = 'gate' does the same from /api/bb/tune?apply=gate.
  */
-export async function runTune(opt: { train?: number[]; test?: number; apply?: boolean; rounds?: number; auto?: string }) {
+export async function runTune(opt: { train?: number[]; test?: number; apply?: boolean | 'gate'; rounds?: number; auto?: string }) {
   const train = opt.train && opt.train.length ? opt.train : GRID_TRAIN, test = opt.test ?? GRID_TEST;
   assertTrainYears(train, test);
   const all = loadRows();
@@ -84,7 +103,7 @@ export async function runTune(opt: { train?: number[]; test?: number; apply?: bo
   const tr = all.filter(x => train.includes(x.year));
   if (tr.length < 500) throw new Error(`only ${tr.length} training games (build the basketball model first)`);
   const t0 = Date.now();
-  const fit = await fitGrid(tr, storedParams(), { rounds: opt.rounds, pause: yieldLoop });
+  const fit = await fitGrid(tr, sharedParams(), { rounds: opt.rounds, pause: yieldLoop });
   const params: GridParams = { ...fit.params, version: `fit ${new Date().toISOString().slice(0, 10)}`, train };
   const stats = rowStats(tr);
   const te = all.filter(x => x.year === test);
@@ -98,16 +117,16 @@ export async function runTune(opt: { train?: number[]; test?: number; apply?: bo
     params
   };
   const fittedAt = new Date().toISOString();
-  let apply = !!opt.apply, auto: AutoTune | null = null;
-  if (opt.auto) {
-    const cur = storedParams();
+  let apply = opt.apply === true, auto: AutoTune | null = null;
+  if (opt.auto || opt.apply === 'gate') {
+    const cur = sharedParams(), first = !hasStored();
     const before = compare(cur, te).v4.logLoss, after = report.testTable.all.v4.logLoss;
     const passing = Object.values(report.testTable.byGroup).filter(g => g.pass).map(g => g.group);
-    apply = passing.length > 0 && after <= before + 1e-6;
+    apply = passing.length > 0 && (first || after <= before + 1e-6);
     const reason = !passing.length ? `not applied: no group beats bb-v3 on ${test} with the new weights`
       : !apply ? `not applied: test log loss ${after} vs ${before} with the settings live now (${cur.version})`
-        : `applied: test log loss ${before} → ${after}; bb-v4 live in ${passing.join(', ')}`;
-    auto = { why: opt.auto, at: fittedAt, applied: apply, reason, before, after, passing, train, test, trainGames: tr.length, testGames: te.length };
+        : `applied${first ? ' (the first tune stored on this database: the gate decides)' : ''}: test log loss ${before} (${cur.version}) → ${after}; bb-v4 live in ${passing.join(', ')}`;
+    auto = { why: opt.auto || 'admin (apply if the gate passes)', at: fittedAt, applied: apply, reason, before, after, passing, train, test, trainGames: tr.length, testGames: te.length, rule: AUTO_RULE };
     db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('auto', ?, ?, ?)`).run(JSON.stringify(params), JSON.stringify(auto), fittedAt);
     logger.info(`bb-v4 tune on the live database (${opt.auto}): ${tr.length} train games, ${te.length} test games — ${reason}`);
   }
@@ -120,8 +139,11 @@ export async function runTune(opt: { train?: number[]; test?: number; apply?: bo
 }
 
 /** fix222: the worker's own tune (bb_tuned 'auto'): when it ran, on what, and whether it was applied */
-export type AutoTune = { why: string; at: string; applied: boolean; reason: string; before: number; after: number; passing: string[]; train: number[]; test: number; trainGames: number; testGames: number };
+export type AutoTune = { why: string; at: string; applied: boolean; reason: string; before: number; after: number; passing: string[]; train: number[]; test: number; trainGames: number; testGames: number; rule?: string };
 export const AUTO_TUNE_DAYS = 30;
+/** fix223: the apply rule of a run (a fix222 run that stored nothing is run once more under the first-store rule) */
+const AUTO_RULE = 'fix223';
+export const hasStored = () => !!db.prepare(`SELECT 1 FROM bb_tuned WHERE id = 'live'`).get();
 export function lastAutoTune(): AutoTune | null {
   const r = db.prepare(`SELECT report FROM bb_tuned WHERE id = 'auto'`).get() as any;
   try { return r?.report ? JSON.parse(r.report) : null; } catch { return null; }
@@ -130,6 +152,8 @@ export function lastAutoTune(): AutoTune | null {
 export function autoTuneDue(now = Date.now()): string | null {
   const last = lastAutoTune();
   if (!last) return 'first tune on the live database';
+  // fix223: fix222's run stored nothing here (not better than the code defaults): once more under the first-store rule
+  if (!hasStored() && last.rule !== AUTO_RULE) return `first tune stored on the live database (the run of ${last.at.slice(0, 10)}: ${last.reason})`;
   return now - Date.parse(last.at) > AUTO_TUNE_DAYS * 86400000 ? `monthly re-tune (last ${last.at.slice(0, 10)})` : null;
 }
 /** the morning report's line */
@@ -147,7 +171,83 @@ export function tunedInfo(action?: 'reload' | 'clear') {
   const r = db.prepare(`SELECT report, at FROM bb_tuned WHERE id = 'live'`).get() as any;
   let report: any = null;
   try { report = r?.report ? JSON.parse(r.report) : null; } catch { report = null; }
-  return { stored: !!r, at: r?.at || null, params: storedParams(), report, auto: lastAutoTune(), autoDue: autoTuneDue(), gate: gs?.gate || null, perLeague: gs?.perLeague || null, live: gs?.live || null, stats: gs?.stats || null };
+  const lg = storedLeagues();
+  return {
+    stored: !!r, at: r?.at || null, params: storedParams(), report, auto: lastAutoTune(), autoDue: autoTuneDue(), gate: gs?.gate || null, perLeague: gs?.perLeague || null, live: gs?.live || null, stats: gs?.stats || null,
+    leagues: lg ? { at: lg.at, stale: lg.base !== baseKey(sharedParams()), due: leagueTuneDue(), report: lg.report } : { at: null, stale: false, due: leagueTuneDue(), report: null }
+  };
+}
+
+/* ---------- fix223: per-league settings (like football's league tune; selection + gate in utils/leagueSettings.ts) ---------- */
+
+/** a league's country (bb_leagues: the built-in leagues and the ones added from the admin) → its group when small */
+const countries = () => new Map((db.prepare(`SELECT code, country FROM bb_leagues`).all() as any[]).map(r => [r.code as string, r.country as string]));
+export const bbLeagueGroup = (code: string, cc = countries()) => regionGroup(cc.get(code));
+
+/** why the league settings are due (null = not due): never fitted, the shared settings changed, or 30+ days old */
+export function leagueTuneDue(now = Date.now()): string | null {
+  const l = storedLeagues();
+  if (!l) return 'first league fit on this database';
+  if (l.base !== baseKey(sharedParams())) return `the shared settings changed (fitted on ${l.base.split('|')[0]})`;
+  return now - Date.parse(l.at) > LS_REFIT_DAYS * 86400000 ? `monthly refit (last ${l.at.slice(0, 10)})` : null;
+}
+
+/**
+ * fix223 — every league with 400+ games in 2022-23 … 2024-25: home edge, stretch, sigma and offsets for the 4 big rows
+ * (#1 impact, #3 team rating, #4 missing, #6 rest), shrunk toward the shared settings; fit 2022-23 + 2023-24, kept only
+ * when it beats the shared model on 2024-25, then refitted on all three; smaller leagues by group (Europe second tier,
+ * Asia, Americas, Oceania, Africa); 2025-26 = the untouched check, 2026-27+ reported, never tuned. `apply` (the worker's
+ * run and ?apply=1) stores the leagues that passed (bb_tuned 'leagues', with the shared settings they were fitted on)
+ * and publishes the settings; a shared tune applied later makes them stale until the next run (storedParams).
+ */
+export async function runLeagueTune(opt: { auto?: string; apply?: boolean; rounds?: number } = {}) {
+  const t0 = Date.now();
+  const all = loadRows();
+  await yieldLoop();
+  if (all.filter(x => LS_REFIT.includes(x.year)).length < 500) throw new Error('too few training games (build the basketball model first)');
+  const base = sharedParams(), cc = countries();
+  const items = all.map(x => Object.assign(x, { league: x.code }));
+  const spreads = new Map<string, { r: number }>();
+  const spreadAll = (years: number[]) => {
+    const k = years.join(',');
+    if (!spreads.has(k)) spreads.set(k, spreadOf(base, all.filter(x => years.includes(x.year))));
+    return spreads.get(k)!;
+  };
+  const withSet = (l: GridItem[], s: LeagueSet | null): GridParams => (s ? { ...base, league: Object.fromEntries([...new Set(l.map(x => x.code))].map(c => [c, s])) } : base);
+  const res: LsResult<LeagueSet> = await tuneLeagueSettings(items, {
+    groupOf: code => regionGroup(cc.get(code)),
+    fit: (l, years) => fitLeagueSet(l, base, spreadAll(years), 'own', null, { rounds: opt.rounds, pause: yieldLoop }),
+    ll: (l, s) => logLoss(withSet(l, s), l),
+    pause: yieldLoop
+  });
+  const league: Record<string, LeagueSet> = {};
+  for (const row of res.leagues) if (row.settings && row.used !== 'shared') league[row.league] = { ...row.settings, src: row.used, group: row.used === 'group' ? row.group : null };
+  const live: GridParams = { ...base, league };
+  const stats = rowStats(all.filter(x => LS_REFIT.includes(x.year)));
+  const r5 = (x: number) => Math.round(x * 1e5) / 1e5;
+  const total = (year: (y: number) => boolean) => { const l = all.filter(x => year(x.year)); return { games: l.length, shared: l.length ? r5(logLoss(base, l)) : null, used: l.length ? r5(logLoss(live, l)) : null }; };
+  const at = new Date().toISOString();
+  const report = {
+    at, why: opt.auto || 'admin', base: base.version, baseKey: baseKey(base), years: res.years, seconds: Math.round((Date.now() - t0) / 1000),
+    leagues: res.leagues.map(r => ({ ...r, settings: league[r.league] || null, split: fittedSplit(weightsFor(live, r.league), stats.sd) })),
+    groups: res.groups, rows: LS_ROWS.map(i => GRID_ROWS[i].id), sharedSplit: fittedSplit(base.w, stats.sd),
+    total: { test: total(y => y === res.years.test), check: total(y => y === res.years.check), live: total(y => y >= res.years.liveFrom), fit: LS_FIT },
+    own: Object.keys(league).filter(k => league[k].src === 'own'), group: Object.keys(league).filter(k => league[k].src === 'group'),
+    applied: !!opt.apply
+  };
+  if (opt.apply) {
+    db.prepare(`INSERT OR REPLACE INTO bb_tuned (id, params, report, at) VALUES ('leagues', ?, ?, ?)`).run(JSON.stringify({ base: baseKey(base), league }), JSON.stringify(report), at);
+    publishGridState(all, storedParams());
+  }
+  logger.info(`bb-v4 league settings (${report.why}${opt.apply ? ', stored' : ', report only'}): own ${report.own.join(', ') || 'none'}; group ${report.group.join(', ') || 'none'}; ${res.years.test} LL ${report.total.test.shared} → ${report.total.test.used}; untouched ${res.years.check} ${report.total.check.shared} → ${report.total.check.used}; live ${report.total.live.shared} → ${report.total.live.used}`);
+  return report;
+}
+/** the morning report's line */
+export function leagueTuneLine(): string | null {
+  const l = storedLeagues();
+  if (!l?.report) return null;
+  const r = l.report;
+  return `Basketball league settings ${l.at.slice(0, 16).replace('T', ' ')} UTC: own ${r.own?.length || 0}, group ${r.group?.length || 0}, shared ${(r.leagues?.length || 0) - (r.own?.length || 0) - (r.group?.length || 0)}; ${r.years?.test} log loss ${r.total?.test?.shared} → ${r.total?.test?.used}, untouched ${r.years?.check} ${r.total?.check?.shared} → ${r.total?.check?.used}${l.base !== baseKey(sharedParams()) ? ' (stale: the shared settings changed, refit due)' : ''}.`;
 }
 
 /** the live weight of row i for a league (shared + offset) */
