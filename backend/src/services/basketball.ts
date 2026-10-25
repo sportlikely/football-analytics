@@ -21,6 +21,7 @@ import { cleanName } from './sponsorNames';
 import { boxUpdated, gameViews } from './gameViews';
 import { dueGames, budgetAllows, chunks } from '../utils/liveBox';
 import { nbaLiveExtras } from './bdl';
+import { nbaRepriceTick, type V4Result } from './nbaV4';
 
 const BASE = 'https://v1.basketball.api-sports.io';
 const KEY = () => process.env.API_BASKETBALL_KEY || process.env.API_FOOTBALL_KEY || '';
@@ -552,6 +553,13 @@ export function startBasketballScheduler() {
   };
   after('bb injuries', () => injuries(), 30 * 1000).unref();
   every('bb injuries', () => void injuries(), 15 * 60 * 1000).unref();
+  // fix217: NBA games re-priced 90, 30 and 10 min before tip-off (fresh injury report, line-ups when published)
+  every('nba reprice', () => void timed('nba reprice', () => nbaRepriceTick(async ids => {
+    bumpBbInjuries(); publishState('bb:injuries', { at: Date.now() }); // the new report / line-ups: recompute these games
+    const out = new Map<number, { v3: number; v4: V4Result | null }>();
+    await recordBbPredictions(['NBA'], ids, out);
+    return out;
+  })).catch(e => logger.warn(`nba reprice: ${e.message}`)), 60 * 1000).unref();
 }
 
 /** Admin: quota and how many games we hold per league and season. */

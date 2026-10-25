@@ -18,6 +18,8 @@ import { onState, publishState, applyStored } from './shared';
 import { threadJobsOn, inThread } from './threadJob';
 import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import { injuryLoss } from './bbInjuries';
+import type { RBase } from '../utils/nbaImpact';
+import { nbaV4Adjust, nbaV4Ver, buildNbaV4, saveShadow, type V4Result } from './nbaV4';
 
 export const BB_MODEL = 'bb-v3';
 const FINISHED = ['FT', 'AOT'];
@@ -29,7 +31,7 @@ type Game = {
 };
 type Params = { k: number; r: number; b2b: number };
 type Team = { o: number; d: number; season: string; games: number; last: number; sg: number; ha: number };
-type Pred = { pHome: number; margin: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
+type Pred = { pHome: number; margin: number; neutral?: number; model?: string; pV3?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
 /** fix192: how a team with no games in the league was rated ('other-league' = its rating there, moved to this league's level) */
 export type NewBasis = 'other-league' | 'bottom3';
 
@@ -132,6 +134,7 @@ class League {
     return {
       pHome: Math.min(0.995, Math.max(0.005, normCdf(margin / this.sigma))),
       margin, total: home + away, home, away, hca: this.hca, b2bHome, b2bAway,
+      neutral: h.o + a.d - a.o - h.d, // fix217: the rating gap alone (no home edge, no back-to-back)
       restHome: restHome === null ? null : Math.round(restHome * 10) / 10,
       restAway: restAway === null ? null : Math.round(restAway * 10) / 10
     };
@@ -205,6 +208,7 @@ class LeagueV2 {
     const home = pace * ph, away = pace * pa, margin = home - away;
     return {
       pHome: Math.min(0.995, Math.max(0.005, normCdf(margin / this.sigma))), margin, total: home + away, home, away, hca, b2bHome, b2bAway,
+      neutral: (pace * (H.o + A.d - A.o - H.d)) / 100, // fix217
       restHome: restH === null ? null : Math.round(restH * 10) / 10, restAway: restA === null ? null : Math.round(restA * 10) / 10,
       _ph: ph, _pa: pa, _pace: pace
     };
@@ -474,6 +478,9 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
   void tuneGames;
   const tune = emptyM(), test = emptyM(), t1 = emptyM(), t2 = emptyM();
   const wf: [number, number, number, number][] = [];
+  // fix217: NBA — bb-v3's walk-forward pieces the v4 replay starts from (neutral-court rating gap, back-to-backs)
+  const base = code === 'NBA' ? new Map<number, RBase>() : null;
+  if (base) nbaBase = base;
   const bySeason = new Map<string, Metrics>();
   for (const g of games) {
     if (!fin2(g) || isPreseason(g) || !p1.has(g.game_id)) continue;
@@ -481,6 +488,10 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
     const tg = talentState.byGame.get(g.game_id);
     const pr = { ...b, pHome: finalP(b.pHome, tg ? talentShift(tg[0], tg[1]) : 0) };
     wf.push([g.game_id, Math.round(pr.pHome * 10000) / 10000, Math.round(pr.margin * 10) / 10, Math.round(pr.total * 10) / 10]);
+    if (base) {
+      const a = p1.get(g.game_id)!, c = p2.get(g.game_id);
+      base.set(g.game_id, { nm: c && w2 ? w2 * (c.neutral || 0) + (1 - w2) * (a.neutral || 0) : a.neutral || 0, b2bH: a.b2bHome, b2bA: a.b2bAway, p: pr.pHome });
+    }
     if (g.season === tuneSeason) addM(tune, pr, g);
     if (testSeasons.includes(g.season)) {
       addM(test, pr, g);
@@ -501,6 +512,10 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
   wfByCode.set(code, wf);
   return model;
 }
+
+/** fix217: bb-v3's NBA walk-forward pieces of the last build (the v4 replay's base). */
+let nbaBase = new Map<number, RBase>();
+export const nbaV3Base = () => nbaBase;
 
 /** Research export (admin): the walk-forward bb-v3 prediction of every finished game (as it was before tip-off). */
 const wfByCode = new Map<string, [number, number, number, number][]>();
@@ -595,6 +610,8 @@ export async function buildLeaguesHere(codes: string[]): Promise<{ built: string
     }
     await yieldLoop();
   }
+  // fix217: NBA v4 (player impact ratings, the gate) from this NBA build's walk-forward pieces
+  if (built.includes('NBA')) { try { await buildNbaV4(nbaBase); } catch (e: any) { logger.warn(`bb-v4: ${e.message}`); } }
   return { built, wf: codes.filter(c => wfByCode.has(c)).map(c => [c, wfByCode.get(c)!]) };
 }
 
@@ -747,7 +764,7 @@ function livePrior(code: string, id: number, now: number, v2: boolean) {
 export function predictGameCached(g: Game): Pred | null {
   if (!models.has(g.code)) return null;
   const ph = prevKickoff(g.home_id, g), pa = prevKickoff(g.away_id, g);
-  const key = `${modelStamp.get(g.code) || 0}|${talentVer}|${g.code === 'NBA' ? injuryVer : 0}|${g.kickoff}|${g.status || ''}|${g.home_id}|${g.away_id}|${ph || 0}|${pa || 0}`;
+  const key = `${modelStamp.get(g.code) || 0}|${talentVer}|${g.code === 'NBA' ? `${injuryVer}.${nbaV4Ver()}` : 0}|${g.kickoff}|${g.status || ''}|${g.home_id}|${g.away_id}|${ph || 0}|${pa || 0}`;
   const c = predCache.get(g.game_id);
   if (c && c.key === key) return c.pred;
   const pred = predictGame(g, ph, pa);
@@ -755,6 +772,9 @@ export function predictGameCached(g: Game): Pred | null {
   if (predCache.size > 20000) predCache.delete(predCache.keys().next().value as number);
   return pred;
 }
+
+/** fix217: the last v4 numbers of each NBA game (players removed, same-day move) for the re-pricing log */
+const v4Detail = new Map<number, V4Result>();
 
 export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null {
   const m = models.get(g.code);
@@ -779,6 +799,22 @@ export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null 
   const pr: Pred = { ...L.predict(g), ...(nb.home ? { newHome: nb.home } : {}), ...(nb.away ? { newAway: nb.away } : {}) };
   for (const [id, t] of keep) { if (t) L.teams.set(id, t); else L.teams.delete(id); }
   for (const [id, old] of [[g.home_id, oldH], [g.away_id, oldA]] as [number, number | undefined][]) { if (old !== undefined) L.lastPlayed.set(id, old); else L.lastPlayed.delete(id); }
+  // fix217: NBA — v4 prices the injury report (and line-ups) itself, from bb-v3 without its injury points; pV3 = the
+  // current model's chance (bb-v3 with its injury points), kept for the side-by-side
+  const finish = (x: Pred, sigma: number): Pred => {
+    const cur = withInjuries(g, x, sigma);
+    if (g.code !== 'NBA') return cur;
+    const v = nbaV4Adjust(g, x.pHome, x.b2bHome, x.b2bAway);
+    if (!v) return cur;
+    v4Detail.set(g.game_id, v);
+    if (v4Detail.size > 2000) v4Detail.delete(v4Detail.keys().next().value as number);
+    const dm = v.margin - x.margin;
+    const names = (sd: typeof v.home) => sd.removed.filter(p => p.keep < 1).map(p => p.name);
+    return {
+      ...x, pHome: v.pHome, margin: v.margin, home: x.home + dm / 2, away: x.away - dm / 2, model: v.model, pV3: cur.pHome,
+      injHome: v.points.home, injAway: v.points.away, injPlayersHome: names(v.home), injPlayersAway: names(v.away)
+    };
+  };
   const v3 = (x: Pred, sigma: number): Pred => {
     const th = teamTalent(g.home_id, g.code === 'NBA' ? 5 : 1), ta = teamTalent(g.away_id, g.code === 'NBA' ? 5 : 1);
     const shift = talentShift(th, ta);
@@ -786,7 +822,7 @@ export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null 
     const dm = (shift * sigma) / V3.stretch; // the talent gap in points (the calibration stretch changes confidence, not the spread)
     return { ...x, pHome: p, margin: x.margin + dm, home: x.home + dm / 2, away: x.away - dm / 2 };
   };
-  if (!m.L2 || !m.w2) return withInjuries(g, v3(pr, L.sigma), L.sigma);
+  if (!m.L2 || !m.w2) return finish(v3(pr, L.sigma), L.sigma);
   // bb-v2: possession ratings, blended with v1 by the weight chosen on the tuning season
   const ko = new Date(g.kickoff).getTime();
   const keep2 = [g.home_id, g.away_id].map(id => [id, m.L2!.teams.get(id) ? { ...m.L2!.teams.get(id)! } : null] as const);
@@ -799,7 +835,7 @@ export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null 
   for (const [id, t] of keep2) { if (t) m.L2.teams.set(id, t); else m.L2.teams.delete(id); }
   const w = m.w2;
   const sig = w * m.L2.sigma + (1 - w) * L.sigma;
-  return withInjuries(g, v3({
+  return finish(v3({
     ...pr, pHome: w * p2.pHome + (1 - w) * pr.pHome, margin: w * p2.margin + (1 - w) * pr.margin, total: w * p2.total + (1 - w) * pr.total,
     home: w * p2.home + (1 - w) * pr.home, away: w * p2.away + (1 - w) * pr.away, hca: w * p2.hca + (1 - w) * pr.hca
   }, sig), sig);
@@ -929,6 +965,25 @@ export function teamRating(code: string, teamId: number) {
   return t ? { attack: Math.round(t.o * 10) / 10, defence: Math.round(-t.d * 10) / 10, net: Math.round((t.o - t.d) * 10) / 10, games: t.games } : null;
 }
 
+/**
+ * fix217 (data health "NBA vs backtest", every league): the saved predictions of the last 30 days against the league's
+ * backtest hit rate; a league with 50+ finished games more than 8 points under its backtest warns.
+ */
+export function bbLiveVsBacktest(now = Date.now()) {
+  const since = new Date(now - 30 * 86400000).toISOString();
+  const rows = db.prepare(`SELECT p.code, COUNT(*) AS n, SUM(CASE WHEN (p.p_home >= 0.5) = (g.hs > g.as_) THEN 1 ELSE 0 END) AS hits
+    FROM bb_predictions p JOIN bb_games g ON g.game_id = p.game_id
+    WHERE g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND g.hs != g.as_ AND g.kickoff > ? AND g.kickoff <= ? GROUP BY p.code`).all(since, new Date(now).toISOString()) as any[];
+  const out: { code: string; games: number; hitRate: number; backtest: number; gap: number; warn: boolean }[] = [];
+  for (const r of rows) {
+    const bt = (models.get(r.code)?.test?.all as any)?.hitRate;
+    if (typeof bt !== 'number' || r.n < 50) continue;
+    const hit = Math.round((1000 * r.hits) / r.n) / 10;
+    out.push({ code: r.code, games: r.n, hitRate: hit, backtest: bt, gap: Math.round((hit - bt) * 10) / 10, warn: hit < bt - 8 });
+  }
+  return out.sort((a, b) => a.gap - b.gap);
+}
+
 /** Admin: how each league's model did on seasons it never saw. */
 export function bbBacktest() {
   return [...models.values()].map(m => ({
@@ -953,12 +1008,14 @@ db.exec(`
 
 /** Save / refresh predictions for games in the next 7 days. A game's prediction is frozen at tip-off. */
 // fix210: async — 200 games a turn (predictions first, then one short transaction), a yield between turns
-export async function recordBbPredictions(codes?: string[]): Promise<number> {
+export async function recordBbPredictions(codes?: string[], ids?: number[], out?: Map<number, { v3: number; v4: V4Result | null }>): Promise<number> {
   const now = new Date();
   // optional league filter (fix122): the 15-minute NBA injury refresh only re-saves NBA games
   const only = codes && codes.length ? ` AND code IN (${codes.map(() => '?').join(',')})` : '';
+  // fix217: optional game list (the NBA re-pricing before tip-off)
+  const onlyIds = ids && ids.length ? ` AND game_id IN (${ids.map(() => '?').join(',')})` : '';
   const rows = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week, home_name, away_name FROM bb_games
-    WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS')${only}`).all(now.toISOString(), new Date(now.getTime() + 7 * 86400000).toISOString(), ...(codes && codes.length ? codes : [])) as Game[];
+    WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS')${only}${onlyIds}`).all(now.toISOString(), new Date(now.getTime() + 7 * 86400000).toISOString(), ...(codes && codes.length ? codes : []), ...(ids || [])) as Game[];
   const up = db.prepare(`INSERT OR REPLACE INTO bb_predictions (game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
   for (let i = 0; i < rows.length; i += 200) {
@@ -966,8 +1023,11 @@ export async function recordBbPredictions(codes?: string[]): Promise<number> {
     await yieldLoop();
     db.exec('BEGIN');
     try {
-      for (const { g, pr } of part) up.run(g.game_id, g.code, g.kickoff, BB_MODEL, pr!.pHome, pr!.margin, pr!.total, pr!.home, pr!.away, now.toISOString());
+      for (const { g, pr } of part) up.run(g.game_id, g.code, g.kickoff, pr!.model || BB_MODEL, pr!.pHome, pr!.margin, pr!.total, pr!.home, pr!.away, now.toISOString());
+      // fix217: NBA — v4 and the current model side by side (daily report, admin NBA model check)
+      saveShadow(part.filter(x => x.pr!.pV3 !== undefined).map(({ g, pr }) => ({ game_id: g.game_id, kickoff: g.kickoff, mode: pr!.model === 'bb-v4' ? 'full' : 'reprice', p_v3: pr!.pV3!, p_v4: pr!.pHome })));
       db.exec('COMMIT');
+      if (out) for (const { g, pr } of part) out.set(g.game_id, { v3: pr!.pV3 ?? pr!.pHome, v4: v4Detail.get(g.game_id) ?? null });
     } catch (e) {
       db.exec('ROLLBACK');
       throw e;

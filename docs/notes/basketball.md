@@ -35,6 +35,54 @@ adds the 3s back by checking against the final score.
   talent are in; show it on the page and mention one-sided H2H in the text, don't change probabilities).
 - What would help: knowing who plays (Europe has no injury feed; "missed the last game" doesn't help).
 
+## NBA model v4 — bb-v4 (fix217, 25 Oct 2026) — public "SL Basketball 4.0"
+Why: live NBA 2026-27 started 14/30; the gap to the market is same-day information (injuries, rest, starters).
+Code: `utils/nbaImpact.ts` (ridge fit, rotation, replay, tuner — pure), `services/nbaV4.ts` (replay in the bb model thread,
+live state `bb:v4`, gate, re-pricing, admin check), `bbModel.predictGame` → `nbaV4Adjust` for NBA games. Admin card
+"NBA model check" (`/api/admin/nba-model-check`). Other leagues stay bb-v3.
+- **Player impact ratings:** ridge regression of every regular-season game's margin on minutes (home +min/48, away −min/48,
+  a home term), last 3 seasons weighted 1 / 0.5 / 0.25, lambda 30; refit at each season's first regular-season game and every
+  14 days (walk-forward: a fit only sees earlier games; pre-season games never rate anyone). No data / rookie: −1.0.
+- **Team strength** = Σ rating × projected minutes / 48 over the top 10, scaled to 240 (cap 42 a player). Projected minutes =
+  his last 15 regular-season games (any team); no regular-season games yet → pre-season minutes × 0.7. Roster = players in
+  the team's last 3 games (pre-season included, so summer moves count from the first game).
+- **Final margin** = w × bb-v3 (its whole prediction as a margin, 12 × probit p: ratings, home edge, rest, talent) + 0.2 ×
+  player-impact margin + 1.4 × what the same-day information changes in it + 0.5 home − 0.5 back-to-back (each side);
+  w = 0.6 at a team's first game of the season → 0.75 after 15; P = Φ(margin / 12). Tuned by `tuneV4` on 2023-24 + 2024-25
+  only (2022-23 is the first season in our database: the ridge fit has no earlier seasons there, it is the warm-up);
+  2025-26 is the test season; `assertTuneSeasons` throws for 2025-26 / 2026-27.
+- **Tried first and rejected (tune seasons):** the brief's form on bb-v3's neutral rating gap (0.6/0.5 team + 0.6 impact + 1.5
+  home − 1.5 b2b): log loss 0.6055 on 2023-25 vs bb-v3 0.6028, 2025-26 0.5959 vs 0.5952 (fails "no worse"). bb-v3's own
+  numbers on our database are stronger than the browser test's "current" model (2025-26 0.595, not 0.614).
+- **Same-day information:** balldontlie injury report (every 15 min): Out = 0 min, Doubtful 25%, Questionable / day-to-day
+  60%; freed minutes go to the next players (the 11th man joins the top 10, everyone scales to 240). Line-ups from balldontlie
+  `/v1/lineups` when it has them (usually only after tip-off): confirmed starters play; a full list (10+) drops roster
+  players not on it. Re-priced at 90, 30 and 10 min before tip-off (worker job "nba reprice", every minute: fresh report if the
+  last is 4+ min old, line-ups, the game re-saved); the prediction recorded is the last one saved before tip-off. Every
+  re-pricing is logged (`bb_v4_log`: players removed, margin before / after). bb-v3's old injury points are not added on top.
+- **Weight of same-day information:** we hold no old injury reports, so it was tuned with who really played as the
+  stand-in (the rotation of the players in the box score, with their projected minutes): 1.4 against 0.2 for the projected
+  rotation — knowing who plays is worth far more than guessing it.
+
+| 10 Oct database, walk-forward | games | bb-v3 log loss · Brier · right | v4 log loss · Brier · right |
+|---|---|---|---|
+| 2023-24 + 2024-25 (tune) | 2,649 | 0.6028 · 0.2074 · 67.2% | 0.5999 · 0.2066 · 67.0% |
+| **2025-26 whole season (test)** | 1,315 | 0.5952 · 0.2048 · 68.1% | **0.5930 · 0.2039 · 68.0%** |
+| **2025-26 games 1–25 (test)** | 385 | 0.6046 · 0.2086 · 67.5% | **0.6016 · 0.2076 · 67.0%** |
+| 2025-26 games 26+ (test) | 930 | 0.5913 · 0.2032 · 68.4% | 0.5894 · 0.2024 · 68.4% |
+| 2025-26, who plays known (stand-in for the injury report) | 1,262 | 0.5934 · 0.2041 · 68.5% | 0.5885 · 0.2019 · 68.4% |
+| 2022-23 (warm-up, not tuned on) | 1,217 | 0.6521 · 0.2292 · 63.0% | 0.6482 · 0.2280 · 63.4% |
+
+Calibration 2025-26 (v4, favourite's side): 50–60% → 54.6% right, 60–70% → 66.4%, 70–80% → 75.5%, 80%+ → 85.5%.
+- **Gate (in code, every build, `v4Gate`):** 2025-26 whole season no worse ✔, games 1–25 better ✔ (above), and this season's
+  finished games (20+, out of sample) better than the saved bb-v3 chances — not in the 10 Oct copy (no 2026-27 games yet):
+  the server decides. Pass → mode `full` (bb-v4 recorded); fail → `reprice` (bb-v3 stays the base, only the injury /
+  line-up part moves it, recorded as bb-v3). `NBA_V4=full|reprice|off` overrides. Both chances of every NBA game are saved
+  (`bb_v4_shadow`): side by side on the admin card and in the daily model report for 2 weeks.
+- **Guard:** data health "NBA vs backtest" — every basketball league with 50+ finished games in 30 days warns when its hit
+  rate is more than 8 points under its backtest.
+- Next: the same player-impact structure for the EuroLeague (no injury feed there: rosters + minutes only).
+
 ## Live win chance (fix110, 13 Oct 2026, `bbLive.ts`)
 - What it shows (Yarin, 13 Oct): live win % for both teams + projected final score (and total), updated every minute
   with the live score sync. Where: game page box under the score ("was X%" vs tip-off), game rows (the team ahead on
@@ -82,6 +130,10 @@ Used for NBA injuries, player bios/advanced stats/game logs, team squads, box-sc
 lineups (published after tip-off), play-by-play, odds/props (never), fantasy. Tables `bdl_*`, admin `/api/bb/bdl?path=`.
 
 ## Open
+- fix217 after deploy: Admin → "NBA model check": the gate's "this season" row (needs 20 finished games) decides full v4 or
+  re-pricing only; check that the first re-pricing rows (90 / 30 / 10 min) list removed players for teams with injuries, and
+  whether balldontlie line-ups ever arrive before tip-off (the "line-ups" tag). If the gate says re-pricing only, change the
+  changelog line (it says v4 rates every player) or set NBA_V4.
 - Live win chance: check `/api/bb/live-test?tune=1` on the server (all leagues). Player photos and 10 missing team logos
   (licensed source needed).
 - Points line for users' picks = average total of both teams' last 10 games, rounded to .5 (not the model's total).

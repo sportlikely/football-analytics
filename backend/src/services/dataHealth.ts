@@ -32,6 +32,7 @@ import { moreHealth } from './morePredictions';
 import { createHealthStore, NOT_YET } from '../utils/healthStore';
 import { LATE_MS } from '../utils/liveBox';
 import { BB_MAJOR } from './basketball';
+import { bbLiveVsBacktest } from './bbModel';
 import { scorersHealth } from './scorersCheck';
 import { perfChecks } from './perfChecks';
 import { photoHealth } from './playerPhotos';
@@ -392,6 +393,16 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // fix216: picks emails — every person due today got one (or a skip reason), bounces, record lines = the public record
   try { checks.push(...emailHealth(now)); } catch (e: any) { logger.warn(`email health: ${e?.message || e}`); }
   try { checks.push(photoHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
+  // fix217: basketball leagues (NBA first) — the last 30 days' hit rate against the league's backtest (50+ games)
+  try {
+    const list = bbLiveVsBacktest(now);
+    const bad = list.filter(x => x.warn);
+    checks.push({
+      id: 'bb-vs-backtest', label: 'NBA vs backtest (basketball leagues, last 30 days)', level: bad.length ? 'warn' : 'ok',
+      detail: list.length ? `${list.length} league(s) with 50+ games · ${bad.length ? `${bad.map(x => `${x.code} ${x.hitRate}% vs ${x.backtest}%`).join(', ')} more than 8 points under` : 'all within 8 points of their backtest'}` : 'no league with 50+ finished games in 30 days yet',
+      items: list.map(x => `${x.code}: ${x.hitRate}% right over ${x.games} games, backtest ${x.backtest}% (${x.gap >= 0 ? '+' : ''}${x.gap})`)
+    });
+  } catch (e: any) { logger.warn(`bb vs backtest: ${e?.message || e}`); }
   // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 

@@ -29,6 +29,7 @@ import { v3WindowRun, liveVector, applyVector, isTuning } from './v3Tuner';
 import { clearPredictionCache } from './predCache';
 import { sendEmail, emailEnabled, SITE, esc } from './email';
 import { lastDataHealth } from './dataHealth';
+import { nbaV4ReportLines } from './nbaV4';
 import { timed, slicer, yieldLoop, heavy } from './perf';
 import {
   buildFeatures, buildFeaturesAsync, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
@@ -334,6 +335,8 @@ export function buildReport(date = localParts().date): string {
     '',
     `Data health: ${failing.length ? failing.map(c => `${c.label}: ${c.detail}`).join('; ') : health ? 'all checks ok' : 'not checked yet'}. Unsettled games (kick-off + 4 h): ${unsettled?.n ?? 0}.`,
     '',
+    // fix217: the NBA's v4 against bb-v3, for 2 weeks after v4 starts
+    ...(() => { const l = nbaV4ReportLines(); return l.length ? [...l, ''] : []; })(),
     'Next challengers:',
     ...(queued.length ? queued.map((c: any, i: number) => `  ${i + 1}. ${c.label}: ${c.dW >= 0 ? '+' : ''}${c.dW.toFixed(4)} vs champion over ${c.W.n} games — ${c.why}`) : ['  none scored today']),
     '',

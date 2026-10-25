@@ -25,6 +25,13 @@ retirements). Six blocks don't exist in tennis:
 | `league.logo` | The provider has no tournament logos (the pages show the trophy, like the NFL's). |
 | `search.teams` | Individual sport; search finds players, tournaments and matches. |
 
+## Model structure (not a page block)
+
+- **Player impact ratings (fix217):** NBA only for now (bb-v4: ridge ratings per player, projected rotations, the injury
+  report / line-ups re-priced 90 / 30 / 10 min before tip-off; `utils/nbaImpact.ts`, `services/nbaV4.ts`). Next: the same
+  structure for the EuroLeague (rosters and minutes only — no injury feed in Europe), then the other basketball leagues.
+  No new page block, so no parity key; the game page's "numbers changed" card already shows the players taken out.
+
 ## Built in the closest way the data allows (provider gaps)
 
 - **Line-ups:** no provider has basketball or American-football line-ups. Basketball: probable starting five = the last game's starters (box-score flag) who play 12+ min, minus players out, on a court. NFL / college: likely starters = season leaders by position from our box scores (no depth chart).

@@ -96,7 +96,7 @@ export const nbaKey = (name: string) => {
   return w[w.length - 1] || '';
 };
 /** Player name key: the name's words, sorted (box scores say "James LeBron", ESPN "LeBron James"). */
-const playerKey = (name: string) => String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+export const playerKey = (name: string) => String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z ]+/g, ' ').split(/\s+/).filter(w => w && !['jr', 'sr', 'ii', 'iii', 'iv'].includes(w)).sort().join(' ');
 
 let lastFetch: string | null = null;

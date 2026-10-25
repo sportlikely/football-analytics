@@ -92,8 +92,8 @@ function present(c: Core, full: boolean) {
       ? (() => { const len = status === 'OT' ? 5 : periodLen(g.code); return { played: g.timer, left: Math.max(0, len - g.timer) }; })()
       : null,
     // locked (free / signed-out, game not finished): { model, locked } only — no hint of the prediction (fix182)
-    prediction: pred && !showAll ? { model: BB_MODEL, locked: true } : pred ? {
-      model: BB_MODEL,
+    prediction: pred && !showAll ? { model: (pred as any).model || BB_MODEL, locked: true } : pred ? {
+      model: (pred as any).model || BB_MODEL, // fix217: NBA games may be bb-v4
       pick,
       locked: false,
       ...(showAll ? {

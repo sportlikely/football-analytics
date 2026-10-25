@@ -92,7 +92,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   `liveChance.ts` = live win chance. `featureModel.ts` = feature model (feat-v1) + v3-mix
   (shadow until published), `modelDaily.ts` = daily champion / challenger (04:00 UTC) + 07:00 Israel-time report.
 - Basketball: `basketball.ts` (API-Basketball games/box scores, `BB_LEAGUES`), `bbModel.ts` (**bb-v3**: v1 ratings +
-  v2 possession ratings, 50/50 blend, player talent), `bbSite.ts` (pages), `bbPlayers.ts`, `bdl.ts`
+  v2 possession ratings, 50/50 blend, player talent), NBA on top: `nbaV4.ts` + `utils/nbaImpact.ts` (**bb-v4**, fix217: player
+  impact ratings, injuries / line-ups re-priced 90 / 30 / 10 min before tip-off, gate → full or re-pricing only, admin "NBA
+  model check"), `bbSite.ts` (pages), `bbPlayers.ts`, `bdl.ts`
   (balldontlie: NBA injuries/players), `bbInjuries.ts`, `bbResults.ts` (result checks), `bbLive.ts` (live win chance + projected score), `bbLeagueConfig.ts` /
   `bbLeagueCoverage.ts` (leagues added from Admin → Basketball leagues, code `BB<id>`). `BASKETBALL_PUBLIC=1` opens
   the basketball site to everyone (admins see it before).

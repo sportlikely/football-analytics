@@ -73,6 +73,7 @@ import { bbPublic, bbLeagues, bbGames, bbGame as bbGameB, bbStandings, bbTeam as
 import { bbPlayer as bbPlayerB, nbaLeaders, bbSearch, bbLeagueLeaders } from './services/bbPlayers';
 import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
+import { nbaV4Check } from './services/nbaV4';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
@@ -3400,6 +3401,12 @@ app.get('/api/basketball/upset-watch', (req, res) => {
 });
 // Admin: how the model did on past seasons it never saw (internal, like football's past seasons)
 app.get('/api/bb/backtest', (_req, res) => res.json({ data: bbBacktest(), timestamp: new Date().toISOString() }));
+// fix217 (admin): NBA model check — v4 mode, the gate table, the latest player fit, v4 vs bb-v3 side by side, and every
+// re-pricing before tip-off (players removed, how far the margin moved). ?days= (default 14)
+app.get('/api/admin/nba-model-check', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: nbaV4Check(Math.min(90, Number(req.query.days) || 14)) }); } catch (e) { sendError(res, e, 'NBA model check failed'); }
+});
 app.get('/api/bb/wf', (req, res) => res.json({ data: bbWalkForward(String(req.query.code || '').toUpperCase()), timestamp: new Date().toISOString() }));
 // Live scores: both providers' latest reading of every Football-Data.org match and the one shown (liveScores.ts)
 app.get('/api/admin/live-book', (_req, res) => res.json({ data: liveBookStatus(), timestamp: new Date().toISOString() }));
