@@ -9,6 +9,7 @@ import { t, LOCALE } from '../lib/i18n'
 import { TwoFactorCard } from '../components/TwoFactor'
 import CalendarCard from '../components/CalendarCard'
 import EmailsCard from '../components/EmailsCard'
+import AlertsCard from '../components/AlertsCard'
 
 function fmtDay(iso: string | null) {
   return iso ? new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' }) : ''
@@ -99,6 +100,9 @@ export default function Account() {
 
       {/* fix218: every email switch lives in one card (the old "Email updates" switch became "Product news" there) */}
       <EmailsCard />
+
+      {/* fix226: push alerts for favourite teams and players */}
+      <AlertsCard />
 
       <CalendarCard />
 

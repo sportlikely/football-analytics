@@ -76,6 +76,7 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   { path: '/api/unsubscribe', sport: 'all', by: 'web', sample: '/api/unsubscribe' },
   { path: '/api/email/settings', sport: 'all', by: 'web', sample: '/api/email/settings' }, // fix216: the signed-in person's own settings
   { path: '/api/email/unsubscribe', sport: 'all', by: 'web', sample: '/api/email/unsubscribe' },
+  { path: '/api/push/settings', sport: 'all', by: 'web', sample: '/api/push/settings' }, // fix226: the signed-in person's own alert settings
   { path: '/api/testers/invite/:code', sport: 'all', by: 'web', sample: '/api/testers/invite/abc' },
   { path: '/api/unlocks', sport: 'all', by: 'web', sample: '/api/unlocks' },
   { path: '/api/billing/plans', sport: 'all', by: 'web', sample: '/api/billing/plans' },

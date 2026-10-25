@@ -128,6 +128,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth } from './services/dataHealth';
+import { pushSettings, savePushPrefs, addPushSub, removePushSub, PushError, pushAdminStats, sendTestPush } from './services/pushAlerts';
 import { emailSettings, saveEmailPrefs, initEmailPrefs, EmailPrefsError, checkUnsub, unsubscribePicks, verifyWebhook, handleWebhookEvent, emailAdminStats, sendTestEmail, previewEmail, crestPath } from './services/pickEmails';
 import { moreForGame as moreForGameB, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, moreBacktestNow, MORE_SPORTS, gameIdOf, hasExtras, saveOne as saveOneB } from './services/morePredictions';
 /*
@@ -572,7 +573,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -1177,6 +1178,46 @@ app.get('/api/admin/emails/preview', (req, res) => {
     if ('skip' in p) return res.type('html').send(`<!doctype html><meta charset="utf-8"><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px"><h2>Nothing to send</h2><p>${p.skip.replace(/[<>&]/g, '')}</p></body>`);
     res.type('html').send(p.html);
   } catch (e) { sendError(res, e, 'Preview failed'); }
+});
+
+/*
+ * fix226: push alerts (services/pushAlerts.ts). Settings and this browser's subscription: the signed-in person's own
+ * (account actions, written here). Alerts are sent by the worker's live loop only. Admin: numbers and a test push to
+ * the admin's own devices (worker).
+ */
+app.get('/api/push/settings', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+  res.json({ data: pushSettings(req.user) });
+});
+const pushFail = (res: express.Response, e: unknown, what: string) => (e instanceof PushError ? res.status(e.status).json({ error: e.message }) : sendError(res, e, what));
+app.put('/api/push/settings', jsonOnly, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+  try {
+    const b = req.body || {};
+    savePushPrefs(req.user.id, { on: b.on, starting: b.starting, score: b.score, final: b.final, upset: b.upset, myPicks: b.myPicks, quietFrom: b.quietFrom, quietTo: b.quietTo, tz: b.tz, lang: b.lang }, 'account');
+    res.json({ data: pushSettings(req.user) });
+  } catch (e) { pushFail(res, e, 'Saving alert settings failed'); }
+});
+// this browser's subscription (PushManager.subscribe); `on: true` = the person just allowed alerts here
+app.post('/api/push/subscribe', jsonOnly, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+  try {
+    const b = req.body || {};
+    addPushSub(req.user.id, b.subscription, req.get('user-agent'));
+    if (b.on === true) savePushPrefs(req.user.id, { on: true, tz: b.tz, lang: b.lang }, 'account');
+    res.json({ data: pushSettings(req.user) });
+  } catch (e) { pushFail(res, e, 'Saving this device failed'); }
+});
+app.post('/api/push/unsubscribe', jsonOnly, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+  try { removePushSub(req.user.id, req.body?.endpoint); res.json({ data: pushSettings(req.user) }); } catch (e) { pushFail(res, e, 'Removing this device failed'); }
+});
+app.get('/api/admin/push', (req, res) => {
+  try { res.json({ data: pushAdminStats(Math.min(60, parseInt(String(req.query.days || '14'), 10) || 14)) }); } catch (e) { sendError(res, e, 'Push stats failed'); }
+});
+app.post('/api/admin/push/test', async (req, res) => {
+  try { res.json({ data: await sendTestPush(req.user!) }); } catch (e) { pushFail(res, e, 'Test push failed'); }
 });
 
 app.delete('/api/crm/team/roles/:key', need('team'), needSudo, (req, res) => {
@@ -4029,6 +4070,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     try { res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(await sitemapOf(file)); }
     catch (e: any) { logger.warn(`${file}: ${e.message}`); res.status(503).send('Try again later'); }
   });
+  // fix226: the push service worker is checked by the browser on every visit (a new version must reach everyone), the
+  // web app manifest (iPhone: alerts need the site added to the Home Screen) keeps a day
+  app.get('/sw.js', (_req, res) => res.type('application/javascript').set({ 'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/' }).sendFile(path.join(STATIC_DIR, 'sw.js')));
+  app.get('/manifest.webmanifest', (_req, res) => res.type('application/manifest+json').set('Cache-Control', 'public, max-age=86400').sendFile(path.join(STATIC_DIR, 'manifest.webmanifest')));
   // files under /assets have a content hash in their name (a new version gets a new name): cache them for a year,
   // so returning visitors never download or re-check them. Other files (logo, icons) keep 7 days.
   app.use('/assets', express.static(path.join(STATIC_DIR, 'assets'), { index: false, maxAge: '365d', immutable: true }));

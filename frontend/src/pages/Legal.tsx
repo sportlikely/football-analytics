@@ -152,6 +152,13 @@ export function Privacy() {
           (if given) and message to answer you and to improve the service. Messages linked to an account are deleted with it.
         </p>
         <p>
+          <span className="text-ink font-semibold">Alerts:</span> if you turn on alerts in your account and allow them in your browser,
+          we keep the address your browser's push service gave for that device (with its encryption keys), a short device label such as
+          "Chrome on Android", when you allowed it, your alert settings and which alerts were sent. Alerts go through your browser's push
+          service (Google, Mozilla, Apple or Microsoft) encrypted, so only your device can read them. Turning alerts off on a device removes
+          that device; deleting your account removes all of it. It is included in "Download my data".
+        </p>
+        <p>
           <span className="text-ink font-semibold">Security:</span> when you sign in, use two-step login or change your password or
           security settings, we record the time, your IP address and your browser in a security log, to protect accounts from
           break-ins. It is kept for 90 days and included in "Download my data". Failed sign-in attempts are also counted in memory for

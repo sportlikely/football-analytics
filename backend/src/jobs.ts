@@ -54,6 +54,7 @@ import { autoTuneDue, runTune } from './services/bbTuner';
 import { threadJobsOn, inThread } from './services/threadJob';
 import { buildBbCalibration } from './services/sportCalibration';
 import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
+import { pushAlertsTick } from './services/pushAlerts';
 
 let started = false;
 
@@ -305,6 +306,8 @@ function startLivePoll() {
       logger.warn('Live poll failed', { message: error.message });
       markFailed('live', error);
     } finally {
+      // fix226: push alerts ride on the live loop (every sport's games read after each tick; sent from here only)
+      await timed('push alerts', () => pushAlertsTick()).catch(e => logger.warn(`push alerts: ${e?.message || e}`));
       livePolling = false;
     }
   }, LIVE_POLL_MS);

@@ -134,6 +134,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   `dataAudit.ts`, `seo.ts`, `proxyGuard.ts` + `proxyScrapers.ts` (fix199: data-centre / proxy scrapers, rules in docs/notes/security.md).
 - Player photos (fix211): `playerPhotos.ts` (worker job every 20 min, Wikidata match → Commons licence → 256 px WebP in
   DATA_DIR/player-photos, `/media/players/…`, admin review / remove + block list, data-health "Player photos").
+- Push alerts (fix226): `pushAlerts.ts` (settings / devices on the web; detect + send only in the worker, after each live
+  tick), rules in `utils/pushRules.ts`, Web Push crypto in `utils/webPush.ts` (no library), words `locales/push/<lang>.json`,
+  keys `VAPID_PUBLIC` / `VAPID_PRIVATE` (never change them). Frontend `public/sw.js`, `lib/push.ts`, `components/AlertsCard.tsx`.
 - Season forecast (fix215): `utils/seasonSim.ts` (engine, pure), `utils/seasonRules.ts` (per-league rules), `utils/seasonFit.ts`
   (thread part), `services/seasonForecast.ts` (inputs, runs 10 min after each finished game + nightly, Free view, data health).
   Frontend `components/sport/forecast/*`, `lib/seasonForecast.ts`. Notes: docs/notes/season-forecast.md.

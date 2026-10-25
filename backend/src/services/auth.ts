@@ -668,6 +668,13 @@ export function exportUserData(userId: number) {
       consentHistory: tableExists('email_consent_log') ? safeAll('SELECT at, kind, on_ AS turnedOn, source FROM email_consent_log WHERE user_id = ? ORDER BY id', userId) : [],
       sent: tableExists('email_sends') ? safeAll('SELECT kind, day, at, status FROM email_sends WHERE user_id = ? ORDER BY id DESC LIMIT 400', userId) : []
     } : null,
+    // fix226: push alerts (the device keys are not exported: they only work for our server)
+    pushAlerts: tableExists('push_prefs') ? {
+      settings: safeAll('SELECT on_ AS turnedOn, on_at AS chosenAt, starting, score, final, upset, my_picks AS myPicks, quiet_from AS quietFrom, quiet_to AS quietTo, tz AS timeZone, lang FROM push_prefs WHERE user_id = ?', userId)[0] || null,
+      consentHistory: tableExists('push_consent_log') ? safeAll('SELECT at, kind, on_ AS turnedOn, source FROM push_consent_log WHERE user_id = ? ORDER BY id', userId) : [],
+      devices: tableExists('push_subs') ? safeAll('SELECT device, consent_at AS allowedAt, last_ok_at AS lastDeliveredAt FROM push_subs WHERE user_id = ?', userId) : [],
+      sent: tableExists('push_sends') ? safeAll('SELECT kind, created_at AS at, status FROM push_sends WHERE user_id = ? ORDER BY id DESC LIMIT 400', userId) : []
+    } : null,
     unlockedMatches: tableExists('match_unlocks') ? safeAll('SELECT match_id AS matchId, at FROM match_unlocks WHERE user_id = ? ORDER BY at', userId) : [],
     waitlists: tableExists('sport_waitlist') ? safeAll('SELECT sport, lang, created_at AS joinedAt FROM sport_waitlist WHERE user_id = ? OR email = ?', userId, u.email) : [],
     securityLog: tableExists('security_log') ? safeAll('SELECT at, event, ip, ua AS device FROM security_log WHERE user_id = ? ORDER BY id DESC LIMIT 500', userId) : [],
@@ -739,6 +746,8 @@ export function deleteAccount(userId: number, password: unknown, reason?: unknow
     if (tableExists('calendar_tokens')) db.prepare('DELETE FROM calendar_tokens WHERE user_id = ?').run(userId);
     // fix216: picks email settings, consent history and send log
     for (const t of ['email_prefs', 'email_consent_log', 'email_sends']) if (tableExists(t)) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
+    // fix226: push alert settings, consent history, devices and send log
+    for (const t of ['push_prefs', 'push_consent_log', 'push_subs', 'push_sends']) if (tableExists(t)) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
     if (tableExists('match_unlocks')) db.prepare('DELETE FROM match_unlocks WHERE user_id = ?').run(userId);
     // fix147: pick packs go with the account
     if (tableExists('user_credits')) db.prepare('DELETE FROM user_credits WHERE user_id = ?').run(userId);

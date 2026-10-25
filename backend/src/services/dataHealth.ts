@@ -43,6 +43,7 @@ import { calibrationHealth } from './calibrationHealth';
 import { afIdOfFd } from './afMatches';
 import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
+import { pushHealth } from './pushAlerts';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -394,6 +395,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // fix211: player photos — coverage (tennis top 100 / 500, basketball squads); fail when one is shown without its credit
   // fix216: picks emails — every person due today got one (or a skip reason), bounces, record lines = the public record
   try { checks.push(...emailHealth(now)); } catch (e: any) { logger.warn(`email health: ${e?.message || e}`); }
+  // fix226: push alerts — failed device sends (warn > 5%) and no alert sent twice to anyone
+  try { checks.push(...pushHealth(now)); } catch (e: any) { logger.warn(`push health: ${e?.message || e}`); }
   try { checks.push(photoHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
   // fix217: basketball leagues (NBA first) — the last 30 days' hit rate against the league's backtest (50+ games)
   try {

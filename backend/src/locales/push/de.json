@@ -1,0 +1,23 @@
+{
+ "{0} – {1} starts at {2}": "{0} – {1} beginnt um {2}",
+ "{0} · Our pick: {1} · {2}%": "{0} · Unsere Prognose: {1} · {2} %",
+ "{0} · Unlock the game to see our pick": "{0} · Schalte das Spiel frei, um unsere Prognose zu sehen",
+ "Goal! {0}": "Tor! {0}",
+ "Set won by {0}": "Satz für {0}",
+ "Sets: {0}": "Sätze: {0}",
+ "End of overtime: {0}": "Ende der Verlängerung: {0}",
+ "End of Q{0}: {1}": "Ende des {0}. Viertels: {1}",
+ "{0} min left": "noch {0} Min.",
+ "Lead change: {0}": "Führungswechsel: {0}",
+ "{0} ahead": "{0} führt",
+ "Our pick ({0}) was right ✓": "Unsere Prognose ({0}) war richtig ✓",
+ "Our pick ({0}) was wrong": "Unsere Prognose ({0}) war falsch",
+ "Final: {0}": "Endstand: {0}",
+ "Upset watch: {0}": "Überraschung möglich: {0}",
+ "{0} is ahead. Before the game we gave them {1}%.": "{0} führt. Vor dem Spiel gaben wir {1} %.",
+ "{0} or draw": "{0} oder Unentschieden",
+ "{0} or {1}": "{0} oder {1}",
+ "{0} to win": "{0} gewinnt",
+ "Test alert": "Test-Benachrichtigung",
+ "Alerts are working on this device.": "Benachrichtigungen funktionieren auf diesem Gerät."
+}

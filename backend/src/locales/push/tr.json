@@ -1,0 +1,23 @@
+{
+ "{0} – {1} starts at {2}": "{0} – {1} saat {2}'de başlıyor",
+ "{0} · Our pick: {1} · {2}%": "{0} · Tahminimiz: {1} · %{2}",
+ "{0} · Unlock the game to see our pick": "{0} · Tahminimizi görmek için maçın kilidini aç",
+ "Goal! {0}": "Gol! {0}",
+ "Set won by {0}": "Seti {0} aldı",
+ "Sets: {0}": "Setler: {0}",
+ "End of overtime: {0}": "Uzatma bitti: {0}",
+ "End of Q{0}: {1}": "{0}. çeyrek bitti: {1}",
+ "{0} min left": "{0} dk kaldı",
+ "Lead change: {0}": "Liderlik değişti: {0}",
+ "{0} ahead": "{0} önde",
+ "Our pick ({0}) was right ✓": "Tahminimiz ({0}) doğru çıktı ✓",
+ "Our pick ({0}) was wrong": "Tahminimiz ({0}) tutmadı",
+ "Final: {0}": "Maç sonucu: {0}",
+ "Upset watch: {0}": "Sürpriz ihtimali: {0}",
+ "{0} is ahead. Before the game we gave them {1}%.": "{0} önde. Maçtan önce %{1} şans veriyorduk.",
+ "{0} or draw": "{0} veya beraberlik",
+ "{0} or {1}": "{0} veya {1}",
+ "{0} to win": "{0} kazanır",
+ "Test alert": "Test bildirimi",
+ "Alerts are working on this device.": "Bildirimler bu cihazda çalışıyor."
+}
