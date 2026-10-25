@@ -74,6 +74,7 @@ import { bbPlayer as bbPlayerB, nbaLeaders, bbSearch, bbLeagueLeaders } from './
 import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
+import { runTune, tunedInfo } from './services/bbTuner';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
@@ -3406,6 +3407,22 @@ app.get('/api/bb/backtest', (_req, res) => res.json({ data: bbBacktest(), timest
 app.get('/api/admin/nba-model-check', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: nbaV4Check(Math.min(90, Number(req.query.days) || 14)) }); } catch (e) { sendError(res, e, 'NBA model check failed'); }
+});
+// fix219 (admin): bb-v4 grid tuner — ?train=2022,2023,2024&test=2025 (the live period 2026+ is refused), &apply=1 stores
+// and publishes the settings (no redeploy). Runs in the job thread, one heavy job at a time.
+app.get('/api/bb/tune', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const nums = (s: unknown) => String(s || '').split(',').map(x => parseInt(x, 10)).filter(Number.isFinite);
+    const opt = { train: nums(req.query.train), test: req.query.test ? parseInt(String(req.query.test), 10) : undefined, apply: req.query.apply === '1' };
+    const r = await heavy('bb tune', () => (threadJobsOn() ? inThread('bb tune', [opt]) : runTune(opt)));
+    res.json({ data: r });
+  } catch (e) { sendError(res, e, 'Basketball tune failed'); }
+});
+// fix219 (admin): the stored bb-v4 settings, the last tune report and the gate; ?reload=1 publishes again, ?clear=1 = code defaults
+app.get('/api/bb/tuned', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: tunedInfo(req.query.clear === '1' ? 'clear' : req.query.reload === '1' ? 'reload' : undefined) }); } catch (e) { sendError(res, e, 'Failed'); }
 });
 app.get('/api/bb/wf', (req, res) => res.json({ data: bbWalkForward(String(req.query.code || '').toUpperCase()), timestamp: new Date().toISOString() }));
 // Live scores: both providers' latest reading of every Football-Data.org match and the one shown (liveScores.ts)

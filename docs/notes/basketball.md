@@ -35,7 +35,52 @@ adds the 3s back by checking against the final score.
   talent are in; show it on the page and mention one-sided H2H in the text, don't change probabilities).
 - What would help: knowing who plays (Europe has no injury feed; "missed the last game" doesn't help).
 
+## Basketball model 4.0 — bb-v4 grid, every league (fix219, 25 Oct 2026) — public "SL Basketball 4.0"
+Football v3's structure for basketball: 13 rows per game (each a value per team as it was before tip-off), margin =
+Σ weight × (home − away) in points, P = Φ(stretch × margin / sigma), sigma = the league's miss widened by 3-point
+volatility; game page "1,000 points split" (components/sport/game/GridSplit.tsx, inside "How we calculated it").
+Code: `utils/bbGridMath.ts` (rows, conversion, split, pattern search), `services/bbGrid.ts` (walk-forward row builder per
+league, in the bb model thread; `bb_grid_rows` for the tuner / gate, `bb_grid_imp` keeps the impact parts so a build
+refits only new windows), `services/bbTuner.ts` (tune, gate, live prediction). Admin card "Basketball model v4 (grid)";
+`/api/bb/tune?train=2022,2023,2024&test=2025[&apply=1]` (job thread; 2026+ refused), `/api/bb/tuned[?reload=1|clear=1]`
+(settings in `bb_tuned`, applied without a redeploy; code defaults = the fit below). `BB_GRID=on|off` overrides the gate.
+- **Rows:** #1 player impact of the expected rotation (fix217's ridge, per league; 40-minute FIBA games: 200 minutes, cap
+  35) · #2 net rating per 100 possessions (ridge on team indicators, same windows) · #3 team rating = bb-v3's whole
+  prediction as a margin (see below) · #4 missing players (rotation players who missed the last 2 games; live NBA: the
+  injury report + confirmed starters, fix217) · #5 four factors for / against (eFG%, TOV%, OREB%, FT rate, Dean Oliver
+  weights, shrunk to the league) · #6 rest (−1 back-to-back, −0.5 third game in 4 days) · #7 home court (league + team;
+  EuroLeague / BCL final fours neutral) · #8 carry-over (players who stayed, fading by game 25) · #9 matchups (shooting,
+  rebounds, turnovers: style against style) · #10 form (last 10 against bb-v1's expectation) · #11 motivation (−1 late in
+  the regular season under 30% wins) · #12 3-point attempt share (widens sigma) · #13 head-to-head (last 3, 2 years).
+  Not built (no data): travel km / time zones (needs an arena table), playoff-race motivation (needs standings history).
+- **#3 decision (train seasons only):** with bb-v1's points rating as #3 (the brief), the grid was worse than bb-v3 *on its
+  own training seasons* (2022–24: 0.5829 vs 0.5815) and on 2025 (0.5813 vs 0.5792), all three groups failing the gate —
+  information missing (bb-v3's possession ratings and talent), not overfitting. With bb-v3's whole team rating as #3:
+  train 0.5787. Chosen on the train seasons; the test numbers below were looked at once.
+- **Fit (train 2022-23 … 2024-25, 17,147 games, 18 leagues; pattern search from the starting weights, offsets for NBA and
+  B.League (1,500+ train games), stretch per league):** split (points per row of 1,000): #3 team 648 · #1 impact 174 ·
+  #5 four factors 50 · #7 home 43 · #13 H2H 29 · #10 form 22 · #4 missing 17 · #6 rest 11 · #8 carry-over 4 · #9 / #11 1 ·
+  #2 net rating 0 (unused once #3 is in) · #12 widens sigma (0.675 × volatility). Weights in `GRID_DEFAULT`.
+
+| test season 2025 (2025-26 / calendar 2025), log loss | games | bb-v3 | bb-v4 | games 1–25: bb-v3 | bb-v4 | gate |
+|---|---|---|---|---|---|---|
+| NBA | 1,315 / 385 | 0.5952 | **0.5945** | 0.6046 | **0.6023** | ✔ |
+| Europe (12 leagues pooled) | 3,028 / 2,397 | 0.5817 | **0.5790** | 0.5720 | **0.5689** | ✔ |
+| Rest of the world (NBL, JBL, CBA, NBB, BSN) | 2,111 / 1,110 | 0.5651 | **0.5640** | 0.5697 | **0.5694** | ✔ |
+| All | 6,454 / 3,892 | 0.5791 | **0.5772** | 0.5746 | **0.5723** | |
+| All, who actually played in place of #4 (the injury-feed ceiling) | 6,283 | 0.5779 | 0.5750 | | | |
+
+Per league (test): better in 14 of 18 (EC 0.615→0.602, FEC 0.553→0.545, LNB 0.593→0.586, LKL, BSN, LBA, EL, ACB, JBL, CBA,
+NBB, BBL, BSL, NBA), worse in ABA (+0.002), BCL (+0.003), GBL (+0.005), NBL (+0.015); hit rate about the same (69.1% vs
+69.2%). The gate is per group, so those four follow their group. Live period (2026-27 / 2026, reported, never tuned):
+better in 10 of 15 leagues with games (small samples; BSN 245 games: 0.670 → 0.664). NBA: by the train-only rule the grid (2023-25 0.5993) replaces fix217's NBA v4
+(0.5999); fix217's injury / line-up re-pricing feeds #4.
+- **Guards:** data health "Basketball model rows (bb-v4) within their usual range" (upcoming 48 h, a row more than 3 sd
+  from its training spread warns; rest / motivation flags skipped) + "NBA vs backtest" (fix217); the 07:00 report lists
+  bb-v4 vs bb-v3 per league for 2 weeks (market favourite: no basketball odds feed, n/a).
+
 ## NBA model v4 — bb-v4 (fix217, 25 Oct 2026) — public "SL Basketball 4.0"
+(fix219: the grid above replaces this as the NBA base when the NBA group passes its gate; the re-pricing stays.)
 Why: live NBA 2026-27 started 14/30; the gap to the market is same-day information (injuries, rest, starters).
 Code: `utils/nbaImpact.ts` (ridge fit, rotation, replay, tuner — pure), `services/nbaV4.ts` (replay in the bb model thread,
 live state `bb:v4`, gate, re-pricing, admin check), `bbModel.predictGame` → `nbaV4Adjust` for NBA games. Admin card

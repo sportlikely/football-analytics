@@ -52,11 +52,11 @@ function core(g: Row) {
   const saved: any = db.prepare(`SELECT * FROM bb_predictions WHERE game_id = ?`).get(g.game_id);
   let pred: any = null;
   if (saved && (state !== 'upcoming' || saved)) {
-    pred = { pHome: saved.p_home, margin: saved.margin, total: saved.total, home: saved.home_pts, away: saved.away_pts, savedAt: saved.made_at };
+    pred = { pHome: saved.p_home, margin: saved.margin, total: saved.total, home: saved.home_pts, away: saved.away_pts, savedAt: saved.made_at, model: saved.model };
   }
   if (state === 'upcoming') {
     const p = predictGameCached(g); // fix159: cached, filled by the bb tick
-    if (p) pred = { pHome: p.pHome, margin: p.margin, total: p.total, home: p.home, away: p.away, savedAt: saved?.made_at || null, b2bHome: p.b2bHome, b2bAway: p.b2bAway, restHome: p.restHome, restAway: p.restAway, injHome: p.injHome || 0, injAway: p.injAway || 0, newHome: p.newHome || null, newAway: p.newAway || null };
+    if (p) pred = { model: p.model || BB_MODEL, pHome: p.pHome, margin: p.margin, total: p.total, home: p.home, away: p.away, savedAt: saved?.made_at || null, b2bHome: p.b2bHome, b2bAway: p.b2bAway, restHome: p.restHome, restAway: p.restAway, injHome: p.injHome || 0, injAway: p.injAway || 0, newHome: p.newHome || null, newAway: p.newAway || null };
   }
   const pick = pred ? (pred.pHome >= 0.5 ? 'H' : 'A') : null;
   const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -431,6 +431,8 @@ export async function bbGame(id: number, full: boolean) {
     // fix178: the swing chart (live and finished games; numbers unlocked)
     liveCurve: open && game.state !== 'upcoming' ? bbLiveCurve(id) : [],
     beforeAfter,
+    // fix219: bb-v4 "1,000 points split" (football's grid table) for whoever sees the full prediction of a game to come
+    grid: open && pr?.grid ? pr.grid : null,
     model: info ? { version: info.version, avgPoints: Math.round(info.avgPoints * 10) / 10, homeEdge: Math.round(((pr as any)?.hca ?? info.homeEdge) * 10) / 10, b2b: info.b2b, gamesRated: info.gamesRated } : null,
     players
   };

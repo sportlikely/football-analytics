@@ -21,6 +21,7 @@ import WinnerPrediction, { type WhyRow } from '../../components/sport/game/Winne
 import GamePreview from '../../components/sport/game/GamePreview'
 import Court, { type CourtPlayer } from '../../components/sport/game/Court'
 import NewsChange from '../../components/sport/game/NewsChange'
+import GridSplit, { type GridView } from '../../components/sport/game/GridSplit'
 import { SwingChart } from '../../components/sport/game/LiveChance'
 import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
@@ -64,6 +65,8 @@ interface Detail {
   /** fix178: the swing chart (home win % through the game; numbers unlocked) */
   liveCurve?: { t: number; p: number }[]
   beforeAfter?: { before: { pHome: number; pAway: number }; after: { pHome: number; pAway: number }; players: { id: number; name: string; status: string; points: number; side: 'H' | 'A' }[] } | null
+  /** fix219: bb-v4's 1,000 points split (games to come, full prediction only) */
+  grid?: GridView | null
 }
 interface LineupSide { from: string; starters: CourtPlayer[]; bench: CourtPlayer[]; out: CourtPlayer[] }
 export interface H2H { id: number; kickoff: string; home: string; away: string; homeId: number; score: [number, number]; league: string }
@@ -137,7 +140,7 @@ export default function BbGame() {
       render: () => (
         <>
           <WinnerPrediction
-            rid={rid(g)} status={rstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model="bb-v3" sport="basketball"
+            rid={rid(g)} status={rstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model={g.prediction?.model || 'bb-v3'} sport="basketball"
             saved={t('Saved before tip-off')} updated={t('Updated until tip-off')} strongAt={70} showLockedPick
             stats={[
               { label: t('Point spread'), value: spreadText(g) || '–' },
@@ -145,7 +148,7 @@ export default function BbGame() {
               { label: t('Total points'), value: typeof p?.total === 'number' ? p.total.toFixed(1) : '–' }
             ]}
             why={bbWhy(d)}
-            howCalc={d.model ? <ModelTable g={g} model={d.model} ratings={d.ratings} /> : undefined}
+            howCalc={d.model ? <>{d.grid && <GridSplit grid={d.grid} home={g.home.name} away={g.away.name} />}<ModelTable g={g} model={d.model} ratings={d.ratings} /></> : undefined}
             badges={g.resultCheck ? <span title={t('The final score from our data provider looks wrong. This game doesn’t count in our record until it is checked.')} className="ml-auto rounded-full px-3 py-1 text-xs font-bold bg-draw/15 text-draw">{t('Result being checked')}</span> : undefined}
             noPrediction={t('No prediction for this game.')}
           />

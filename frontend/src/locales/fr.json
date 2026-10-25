@@ -2472,5 +2472,18 @@
  "We replay last season week by week with only what was known then. Its accuracy appears here once it beats simply reading the table as it stands.": "Nous rejouons la saison passée semaine après semaine avec seulement ce que l’on savait alors. Sa précision s’affiche ici dès qu’elle fait mieux que la simple lecture du classement du moment.",
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Saison passée rejouée semaine après semaine : score de Brier {0}, contre {1} en lisant le classement du moment. Plus bas, c’est mieux.",
  "Product news": "Nouveautés du produit",
- "New features and Premium news, a few times a year. Off unless you turn it on.": "Nouvelles fonctions et actualités Premium, quelques fois par an. Désactivé tant que vous ne l'activez pas."
+ "New features and Premium news, a few times a year. Off unless you turn it on.": "Nouvelles fonctions et actualités Premium, quelques fois par an. Désactivé tant que vous ne l'activez pas.",
+ "Our 13 factors: 1,000 points split": "Nos 13 facteurs : répartition de 1000 points",
+ "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "Les deux équipes tentent beaucoup de tirs à 3 points : ce match est plus difficile à prévoir, les chances restent donc plus proches de 50 %.",
+ "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "Chaque facteur est mesuré pour les deux équipes avant l’entre-deux et pondéré selon sa capacité à prédire les résultats sur trois saisons (2022-23 à 2024-25), vérifié sur 2025-26. Avantage = combien de points (sur 1000) ce facteur déplace vers un camp.",
+ "Player impact of the expected rotation": "Impact des joueurs de la rotation prévue",
+ "Net rating per 100 possessions": "Différentiel pour 100 possessions",
+ "Team rating (points, possessions, talent)": "Note de l’équipe (points, possessions, talent)",
+ "Four factors (shooting, turnovers, rebounds, free throws)": "Quatre facteurs (tir, balles perdues, rebonds, lancers francs)",
+ "Rest (back-to-back, 3 games in 4 days)": "Repos (back-to-back, 3 matchs en 4 jours)",
+ "Season carry-over (players who stayed)": "Continuité de la saison passée (joueurs restés)",
+ "Matchups (style against style)": "Confrontations (style contre style)",
+ "Form: last 10 games against expectation": "Forme : 10 derniers matchs par rapport aux attentes",
+ "Motivation (late-season tanking)": "Motivation (équipes qui lâchent en fin de saison)",
+ "3-point volatility": "Volatilité à 3 points"
 }

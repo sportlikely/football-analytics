@@ -32,7 +32,8 @@ import { moreHealth } from './morePredictions';
 import { createHealthStore, NOT_YET } from '../utils/healthStore';
 import { LATE_MS } from '../utils/liveBox';
 import { BB_MAJOR } from './basketball';
-import { bbLiveVsBacktest } from './bbModel';
+import { bbLiveVsBacktest, predictGameCached } from './bbModel';
+import { rowSanityViews } from './bbTuner';
 import { scorersHealth } from './scorersCheck';
 import { perfChecks } from './perfChecks';
 import { photoHealth } from './playerPhotos';
@@ -403,6 +404,18 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
       items: list.map(x => `${x.code}: ${x.hitRate}% right over ${x.games} games, backtest ${x.backtest}% (${x.gap >= 0 ? '+' : ''}${x.gap})`)
     });
   } catch (e: any) { logger.warn(`bb vs backtest: ${e?.message || e}`); }
+  // fix219: bb-v4 row sanity — no row of an upcoming game (48 h) more than 3 sd from its training spread
+  try {
+    const up = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week, home_name, away_name FROM bb_games
+      WHERE (status IS NULL OR status = 'NS') AND kickoff > ? AND kickoff < ? ORDER BY kickoff LIMIT 400`).all(new Date(now).toISOString(), new Date(now + 48 * 3600 * 1000).toISOString()) as any[];
+    const views = up.map(g => ({ g, p: predictGameCached(g) })).filter(x => x.p?.grid).map(x => ({ label: `${x.g.code} ${x.g.home_name} – ${x.g.away_name}`, view: x.p!.grid! }));
+    const r = rowSanityViews(views);
+    checks.push({
+      id: 'bb-grid-rows', label: 'Basketball model rows (bb-v4) within their usual range', level: r.bad.length ? 'warn' : 'ok',
+      detail: views.length ? `${r.checked} upcoming game(s) · ${r.bad.length ? `${r.bad.length} row value(s) more than 3 sd from training` : 'every row inside 3 sd of training'}` : 'no upcoming bb-v4 game in 48 h',
+      items: r.bad.slice(0, 30)
+    });
+  } catch (e: any) { logger.warn(`bb grid rows: ${e?.message || e}`); }
   // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 

@@ -25,7 +25,7 @@ import {
 } from '../utils/nbaImpact';
 
 export const NBA_V4_MODEL = 'bb-v4';
-export type V4Mode = 'full' | 'reprice' | 'off';
+export type V4Mode = 'full' | 'reprice' | 'off' | 'grid';
 /** Re-pricing checkpoints (minutes before tip-off). */
 export const CHECKPOINTS = [90, 30, 10];
 
@@ -225,6 +225,12 @@ export function nbaV4Adjust(g: { game_id: number; season: string; home_id: numbe
   return { model: mode === 'full' ? NBA_V4_MODEL : 'bb-v3', mode, pHome: r.pHome, margin: r.margin, impact, sameDay, home: h, away: a, points: { home: pts(h), away: pts(a) } };
 }
 
+/** fix219: both teams' same-day sides (injury report + line-ups) for the bb-v4 grid's #4 (null = no v4 state yet) */
+export function nbaSameDay(g: { game_id: number; home_id: number; away_id: number; home_name?: string; away_name?: string }): { home: V4Side; away: V4Side } | null {
+  if (!st || !g.home_name || !g.away_name || String(process.env.NBA_V4 || '').toLowerCase() === 'off') return null;
+  return { home: sideOf(st, g.game_id, g.home_id, g.home_name), away: sideOf(st, g.game_id, g.away_id, g.away_name) };
+}
+
 /** recordBbPredictions: both chances of each NBA game until tip-off (daily report "v4 vs current", 2 weeks). */
 export function saveShadow(rows: { game_id: number; kickoff: string; mode: string; p_v3: number; p_v4: number }[]) {
   if (!rows.length) return;
@@ -337,15 +343,16 @@ export function nbaV4Check(days = 14) {
 }
 
 /** v4 against the current model on finished games with both chances saved (shadow table). */
-export function sideBySide(sinceIso?: string) {
-  const rows = db.prepare(`SELECT s.p_v3, s.p_v4, g.hs, g.as_ FROM bb_v4_shadow s JOIN bb_games g ON g.game_id = s.game_id WHERE g.status IN ('FT','AOT') AND g.hs IS NOT NULL${sinceIso ? ' AND g.kickoff >= ?' : ''}`).all(...(sinceIso ? [sinceIso] : [])) as any[];
+/** (fix219: one league, NBA by default — the shadow table holds every league's bb-v4 games) */
+export function sideBySide(sinceIso?: string, code = 'NBA') {
+  const rows = db.prepare(`SELECT s.p_v3, s.p_v4, g.hs, g.as_ FROM bb_v4_shadow s JOIN bb_games g ON g.game_id = s.game_id WHERE g.code = ? AND g.status IN ('FT','AOT') AND g.hs IS NOT NULL${sinceIso ? ' AND g.kickoff >= ?' : ''}`).all(code, ...(sinceIso ? [sinceIso] : [])) as any[];
   const ys = rows.map(r => (r.hs > r.as_ ? 1 : 0));
   return { games: rows.length, current: scoreP(rows.map(r => r.p_v3), ys), v4: scoreP(rows.map(r => r.p_v4), ys) };
 }
 
 /** Daily model report lines: v4 vs current for 2 weeks after the first shadow row. */
 export function nbaV4ReportLines(now = Date.now()): string[] {
-  const first = db.prepare(`SELECT MIN(made_at) AS t FROM bb_v4_shadow`).get() as any;
+  const first = db.prepare(`SELECT MIN(s.made_at) AS t FROM bb_v4_shadow s JOIN bb_games g ON g.game_id = s.game_id WHERE g.code = 'NBA'`).get() as any;
   if (!first?.t || now - Date.parse(first.t) > 15 * 86400000) return [];
   const y = sideBySide(new Date(now - 86400000).toISOString().slice(0, 10)), all = sideBySide();
   const f = (x: any) => (x.games ? `log loss ${x.logLoss.toFixed(3)}, Brier ${x.brier.toFixed(3)}, ${x.hitRate}% right` : 'n/a');

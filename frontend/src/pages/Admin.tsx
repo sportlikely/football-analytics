@@ -10,6 +10,7 @@ import LeaguesCard from '../components/LeaguesCard'
 import PlayerPhotosCard from '../components/PlayerPhotosCard'
 import EmailsAdminCard from '../components/EmailsAdminCard'
 import NbaModelCheckCard from '../components/NbaModelCheckCard'
+import BbGridCard from '../components/BbGridCard'
 import { PARITY_REPORT } from '../lib/sportParity.report'
 import { slAdmin } from '../lib/modelNames'
 
@@ -107,6 +108,7 @@ export default function Admin() {
           <LinkCheckCard />
           <BackupsCard />
           <BbResultsCard />
+          <BbGridCard />
           <NbaModelCheckCard />
           <LeaguesCard />
           <LeaguesCard sport="basketball" />

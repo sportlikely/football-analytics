@@ -19,7 +19,7 @@ export type ImpactFit = { ratings: Map<number, number>; home: number; players: n
  * Ridge fit by the normal equations ((XᵀWX + λI) β = XᵀWy, the home term not penalised), solved by Cholesky.
  * ~900 players over 3 seasons: one dense solve takes well under a second.
  */
-export function ridgeFit(games: FitGame[], lambda: number): ImpactFit {
+export function ridgeFit(games: FitGame[], lambda: number, gameMin = 48): ImpactFit {
   const idx = new Map<number, number>();
   for (const g of games) for (const side of [g.home, g.away]) for (const [p] of side) if (!idx.has(p)) idx.set(p, idx.size);
   const P = idx.size, n = P + 1; // last column = home term
@@ -27,8 +27,8 @@ export function ridgeFit(games: FitGame[], lambda: number): ImpactFit {
   const xi: number[] = [], xv: number[] = [];
   for (const g of games) {
     xi.length = 0; xv.length = 0;
-    for (const [p, m] of g.home) { xi.push(idx.get(p)!); xv.push(m / 48); }
-    for (const [p, m] of g.away) { xi.push(idx.get(p)!); xv.push(-m / 48); }
+    for (const [p, m] of g.home) { xi.push(idx.get(p)!); xv.push(m / gameMin); }
+    for (const [p, m] of g.away) { xi.push(idx.get(p)!); xv.push(-m / gameMin); }
     xi.push(P); xv.push(1);
     for (let i = 0; i < xi.length; i++) {
       const wi = g.w * xv[i];
@@ -76,14 +76,16 @@ export function statusKeep(status: string): number {
 }
 
 export type RotPlayer = { id: number; min: number; rating: number };
-const ROT = 10, TEAM_MIN = 240, CAP = 42;
+const ROT = 10;
 
 /**
  * The rotation for a game: each player's projected minutes × the share he keeps (injury report / line-up), the top 10,
  * scaled to 240 minutes (no one above 42; what a capped player can't take goes to the others). Minutes an injured
  * player loses go to the next players in the rotation: the 11th man moves into the top 10 and everyone's share grows.
  */
-export function rotation(players: RotPlayer[], keep: Map<number, number> = new Map()): (RotPlayer & { proj: number })[] {
+/** fix219: gameMin = 40 for FIBA leagues (team 200 minutes, cap 36). */
+export function rotation(players: RotPlayer[], keep: Map<number, number> = new Map(), gameMin = 48): (RotPlayer & { proj: number })[] {
+  const TEAM_MIN = 5 * gameMin, CAP = Math.round(gameMin * 0.875);
   const list = players.map(p => ({ ...p, min: p.min * (keep.has(p.id) ? keep.get(p.id)! : 1) }))
     .filter(p => p.min > 0).sort((a, b) => b.min - a.min || a.id - b.id).slice(0, ROT);
   if (!list.length) return [];
@@ -103,7 +105,7 @@ export function rotation(players: RotPlayer[], keep: Map<number, number> = new M
 }
 
 /** Team strength: Σ rating × minutes / 48 over the rotation (points of margin against a team of average players). */
-export const strength = (rot: { rating: number; proj: number }[]) => rot.reduce((s, p) => s + (p.rating * p.proj) / 48, 0);
+export const strength = (rot: { rating: number; proj: number }[], gameMin = 48) => rot.reduce((s, p) => s + (p.rating * p.proj) / gameMin, 0);
 
 /**
  * v4 settings. The numbers that combine the parts are tuned on 2023-24 + 2024-25 only (2022-23 is the first season in

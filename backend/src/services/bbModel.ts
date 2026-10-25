@@ -19,7 +19,10 @@ import { threadJobsOn, inThread } from './threadJob';
 import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import { injuryLoss } from './bbInjuries';
 import type { RBase } from '../utils/nbaImpact';
-import { nbaV4Adjust, nbaV4Ver, buildNbaV4, saveShadow, type V4Result } from './nbaV4';
+import type { GridBase, GridView } from '../utils/bbGridMath';
+import { nbaV4Adjust, nbaV4Ver, buildNbaV4, saveShadow, nbaSameDay, type V4Result } from './nbaV4';
+import { replayLeague, storeRows, publishSnap, gridSnapVer } from './bbGrid';
+import { publishGridState, gridPredict, gridParamsVer, gridWeight } from './bbTuner';
 
 export const BB_MODEL = 'bb-v3';
 const FINISHED = ['FT', 'AOT'];
@@ -31,7 +34,7 @@ type Game = {
 };
 type Params = { k: number; r: number; b2b: number };
 type Team = { o: number; d: number; season: string; games: number; last: number; sg: number; ha: number };
-type Pred = { pHome: number; margin: number; neutral?: number; model?: string; pV3?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
+type Pred = { pHome: number; margin: number; neutral?: number; netH?: number; netA?: number; haH?: number; haA?: number; sig?: number; grid?: GridView; model?: string; pV3?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
 /** fix192: how a team with no games in the league was rated ('other-league' = its rating there, moved to this league's level) */
 export type NewBasis = 'other-league' | 'bottom3';
 
@@ -135,6 +138,7 @@ class League {
       pHome: Math.min(0.995, Math.max(0.005, normCdf(margin / this.sigma))),
       margin, total: home + away, home, away, hca: this.hca, b2bHome, b2bAway,
       neutral: h.o + a.d - a.o - h.d, // fix217: the rating gap alone (no home edge, no back-to-back)
+      netH: h.o - h.d, netA: a.o - a.d, haH: h.ha, haA: a.ha, sig: this.sigma, // fix219: the grid rows #3 / #7
       restHome: restHome === null ? null : Math.round(restHome * 10) / 10,
       restAway: restAway === null ? null : Math.round(restAway * 10) / 10
     };
@@ -209,6 +213,7 @@ class LeagueV2 {
     return {
       pHome: Math.min(0.995, Math.max(0.005, normCdf(margin / this.sigma))), margin, total: home + away, home, away, hca, b2bHome, b2bAway,
       neutral: (pace * (H.o + A.d - A.o - H.d)) / 100, // fix217
+      sig: this.sigma, // fix219
       restHome: restH === null ? null : Math.round(restH * 10) / 10, restAway: restA === null ? null : Math.round(restA * 10) / 10,
       _ph: ph, _pa: pa, _pace: pace
     };
@@ -481,6 +486,9 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
   // fix217: NBA — bb-v3's walk-forward pieces the v4 replay starts from (neutral-court rating gap, back-to-backs)
   const base = code === 'NBA' ? new Map<number, RBase>() : null;
   if (base) nbaBase = base;
+  // fix219: every league — the pieces the bb-v4 grid rows read (v1 team ratings, home edges, rest, sigma, bb-v3's chance)
+  const gb = new Map<number, GridBase>();
+  gridBases.set(code, gb);
   const bySeason = new Map<string, Metrics>();
   for (const g of games) {
     if (!fin2(g) || isPreseason(g) || !p1.has(g.game_id)) continue;
@@ -488,6 +496,13 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
     const tg = talentState.byGame.get(g.game_id);
     const pr = { ...b, pHome: finalP(b.pHome, tg ? talentShift(tg[0], tg[1]) : 0) };
     wf.push([g.game_id, Math.round(pr.pHome * 10000) / 10000, Math.round(pr.margin * 10) / 10, Math.round(pr.total * 10) / 10]);
+    {
+      const a = p1.get(g.game_id)!, c = p2.get(g.game_id);
+      gb.set(g.game_id, {
+        p: pr.pHome, m1: a.margin, netH: a.netH || 0, netA: a.netA || 0, hca: a.hca, haH: a.haH || 0, haA: a.haA || 0,
+        b2bH: a.b2bHome, b2bA: a.b2bAway, sig: c && w2 ? w2 * (c.sig || 12) + (1 - w2) * (a.sig || 12) : a.sig || 12
+      });
+    }
     if (base) {
       const a = p1.get(g.game_id)!, c = p2.get(g.game_id);
       base.set(g.game_id, { nm: c && w2 ? w2 * (c.neutral || 0) + (1 - w2) * (a.neutral || 0) : a.neutral || 0, b2bH: a.b2bHome, b2bA: a.b2bAway, p: pr.pHome });
@@ -516,6 +531,9 @@ export async function buildLeague(code: string, opts: { retune?: boolean } = {})
 /** fix217: bb-v3's NBA walk-forward pieces of the last build (the v4 replay's base). */
 let nbaBase = new Map<number, RBase>();
 export const nbaV3Base = () => nbaBase;
+/** fix219: every league's walk-forward pieces of the last build (the bb-v4 grid rows) */
+const gridBases = new Map<string, Map<number, GridBase>>();
+export const gridBaseOf = (code: string) => gridBases.get(code) || null;
 
 /** Research export (admin): the walk-forward bb-v3 prediction of every finished game (as it was before tip-off). */
 const wfByCode = new Map<string, [number, number, number, number][]>();
@@ -612,6 +630,15 @@ export async function buildLeaguesHere(codes: string[]): Promise<{ built: string
   }
   // fix217: NBA v4 (player impact ratings, the gate) from this NBA build's walk-forward pieces
   if (built.includes('NBA')) { try { await buildNbaV4(nbaBase); } catch (e: any) { logger.warn(`bb-v4: ${e.message}`); } }
+  // fix219: bb-v4 grid rows of every league built now (stored for the tuner / gate), its teams' live values, then the gate
+  let gridDone = 0;
+  for (const c of built) {
+    const gb = gridBases.get(c);
+    if (!gb || !gb.size) continue;
+    try { const r = await replayLeague(c, gb); storeRows(c, r.items); publishSnap(r.snap); gridDone++; } catch (e: any) { logger.warn(`bb-v4 grid ${c}: ${e.message}`); }
+    await yieldLoop();
+  }
+  if (gridDone) { try { const s = publishGridState(); logger.info(`bb-v4 grid: ${gridDone} league(s), gate ${Object.values(s.gate).map(x => `${x.group} ${x.pass ? 'pass' : 'fail'}`).join(', ')}`); } catch (e: any) { logger.warn(`bb-v4 gate: ${e.message}`); } }
   return { built, wf: codes.filter(c => wfByCode.has(c)).map(c => [c, wfByCode.get(c)!]) };
 }
 
@@ -764,7 +791,7 @@ function livePrior(code: string, id: number, now: number, v2: boolean) {
 export function predictGameCached(g: Game): Pred | null {
   if (!models.has(g.code)) return null;
   const ph = prevKickoff(g.home_id, g), pa = prevKickoff(g.away_id, g);
-  const key = `${modelStamp.get(g.code) || 0}|${talentVer}|${g.code === 'NBA' ? `${injuryVer}.${nbaV4Ver()}` : 0}|${g.kickoff}|${g.status || ''}|${g.home_id}|${g.away_id}|${ph || 0}|${pa || 0}`;
+  const key = `${modelStamp.get(g.code) || 0}|${talentVer}|${gridSnapVer()}.${gridParamsVer()}|${g.code === 'NBA' ? `${injuryVer}.${nbaV4Ver()}` : 0}|${g.kickoff}|${g.status || ''}|${g.home_id}|${g.away_id}|${ph || 0}|${pa || 0}`;
   const c = predCache.get(g.game_id);
   if (c && c.key === key) return c.pred;
   const pred = predictGame(g, ph, pa);
@@ -803,6 +830,23 @@ export function predictGame(g: Game, phIn?: number, paIn?: number): Pred | null 
   // current model's chance (bb-v3 with its injury points), kept for the side-by-side
   const finish = (x: Pred, sigma: number): Pred => {
     const cur = withInjuries(g, x, sigma);
+    // fix219: bb-v4 grid where its league group passed the gate (NBA #4 = the injury report's lost impact)
+    const sd = g.code === 'NBA' ? nbaSameDay(g) : null;
+    const gv = gridPredict(g, { p: x.pHome, hca: pr.hca, haH: pr.haH, haA: pr.haA, b2bHome: pr.b2bHome, b2bAway: pr.b2bAway }, sigma, sd ? { home: sd.home.sameDay, away: sd.away.sameDay } : undefined);
+    if (gv) {
+      const w4 = gridWeight(g.code, 3);
+      const pts = (s: number) => Math.round(Math.max(0, -w4 * s) * 10) / 10;
+      if (sd) {
+        v4Detail.set(g.game_id, { model: 'bb-v4', mode: 'grid', pHome: gv.pHome, margin: gv.margin, impact: 0, sameDay: sd.home.sameDay - sd.away.sameDay, home: sd.home, away: sd.away, points: { home: pts(sd.home.sameDay), away: pts(sd.away.sameDay) } });
+        if (v4Detail.size > 2000) v4Detail.delete(v4Detail.keys().next().value as number);
+      }
+      const dm = gv.margin - x.margin;
+      const out = (s: NonNullable<typeof sd>['home']) => s.removed.filter(p => p.keep < 1).map(p => p.name);
+      return {
+        ...x, pHome: gv.pHome, margin: gv.margin, home: x.home + dm / 2, away: x.away - dm / 2, model: 'bb-v4', pV3: cur.pHome, grid: gv.view,
+        ...(sd ? { injHome: pts(sd.home.sameDay), injAway: pts(sd.away.sameDay), injPlayersHome: out(sd.home), injPlayersAway: out(sd.away) } : {})
+      };
+    }
     if (g.code !== 'NBA') return cur;
     const v = nbaV4Adjust(g, x.pHome, x.b2bHome, x.b2bAway);
     if (!v) return cur;
@@ -1025,7 +1069,7 @@ export async function recordBbPredictions(codes?: string[], ids?: number[], out?
     try {
       for (const { g, pr } of part) up.run(g.game_id, g.code, g.kickoff, pr!.model || BB_MODEL, pr!.pHome, pr!.margin, pr!.total, pr!.home, pr!.away, now.toISOString());
       // fix217: NBA — v4 and the current model side by side (daily report, admin NBA model check)
-      saveShadow(part.filter(x => x.pr!.pV3 !== undefined).map(({ g, pr }) => ({ game_id: g.game_id, kickoff: g.kickoff, mode: pr!.model === 'bb-v4' ? 'full' : 'reprice', p_v3: pr!.pV3!, p_v4: pr!.pHome })));
+      saveShadow(part.filter(x => x.pr!.pV3 !== undefined).map(({ g, pr }) => ({ game_id: g.game_id, kickoff: g.kickoff, mode: pr!.grid ? 'grid' : pr!.model === 'bb-v4' ? 'full' : 'reprice', p_v3: pr!.pV3!, p_v4: pr!.pHome })));
       db.exec('COMMIT');
       if (out) for (const { g, pr } of part) out.set(g.game_id, { v3: pr!.pV3 ?? pr!.pHome, v4: v4Detail.get(g.game_id) ?? null });
     } catch (e) {

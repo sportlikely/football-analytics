@@ -31,6 +31,11 @@ retirements). Six blocks don't exist in tennis:
   report / line-ups re-priced 90 / 30 / 10 min before tip-off; `utils/nbaImpact.ts`, `services/nbaV4.ts`). Next: the same
   structure for the EuroLeague (rosters and minutes only — no injury feed in Europe), then the other basketball leagues.
   No new page block, so no parity key; the game page's "numbers changed" card already shows the players taken out.
+  fix219: player impact is now row #1 of the bb-v4 grid in every basketball league (EuroLeague included).
+- **Grid model with a "1,000 points split" (fix219):** football (v3) and basketball (bb-v4, every league; shared
+  `components/sport/game/GridSplit.tsx`, inside "How we calculated it" = parity key `game.howCalculated`). NFL and tennis
+  keep their own "how it was calculated" tables until their models become grids (nfl-v1 is a rating model, tennis-v1 a
+  point-level chain).
 
 ## Built in the closest way the data allows (provider gaps)
 

@@ -7,13 +7,13 @@
    "kind": "model",
    "version": "4.0",
    "text": {
-    "en": "NBA model v4: rates every player, so injuries, rest and summer moves change the prediction.",
-    "es": "Modelo NBA v4: valora a cada jugador, así que las lesiones, el descanso y los fichajes de verano cambian el pronóstico.",
-    "pt": "Modelo NBA v4: avalia cada jogador, por isso lesões, descanso e transferências de verão mudam a previsão.",
-    "de": "NBA-Modell v4: bewertet jeden Spieler, daher verändern Verletzungen, Pausen und Sommerwechsel die Prognose.",
-    "fr": "Modèle NBA v4 : il note chaque joueur, donc les blessures, le repos et les transferts de l’été changent la prédiction.",
-    "it": "Modello NBA v4: valuta ogni giocatore, quindi infortuni, riposo e trasferimenti estivi cambiano la previsione.",
-    "tr": "NBA modeli v4: her oyuncuyu derecelendirir; sakatlıklar, dinlenme ve yaz transferleri tahmini değiştirir."
+    "en": "Basketball model 4.0: rates every player, injuries, rest and matchups — 13 factors, weights fitted on three seasons.",
+    "es": "Modelo de baloncesto 4.0: valora a cada jugador, las lesiones, el descanso y los emparejamientos — 13 factores, con pesos ajustados en tres temporadas.",
+    "pt": "Modelo de basquetebol 4.0: avalia cada jogador, as lesões, o descanso e os duelos — 13 fatores, com pesos ajustados em três temporadas.",
+    "de": "Basketball-Modell 4.0: bewertet jeden Spieler, Verletzungen, Pausen und Duelle — 13 Faktoren, Gewichte an drei Saisons angepasst.",
+    "fr": "Modèle de basket 4.0 : il note chaque joueur, les blessures, le repos et les confrontations — 13 facteurs, pondérés sur trois saisons.",
+    "it": "Modello di basket 4.0: valuta ogni giocatore, gli infortuni, il riposo e gli accoppiamenti — 13 fattori, con pesi adattati su tre stagioni.",
+    "tr": "Basketbol modeli 4.0: her oyuncuyu, sakatlıkları, dinlenmeyi ve eşleşmeleri değerlendirir — 13 faktör, ağırlıklar üç sezona göre ayarlandı."
    }
   },
   {

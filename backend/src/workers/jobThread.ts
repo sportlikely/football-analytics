@@ -9,6 +9,8 @@ import { onCaptured } from '../services/shared';
 async function run(): Promise<unknown> {
   const { job, args } = workerData as { job: string; args: unknown[] };
   if (job === 'bb model') return (await import('../services/bbModel')).buildLeaguesHere(args[0] as string[]);
+  // fix219: the bb-v4 grid tuner (reads the stored rows; apply = stored + published from here)
+  if (job === 'bb tune') return (await import('../services/bbTuner')).runTune(args[0] as any);
   if (job === 'national elo') return (await import('../services/nationalElo')).buildNationalEloHere();
   if (job === 'sitemap') { const seo = await import('../services/seo'); return seo.SITEMAPS[args[0] as string]?.() ?? null; }
   // fix212: one player photo's crop (sharp) — the buffer comes back as a plain byte array
