@@ -129,7 +129,7 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
           return (
             <div key={side} className="flex items-center gap-2 min-w-0 h-5">
               <Crest team={t} size={15} />
-              <span className={`text-[13px] truncate ${onSide(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>
+              <span data-testid="team-name" className={`text-[13px] truncate ${onSide(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>
                 <span className="sm:hidden">{t.short}</span><span className="hidden sm:inline">{t.name}</span>
                 {t.rank ? <span className="ml-1 text-[10px] font-semibold text-faint num">{t.rank}</span> : null}
               </span>

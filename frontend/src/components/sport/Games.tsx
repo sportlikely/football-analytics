@@ -46,7 +46,9 @@ export function LiveRow({ g, showLeague = false }: { g: SGame; showLeague?: bool
       {showLeague && <div className="text-[10px] text-faint truncate mb-0.5">{g.competition.name}</div>}
       <div className="flex items-center justify-between gap-2 text-[11px] mb-1">
         <span className="font-bold text-live tracking-wider whitespace-nowrap">{g.live?.label || tt("LIVE")}</span>
-        {chance && <span className="num font-bold text-accent truncate">{chance}</span>}
+        {/* fix214: a long name gives way, the % never does ("Now: Prairie View A&M 64%" was cut before the number) */}
+        {chance && (() => { const m = /^(.*?)\s*(\d+%)$/.exec(chance); return (
+          <span className="num font-bold text-accent flex min-w-0"><span className="truncate">{m ? m[1] : chance}</span>{m && <span className="shrink-0 pl-1" data-testid="live-pct">{m[2]}</span>}</span>) })()}
         {pick && <span className="text-muted truncate">{pick.text}{pick.ok !== null && <> <span className={pick.ok ? 'text-win font-bold' : 'text-loss font-bold'}>{pick.ok ? '✓' : '✗'}</span> {tt('so far')}</>}</span>}
       </div>
       {(['H', 'A'] as const).map((s, i) => {
@@ -151,7 +153,9 @@ export default function Games({ a }: { a: GamesAdapter }) {
           {tt("Live")}</h2>
         <span className="num text-xs text-faint">{live.length}</span>
       </div>
-      {live.length === 0 ? <p className="text-xs text-faint">{a.noLive}</p> : (
+      {/* fix214: while the games load, placeholder rows (never "No games in play" before the data) */}
+      {d.loading ? <div className="space-y-2" data-testid="live-loading">{[0, 1, 2].map(i => <div key={i} className="h-14 rounded-xl bg-surface2/60 animate-pulse" />)}</div>
+      : live.length === 0 ? <p className="text-xs text-faint">{a.noLive}</p> : (
         <>
           {liveOther && <p className="text-[11px] text-faint mb-2">{tt("Nothing in play in this league. Live elsewhere:")}</p>}
           <div className="max-h-72 overflow-y-auto -mx-1 px-1 space-y-2">
@@ -208,8 +212,9 @@ export default function Games({ a }: { a: GamesAdapter }) {
           <div className="flex flex-wrap items-end justify-between gap-4 mb-6" data-testid="games-title">
             <div>
               <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink">{league === 'ALL' ? a.title : favMode ? tt("My favorites") : chosen?.name || a.title}</h1>
-              <p className="mt-1 text-sm text-muted">
-                {a.countLine(upcoming.length, days)}
+              <p className="mt-1 text-sm text-muted" data-testid="games-count">
+                {/* fix214: no count before the data ("0 games in the next 7 days" showed for ~2 s) */}
+                {d.loading ? <span className="inline-block align-middle h-4 w-44 rounded bg-surface2/60 animate-pulse" aria-label={tt("Loading…")} /> : a.countLine(upcoming.length, days)}
                 {league !== 'ALL' && !favMode && chosen?.href && <Link to={chosen.href} className="ml-3 font-bold text-accent">{tt("League page →")}</Link>}
               </p>
             </div>

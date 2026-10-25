@@ -88,8 +88,14 @@ function basketball() {
 
 function nfl() {
   // the 24 Oct report: 39 college games live at once, one NFL game
+  // fix214: real long school names ("New Me…", "North D…" on phones, "Now: Prairie View A&M…" cut in the Live box)
+  const SCHOOLS = ['North Dakota State Bison', 'New Mexico State Aggies', 'Prairie View A&M Panthers', 'Eastern Michigan Eagles', 'Southeast Missouri State Redhawks', 'Mississippi Valley State Delta Devils']
   const g = (i: number, live: boolean) => {
     const league = i === 3 ? 1 : 2, [h, a] = score(i)
+    if (league === 2) return { ...g0(i, live, league, h, a), home: team(i * 2 + 1, SCHOOLS[i % SCHOOLS.length]), away: team(i * 2 + 2, SCHOOLS[(i + 3) % SCHOOLS.length]) }
+    return g0(i, live, league, h, a)
+  }
+  const g0 = (i: number, live: boolean, league: number, h: number, a: number) => {
     return {
       id: 3000 + i, season: 2026, week: 'Week 8', weekKey: '8', stage: 'Regular Season', kickoff: live ? started(i) : soon(i),
       status: live ? (i % 5 === 0 ? 'HT' : 'Q3') : 'NS', state: live ? 'live' : 'upcoming', clock: live ? '08:42' : null,
@@ -135,6 +141,7 @@ const SPORTS = [
   { sport: 'nfl', path: '/american-football/games', api: nfl() },
   { sport: 'tennis', path: '/tennis/matches', api: tennis() }
 ]
+const LISTS = new Set(['/api/matches/upcoming', '/api/basketball/games', '/api/nfl/games', '/api/tennis/matches'])
 const SCREENS = [{ name: 'desktop', width: 1440, height: 900 }, { name: 'phone', width: 390, height: 844 }]
 
 /* ---------- run ---------- */
@@ -164,6 +171,8 @@ try {
       await page.route('**/api/**', async r => {
         const u = new URL(r.request().url())
         const body = s.api(u)
+        // fix214: the game lists answer after 1.5 s (a slow first load): the page must not say "0 games" meanwhile
+        if (body && LISTS.has(u.pathname)) await new Promise(res => setTimeout(res, 1500))
         if (body) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
         if (u.pathname === '/api/auth/me') return r.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"signed out"}' })
         return r.fulfill({ status: 200, contentType: 'application/json', body: '{"data":null}' })
@@ -172,6 +181,11 @@ try {
       try {
         await page.goto(base + s.path, { waitUntil: 'domcontentloaded', timeout: 60000 })
         await page.waitForSelector('[data-testid="games-title"]', { timeout: 60000 })
+        // fix214: before the data: no count ("0 games in the next 7 days"), no "nothing in play" in the Live box
+        const early = await page.evaluate(() => ({ count: document.querySelector('[data-testid="games-count"]')?.textContent || '', live: document.querySelector('[data-testid="live-box"]')?.textContent || '', loading: !!document.querySelector('[data-testid="live-loading"]') }))
+        if (/(^|\D)0 (games|matches)\b/i.test(early.count)) fails.push(`${tag}: "${early.count.trim()}" shown before the games loaded`)
+        if (/in play right now|no live/i.test(early.live) && !early.loading) fails.push(`${tag}: the Live box says "${early.live.trim().slice(0, 60)}" before the games loaded`)
+        await page.waitForFunction(() => /\d/.test(document.querySelector('[data-testid="games-count"]')?.textContent || ''), null, { timeout: 15000 })
         await page.waitForTimeout(800)
         const m = await page.evaluate(() => {
           const vis = (el: Element | null) => !!el && (el as HTMLElement).offsetWidth > 0 && (el as HTMLElement).offsetHeight > 0
@@ -180,6 +194,9 @@ try {
             title: box('[data-testid="games-title"]'), left: box('[data-testid="games-left"]'),
             liveBox: box('[data-testid="live-box"]'), liveStrip: box('[data-testid="live-strip"]'),
             liveRows: [...document.querySelectorAll('[data-testid="live-box"] li, [data-testid="live-strip"] a')].filter(vis).length,
+            // fix214: team names in the list rows (Spotlight, day lists) and the Live "Now: … NN%" must not be cut
+            cutNames: [...document.querySelectorAll('[data-testid="team-name"]')].filter(el => vis(el) && el.scrollWidth > el.clientWidth + 1).map(el => (el.textContent || '').trim()).slice(0, 4),
+            cutPct: [...document.querySelectorAll('[data-testid="live-pct"]')].filter(el => { if (!vis(el)) return false; const r = el.getBoundingClientRect(), box = el.closest('a')!.getBoundingClientRect(); return r.right > box.right + 1 }).length,
             scrollW: document.documentElement.scrollWidth, w: window.innerWidth, h: window.innerHeight,
             // what sticks out on the right (deepest elements first), for the failure line
             wide: [...document.body.querySelectorAll('*')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.right > window.innerWidth + 1 && !el.closest('.overflow-x-auto, .overflow-hidden, .overflow-x-hidden') && el.children.length === 0 })
@@ -192,6 +209,8 @@ try {
         if (!m.title || m.title.top > 900) fails.push(`${tag}: the page title starts at ${m.title ? Math.round(m.title.top) : '—'} px (must be within the first 900 px)`)
         if (!live) fails.push(`${tag}: no ${desktop ? 'Live box' : 'live strip'} with ${LIVE_N} live games in the fixture`)
         else if (live.height > 0.6 * m.h) fails.push(`${tag}: the ${desktop ? 'Live box' : 'live strip'} is ${Math.round(live.height)} px tall (more than 60% of ${m.h})`)
+        if (m.cutNames.length) fails.push(`${tag}: team names cut in the list rows: ${m.cutNames.join(', ')}`)
+        if (m.cutPct) fails.push(`${tag}: ${m.cutPct} live win chances cut before the %`)
         if (desktop && !m.left) fails.push(`${tag}: no left column (Live box, leagues, Latest results)`)
         if (m.scrollW > m.w + 1) fails.push(`${tag}: the page scrolls sideways (${m.scrollW} px wide: ${m.wide.join(', ') || '?'})`)
         // "Show all N live" opens every live game (?live=1), grouped by league, in the centre

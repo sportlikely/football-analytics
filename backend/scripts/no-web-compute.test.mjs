@@ -77,6 +77,8 @@ db.prepare = sql => {
   return { run: wrap(st.run.bind(st)), get: wrap(st.get.bind(st)), all: wrap(st.all.bind(st)), iterate: st.iterate && st.iterate.bind(st) };
 };
 const { app } = require(D + '/app.js');
+// fix214: the web process answers 503 until its shared state is loaded (fix212b): without this every URL was a 503
+require(D + '/services/readiness.js').markReady({ loadMs: 0, states: 0 });
 const { webBuilds } = require(D + '/services/builders.js');
 const { PUBLIC_ROUTES, PAGE_SAMPLES, workerRouteOf } = require(D + '/services/workerRoutes.js');
 const role = require(D + '/services/role.js');
@@ -140,6 +142,7 @@ test('basketball game pages: the worker stores one data build per game, the web 
   const r = spawnSync(process.execPath, ['-e', `
     const D = ${JSON.stringify(DIST)};
     const { app } = require(D + '/app.js');
+    require(D + '/services/readiness.js').markReady({ loadMs: 0, states: 0 });
     const { webBuilds } = require(D + '/services/builders.js');
     const s = app.listen(0, '127.0.0.1', async () => {
       const out = [];
@@ -159,6 +162,60 @@ test('basketball game pages: the worker stores one data build per game, the web 
     assert.equal(x.lang, x.l ? x.l.slice(1) : 'en');
     assert.ok(x.ms < 50, `${x.l || '/'}: ${x.ms} ms`);
   }
+});
+
+// fix214: the web stalls named "/match/* + /basketball/* + /team/* + /<lang>/*": the crawler pages as production serves
+// them — a stored copy exists (the worker built it), the web process reads it and only fills index.html. Real ids,
+// every language; the first open reads the stored row (not this process's memory), the second the memory copy.
+test('crawler pages with a stored copy: served from page_cache, no build, under 50 ms, real HTML', () => {
+  const { dir, stat } = scratch();
+  const ids = realIds(dir);
+  const urls = [
+    ...LANG_PREFIX.map(l => `${l}/match/${ids.fbMatch}`), ...LANG_PREFIX.map(l => `${l}/basketball/game/${ids.bbGame}`),
+    `/team/${ids.fbTeam}`, `/fr/team/${ids.fbTeam}`, `/pt/team/${ids.fbTeam}`, `/basketball/team/${ids.bbTeam}`, `/es/basketball/team/${ids.bbTeam}`,
+    `/de/basketball/player/${ids.bbPlayer}`, `/player/${ids.fbPlayer}`, `/american-football/game/${ids.nflGame}`, `/tennis/player/${ids.tnPlayer}`
+  ];
+  const base = { ...process.env, DATA_DIR: dir, STATIC_DIR: stat, LOG_LEVEL: 'error', NODE_ENV: 'production', GEO_OFF: '1', BASKETBALL_PUBLIC: '1', NFL_PUBLIC: '1', TENNIS_PUBLIC: '1' };
+  for (const k of KEYS) base[k] = '';
+  const w = spawnSync(process.execPath, ['-e', `
+    const D = ${JSON.stringify(DIST)};
+    require(D + '/app.js');
+    const pc = require(D + '/services/pageCache.js');
+    (async () => {
+      for (const u of ${JSON.stringify(urls)}) {
+        const bb = /^(?:\\/[a-z]{2})?\\/basketball\\/game\\/(\\d+)$/.exec(u);
+        if (bb) await pc.storePage('bb-game-facts', { id: Number(bb[1]) }); else await pc.storePage('seo-page', { path: u });
+      }
+      process.exit(0);
+    })();`], { env: { ...base, SL_ROLE: 'worker' }, encoding: 'utf8', timeout: 180000 });
+  assert.equal(w.status, 0, w.stderr);
+  const r = spawnSync(process.execPath, ['-e', `
+    const D = ${JSON.stringify(DIST)};
+    const { app } = require(D + '/app.js');
+    require(D + '/services/readiness.js').markReady({ loadMs: 0, states: 0 });
+    const { webBuilds } = require(D + '/services/builders.js');
+    const s = app.listen(0, '127.0.0.1', async () => {
+      const base = 'http://127.0.0.1:' + s.address().port, out = [];
+      const open = async u => { const t0 = process.hrtime.bigint(); const x = await fetch(base + u, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' } }); const html = await x.text(); return { status: x.status, ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e5) / 10, h1: html.includes('<h1>'), lang: (html.match(/<html lang="([a-z]+)"/) || [])[1] }; };
+      for (const u of ${JSON.stringify(urls)}) out.push({ u, first: await open(u), second: await open(u) });
+      console.log(JSON.stringify({ out, builds: webBuilds() })); process.exit(0);
+    });`], { env: { ...base, SL_ROLE: 'web', SL_STRICT_WEB: '1', SEO_WAIT_MS: '1', PAGE_WAIT_MS: '1' }, encoding: 'utf8', timeout: 120000 });
+  assert.equal(r.status, 0, r.stderr);
+  const res = JSON.parse(r.stdout.trim().split('\n').pop());
+  assert.deepEqual(res.builds, {}, 'a page builder ran in the web process');
+  const bad = [];
+  for (const x of res.out) {
+    const lang = (/^\/(es|pt|de|fr|it|tr)\//.exec(x.u) || [])[1] || 'en';
+    for (const k of ['first', 'second']) {
+      if (x[k].status !== 200) bad.push(`${x.u} (${k}): ${x[k].status}`);
+      if (x[k].ms > LIMIT_MS) bad.push(`${x.u} (${k}): ${x[k].ms} ms — over ${LIMIT_MS} ms`);
+    }
+    // (an NFL / tennis id the copy has no such game / player for falls back to the generic page)
+    if (!x.second.h1 && !(/american-football|tennis/.test(x.u) && /\/1$/.test(x.u))) bad.push(`${x.u}: no <h1> (the stored copy was not used)`);
+    if (x.second.lang !== lang) bad.push(`${x.u}: <html lang="${x.second.lang}">, not ${lang}`);
+  }
+  console.log(`stored crawler pages: ${res.out.length} URLs, slowest ${[...res.out].sort((a, b) => b.first.ms - a.first.ms).slice(0, 3).map(x => `${x.u} ${x.first.ms} ms`).join(', ')}`);
+  assert.deepEqual(bad, [], `\n${bad.join('\n')}`);
 });
 
 test('the real pair: a worker route is answered by the worker, then served from the signed-out copy; a worker crash is recorded', async () => {

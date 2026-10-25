@@ -26,6 +26,7 @@
     "test:fix212": "tsc && node --no-warnings --test --test-force-exit scripts/fd-freeze.test.mjs",
     "test:fix212b": "tsc && node --no-warnings --test --test-force-exit scripts/fd-twins-startup.test.mjs",
     "test:fix215": "tsc && node --no-warnings --test --test-force-exit scripts/season-sim.test.mjs scripts/season-forecast.test.mjs",
+    "test:fix214": "tsc && node --no-warnings --test --test-force-exit scripts/photo-matcher.test.mjs scripts/web-log.test.mjs",
     "test:fix216": "tsc && node --no-warnings --test --test-force-exit scripts/pick-emails.test.mjs"
   },
   "keywords": [

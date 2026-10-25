@@ -4,7 +4,7 @@ import { API_URL } from '../../lib/socket'
 import { t as tt } from '../../lib/i18n'
 import { slModel } from '../../lib/modelNames'
 import { useAuth } from '../../lib/auth'
-import { useNflConfig, useNflFavorites, useNflFilter, NFL_STATUS, weekLabel, nick, nflRid, nflRstatus, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
+import { useNflConfig, useNflFavorites, useNflFilter, NFL_STATUS, weekLabel, nick, rowName, nflRid, nflRstatus, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
 import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats, recordAside } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
 
@@ -23,12 +23,12 @@ export const nflClock = (g: NflGame) => { const q = NFL_STATUS[g.status] || tt('
 
 export function toGame(g: NflGame): HGame {
   const lg = lgOf(g)
-  const team = (s: NflGame['home']) => ({ id: s.id, name: s.name, short: nick(s.name, lg), logo: s.logo, href: `/american-football/team/${s.id}` })
+  const team = (s: NflGame['home']) => ({ id: s.id, name: s.name, short: rowName(s.name, lg), logo: s.logo, href: `/american-football/team/${s.id}` })
   return {
     id: g.id, href: `/american-football/game/${g.id}`, reveal: { id: nflRid(g), status: nflRstatus(g) }, kickoff: g.kickoff,
     competition: { name: compOf(g), href: lg === 2 ? '/american-football/college/league' : '/american-football/league' }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: nflClock(g), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
-    pred: winnerPred(g.prediction, nick(g.home.name, lg), nick(g.away.name, lg), nflStrongAt(lg))
+    pred: winnerPred(g.prediction, rowName(g.home.name, lg), rowName(g.away.name, lg), nflStrongAt(lg))
   }
 }
 

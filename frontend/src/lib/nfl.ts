@@ -97,6 +97,18 @@ export const teamName = (name: string | null | undefined) => (typeof name === 's
 export const schoolName = (raw: string | null | undefined) => { const name = teamName(raw); return name === 'TBD' ? name : schoolOf(name) }
 /** "Kansas City Chiefs" → "Chiefs" for tight rows (the nickname is what people say); college: the school name. */
 export const nick = (raw: string | null | undefined, league: NflLeague = 1) => { if (league === 2) return schoolName(raw); const name = teamName(raw); const w = name.split(/\s+/); return w.length > 1 ? w[w.length - 1] : name }
+/**
+ * fix214: a school's name for tight rows on phones (list rows, the Live box, Spotlight): "North Dakota State" →
+ * "N. Dakota St.", "Eastern Michigan" → "E. Michigan"; short names (12 letters or fewer) stay as they are.
+ */
+export const schoolShort = (raw: string | null | undefined) => {
+  const s = schoolName(raw)
+  if (s.length <= 12) return s
+  return s.replace(/^University of /, '').replace(/\bState\b/g, 'St.').replace(/\b(North|South|East|West)(ern)?\b(?=\s)/g, m => `${m[0]}.`)
+    .replace(/\bCentral\b(?=\s)/g, 'C.').replace(/\bInternational\b/g, 'Intl.')
+}
+/** fix214: the name in a list row: NFL the nickname ("Chiefs"), college the short school name */
+export const rowName = (raw: string | null | undefined, league: NflLeague = 1) => (league === 2 ? schoolShort(raw) : nick(raw, 1))
 /** Reveal ids for NFL games (own negative range: never clashes with football ids or basketball's -id). */
 export const nflRid = (g: { id: number }) => -(2e9 + g.id)
 export const nflRstatus = (g: NflGame) => (g.state === 'done' ? 'FT' : g.status)

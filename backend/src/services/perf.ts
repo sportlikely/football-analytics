@@ -34,6 +34,20 @@ try {
   }).observe({ entryTypes: ['gc'] });
 } catch { /* gc entries not available */ }
 
+/*
+ * fix214: stdout / stderr writes are timed. On Linux a write to a pipe is synchronous: when the host's log collector
+ * reads slowly (a crawler burst = a line per request), the write blocks the whole loop and the stall was named after
+ * the pages in flight ("GET /match/* + GET /basketball/*", 2.7 s). A stall now says "log writes N ms (k lines)".
+ */
+let logMs = 0, logLines = 0;
+if (isMainThread) for (const s of [process.stdout, process.stderr]) {
+  const write = s.write.bind(s) as (...a: any[]) => boolean;
+  (s as any).write = (...a: any[]) => {
+    const t0 = performance.now();
+    try { return write(...a); } finally { logMs += performance.now() - t0; logLines++; }
+  };
+}
+
 const STEP = 500;
 const stalls: { at: string; ms: number; job: string | null; startup?: true }[] = [];
 // fix210: heapDeltaMb = heap after − before the last run; maxHeapDeltaMb = the worst run; peakHeapMb = highest heap seen while it ran
@@ -63,6 +77,8 @@ if (isMainThread) setInterval(() => {
   const since = last;
   last = now;
   if (lag > maxLag) maxLag = lag;
+  const logs = logMs >= 50 ? `log writes ${Math.round(logMs)} ms (${logLines} lines)` : null;
+  logMs = 0; logLines = 0;
   // what ran (and ended) since the last tick: the synchronous jobs, requests and gc pauses behind this stall
   const ended = lag > 50 ? recent.filter(r => r.end >= since && !active.has(r.label)).sort((a, b) => (b.end - b.start) - (a.end - a.start)) : [];
   if (lag > 50) for (const label of new Set([...active.keys(), ...ended.map(r => r.label)])) {
@@ -74,7 +90,7 @@ if (isMainThread) setInterval(() => {
     const running = runningLabel();
     // fix175: a request carries its full path (ids kept, only the c / n query values) — "http GET /it/* [/it/team/86] 3773 ms"
     const done = ended.slice(0, 4).map(r => `${r.label}${r.detail ? ` [${r.detail}]` : ''} ${Math.round(r.end - r.start)} ms`).join(' + ');
-    const job = [running, done].filter(Boolean).join(' + ') || null;
+    const job = [logs, running, done].filter(Boolean).join(' + ') || null;
     stalls.push({ at: new Date(now).toISOString(), ms: lag, job, startup: !startupDone || undefined });
     noteHour(lag, job);
     if (stalls.length > 100) stalls.shift();

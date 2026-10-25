@@ -251,7 +251,23 @@ app.use('/api', (_req, res, next) => {
   next();
 });
 
+// fix214: in production a GET is counted, not logged line by line — a write to the log pipe blocks the loop when the
+// host reads it slowly (crawler bursts: the 2.7 s web stalls); one summary line a minute. LOG_REQUESTS=1 = every line.
+const LOG_EVERY_REQUEST = isDev || process.env.LOG_REQUESTS === '1';
+const reqCounts = new Map<string, number>();
+if (!LOG_EVERY_REQUEST) setInterval(() => {
+  if (!reqCounts.size) return;
+  const all = [...reqCounts.values()].reduce((a, b) => a + b, 0);
+  const top = [...reqCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => `${k.replace(/^http GET /, '')} ${n}`).join(', ');
+  reqCounts.clear();
+  logger.info(`GET requests (last minute): ${all} — ${top}`);
+}, 60 * 1000).unref();
 app.use((req, _res, next) => {
+  if (!LOG_EVERY_REQUEST && req.method === 'GET') {
+    const k = routeLabel('GET', req.path);
+    if (reqCounts.has(k) || reqCounts.size < 500) reqCounts.set(k, (reqCounts.get(k) || 0) + 1);
+    return next();
+  }
   // fix205: a calendar link is a secret too: only its first 6 characters reach the log
   logger.info(`${req.method} ${req.originalUrl.replace(/([?&]token=)[^&]+/g, '$1***').replace(/^(\/cal\/[A-Za-z0-9_-]{6})[^/?]*/, '$1…')}`);
   next();

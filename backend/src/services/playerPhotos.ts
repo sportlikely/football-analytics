@@ -57,12 +57,14 @@ if (!DB_READ_ONLY) db.exec(`
 /** a name as a set of words: accents, case, punctuation and order aside ("Alcaraz, Carlos" = "carlos alcaraz") */
 export function nameKey(raw: string | null | undefined): string {
   // fix212b: "Jr.", "Sr.", "II", "III", "IV" are not part of the name (rosters write "Gary Trent Jr.", Wikidata "Gary Trent Jr." or not)
-  return String(raw || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ø/gi, 'o').replace(/ł/gi, 'l').replace(/ß/g, 'ss')
+  return unescapeName(raw).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ø/gi, 'o').replace(/ł/gi, 'l').replace(/ß/g, 'ss')
     .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(w => w && !SUFFIX.has(w)).sort().join(' ');
 }
+/** fix214: API-Basketball sends some names HTML-escaped ("De&apos;Anthony Melton") */
+export const unescapeName = (raw: string | null | undefined) => String(raw || '').replace(/&apos;|&#0?39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 const SUFFIX = new Set(['jr', 'sr', 'ii', 'iii', 'iv']);
 /** fix212b: "Tatum, Jayson" (some rosters) → "Jayson Tatum"; a name as the search box wants it */
-export const searchName = (raw: string) => { const m = /^([^,]+),\s*(.+)$/.exec(String(raw || '').trim()); return (m ? `${m[2]} ${m[1]}` : String(raw || '')).replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').trim(); };
+export const searchName = (raw: string) => { const m = /^([^,]+),\s*(.+)$/.exec(unescapeName(raw).trim()); return (m ? `${m[2]} ${m[1]}` : unescapeName(raw)).replace(/(^|\s)(jr|sr|ii|iii|iv)\.?(?=\s|$)/gi, ' ').replace(/\s+/g, ' ').trim(); };
 /** "C. Alcaraz", "Alcaraz C." — an initial instead of a first name: never matched */
 export const abbreviated = (raw: string | null | undefined) => !raw || String(raw).trim().split(/\s+/).length < 2 || /(^|\s)\p{L}\.?(\s|$)/u.test(String(raw).trim());
 
@@ -111,6 +113,13 @@ const ageAt = (dob: string, now: number) => {
   const d = Date.parse(dob.length === 4 ? `${dob}-07-01` : dob);
   return Number.isFinite(d) ? (now - d) / (365.2425 * DAY) : null;
 };
+/**
+ * fix214: API-Basketball's roster age is the age when the player was first stored, 2–4 years behind (Dončić "25" at
+ * 27, Reaves "25" at 28): the old ±1.6 window dropped the right item for nearly every player (basketball 1 of 4,899).
+ * The real age may be up to AGE_STALE years above ours, never more than 1.6 below.
+ */
+export const AGE_STALE = 5;
+export const ageFits = (real: number, ours: number) => real - ours >= -1.6 && real - ours <= AGE_STALE;
 
 /** pick one Wikidata item for our player — or none, with the reason */
 export function decide(ours: Ours, cands: Candidate[], now = Date.now()): Decision {
@@ -121,12 +130,15 @@ export function decide(ours: Ours, cands: Candidate[], now = Date.now()): Decisi
   const dobOurs = ours.dob ? String(ours.dob).slice(0, 10) : null;
   const alive = named.filter(c => {
     if (dobOurs && c.dob && (c.dob.length === 4 ? c.dob !== dobOurs.slice(0, 4) : c.dob !== dobOurs)) return false;
-    if (ours.age != null && c.dob) { const a = ageAt(c.dob, now); if (a != null && Math.abs(a - ours.age) > 1.6) return false; }
+    if (ours.age != null && c.dob) { const a = ageAt(c.dob, now); if (a != null && !ageFits(a, ours.age)) return false; }
     return true;
   });
   if (!alive.length) return { qid: null, confidence: null, reason: named.length ? `${named.length} same-name item(s), birth date / age disagrees` : 'no Wikidata match', image: null };
-  if (alive.length > 1) return { qid: null, confidence: null, reason: `same name: ${alive.length} candidates (${alive.map(c => c.qid).join(', ')})`, image: null };
-  const c = alive[0];
+  // fix214: several same-name items (a stub without a birth date, a namesake in another league): the one who played for
+  // one of our teams is him; none or two of them → no photo
+  const onTeam = alive.length > 1 ? alive.filter(c => (ours.teams || []).some(t => c.teams.some(x => sameTeam(t, x)))) : [];
+  if (alive.length > 1 && onTeam.length !== 1) return { qid: null, confidence: null, reason: `same name: ${alive.length} candidates (${alive.map(c => c.qid).join(', ')})`, image: null };
+  const c = onTeam.length === 1 ? onTeam[0] : alive[0];
   const country = ours.country ? String(ours.country).trim().toLowerCase() : null;
   const sig = {
     dob: !!(dobOurs && c.dob && c.dob.length === 10 && c.dob === dobOurs),
@@ -362,8 +374,38 @@ function basketballQueue(): (Ours & { id: number; prio: number })[] {
       if (abbreviated(x.name) && !abbreviated(r.name)) x.name = r.name;
       by.set(r.id, x);
     }
+    // fix214: the leagues with targets first (NBA ≥ 85 %, EuroLeague ≥ 50 %), most minutes first inside them
+    const leagueOf = new Map<number, string>();
+    for (const g of db.prepare(`SELECT home_id AS id, code FROM bb_games WHERE kickoff >= ? AND code IN ('NBA','EL') UNION SELECT away_id, code FROM bb_games WHERE kickoff >= ? AND code IN ('NBA','EL')`).all(year, year) as any[])
+      leagueOf.set(g.id, g.code);
+    const rosterTeams = new Map<number, number[]>();
+    for (const r of db.prepare(`SELECT player_id AS id, team_id FROM bb_roster WHERE updated_at >= ?`).all(new Date(Date.now() - 180 * DAY).toISOString()) as any[])
+      rosterTeams.set(r.id, [...(rosterTeams.get(r.id) || []), r.team_id]);
+    for (const x of by.values()) {
+      const codes = (rosterTeams.get(x.id) || []).map(t => leagueOf.get(t));
+      if (codes.includes('NBA')) { x.prio -= 2e6; nbaFullName(x); } else if (codes.includes('EL')) x.prio -= 1e6;
+    }
   } catch (e: any) { logger.warn(`player photos: basketball list: ${e?.message || e}`); }
   return [...by.values()];
+}
+/**
+ * fix214: an NBA player API-Basketball only knows as "T. Johnson" (40 % of NBA roster rows: rookies, two-way players):
+ * balldontlie's active player with that initial and last name on the same team gives the full name (and country).
+ * Exactly one such player, or nothing changes.
+ */
+function nbaFullName(x: Ours & { id: number }) {
+  if (!abbreviated(x.name)) return;
+  const m = /^(\p{L})\.?\s+(.+)$/u.exec(x.name.trim()) || ((y) => (y ? [y[0], y[2], y[1]] : null))(/^(.+?)\s+(\p{L})\.?$/u.exec(x.name.trim()));
+  if (!m) return;
+  const [, initial, last] = m;
+  try {
+    const rows = (db.prepare(`SELECT p.first, p.last, p.country, t.full_name AS team FROM bdl_players p LEFT JOIN bdl_teams t ON t.id = p.team_id
+        WHERE p.active = 1 AND LOWER(p.last) = LOWER(?) AND SUBSTR(LOWER(p.first), 1, 1) = LOWER(?)`).all(last.trim(), initial) as any[])
+      .filter(r => r.team && (x.teams || []).some(t => sameTeam(t, r.team)));
+    if (rows.length !== 1) return;
+    x.name = `${rows[0].first} ${rows[0].last}`;
+    x.country = x.country || rows[0].country || null;
+  } catch { /* no balldontlie tables */ }
 }
 
 /** players to look at now: never looked at first (best first), then the oldest look over 7 days ago (no review / block) */
@@ -394,15 +436,25 @@ function queue(limit: number) {
 
 const run = { at: null as string | null, done: 0, ok: 0, review: 0, none: 0, errors: 0, lastError: null as string | null, running: false };
 /**
- * a batch of players (PHOTO_BATCH, default 30); stops on the first 429. fix212: the batch goes in slices of at most 20
+ * a batch of players (PHOTO_BATCH, default 60 since fix214: ~5 min of 1-a-second calls); stops on the first 429. fix212: the batch goes in slices of at most 20
  * players, the loop yields after every player (and whenever 50 ms have passed), the image work is in a thread: the
  * run was one 12-second turn ("player photos + web writes" stall).
  */
 export const PHOTO_SLICE = 20;
-export async function photosTick(limit = Number(process.env.PHOTO_BATCH) || 30) {
+/** fix214: basketball players turned down by the old rules (stale age) are looked at again now, not in 7 days */
+const MATCHER = 'fix214';
+function requeueOnce() {
+  const done = db.prepare(`SELECT data FROM photo_wd_cache WHERE qid = '_matcher'`).get() as any;
+  if (done?.data === JSON.stringify(MATCHER)) return;
+  const n = db.prepare(`UPDATE player_photos SET checked_at = '2000-01-01T00:00:00.000Z' WHERE sport = 'basketball' AND status = 'none'`).run().changes;
+  db.prepare(`INSERT OR REPLACE INTO photo_wd_cache (qid, data, at) VALUES ('_matcher', ?, ?)`).run(JSON.stringify(MATCHER), new Date().toISOString());
+  logger.info(`player photos: ${n} basketball players queued again (${MATCHER} matcher)`);
+}
+export async function photosTick(limit = Number(process.env.PHOTO_BATCH) || 60) {
   if (run.running || process.env.PLAYER_PHOTOS === '0') return;
   run.running = true;
   try {
+    requeueOnce();
     const list = queue(limit);
     const step = yieldEvery(1, 50);
     let stop = false;
