@@ -6,6 +6,7 @@ import { t as tt, LOCALE } from '../lib/i18n'
 import RecordLink from './RecordLink'
 import { dcLabel, type DC } from '../lib/predict'
 import { DcTag } from './DcPick'
+import { matchHref } from '../lib/links'
 
 type Pick = 'H' | 'D' | 'A'
 const PICK_COLOR: Record<Pick, string> = { H: 'text-home', D: 'text-draw', A: 'text-away' }
@@ -97,7 +98,7 @@ function ResultRow({ r, compact }: { r: Settled; compact?: boolean }) {
     </div>
   )
   return (
-    <Link to={`/match/${r.matchId}`} className="block rounded-xl px-2 py-2 hover:bg-surface2 transition-colors">
+    <Link to={matchHref('football', r.matchId, { home: r.home, away: r.away, date: r.date })!} className="block rounded-xl px-2 py-2 hover:bg-surface2 transition-colors">
       <div className="flex items-center justify-between gap-2 text-[10px] text-faint mb-1">
         <span className="truncate">{r.competition}</span>
         <span className="flex-shrink-0">{when}</span>

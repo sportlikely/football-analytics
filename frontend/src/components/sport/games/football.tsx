@@ -10,6 +10,7 @@ import { toGame, toResult, mainPred, type Match } from '../../SportHome/football
 import { LeaguePanel } from '../../../pages/Dashboard'
 import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 import { footballTeamHref } from '../../../lib/teamLink'
+import { leagueHref } from '../../../lib/links'
 
 /** Football's adapter for the shared Matches page (fix152a): data + labels only. */
 
@@ -56,7 +57,7 @@ function useData(): GamesData {
       const c = m.competition as Match['competition'] & { type?: string }
       if (!leagues.has(c.code)) leagues.set(c.code, {
         code: c.code, name: c.name, short: leagueShortName(c.name), logo: c.emblem || null, country: footballCountry(c as any),
-        rank: c.rank ?? (c.code === 'CL' ? 1 : 0), href: `/league/${c.code}`,
+        rank: c.rank ?? (c.code === 'CL' ? 1 : 0), href: leagueHref('football', c.code, c.name)!,
         fav: { kind: 'league', ref: c.code, code: c.code, name: c.name, img: c.emblem || null }
       })
     }

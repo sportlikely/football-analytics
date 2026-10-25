@@ -1,6 +1,7 @@
 import { t } from '../../lib/i18n'
 import Accuracy from '../../components/sport/Accuracy'
 import { winnerAccuracy } from '../../components/sport/accuracy/winner'
+import { matchHref } from '../../lib/links'
 
 const GROUP: Record<string, string> = { slam: 'Grand Slams', atp: 'ATP', wta: 'WTA', challenger: 'Challenger', 's:hard': 'Hard courts', 's:clay': 'Clay courts', 's:grass': 'Grass courts' }
 
@@ -12,7 +13,7 @@ const a = winnerAccuracy({
   more: 'tennis',
   intro: t('Every pick is saved before the first serve and checked after the match. Nothing is removed. Walkovers and cancelled matches are not counted.'),
   url: '/tennis/accuracy',
-  gameHref: id => `/tennis/match/${id}`,
+  gameHref: r => matchHref('tennis', r.gameId, { ...r, date: r.kickoff })!,
   leagueName: c => t(GROUP[c] || c),
   strongLabel: t('Strong picks right'),
   savedNote: t('picks saved before the first serve'),

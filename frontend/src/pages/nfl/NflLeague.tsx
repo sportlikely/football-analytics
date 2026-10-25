@@ -11,6 +11,7 @@ import { useNews, NewsRows } from '../../components/NewsList'
 import SeasonForecast from '../../components/sport/forecast/SeasonForecast'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import { StandingsBlock, LeagueSwitch, NflGameRow } from './parts'
+import { teamHref, playerHref } from '../../lib/links'
 
 /**
  * NFL + college league page: football's league page (fix152d) — the header with our record, standings and leaders on
@@ -53,7 +54,7 @@ export default function NflLeague() {
       name={name}
       sub={d ? (league === 2 ? t('{0} season · by conference, FBS first', { 0: d.season }) : t('{0} season · regular season', { 0: d.season })) : null}
       record={record}
-      forecast={<SeasonForecast sport="nfl" code={league === 2 ? 'NCAA' : 'NFL'} teamHref={id => `/american-football/team/${id}`} />}
+      forecast={<SeasonForecast sport="nfl" code={league === 2 ? 'NCAA' : 'NFL'} teamHref={(id, name) => teamHref('american-football', id, name)!} />}
       // fix175 (parity) + fix174: favorite star and the weekly hub, like football and basketball
       fav={fav}
       hub={{ to: `/predictions/${league === 2 ? 'college-football' : 'nfl'}`, label: t("This week's predictions →") }}
@@ -73,8 +74,8 @@ export default function NflLeague() {
                         <li key={r.id} className="flex items-center gap-2 text-sm min-w-0">
                           <span className="w-4 text-faint num">{i + 1}</span>
                           {r.team && <TeamLogo team={r.team} size={16} />}
-                          <Link to={`/american-football/player/${r.id}`} className="flex-1 truncate text-ink hover:text-accent">{r.name}</Link>
-                          {r.team && <NameLink to={href.nflTeam(r.team.id)} className="hidden sm:block max-w-[7rem] truncate text-[11px] text-faint">{r.team.name}</NameLink>}
+                          <Link to={playerHref('american-football', r.id, r.name)!} className="flex-1 truncate text-ink hover:text-accent">{r.name}</Link>
+                          {r.team && <NameLink to={href.nflTeam(r.team.id, r.team.name)} className="hidden sm:block max-w-[7rem] truncate text-[11px] text-faint">{r.team.name}</NameLink>}
                           <span className="num font-bold text-ink">{r.value}</span>
                         </li>
                       ))}

@@ -57,9 +57,9 @@ function league(sport: string, code: string, groups: string[], perGroup: number,
   return { sport, code, name: code, season: '2026', runAt: new Date().toISOString(), runs: 20000, known: true, zones, groups, teams, gamesLeft: 200, full, locked: full ? 0 : teams.filter(x => x.locked).length }
 }
 const CASES = [
-  { sport: 'football', path: '/league/PL#forecast', api: '/api/season-forecast/football/league/PL', teams: 20, mk: (full: boolean) => league('football', 'PL', [''], 20, ['title', 'cl', 'europe', 'relegation'], full) },
-  { sport: 'basketball', path: '/basketball/league/NBA#forecast', api: '/api/season-forecast/basketball/league/NBA', teams: 30, mk: (full: boolean) => league('basketball', 'NBA', ['Eastern Conference', 'Western Conference'], 15, ['title', 'final', 'conf_title', 'playoffs', 'playin'], full) },
-  { sport: 'nfl', path: '/american-football/league#forecast', api: '/api/season-forecast/nfl/league/NFL', teams: 32, mk: (full: boolean) => league('nfl', 'NFL', ['AFC', 'NFC'], 16, ['title', 'conf_title', 'div_title', 'bye', 'playoffs'], full) }
+  { sport: 'football', path: '/football/league/premier-league#forecast', id: 'PL', api: '/api/season-forecast/football/league/PL', teams: 20, mk: (full: boolean) => league('football', 'PL', [''], 20, ['title', 'cl', 'europe', 'relegation'], full) },
+  { sport: 'basketball', path: '/basketball/league/nba#forecast', id: 'NBA', api: '/api/season-forecast/basketball/league/NBA', teams: 30, mk: (full: boolean) => league('basketball', 'NBA', ['Eastern Conference', 'Western Conference'], 15, ['title', 'final', 'conf_title', 'playoffs', 'playin'], full) },
+  { sport: 'nfl', path: '/american-football/league/nfl#forecast', id: '1', api: '/api/season-forecast/nfl/league/NFL', teams: 32, mk: (full: boolean) => league('nfl', 'NFL', ['AFC', 'NFC'], 16, ['title', 'conf_title', 'div_title', 'bye', 'playoffs'], full) }
 ]
 const CONFIG: Record<string, unknown> = {
   '/api/basketball/config': { data: { public: true, open: true, leagues: [{ code: 'NBA', name: 'NBA', country: 'USA', logo: null }] } },
@@ -90,6 +90,8 @@ try {
     await page.route('**/socket.io/**', r => r.abort())
     await page.route('**/api/**', async r => {
       const u = new URL(r.request().url())
+      // fix229: the slug address's item (SlugRoute asks /api/slug/<sport>/<kind>/<slug>)
+      if (u.pathname.startsWith('/api/slug/')) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: c.id, slug: u.pathname.split('/').pop() } }) })
       const body = u.pathname === c.api ? { data: c.mk(full) } : CONFIG[u.pathname]
       if (body) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
       if (u.pathname === '/api/auth/me') return r.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"signed out"}' })

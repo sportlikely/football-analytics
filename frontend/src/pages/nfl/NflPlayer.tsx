@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
@@ -9,6 +10,7 @@ import { LeagueSwitch } from './parts'
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
 import NameLink, { href } from '../../components/sport/NameLink'
+import { teamHref, matchHref } from '../../lib/links'
 
 interface Data {
   player: { id: number; name: string; position: string | null; group: string | null; number: number | null; age: number | null; height: string | null; weight: string | null; college: string | null; experience: number | null; image: string | null }
@@ -27,7 +29,7 @@ const CAREER_COLS: { key: string; label: string }[] = [
 
 /** NFL player page (fix137): bio, season totals by group, game log. Pictures from API-Sports only. */
 export default function NflPlayer() {
-  const { id } = useParams()
+  const id = useEntityId()
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
   const [imgBroken, setImgBroken] = useState(false)
@@ -59,7 +61,7 @@ export default function NflPlayer() {
           p.position ? <Chip>{p.position}</Chip> : null,
           p.number != null ? <span className="num">#{p.number}</span> : null
         ].filter(Boolean)}
-        team={d.team ? { name: d.team.name, logo: <TeamLogo team={d.team} size={20} />, href: `/american-football/team/${d.team.id}` } : null}
+        team={d.team ? { name: d.team.name, logo: <TeamLogo team={d.team} size={20} />, href: teamHref('american-football', d.team.id, d.team.name)! } : null}
         facts={bio.filter(([k]) => k !== t('Position') && k !== t('Number'))}
       />
       {p.image && !imgBroken && <img src={p.image} alt="" onError={() => setImgBroken(true)} className="hidden" />}
@@ -97,7 +99,7 @@ export default function NflPlayer() {
                   {d.career!.map(s => (
                     <tr key={`${s.season}${s.team?.id}`} className="border-t border-line/50">
                       <td className="py-1.5 px-1 num text-muted">{s.season}</td>
-                      <td className="py-1.5 px-1">{s.team ? <span className="flex items-center gap-1.5 min-w-0"><TeamLogo team={s.team} size={14} /><NameLink to={href.nflTeam(s.team.id)} className="truncate text-ink">{s.team.name}</NameLink></span> : '–'}</td>
+                      <td className="py-1.5 px-1">{s.team ? <span className="flex items-center gap-1.5 min-w-0"><TeamLogo team={s.team} size={14} /><NameLink to={href.nflTeam(s.team.id, s.team.name)} className="truncate text-ink">{s.team.name}</NameLink></span> : '–'}</td>
                       <td className="py-1.5 px-1 text-right num text-muted">{s.games}</td>
                       {cols.map(c => <td key={c.key} className="py-1.5 px-1 text-right num text-ink">{s.stats[c.key] ?? '–'}</td>)}
                     </tr>
@@ -115,7 +117,7 @@ export default function NflPlayer() {
               const g = l.game, home = g.home.id === l.teamId, opp = home ? g.away : g.home
               return (
                 <li key={g.id} className="py-2 text-sm">
-                  <Link to={`/american-football/game/${g.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 hover:text-accent">
+                  <Link to={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} className="flex flex-wrap items-center gap-x-3 gap-y-1 hover:text-accent">
                     <span className="w-16 text-xs text-faint">{new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
                     <span className="flex items-center gap-1.5 min-w-0"><span className="text-xs text-faint">{home ? t('vs') : '@'}</span><TeamLogo team={opp} size={16} /><span className="truncate text-ink">{opp.name}</span></span>
                     {g.score && <span className="num text-muted">{home ? `${g.score.home}–${g.score.away}` : `${g.score.away}–${g.score.home}`}</span>}

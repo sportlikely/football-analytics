@@ -3,11 +3,12 @@ import type { Favorite } from '../lib/favorites'
 import FavoritesPage from '../components/sport/Favorites'
 import { footballGames } from '../components/sport/games/football'
 import { footballTeamHref } from '../lib/teamLink'
+import { leagueHref, playerHref } from '../lib/links'
 
 /** fix152b: football's Favorites page is the shared one (components/sport/Favorites) with football's adapter. */
 function hrefOf(f: Favorite) {
-  if (f.kind === 'league') return `/league/${f.code || f.ref}`
-  if (f.kind === 'player') return `/player/${f.ref}`
+  if (f.kind === 'league') return leagueHref('football', f.code || f.ref, f.name)!
+  if (f.kind === 'player') return playerHref('football', f.ref, f.name)!
   const id = f.ids?.[0]
   return id ? footballTeamHref(id, f.name) : `/matches`
 }

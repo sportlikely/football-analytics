@@ -1,6 +1,7 @@
 import LeaguePage, { LCard } from '../components/sport/page/LeaguePage'
+import { useEntityId } from '../components/SlugRoute'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { doubleChance, shortTeam, type Prediction } from '../lib/predict'
@@ -13,6 +14,7 @@ import { footballTeamHref } from '../lib/teamLink'
 import NameLink, { href } from '../components/sport/NameLink'
 import SeasonForecast from '../components/sport/forecast/SeasonForecast'
 import { NewsPic } from '../components/NewsList'
+import { playerHref, leagueHref, matchHref } from '../lib/links'
 
 /**
  * League page: /league/<code> (football-data codes like PL, API-Football codes like AF140).
@@ -79,10 +81,11 @@ const editionYears = (e: Edition) => {
   return a === b ? String(a) : `${a}–${String(b).slice(2)}`
 }
 const hasPct = (p: Prediction | null): p is Prediction => !!p && !p.locked && typeof p.home === 'number'
-const playerHref = (s: Scorer, code: string) =>
+// fix229: an API-Football player opens his page; a Football-Data.org scorer (no page id) opens the search with his name
+const scorerHref = (s: Scorer, code: string) =>
   code.startsWith('AF') || s.player.id >= 1_000_000_000
-    ? `/player/${s.player.id}`
-    : `/player/find?${new URLSearchParams({ name: s.player.name, team: String(s.team.id), c: code, n: s.team.name }).toString()}`
+    ? playerHref('football', s.player.id, s.player.name)!
+    : `/search?q=${encodeURIComponent(s.player.name)}`
 const teamLink = (t: Team, code: string) => footballTeamHref(t.id, t.name, code)
 
 const Card = LCard
@@ -105,14 +108,14 @@ const FORM_BG: Record<string, string> = { W: 'bg-win', D: 'bg-draw', L: 'bg-loss
 const FD_OF: Record<string, string> = { AF39: 'PL', AF40: 'ELC', AF140: 'PD', AF135: 'SA', AF78: 'BL1', AF61: 'FL1', AF88: 'DED', AF94: 'PPL', AF2: 'CL', BSA: 'AF71' }
 
 export default function LeagueRoute() {
-  const { code = '' } = useParams()
+  const code = useEntityId() || ''
   const fd = FD_OF[code.toUpperCase()]
-  if (fd) return <Navigate to={`/league/${fd}`} replace />
+  if (fd) return <Navigate to={leagueHref('football', fd)!} replace />
   return <League key={code.toUpperCase()} />
 }
 
 function League() {
-  const { code: raw = '' } = useParams()
+  const raw = useEntityId() || ''
   const code = raw.toUpperCase()
   const [comp, setComp] = useState<Comp | null>(null)
   const [tables, setTables] = useState<{ type: string; group?: string | null; table: StandingRow[] }[] | null>(null)
@@ -221,7 +224,7 @@ function League() {
       hub={hub ? { to: `/predictions/${hub.slug}`, label: tt("This week's predictions →") } : null}
       fav={comp?.name && code ? { kind: 'league', ref: code, code, name: comp.name, img: comp.emblem || null } : null}
       record={record && record.hitRate !== null && record.n > 0 ? { hitRate: record.hitRate, n: record.n } : null}
-      forecast={code ? <SeasonForecast sport="football" code={code} teamHref={(id, name) => href.team(Number(id), code, name) || `/team/${id}`} /> : null}
+      forecast={code ? <SeasonForecast sport="football" code={code} teamHref={(id, name) => href.team(Number(id), code, name) || '/football'} /> : null}
       left={<>
           <Card title={tt("Table")}>
             {!tables ? (
@@ -319,7 +322,7 @@ function League() {
                       <span className="w-5 text-xs num text-faint text-right">{i + 1}</span>
                       <Crest team={s.team} size={22} />
                       <span className="min-w-0 flex-1">
-                        <Link to={playerHref(s, code)} className="block text-sm font-semibold text-ink truncate hover:text-accent">{s.player.name}</Link>
+                        <Link to={scorerHref(s, code)} className="block text-sm font-semibold text-ink truncate hover:text-accent">{s.player.name}</Link>
                         <span className="block h-1.5 mt-1 rounded-full bg-surface2">
                           <span className="block h-full rounded-full bg-accent" style={{ width: `${(v / max) * 100}%` }} />
                         </span>
@@ -341,7 +344,7 @@ function League() {
               <ul className="space-y-1">
                 {live.map(m => (
                   <li key={m.id}>
-                    <Link to={`/match/${m.id}`} state={{ match: m }} className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-surface2/60 text-sm">
+                    <Link to={matchHref('football', m.id, { home: m.homeTeam.name || m.homeTeam.shortName, away: m.awayTeam.name || m.awayTeam.shortName, homeId: m.homeTeam.id, awayId: m.awayTeam.id, date: m.utcDate })!} state={{ match: m }} className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-surface2/60 text-sm">
                       <span className="w-2 h-2 rounded-full bg-live animate-pulseDot" />
                       <span className="truncate flex-1 font-semibold">{tn(m.homeTeam)} – {tn(m.awayTeam)}</span>
                     </Link>
@@ -396,7 +399,7 @@ function League() {
           {/* fix176: between editions — where the next one is being decided */}
           {(code === 'EC' || code === 'WC') && (
             <Card title={tt("Next edition")}>
-              <Link to={code === 'EC' ? '/league/AF960' : '/league/AF32'} className="text-sm font-bold text-accent">{code === 'EC' ? tt("European Championship qualifiers →") : tt("World Cup qualifiers →")}</Link>
+              <Link to={leagueHref('football', code === 'EC' ? 'AF960' : 'AF32')!} className="text-sm font-bold text-accent">{code === 'EC' ? tt("European Championship qualifiers →") : tt("World Cup qualifiers →")}</Link>
             </Card>
           )}
           {edition && edition.matches.length > 0 && (
@@ -415,7 +418,7 @@ function League() {
                   const ft = m.score?.fullTime
                   return (
                     <li key={m.id}>
-                      <Link to={`/match/${m.id}`} state={{ match: m }} className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-surface2/60 text-sm">
+                      <Link to={matchHref('football', m.id, { home: m.homeTeam.name || m.homeTeam.shortName, away: m.awayTeam.name || m.awayTeam.shortName, homeId: m.homeTeam.id, awayId: m.awayTeam.id, date: m.utcDate })!} state={{ match: m }} className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-surface2/60 text-sm">
                         <span className="w-14 text-[11px] text-faint">{new Date(m.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
                         <span className="flex-1 min-w-0">
                           <span className="block truncate">
@@ -450,7 +453,7 @@ function FixtureRow({ m }: { m: Match }) {
   // fix120: our pick is the double chance
   const dc = doubleChance(p)
   return (
-    <Link to={`/match/${m.id}#prediction`} state={{ match: m }} className="flex items-center gap-2 sm:gap-3 px-1 sm:px-2 py-2 rounded-xl hover:bg-surface2/60 transition-colors">
+    <Link to={`${matchHref('football', m.id, { home: m.homeTeam.name || m.homeTeam.shortName, away: m.awayTeam.name || m.awayTeam.shortName, homeId: m.homeTeam.id, awayId: m.awayTeam.id, date: m.utcDate })}#prediction`} state={{ match: m }} className="flex items-center gap-2 sm:gap-3 px-1 sm:px-2 py-2 rounded-xl hover:bg-surface2/60 transition-colors">
       <span className="w-10 sm:w-12 flex-shrink-0 text-center">
         <span className="block text-[10px] text-faint">{new Date(m.utcDate).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric' })}</span>
         <span className="block text-xs font-bold text-ink num">{new Date(m.utcDate).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}</span>

@@ -23,7 +23,7 @@ function Token({ p, side, href }: { p: CourtPlayer; side: 'home' | 'away'; href:
   )
 }
 
-export default function Court({ home, away, playerHref }: { home: CourtSide; away: CourtSide; playerHref: (id: number) => string }) {
+export default function Court({ home, away, playerHref }: { home: CourtSide; away: CourtSide; playerHref: (id: number, name: string) => string | null }) {
   const dots = [
     ...home.starters.slice(0, 5).map((p, i) => ({ p, side: 'home' as const, x: SPOTS[i][0], y: SPOTS[i][1] })),
     ...away.starters.slice(0, 5).map((p, i) => ({ p, side: 'away' as const, x: 100 - SPOTS[i][0], y: 100 - SPOTS[i][1] }))
@@ -37,7 +37,7 @@ export default function Court({ home, away, playerHref }: { home: CourtSide; awa
           <ul className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-3">
             {s.bench.map(p => (
               <li key={`${p.id}${p.name}`} className="flex items-center gap-1.5 min-w-0">
-                {p.id ? <Link to={playerHref(p.id)} className="truncate text-muted hover:text-ink hover:underline">{p.name}</Link> : <span className="truncate text-muted">{p.name}</span>}
+                {p.id ? <Link to={playerHref(p.id, p.name) || '#'} className="truncate text-muted hover:text-ink hover:underline">{p.name}</Link> : <span className="truncate text-muted">{p.name}</span>}
                 {p.min != null && <span className="ml-auto num text-faint shrink-0">{Math.round(p.min)}′</span>}
               </li>
             ))}
@@ -51,7 +51,7 @@ export default function Court({ home, away, playerHref }: { home: CourtSide; awa
             {s.out.map(p => (
               <li key={`${p.id}${p.name}`} className="flex items-center gap-1.5 min-w-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-loss shrink-0" />
-                {p.id ? <Link to={playerHref(p.id)} className="truncate text-ink hover:underline">{p.name}</Link> : <span className="truncate text-ink">{p.name}</span>}
+                {p.id ? <Link to={playerHref(p.id, p.name) || '#'} className="truncate text-ink hover:underline">{p.name}</Link> : <span className="truncate text-ink">{p.name}</span>}
                 {p.status && <span className="ml-auto text-loss font-semibold shrink-0">{p.status}</span>}
               </li>
             ))}
@@ -76,7 +76,7 @@ export default function Court({ home, away, playerHref }: { home: CourtSide; awa
         </svg>
         {dots.map(d => (
           <div key={`${d.side}${d.p.id}${d.p.name}`} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${d.x}%`, top: `${d.y}%` }}>
-            <Token p={d.p} side={d.side} href={d.p.id ? playerHref(d.p.id) : null} />
+            <Token p={d.p} side={d.side} href={d.p.id ? playerHref(d.p.id, d.p.name) : null} />
           </div>
         ))}
       </div>

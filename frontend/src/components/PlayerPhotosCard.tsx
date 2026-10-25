@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
+import { playerHref } from '../lib/links'
 
 /**
  * fix211: Admin → Player photos (tennis, basketball; Wikidata / Commons). Low-confidence matches wait here to be
@@ -15,7 +16,7 @@ interface Data {
   coverage?: { code: string; n: number; has: number; pct: number }[]
   review: PRow[]; recent: PRow[]; notMatched: PRow[]; blocked: { key: string; reason: string; at: string }[]
 }
-const href = (r: PRow) => (r.sport === 'tennis' ? `/tennis/player/${r.id}` : `/basketball/player/${r.id}`)
+const href = (r: PRow) => playerHref(r.sport === 'tennis' ? 'tennis' : 'basketball', r.id, r.name)!
 
 export default function PlayerPhotosCard() {
   const [d, setD] = useState<Data | null>(null)

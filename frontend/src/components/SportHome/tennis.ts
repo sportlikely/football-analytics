@@ -12,13 +12,13 @@ import type { SportAdapter, SportHomeData, HGame, HNews, HResult, HTeam } from '
 
 /** "Vienna · R16" / "Australian Open · Final" */
 export const compOf = (m: TMatch) => [m.tournament.name, roundName(m)].filter(Boolean).join(' · ')
-const side = (s: TMatch['home']): HTeam => ({ id: s.id ?? s.name, name: s.name, short: surname(s), logo: s.logo || null, flag: flagOf(s.country) || null, rank: s.rank, href: tennisHref.player(s.id) || '/tennis' })
+const side = (s: TMatch['home']): HTeam => ({ id: s.id ?? s.name, name: s.name, short: surname(s), logo: s.logo || null, flag: flagOf(s.country) || null, rank: s.rank, href: tennisHref.player(s.id, s.name) || '/tennis' })
 /** "Set 2" while a set is on, the sets won as the score */
 const liveLabel = (m: TMatch) => (m.score ? tt('Set {0}', { 0: Math.min(m.bestOf, m.score.won[0] + m.score.won[1] + 1) }) : tt('LIVE'))
 
 export function toGame(m: TMatch): HGame {
   return {
-    id: m.id, href: tennisHref.match(m.id), reveal: { id: tennisRid(m), status: tennisRstatus(m) }, kickoff: m.start,
+    id: m.id, href: tennisHref.match(m), reveal: { id: tennisRid(m), status: tennisRstatus(m) }, kickoff: m.start,
     competition: { name: compOf(m) }, home: side(m.home), away: side(m.away),
     live: m.state === 'live' ? { label: liveLabel(m), score: m.score ? m.score.won : [0, 0] } : null,
     pred: winnerPred(m.prediction, surname(m.home), surname(m.away), m.prediction?.strongAt ?? TENNIS_STRONG)
@@ -30,7 +30,7 @@ export function toResult(m: TMatch): HResult {
   const p = m.prediction
   const pick = p && p.pick ? p.pick : null
   return {
-    id: m.id, href: tennisHref.match(m.id), competition: compOf(m), date: m.start,
+    id: m.id, href: tennisHref.match(m), competition: compOf(m), date: m.start,
     home: { name: m.home.name, logo: m.home.logo || null, score: m.score ? m.score.won[0] : '', won: m.winner === 1 },
     away: { name: m.away.name, logo: m.away.logo || null, score: m.score ? m.score.won[1] : '', won: m.winner === 2 },
     pick: pick ? { words: surname(pick === 'H' ? m.home : m.away), pct: null, strong: false } : null,
@@ -95,7 +95,7 @@ function useTennisData(): SportHomeData {
     },
     special: {
       title: tt("Upset watch"), tone: 'loss', open: full,
-      items: upsetItems(notStarted, m => m.prediction ? { id: m.id, href: tennisHref.match(m.id), league: compOf(m), date: m.start, home: surname(m.home), away: surname(m.away), pHome: m.prediction.pHome, pAway: m.prediction.pAway, locked: m.prediction.locked } : null),
+      items: upsetItems(notStarted, m => m.prediction ? { id: m.id, href: tennisHref.match(m), league: compOf(m), date: m.start, home: surname(m.home), away: surname(m.away), pHome: m.prediction.pHome, pAway: m.prediction.pAway, locked: m.prediction.locked } : null),
       empty: tt("No upsets on the radar this week."),
       locked: { title: tt("Upset watch"), text: tt("The 2 matches where our model gives the underdog the best chance. Part of Pro.") },
       link: full ? { to: '/tennis/upset-watch', label: tt("All upsets →") } : { to: '/premium', label: tt("Unlock upset watch →") }

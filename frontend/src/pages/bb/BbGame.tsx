@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
@@ -31,6 +32,7 @@ import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { basketballScorers } from '../../lib/scorers'
 import PlayerPhoto from '../../components/sport/PlayerPhoto'
 import KeyPlayers, { type KeyPlayerRow, type KeyTone } from '../../components/sport/game/KeyPlayers'
+import { teamHref, playerHref, leagueHref } from '../../lib/links'
 
 export interface Avg {
   games: number; won: number; lost: number; pointsFor: number; pointsAgainst: number
@@ -99,7 +101,7 @@ const TABS = ['prediction', 'lineups', 'box', 'stats', 'players', 'quarters', 'r
 
 /** A basketball game: the shared game page (football's match page, fix152c) with basketball's data and tabs. */
 export default function BbGame() {
-  const { id = '' } = useParams()
+  const id = useEntityId() || ''
   const { access } = useAuth()
   const cfg = useBbConfig()
   const [d, setD] = useState<Detail | null>(null)
@@ -137,7 +139,7 @@ export default function BbGame() {
   const q = g.quarters
   const showQ = showScore && q && q.home.some(x => x !== null)
   const side = (team: Game['home']) => ({
-    name: team.name, logo: <TeamLogo team={team} size={72} />, href: `/basketball/team/${team.id}#analysis`,
+    name: team.name, logo: <TeamLogo team={team} size={72} />, href: `${teamHref('basketball', team.id, team.name)}#analysis`,
     title: t('{0}: team page', { 0: team.name }), linkLabel: t('Team page →'), star: <FavStar size="sm" fav={bbTeamFav(team, g.league.code)} />
   })
 
@@ -165,7 +167,7 @@ export default function BbGame() {
           {d.keyPlayers && <KeyPlayers home={bbKeySide(d.keyPlayers.home)} away={bbKeySide(d.keyPlayers.away)} />}
           {d.beforeAfter && (
             <NewsChange home={g.home.name} away={g.away.name} before={d.beforeAfter.before} after={d.beforeAfter.after}
-              players={d.beforeAfter.players.map(p => ({ id: p.id, name: p.name, side: p.side, href: href.bbPlayer(p.id), detail: `${p.status} · −${p.points.toFixed(1)} ${t('pts')}` }))} />
+              players={d.beforeAfter.players.map(p => ({ id: p.id, name: p.name, side: p.side, href: href.bbPlayer(p.id, p.name), detail: `${p.status} · −${p.points.toFixed(1)} ${t('pts')}` }))} />
           )}
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
           <YourPicks sport="bb" gameId={g.id} home={g.home.name} away={g.away.name} />
@@ -195,7 +197,7 @@ export default function BbGame() {
           <Court
             home={{ name: g.home.name, starters: d.lineups!.home?.starters || [], bench: d.lineups!.home?.bench || [], out: d.lineups!.home?.out || [] }}
             away={{ name: g.away.name, starters: d.lineups!.away?.starters || [], bench: d.lineups!.away?.bench || [], out: d.lineups!.away?.out || [] }}
-            playerHref={pid => `/basketball/player/${pid}`}
+            playerHref={(pid, name) => playerHref('basketball', pid, name)}
           />
         </Card>
       )
@@ -214,7 +216,7 @@ export default function BbGame() {
       back={{ to: '/basketball/games', label: t('All games') }}
       srTitle={`${g.home.name} vs ${g.away.name} · ${g.league.name} ${t('prediction')}`}
       league={{
-        name: g.league.name, href: `/basketball/league/${g.league.code}`, logo: cfg?.leagues.find(l => l.code === g.league.code)?.logo || null,
+        name: g.league.name, href: leagueHref('basketball', g.league.code, g.league.name)!, logo: cfg?.leagues.find(l => l.code === g.league.code)?.logo || null,
         star: <FavStar size="sm" fav={bbLeagueFav({ code: g.league.code, name: g.league.name, logo: cfg?.leagues.find(l => l.code === g.league.code)?.logo || null })} />,
         bits: [g.round].filter((x): x is string => !!x),
         badges: <>
@@ -235,7 +237,7 @@ export default function BbGame() {
         return ht ? <div className="num text-xs text-faint mt-1">{t('HT')} {ht.home}–{ht.away}</div> : undefined
       })()}
       // fix208 / fix209: each team's top scorer under it, live and final ("Haliburton 28"), from the box score
-      scorers={(live || done) && d.box ? { lines: basketballScorers({ home: d.box.home.top || null, away: d.box.away.top || null }), playerHref: pid => href.bbPlayer(pid) } : null}
+      scorers={(live || done) && d.box ? { lines: basketballScorers({ home: d.box.home.top || null, away: d.box.away.top || null }), playerHref: (pid, name) => href.bbPlayer(pid, name) } : null}
       statusNote={g.state === 'off' ? (
         <p className="mt-2 max-w-[260px] mx-auto text-[11px] text-muted">
           {/CANC|ABD/.test(g.status) ? t('This game was cancelled. It does not count in our record.') : t('This game was postponed. Our prediction stays until the new date.')}
@@ -249,7 +251,7 @@ export default function BbGame() {
             <tbody>
               {(['home', 'away'] as const).map(s => (
                 <tr key={s}>
-                  <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left"><NameLink to={href.bbTeam((s === 'home' ? g.home : g.away).id)}>{(s === 'home' ? g.home : g.away).name}</NameLink></td>
+                  <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left"><NameLink to={href.bbTeam((s === 'home' ? g.home : g.away).id, (s === 'home' ? g.home : g.away).name)}>{(s === 'home' ? g.home : g.away).name}</NameLink></td>
                   {q![s].map((v, i) => (i < 4 || q!.home[4] !== null) && <td key={i} className="px-3 text-center text-ink">{v ?? '–'}</td>)}
                   <td className="px-3 text-center text-ink font-bold">{s === 'home' ? g.score!.home : g.score!.away}</td>
                 </tr>
@@ -344,7 +346,7 @@ function bbKeySide(s: KeySide | null): { name: string; players: KeyPlayerRow[] }
   return {
     name: s.team,
     players: s.players.map(p => ({
-      id: p.id, name: p.name, href: href.bbPlayer(p.id), photo: p.photo,
+      id: p.id, name: p.name, href: href.bbPlayer(p.id, p.name), photo: p.photo,
       detail: [t('{0} pts a game', { 0: `${p.perGame > 0 ? '+' : ''}${p.perGame.toFixed(1)}` }), t('{0} min', { 0: Math.round(p.minutes) }), p.noteKind === 'injury' ? p.note : null].filter(Boolean).join(' · '),
       status: { tone: tone[p.status], label: label(p), title: why(p), link: p.link },
       without: p.without
@@ -444,7 +446,7 @@ function InjuriesCard({ d }: { d: Detail }) {
     <div>
       <div className="flex items-center gap-2 mb-3">
         <TeamLogo team={team} size={22} />
-        <NameLink to={href.bbTeam(team.id)} className="font-display font-bold text-ink">{team.name}</NameLink>
+        <NameLink to={href.bbTeam(team.id, team.name)} className="font-display font-bold text-ink">{team.name}</NameLink>
         {pts ? <span className="ml-auto text-xs font-bold text-loss num">−{pts.toFixed(1)} {t('pts')}</span> : null}
       </div>
       {list.length === 0 ? <p className="text-sm text-faint">{t('No injuries listed.')}</p> : (
@@ -453,7 +455,7 @@ function InjuriesCard({ d }: { d: Detail }) {
             <li key={x.name} className="text-sm">
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full shrink-0 ${x.weight >= 1 ? 'bg-loss' : x.weight >= 0.4 ? 'bg-draw' : 'bg-faint'}`} />
-                {x.playerId ? <Link to={`/basketball/player/${x.playerId}`} className="text-ink font-semibold truncate hover:text-accent">{x.name}</Link> : <span className="text-ink font-semibold truncate">{x.name}</span>}
+                {x.playerId ? <Link to={playerHref('basketball', x.playerId, x.name)!} className="text-ink font-semibold truncate hover:text-accent">{x.name}</Link> : <span className="text-ink font-semibold truncate">{x.name}</span>}
                 {x.minutes !== null && <span className="text-[11px] text-faint num">{t('{0} min', { 0: x.minutes })}</span>}
                 <span className={`ml-auto text-xs font-bold ${x.weight >= 1 ? 'text-loss' : 'text-draw'}`}>{x.status}</span>
               </div>
@@ -499,7 +501,7 @@ function BoxTab({ d }: { d: Detail }) {
       steals: tm?.stl ?? sum('steals'), blocks: tm?.blk ?? sum('blocks'), turnovers: tm?.tov ?? sum('turnovers')
     }
     return (
-    <Card title={<NameLink to={href.bbTeam(team.id)}>{team.name}</NameLink>}>
+    <Card title={<NameLink to={href.bbTeam(team.id, team.name)}>{team.name}</NameLink>}>
       <div className="overflow-x-auto">
         <table className="w-full text-xs num">
           <thead>
@@ -518,7 +520,7 @@ function BoxTab({ d }: { d: Detail }) {
           <tbody>
             {played.map(pl => (
               <tr key={pl.id} className="border-t border-line/40 align-top">
-                <td className="py-1 font-sans text-ink whitespace-nowrap">{pl.photo && <PlayerPhoto src={pl.photo} name={pl.name} size={18} className="mr-1.5 align-middle" />}<Link to={`/basketball/player/${pl.id}`} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
+                <td className="py-1 font-sans text-ink whitespace-nowrap">{pl.photo && <PlayerPhoto src={pl.photo} name={pl.name} size={18} className="mr-1.5 align-middle" />}<Link to={playerHref('basketball', pl.id, pl.name)!} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
                 <td className="text-right px-1 text-muted">{pl.minutes !== null ? Math.round(pl.minutes) : '–'}</td>
                 <td className="text-right px-1 text-ink font-bold">{pl.points ?? '–'}</td>
                 <td className="text-right px-1 text-muted"><Shot m={pl.fgm} a={pl.fga} /></td>
@@ -553,7 +555,7 @@ function BoxTab({ d }: { d: Detail }) {
       {bench.length > 0 && (
         <p className="mt-3 text-xs text-faint">
           <span className="font-semibold text-muted">{live ? t('Bench, not yet played') : t('Did not play')}:</span>{' '}
-          {bench.map((pl, i) => <span key={pl.id}>{i > 0 && ', '}<Link to={`/basketball/player/${pl.id}`} className="hover:text-accent">{pl.name}</Link></span>)}
+          {bench.map((pl, i) => <span key={pl.id}>{i > 0 && ', '}<Link to={playerHref('basketball', pl.id, pl.name)!} className="hover:text-accent">{pl.name}</Link></span>)}
         </p>
       )}
     </Card>

@@ -22,7 +22,7 @@ export function TennisTourChips({ className = '' }: { className?: string }) {
 
 /** "🇪🇸 Carlos Alcaraz 2" — flag, the name (a link when we know the player), the ranking */
 export function PlayerName({ p, short = false, bold = false, className = '' }: { p: TMatch['home']; short?: boolean; bold?: boolean; className?: string }) {
-  const href = tennisHref.player(p.id)
+  const href = tennisHref.player(p.id, p.name)
   const name = short ? surname(p) : p.name
   const flag = flagOf(p.country)
   const body = <>{flag && <span aria-hidden className="mr-1">{flag}</span>}<span className={bold ? 'font-bold text-ink' : ''}>{name}</span>{p.rank ? <span className="ml-1 text-[10px] font-semibold text-faint num">{p.rank}</span> : null}</>
@@ -68,7 +68,7 @@ export function TennisTournamentPanel({ tkey }: { tkey: string }) {
                   <ul className="space-y-1.5 text-xs">
                     {done.map(m => (
                       <li key={m.id}>
-                        <Link to={tennisHref.match(m.id)} className="flex items-center justify-between gap-2 hover:text-accent">
+                        <Link to={tennisHref.match(m)} className="flex items-center justify-between gap-2 hover:text-accent">
                           <span className="min-w-0 truncate"><span className="font-semibold text-ink">{surname(m.winner === 2 ? m.away : m.home)}</span> <span className="text-faint">{t('beat')}</span> {surname(m.winner === 2 ? m.home : m.away)}</span>
                           <span className="num text-muted shrink-0">{setsText(m.score, m.winner === 2)}</span>
                         </Link>
@@ -89,7 +89,7 @@ export function TennisTournamentPanel({ tkey }: { tkey: string }) {
 export const dayTime = (iso: string) => new Date(iso).toLocaleString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 /** a player's finished match as the match and player pages list it */
-export interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; roundCode?: string | null; opponent: { id: number | null; name: string; short?: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean }
+export interface Played { id: number; start: string; tournament: string; tkey: string; surface: string | null; round: string | null; roundCode?: string | null; opponent: { id: number | null; name: string; short?: string; country: string | null }; won: boolean; score: string; sets: number; minutes: number | null; retired: boolean; p1?: { id: number | null; name: string }; p2?: { id: number | null; name: string } }
 
 /** W / L, the opponent (their page), the tournament (its page), the score (the match page) */
 export function FormList({ list, title, empty }: { list: Played[]; title?: ReactNode; empty?: string }) {
@@ -105,7 +105,7 @@ export function FormList({ list, title, empty }: { list: Played[]; title?: React
                 <PlayerName p={{ ...x.opponent, rank: null, logo: null }} className="block truncate" />
                 <span className="block text-[11px] text-faint truncate"><Link to={tennisHref.tournament(x.tkey)} className="hover:text-accent">{x.tournament}</Link>{roundName(x) ? ` · ${roundName(x)}` : ''}</span>
               </span>
-              <Link to={tennisHref.match(x.id)} className="num text-xs text-muted shrink-0 hover:text-accent inline-flex gap-1.5">{x.score.split(' ').filter(Boolean).map((v, i) => <span key={i}>{v.replace('-', '–')}</span>)}{x.retired ? <span>{t('ret.')}</span> : null}</Link>
+              <Link to={tennisHref.match({ id: x.id, start: x.start, home: x.p1 || x.opponent, away: x.p2 || x.opponent })} className="num text-xs text-muted shrink-0 hover:text-accent inline-flex gap-1.5">{x.score.split(' ').filter(Boolean).map((v, i) => <span key={i}>{v.replace('-', '–')}</span>)}{x.retired ? <span>{t('ret.')}</span> : null}</Link>
             </li>
           ))}
         </ul>
@@ -132,7 +132,7 @@ export function DrawTab({ m, rounds }: { m: TMatch | null; rounds: DrawRound[] }
           const w = x.winner
           return (
             <li key={x.id}>
-              <Link to={tennisHref.match(x.id)} className={`block rounded-xl border px-3 py-2 text-sm hover:border-accent/50 ${on ? 'border-accent/70 bg-accent/10' : 'border-line/60 bg-surface2/30'}`}>
+              <Link to={tennisHref.match(x)} className={`block rounded-xl border px-3 py-2 text-sm hover:border-accent/50 ${on ? 'border-accent/70 bg-accent/10' : 'border-line/60 bg-surface2/30'}`}>
                 {([1, 2] as const).map(k => {
                   const s = k === 1 ? x.home : x.away
                   return (

@@ -29,7 +29,7 @@ export interface GamePageProps {
   scoreSub?: ReactNode
   /** fix209: under both teams, live and final (football: goals + red cards; basketball: top scorer; NFL: scoring
    *  plays). null / empty = no line (an upcoming game). Built with lib/scorers.ts; checked by npm run parity. */
-  scorers?: { lines: ScorerLines; playerHref?: (id: number) => string | null } | null
+  scorers?: { lines: ScorerLines; playerHref?: (id: number, name: string) => string | null } | null
   status: { kind: 'live' | 'done' | 'halted' | 'upcoming'; text: string }
   statusNote?: ReactNode
   /** colour of the pick's glow ('--home' / '--away' / '--draw') */

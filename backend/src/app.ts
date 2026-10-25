@@ -95,7 +95,9 @@ import { builder, webBuilds } from './services/builders';
 import { workerHealth, memorySizing } from './services/workerHealth';
 import { perfHours } from './services/perfHistory';
 import { sharedStatus } from './services/shared';
-import { forwardToWorker } from './services/forward';
+import { forwardToWorker, fetchFromWorker } from './services/forward';
+import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, type LinkAnswer } from './services/slugs';
+import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
 import { definePage, getPage, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
@@ -581,7 +583,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|changelog$|hub(\/|$)|slugs\/|slug\/|slug-of\/|slug-route$|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -2550,6 +2552,51 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+// fix229: clean links. The app's exception list per sport (stored by the worker, ETag), slug → id and id → slug for a
+// page (the web process reads its state; anything outside it is asked of the worker, which reads the table)
+const linkSport = (s: string): s is LinkSport => (LINK_SPORTS as readonly string[]).includes(s);
+const linkKind = (k: string): k is LinkKind => (LINK_KINDS as readonly string[]).includes(k);
+const slugEtags = new Map<string, { text: string; etag: string }>();
+const sendSlugs = (req: express.Request, res: express.Response, text: string | null) => {
+  if (!text) return res.status(503).set('Retry-After', '30').json({ error: 'Not ready yet' });
+  const k = req.path;
+  let e = slugEtags.get(k);
+  if (!e || e.text !== text) { e = { text, etag: etagOf(text) }; slugEtags.set(k, e); }
+  res.set({ ETag: e.etag, 'Cache-Control': 'public, max-age=300' }).type('json');
+  if (req.fresh) return res.status(304).end();
+  res.send(text);
+};
+app.get('/api/slugs/:sport', (req, res) => { const s = String(req.params.sport); if (!linkSport(s)) return res.status(404).json({ error: 'Not found' }); sendSlugs(req, res, clientSlugs(s)); });
+app.get('/api/slugs/:sport/players', (req, res) => { const s = String(req.params.sport); if (!linkSport(s)) return res.status(404).json({ error: 'Not found' }); sendSlugs(req, res, clientSlugs(s, true)); });
+app.get('/api/slug/:sport/:kind/:slug', (req, res) => {
+  const { sport, kind, slug } = req.params as Record<string, string>;
+  if (!linkSport(sport) || !linkKind(kind) || !isSlug(slug)) return res.status(404).json({ error: 'Not found' });
+  const hit = idOfSlug(sport, kind, slug);
+  if (hit) return res.set('Cache-Control', 'public, max-age=300').json({ data: { id: hit.id, slug: hit.canonical } });
+  if (isWeb) return forwardToWorker(req, res);
+  const a = linkAnswer(`/${sport}/${kind}/${slug}`);
+  if (a && 'to' in a) return res.json({ data: { slug: a.to.split('/').pop() } });
+  res.status(404).json({ error: 'Not found', search: a && 'search' in a ? a.search : null });
+});
+app.get('/api/slug-of/:sport/:kind/:id', (req, res) => {
+  const { sport, kind, id } = req.params as Record<string, string>;
+  if (!linkSport(sport) || !linkKind(kind) || !/^-?[A-Za-z0-9-]{1,40}$/.test(id)) return res.status(404).json({ error: 'Not found' });
+  const s = slugOf(sport, kind, id);
+  if (s) return res.set('Cache-Control', 'public, max-age=300').json({ data: { slug: s } });
+  if (isWeb) return forwardToWorker(req, res);
+  // the old address's own lookup (a Football-Data.org team id with its league + name)
+  const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  const a = linkAnswer(kind === 'league' && sport === 'american-football' ? (id === '2' ? '/american-football/college/league' : '/american-football/league') : internalPath(sport, kind, id), qs);
+  if (a && 'to' in a) return res.json({ data: { slug: a.to.split('?')[0].split('/').pop() } });
+  res.status(404).json({ error: 'Not found' });
+});
+// the page route's question to the worker (an address outside the web process's state): 301 / search / the item
+app.get('/api/slug-route', (req, res) => {
+  const p = String(req.query.p || '').slice(0, 300), qs = String(req.query.q || '').slice(0, 300);
+  res.set('Cache-Control', 'no-store').json({ data: linkAnswer(p, qs) });
+});
+app.get('/api/admin/slugs', (_req, res) => res.json({ data: slugStatus() }));
+
 // Weekly league hubs (fix125): this week's games of a big league with their preview texts (never the pick or a %)
 app.get('/api/hub/:slug', (req, res) => {
   try {
@@ -4140,7 +4187,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   app.use(express.static(STATIC_DIR, { index: false, maxAge: '7d' }));
   const indexHtml = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
   // fix202: the sport home pages (every language) as search engines get them: stored pages built in the worker
-  const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr'].map(l => `/${l}`)].flatMap(l => ['', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
+  const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr'].map(l => `/${l}`)].flatMap(l => ['', '/football', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
   // fix221: the finished HTML is stored beside each (made by the worker): the web process only sends it
   const VIEWS_HTML = { html: (b: any) => (b ? renderIndex(indexHtml, b) : '') };
   definePage({ name: 'seo', freshMs: 10 * 60 * 1000, warm: SEO_HOMES.map(p => ({ path: p })), variants: VIEWS_HTML, build: q => seoPage(q.path) });
@@ -4152,9 +4199,24 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   definePage({ name: 'bb-game-facts', freshMs: 10 * 60 * 1000, freshOf: bbFactsFreshMs, refresh: false, keepMs: 8 * 86400000, build: q => bbGameFacts(Number(q.id)) });
   definePage({ name: 'seo-page', freshMs: 10 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, variants: VIEWS_HTML, build: q => seoPage(q.path) });
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
+  // fix229: an address outside the web process's slug state — the worker reads the table (3 s at most, else the app page)
+  const askWorker = async (req: express.Request, qs: string): Promise<LinkAnswer> => {
+    try {
+      const a = await fetchFromWorker(req, 3000, `/api/slug-route?p=${encodeURIComponent(req.path.slice(0, 300))}&q=${encodeURIComponent(qs.slice(0, 300))}`);
+      return a.status === 200 ? (JSON.parse(a.body.toString('utf8'))?.data ?? null) : null;
+    } catch { return null; }
+  };
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
+    // fix229: clean links — an old address (/team/86?c=…, /match/1, /basketball/game/1 …, any language) answers 301 with
+    // its slug address in one hop, a renamed item's old slug 301 to the new one, an unknown slug the search page
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    let la: LinkAnswer = linkAnswer(req.path, qs);
+    if (la && 'ask' in la) la = await askWorker(req, qs);
+    if (la && 'to' in la) return res.redirect(301, la.to);
+    if (la && 'search' in la) return res.redirect(302, la.search);
     // old hub URLs (fix134): /predictions/PL → /predictions/premier-league, permanently
-    const moved = hubRedirect(req.path) || leagueRedirect(req.path); // fix176: /league/BSA → /league/AF71
+    const moved0 = hubRedirect(req.path) || leagueRedirect(req.path); // fix176: /league/BSA → /league/AF71
+    const moved = moved0 ? pubPath(moved0) : null; // fix229: straight to the slug address (one hop)
     if (moved) return res.redirect(301, moved + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''));
     // fix185: American football is one sport — the old college list pages are the same pages filtered to college
     const college = /^\/american-football\/college(\/games|\/today)?\/?$/.exec(req.path);
@@ -4174,10 +4236,11 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     }
     res.set('Cache-Control', 'no-cache');
     try {
-      const bbg = bbPublic() ? bbGamePath(req.path) : null;
+      const lang0 = (/^\/(es|pt|de|fr|it|tr)(\/|$)/.exec(req.path)?.[1] || 'en') as any;
+      const bbg = !bbPublic() ? null : la && 'page' in la && la.page.sport === 'basketball' && la.page.kind === 'match' ? { id: Number(la.page.id), lang: lang0 } : bbGamePath(req.path);
       if (bbg) {
         const f = (await getPage('bb-game-facts', { id: bbg.id }, { waitMs: SEO_WAIT_MS }))?.body;
-        if (f) return res.type('html').send(renderIndex(indexHtml, bbGameSeo(f, bbg.lang)));
+        if (f) return res.type('html').send(renderIndex(indexHtml, bbGameSeo(f, bbg.lang, la && 'page' in la ? la.page.slug : undefined)));
       }
       const home = seoHome(req.path);
       // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page

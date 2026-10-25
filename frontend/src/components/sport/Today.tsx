@@ -14,14 +14,15 @@ export interface TodayAdapter {
   title: string
   /** /api/today parameters */
   params: Record<string, string | number>
-  gameHref: (id: number) => string
-  leagueHref: (code: string | null) => string | null
+  /** fix229: the game's slug link (lib/links.ts matchHref) */
+  gameHref: (g: Game) => string
+  leagueHref: (code: string | null, name?: string) => string | null
   all: { to: string; label: string }
   /** the switcher above the title (American football: NFL | College) */
   top?: ReactNode
 }
 
-interface Game { id: number; kickoff: string; home: string; away: string; score: [number, number] | null; line: string }
+export interface Game { id: number; kickoff: string; home: string; away: string; homeId?: number | null; awayId?: number | null; score: [number, number] | null; line: string }
 interface Group { league: string; code: string | null; games: Game[] }
 
 const localDay = () => {
@@ -66,14 +67,14 @@ export default function Today({ a }: { a: TodayAdapter }) {
       )}
 
       {groups?.map(g => {
-        const href = a.leagueHref(g.code)
+        const href = a.leagueHref(g.code, g.league)
         return (
           <section key={g.code || g.league} className="card p-3 sm:p-4 space-y-1">
             <h2 className="font-display text-base font-bold px-2 pt-1">{href ? <Link to={href} className="hover:text-accent">{g.league}</Link> : g.league}</h2>
             <ul className="divide-y divide-line/50">
               {g.games.map(x => (
                 <li key={x.id}>
-                  <Link to={a.gameHref(x.id)} className="flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-surface2/60 transition-colors">
+                  <Link to={a.gameHref(x)} className="flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-surface2/60 transition-colors">
                     <span className="w-12 flex-shrink-0 text-xs font-bold text-ink pt-0.5 num">
                       {x.score ? `${x.score[0]}–${x.score[1]}` : new Date(x.kickoff).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}
                     </span>

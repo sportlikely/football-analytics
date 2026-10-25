@@ -48,7 +48,8 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/tennis\/(matches|rankings|accuracy|upset-watch)$/, freshMs: 2 * MIN },
   { re: /^\/api\/tennis\/(player\/\d+|tournament\/[a-z0-9-]+)$/, freshMs: 10 * MIN },
   { re: /^\/api\/season-forecast\/(football|basketball|nfl)\/(league\/[A-Za-z0-9]+|team\/\d+|game\/\d+)$/, freshMs: 2 * MIN }, // fix215
-  { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN }
+  { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN },
+  { re: /^\/api\/slug-route$/, freshMs: 1 * MIN } // fix229: an address outside the web process's slug state
 ];
 
 /**
@@ -87,6 +88,12 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   { path: '/api/search', sport: 'all', by: 'worker', sample: '/api/search?q=arsenal' },
   { path: '/api/today', sport: 'all', by: 'worker', sample: '/api/today?sport=football' },
   { path: '/api/news', sport: 'all', by: 'worker', sample: '/api/news' },
+  // fix229: clean links — the app's exception lists and slug ↔ id from the worker's published state (a miss is passed on)
+  { path: '/api/slugs/:sport', sport: 'all', by: 'stored', sample: '/api/slugs/football' },
+  { path: '/api/slugs/:sport/players', sport: 'all', by: 'stored', sample: '/api/slugs/football/players' },
+  { path: '/api/slug/:sport/:kind/:slug', sport: 'all', by: 'stored', sample: '/api/slug/football/team/barcelona' },
+  { path: '/api/slug-of/:sport/:kind/:id', sport: 'all', by: 'stored', sample: '/api/slug-of/football/team/1000000529' },
+  { path: '/api/slug-route', sport: 'all', by: 'worker', sample: '/api/slug-route?p=/team/1' },
   { path: '/api/hub', sport: 'football', by: 'stored', sample: '/api/hub' },
   { path: '/api/hub/:slug', sport: 'football', by: 'stored', sample: '/api/hub/premier-league' },
   { path: '/api/public/record', sport: 'football', by: 'stored', sample: '/api/public/record' },

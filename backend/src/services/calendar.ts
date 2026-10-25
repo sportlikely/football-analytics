@@ -10,6 +10,7 @@
  * No odds, no betting words.
  */
 import crypto from 'crypto';
+import { pubPath } from './slugs';
 import { db } from '../db';
 import { runsJobs } from './role';
 import { listFavorites, type Favorite } from './favorites';
@@ -253,7 +254,7 @@ function footballGames(ids: Set<number>, from: string, to: string, full: (id: nu
     const hg = r.home_goals ?? af?.hg, ag = r.away_goals ?? af?.ag;
     out.push({
       sport: 'football', key: 'fb', id: r.match_id, start: af?.kickoff || r.utc_date, hours: 2, home: r.home_team, away: r.away_team,
-      comp: r.competition_name || '', venue: null, path: `/match/${r.match_id}`, state,
+      comp: r.competition_name || '', venue: null, path: pubPath(`/match/${r.match_id}`), state,
       score: state === 'done' && hg != null && ag != null ? [hg, ag] : null, winner: null,
       pred: { h: pct(r.p_home)!, d: pct(r.p_draw), a: pct(r.p_away)! }, full: full(r.match_id)
     });
@@ -272,7 +273,7 @@ function footballGames(ids: Set<number>, from: string, to: string, full: (id: nu
       const status = String(f.status || '').toUpperCase();
       const state: State = FB_OFF.has(status) ? 'off' : FB_DONE.has(status) ? 'done' : 'sched';
       out.push({ sport: 'football', key: 'fb', id, start: f.kickoff, hours: 2, home: f.home_name, away: f.away_name, comp: names.get(f.league_id) || '', venue: null,
-        path: `/match/${id}`, state, score: state === 'done' && f.hg != null && f.ag != null ? [f.hg, f.ag] : null, winner: null, pred: null, full: full(id) });
+        path: pubPath(`/match/${id}`), state, score: state === 'done' && f.hg != null && f.ag != null ? [f.hg, f.ag] : null, winner: null, pred: null, full: full(id) });
     }
   }
   return out;
@@ -297,7 +298,7 @@ function basketballGames(ids: number[], from: string, to: string, full: (rid: nu
     const state = usState(r.status, r.hs, r.as_);
     const p = pct(r.p_home);
     return { sport: 'basketball', key: 'bb', id: r.game_id, start: r.kickoff, hours: 2.5, home: r.home_name, away: r.away_name, comp: names.get(r.code) || r.code,
-      venue: null, path: `/basketball/game/${r.game_id}`, state, score: state === 'done' ? [r.hs, r.as_] : null, winner: null,
+      venue: null, path: pubPath(`/basketball/game/${r.game_id}`), state, score: state === 'done' ? [r.hs, r.as_] : null, winner: null,
       pred: p == null ? null : { h: p, d: null, a: 100 - p }, full: full(-r.game_id) } as Game;
   });
 }
@@ -312,7 +313,7 @@ function nflGames(ids: number[], from: string, to: string, full: (rid: number) =
     const state = usState(r.status, r.home_pts, r.away_pts);
     const p = pct(r.p_home);
     return { sport: 'american-football', key: 'nfl', id: r.game_id, start: r.kickoff, hours: 3.5, home: r.home_name, away: r.away_name,
-      comp: r.league === 2 ? 'College football' : 'NFL', venue: r.venue || null, path: `/american-football/game/${r.game_id}`, state,
+      comp: r.league === 2 ? 'College football' : 'NFL', venue: r.venue || null, path: pubPath(`/american-football/game/${r.game_id}`), state,
       score: state === 'done' ? [r.home_pts, r.away_pts] : null, winner: null, pred: p == null ? null : { h: p, d: null, a: 100 - p }, full: full(-(2e9 + r.game_id)) } as Game;
   });
 }
@@ -332,7 +333,7 @@ function tennisGames(ids: number[], from: string, to: string, full: (rid: number
     const saved = !!m.prediction; // a locked prediction is still a prediction
     return { sport: 'tennis', key: 'tennis', id: m.id, start: m.start, hours: m.bestOf === 5 ? 3.5 : 2, home: m.home.name, away: m.away.name,
       comp: [m.tournament.name, m.round].filter(Boolean).join(' · '), venue: [m.tournament.city, m.tournament.country].filter(Boolean).join(', ') || null,
-      path: `/tennis/match/${m.id}`, state, score: state === 'done' && m.score ? [m.score.won[0], m.score.won[1]] : null, winner: m.winner,
+      path: pubPath(`/tennis/match/${m.id}`), state, score: state === 'done' && m.score ? [m.score.won[0], m.score.won[1]] : null, winner: m.winner,
       pred: p ? { h: p.pHome, d: null, a: p.pAway } : saved ? { h: NaN, d: null, a: NaN } : null, full: !!p } as Game;
   });
 }

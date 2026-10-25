@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
@@ -12,6 +13,7 @@ import { teamPlace } from '../../lib/bbTable'
 import TeamPage, { TCard as Card } from '../../components/sport/page/TeamPage'
 import TeamForecast from '../../components/sport/forecast/TeamForecast'
 import { BbTeamAnalysisCard, TeamRecordCard, type BbAnalysis } from '../../components/TeamAnalysis'
+import { playerHref, leagueHref, matchHref } from '../../lib/links'
 
 interface Profile { games: number; fgPct: number | null; threePct: number | null; threeAttempts: number | null; ftPct: number | null; rebounds: number | null; assists: number | null; turnovers: number | null; steals: number | null; blocks: number | null }
 interface Analysis {
@@ -41,7 +43,7 @@ interface SquadPlayer { id: number; name: string; number: string | null; positio
 
 /** A team: strengths and weaknesses, form chart, splits, news, next games and results. */
 export default function BbTeam() {
-  const { id = '' } = useParams()
+  const id = useEntityId() || ''
   const cfg = useBbConfig()
   const [d, setD] = useState<TeamData | null | undefined>(undefined)
   const news = useNews({ sport: 'basketball', teamId: id, limit: 8 })
@@ -73,12 +75,12 @@ export default function BbTeam() {
         `${t('Home')} ${s.homeWon}–${s.homeLost}`,
         `${t('Away')} ${s.awayWon}–${s.awayLost}`
       ] : []}
-      note={<>{league ? <Link to={`/basketball/league/${league.code}`} className="hover:text-white">{t('{0} table →', { 0: league.name })}</Link> : null}{d.noGamesYet && <span className="block">{d.standing ? t('#{0} in the table · {1}–{2}', { 0: d.standing.position, 1: d.standing.won, 2: d.standing.lost }) + ' · ' : ''}{t("Games appear here once the league's schedule is loaded.")}</span>}</>}
+      note={<>{league ? <Link to={leagueHref('basketball', league.code, league.name)!} className="hover:text-white">{t('{0} table →', { 0: league.name })}</Link> : null}{d.noGamesYet && <span className="block">{d.standing ? t('#{0} in the table · {1}–{2}', { 0: d.standing.position, 1: d.standing.won, 2: d.standing.lost }) + ' · ' : ''}{t("Games appear here once the league's schedule is loaded.")}</span>}</>}
       form={form}
       left={<>
         {/* fix126: Team analysis, like football (strengths & weaknesses, model rating, 1–10 scores, rank over time) */}
         <div id="analysis" className="scroll-mt-24"><BbTeamAnalysisCard a={d.teamAnalysis} full={!!d.teamAnalysis && !d.teamAnalysis.locked} /></div>
-        <TeamForecast sport="basketball" id={id} leagueHref={c => `/basketball/league/${c}`} />
+        <TeamForecast sport="basketball" id={id} leagueHref={c => leagueHref('basketball', c)!} />
         {an && (
           <>
               <Card title={t('Compared with the league')}>
@@ -111,7 +113,7 @@ export default function BbTeam() {
               </Card>
               {an.last20.length > 0 && (
                 <Card title={t('Last {0} games', { 0: an.last20.length })} action={an.streak && an.streak.n >= 2 ? <span className={`text-xs font-bold ${an.streak.kind === 'W' ? 'text-win' : 'text-loss'}`}>{an.streak.kind === 'W' ? t('{0} wins in a row', { 0: an.streak.n }) : t('{0} losses in a row', { 0: an.streak.n })}</span> : undefined}>
-                  <MarginChart games={an.last20} />
+                  <MarginChart games={an.last20} team={d.team} />
                   <p className="mt-2 text-[11px] text-faint">{t('Bars: points won or lost by. Green = win, red = loss. Tap a bar for the game.')}</p>
                 </Card>
               )}
@@ -163,7 +165,7 @@ const PROFILE_ROWS: { k: keyof Profile; label: string; pct?: boolean; lowerBette
 ]
 
 /** Win/loss margin per game as bars (oldest left). */
-function MarginChart({ games }: { games: Analysis['last20'] }) {
+function MarginChart({ games, team }: { games: Analysis['last20']; team: { id: number; name: string } }) {
   const max = Math.max(10, ...games.map(g => Math.abs(g.margin)))
   const w = 100 / games.length
   return (
@@ -175,7 +177,7 @@ function MarginChart({ games }: { games: Analysis['last20'] }) {
         {games.map(g => {
           const h = (Math.abs(g.margin) / max) * 50
           return (
-            <Link key={g.id} to={`/basketball/game/${g.id}`} className="relative h-full group" style={{ width: `${w}%` }}
+            <Link key={g.id} to={matchHref('basketball', g.id, g.home ? { home: team.name, homeId: team.id, away: g.opponent, date: g.kickoff } : { home: g.opponent, away: team.name, awayId: team.id, date: g.kickoff })!} className="relative h-full group" style={{ width: `${w}%` }}
               title={`${new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })} · ${g.home ? t('H') : t('A')} ${g.opponent} · ${g.for}–${g.against}`}>
               <span className={`absolute left-[15%] right-[15%] rounded-sm ${g.margin > 0 ? 'bg-win' : 'bg-loss'} group-hover:opacity-80`}
                 style={g.margin > 0 ? { bottom: '50%', height: `${h}%` } : { top: '50%', height: `${h}%` }} />
@@ -214,7 +216,7 @@ function SquadCard({ players }: { players: SquadPlayer[] }) {
               <tr key={p.id} className="border-t border-line/40 hover:bg-surface2/40">
                 <td className="py-1.5 px-2 text-faint">{p.number ?? ''}</td>
                 <td className="py-1.5 pr-2 font-sans whitespace-nowrap">
-                  <Link to={`/basketball/player/${p.id}`} className="text-ink font-semibold hover:text-accent">{p.name}</Link>
+                  <Link to={playerHref('basketball', p.id, p.name)!} className="text-ink font-semibold hover:text-accent">{p.name}</Link>
                   {p.position && <span className="ml-1.5 text-[10px] text-faint">{p.position}</span>}
                   {p.injury && <span className="ml-1.5 rounded px-1 text-[9px] font-bold bg-loss/15 text-loss">{p.injury}</span>}
                   {p.statsFrom && p.statsFrom !== 'current' && <span className="ml-1.5 rounded px-1 text-[9px] font-semibold bg-surface2 text-faint" title={t('No games this season yet: his last season in our leagues')}>{p.statsFrom.league ? `${p.statsFrom.league} ` : ''}{p.statsFrom.season}</span>}
@@ -256,7 +258,7 @@ function MiniTable({ code, teamId, name }: { code: string; teamId: number; name:
   const i = gr.rows.findIndex(r => r.team.id === teamId)
   const from = Math.max(0, Math.min(i - 3, gr.rows.length - 7))
   return (
-    <Card title={<NameLink to={href.bbLeague(code)}>{gr.name && gr.name !== name ? `${name} · ${gr.name}` : name}</NameLink>} action={<Link to={`/basketball/league/${code}`} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
+    <Card title={<NameLink to={href.bbLeague(code)}>{gr.name && gr.name !== name ? `${name} · ${gr.name}` : name}</NameLink>} action={<Link to={leagueHref('basketball', code, name)!} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
       <StandingsTable data={{ season: data!.season, groups: [{ ...gr, rows: gr.rows.slice(from, from + 7) }] }} mark={[teamId]} />
     </Card>
   )

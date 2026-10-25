@@ -56,6 +56,7 @@ import { buildBbCalibration } from './services/sportCalibration';
 import { startKeyPlayersScheduler } from './services/keyPlayers';
 import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
 import { pushAlertsTick } from './services/pushAlerts';
+import { buildSlugs } from './services/slugs';
 
 let started = false;
 
@@ -66,6 +67,9 @@ export function startJobs() {
   clearLive();
 
   every('link check', linkCheckTick, 3600 * 1000).unref();
+  // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the
+  // first run waits for the leagues and the team index to load (a league's country decides a shared name's slug)
+  after('slugs', () => buildSlugs().then(() => every('slugs', () => buildSlugs(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();
   // fix169: the weekly prediction hubs are rebuilt in the background (visitors and crawlers get the cached copy)
   every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
   // fix175: indexes for the crawler pages, built off the main thread

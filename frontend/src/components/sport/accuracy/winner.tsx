@@ -33,7 +33,8 @@ export interface WinnerOpts {
   more: MoreSport
   intro: string
   url: string
-  gameHref: (id: number) => string
+  /** fix229: the game's slug link (lib/links.ts matchHref) */
+  gameHref: (r: { gameId: number; kickoff: string; home: string; away: string }) => string
   leagueName: (code: string) => string
   leagueHref?: (code: string) => string | null
   strongLabel: string
@@ -50,7 +51,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
   const day = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })
   const line = (r: Row | Pending, mid: string, end: JSX.Element) => (
     <li key={r.gameId}>
-      <Link to={o.gameHref(r.gameId)} className="flex items-center gap-2 py-2 text-sm hover:bg-surface2/50 rounded-lg px-1 min-w-0">
+      <Link to={o.gameHref(r)} className="flex items-center gap-2 py-2 text-sm hover:bg-surface2/50 rounded-lg px-1 min-w-0">
         {mid === '' ? null : <span className="w-16 shrink-0 text-xs text-faint">{mid}</span>}
         <TeamLogo team={{ name: r.home, logo: r.homeLogo }} size={16} />
         <span className={`truncate ${r.pick === 'H' ? 'font-bold text-ink' : 'text-muted'}`}>{r.home}</span>
@@ -101,7 +102,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
         cols: [l.strongHitRate ?? null, l.marginOff != null ? (o.scoreWords?.aFmt ? o.scoreWords.aFmt(l.marginOff) : `±${l.marginOff}`) : null, l.totalOff != null ? (o.scoreWords?.bFmt ? o.scoreWords.bFmt(l.totalOff) : `±${l.totalOff}`) : null],
       })),
       recent: d.recent.map(r => ({
-        id: r.gameId, href: o.gameHref(r.gameId), date: r.kickoff, comp: o.leagueName(r.code), compHref: o.leagueHref?.(r.code) || null, home: r.home, away: r.away, score: `${r.score[0]}–${r.score[1]}`,
+        id: r.gameId, href: o.gameHref(r), date: r.kickoff, comp: o.leagueName(r.code), compHref: o.leagueHref?.(r.code) || null, home: r.home, away: r.away, score: `${r.score[0]}–${r.score[1]}`,
         cells: [<span className="inline-flex items-center gap-1.5"><Tick hit={r.hit} /> <span className="text-ink truncate">{r.pick === 'H' ? r.home : r.away}</span> <span className="num text-faint">{pct(Math.round(100 * (r.pick === 'H' ? r.pHome : 1 - r.pHome)))}</span></span>]
       })),
       after: (

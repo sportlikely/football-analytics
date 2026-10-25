@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
+import { playerHref } from '../lib/links'
 
 type Item = {
   id: number; playerId: number; name: string; teamId: number; team: string | null; code: string; status: 'out' | 'doubtful'; injury: string | null
@@ -33,7 +34,7 @@ export default function NewsInjuriesCard() {
           {list.map(x => (
             <li key={x.id} className="py-2.5 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                <Link to={`/basketball/player/${x.playerId}`} className="font-semibold text-ink hover:underline">{x.name}</Link>
+                <Link to={playerHref('basketball', x.playerId, x.name)!} className="font-semibold text-ink hover:underline">{x.name}</Link>
                 <span className="text-faint">{x.team || x.teamId} · {x.code}</span>
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${x.state === 'active' ? 'bg-loss/15 text-loss' : 'bg-surface2 text-muted'}`}>{x.state === 'active' ? `${x.status}${x.injury ? ` (${x.injury})` : ''} until ${x.until.slice(0, 10)}` : x.state}</span>
                 {x.reviewed && x.state === 'active' && <span className="text-[10px] text-win font-bold">checked</span>}

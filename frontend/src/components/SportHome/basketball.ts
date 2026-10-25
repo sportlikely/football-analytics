@@ -8,6 +8,7 @@ import { useBbConfig, useBbFavorites, liveLabel, bbRank, type BbGame } from '../
 import { rid, rstatus, bbShort } from '../../pages/bb/parts'
 import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats, recordAside } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
+import { teamHref, leagueHref, matchHref } from '../../lib/links'
 
 /** Basketball's adapter for components/SportHome (fix141): the data and labels of the basketball home. */
 
@@ -19,10 +20,10 @@ const hasPct = (g: BbGame) => !!g.prediction && !g.prediction.locked && typeof g
 const top = (g: BbGame) => Math.max(g.prediction!.pHome!, g.prediction!.pAway!)
 
 export function toGame(g: BbGame): HGame {
-  const team = (s: BbGame['home']) => ({ id: s.id, name: s.name, short: bbShort(s.name, g.league.code), logo: s.logo, href: `/basketball/team/${s.id}` })
+  const team = (s: BbGame['home']) => ({ id: s.id, name: s.name, short: bbShort(s.name, g.league.code), logo: s.logo, href: teamHref('basketball', s.id, s.name)! })
   return {
-    id: g.id, href: `/basketball/game/${g.id}`, reveal: { id: rid(g), status: rstatus(g) }, kickoff: g.kickoff,
-    competition: { name: g.league.name, href: `/basketball/league/${g.league.code}` }, home: team(g.home), away: team(g.away),
+    id: g.id, href: matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, reveal: { id: rid(g), status: rstatus(g) }, kickoff: g.kickoff,
+    competition: { name: g.league.name, href: leagueHref('basketball', g.league.code, g.league.name)! }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: liveLabel(g, true), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
     pred: winnerPred(g.prediction, bbShort(g.home.name, g.league.code), bbShort(g.away.name, g.league.code), g.prediction?.strongAt ?? STRONG)
   }
@@ -33,7 +34,7 @@ export function toResult(g: BbGame): HResult {
   const pick = g.prediction?.pick || null
   const won = (s: 'H' | 'A') => !!g.score && (s === 'H' ? g.score.home > g.score.away : g.score.away > g.score.home)
   return {
-    id: g.id, href: `/basketball/game/${g.id}`, competition: g.league.name, date: g.kickoff,
+    id: g.id, href: matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, competition: g.league.name, date: g.kickoff,
     home: { name: g.home.name, logo: g.home.logo, score: g.score?.home ?? '', won: won('H') },
     away: { name: g.away.name, logo: g.away.logo, score: g.score?.away ?? '', won: won('A') },
     pick: pick ? { words: pick === 'H' ? g.home.name : g.away.name, pct: null, strong: false } : null,
@@ -96,7 +97,7 @@ function useBasketballData(): SportHomeData {
     },
     special: {
       title: tt("Upset watch"), tone: 'loss', open: full,
-      items: upsetItems(notStarted, g => g.prediction ? { id: g.id, href: `/basketball/game/${g.id}`, league: g.league.name, date: g.kickoff, home: g.home.name, away: g.away.name, pHome: g.prediction.pHome, pAway: g.prediction.pAway, locked: g.prediction.locked } : null),
+      items: upsetItems(notStarted, g => g.prediction ? { id: g.id, href: matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, league: g.league.name, date: g.kickoff, home: g.home.name, away: g.away.name, pHome: g.prediction.pHome, pAway: g.prediction.pAway, locked: g.prediction.locked } : null),
       empty: tt("No upsets on the radar this week."),
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
       link: full ? { to: '/basketball/games', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }

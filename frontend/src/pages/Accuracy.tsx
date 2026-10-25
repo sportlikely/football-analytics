@@ -5,6 +5,7 @@ import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { slAdmin } from '../lib/modelNames'
+import { matchHref } from '../lib/links'
 
 type Outcome = 'H' | 'D' | 'A'
 
@@ -240,7 +241,7 @@ function Accuracy() {
                         {new Date(r.date).toLocaleDateString(LOCALE, { day: '2-digit', month: 'short' })}
                       </td>
                       <td>
-                        <Link to={`/match/${r.matchId}`} className="hover:underline">
+                        <Link to={matchHref('football', r.matchId, { home: r.home, away: r.away, date: r.date })!} className="hover:underline">
                           {r.home} – {r.away}
                         </Link>
                         <span className="text-xs text-faint ml-2 hidden md:inline">{r.competition}</span>

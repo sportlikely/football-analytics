@@ -5,6 +5,7 @@ import { API_URL } from '../lib/socket'
 import { errorText } from '../lib/auth'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { OurPickBadge } from '../components/DcPick'
+import { matchHref } from '../lib/links'
 
 /*
  * Draw picks (Pro): the 2 games of the coming 7 days where a draw is most likely by our own model, then more
@@ -37,7 +38,7 @@ function Crest({ src, name }: { src?: string | null; name: string }) {
 function PickCard({ p, n }: { p: Pick; n: number }) {
   const max = 50
   return (
-    <Link to={`/match/${p.matchId}`} className="card card-hover relative overflow-hidden p-5 sm:p-6 flex flex-col gap-5 border-draw/40">
+    <Link to={matchHref('football', p.matchId, { home: p.home, away: p.away, date: p.date })!} className="card card-hover relative overflow-hidden p-5 sm:p-6 flex flex-col gap-5 border-draw/40">
       <div className="pointer-events-none absolute -top-24 -right-24 w-64 h-64 rounded-full bg-draw/15 blur-3xl" />
       <div className="relative flex items-center justify-between gap-3 text-xs">
         <span className="inline-flex items-center gap-2 min-w-0">
@@ -128,7 +129,7 @@ export default function DrawAlerts() {
           <ul className="divide-y divide-line/50">
             {data.likely.filter(m => !data.picks.some(p => p.matchId === m.matchId)).map(m => (
               <li key={m.matchId}>
-                <Link to={`/match/${m.matchId}`} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 hover:bg-surface2/50">
+                <Link to={matchHref('football', m.matchId, { home: m.home, away: m.away, date: m.date })!} className="flex items-center gap-3 px-4 sm:px-5 py-2.5 hover:bg-surface2/50">
                   <span className="w-16 flex-shrink-0 text-[11px] text-faint leading-tight">
                     {new Date(m.date).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric' })}
                     <span className="block num">{new Date(m.date).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}</span>

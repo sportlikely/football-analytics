@@ -9,6 +9,7 @@ import { t as tt } from '../../lib/i18n'
 import { slModel } from '../../lib/modelNames'
 import type { SportAdapter, SportHomeData, HGame, HNews, HRecordRow, HResult, HSpecialItem } from './types'
 import { footballTeamHref } from '../../lib/teamLink'
+import { leagueHref, matchHref } from '../../lib/links'
 
 /** Football's adapter for components/SportHome (fix141): the data and labels of the football home. */
 
@@ -83,8 +84,8 @@ export function toGame(m: Match): HGame {
     }
   } else if (p) pred = { kind: 'locked', heads: ['1', 'X', '2'] } // fix160: drawn blurred, like the open block
   return {
-    id: m.id, href: `/match/${m.id}`, linkState: { match: m }, reveal: { id: m.id, status: m.status }, kickoff: m.utcDate,
-    competition: { name: m.competition.name, emblem: m.competition.emblem || null, href: m.competition.code ? `/league/${m.competition.code}` : null },
+    id: m.id, href: matchHref('football', m.id, { home: m.homeTeam.name || m.homeTeam.shortName, away: m.awayTeam.name || m.awayTeam.shortName, homeId: m.homeTeam.id, awayId: m.awayTeam.id, date: m.utcDate })!, linkState: { match: m }, reveal: { id: m.id, status: m.status }, kickoff: m.utcDate,
+    competition: { name: m.competition.name, emblem: m.competition.emblem || null, href: leagueHref('football', m.competition.code, m.competition.name) },
     home: team(m.homeTeam), away: team(m.awayTeam),
     live: live ? { label: m.minute ? `${m.minute}'` : tt('Live'), score: [m.score?.fullTime?.home ?? 0, m.score?.fullTime?.away ?? 0] } : null,
     pred
@@ -95,7 +96,7 @@ export function toGame(m: Match): HGame {
 export function toResult(r: any): HResult {
   const [hg, ag] = String(r.score || '').split(/[–-]/).map((x: string) => x.trim())
   return {
-    id: r.matchId, href: `/match/${r.matchId}`, competition: r.competition || '', date: r.date,
+    id: r.matchId, href: matchHref('football', r.matchId, { home: r.home, away: r.away, date: r.date })!, competition: r.competition || '', date: r.date,
     home: { name: r.home, logo: r.homeCrest || null, score: hg, won: r.outcome === 'H' },
     away: { name: r.away, logo: r.awayCrest || null, score: ag, won: r.outcome === 'A' },
     pick: r.dc ? { words: dcLabel(r.dc.pick, r.home, r.away), tag: r.dc.pick, pct: r.dc.p ?? null, strong: false } : null,
@@ -187,7 +188,7 @@ function useFootballData(): SportHomeData {
   const rows: HRecordRow[] | null = summary ? RECORD_ROWS.map(r => ({ key: r.key, label: tt(r.label), ...(summary.highlights?.[r.key] || { n: 0, pct: null }) })) : null
   const sure = summary ? dcSure(summary.doubleChance) : null
   const specialItems: HSpecialItem[] = alerts.map(x => ({
-    id: x.matchId, href: `/match/${x.matchId}`, league: x.league, date: x.date, title: `${x.home} – ${x.away}`,
+    id: x.matchId, href: matchHref('football', x.matchId, { home: x.home, away: x.away, date: x.date })!, league: x.league, date: x.date, title: `${x.home} – ${x.away}`,
     main: { label: tt('Draw chance'), value: `${Math.round(x.ourDraw)}%` },
     extra: x.dc ? { label: tt('Our pick'), value: `${x.dc.k} · ${Math.round(x.dc.p)}%` } : null
   }))

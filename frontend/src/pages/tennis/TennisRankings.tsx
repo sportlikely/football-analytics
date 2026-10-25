@@ -19,7 +19,7 @@ const Move = ({ r }: { r: Row }) => (
 const Name = ({ r }: { r: Row }) => {
   // fix211: the player's photo when we have one (initials otherwise), then flag and name
   const body = <><PlayerPhoto src={r.photo} name={r.name} size={22} className="mr-2 align-middle" />{flagOf(r.country) && <span aria-hidden className="mr-1.5">{flagOf(r.country)}</span>}{r.name}</>
-  return r.id ? <Link to={tennisHref.player(r.id)!} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{body}</Link> : <span className="min-w-0 truncate font-semibold text-ink">{body}</span>
+  return r.id ? <Link to={tennisHref.player(r.id, r.name)!} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{body}</Link> : <span className="min-w-0 truncate font-semibold text-ink">{body}</span>
 }
 
 /**

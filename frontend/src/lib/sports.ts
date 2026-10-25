@@ -14,7 +14,7 @@ export interface Sport {
 }
 
 export const SPORTS: Sport[] = [
-  { id: 'football', name: t('Football'), icon: '⚽', path: '/', live: true },
+  { id: 'football', name: t('Football'), icon: '⚽', path: '/football', live: true }, // fix229: the football home has its own address
   { id: 'basketball', name: t('Basketball'), icon: '🏀', path: '/basketball', live: false },
   { id: 'american-football', name: t('American football'), short: 'NFL', icon: '🏈', path: '/american-football', live: false },
   // fix145: tennis last (coming soon)

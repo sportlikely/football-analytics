@@ -74,7 +74,7 @@ function useData(): GamesData {
     return {
       loading: matches === null, error, games, leagues: [...leagues.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),
       results: { rows: results ? results.map(toResult) : null, days: 30, link: null },
-      favTeams: favs.players.map(f => ({ key: f.ref, name: f.name, logo: null, to: tennisHref.player(Number(f.ref)) || '/tennis' })),
+      favTeams: favs.players.map(f => ({ key: f.ref, name: f.name, logo: null, to: tennisHref.player(Number(f.ref), f.name) || '/tennis' })),
       favLeagues: list.filter(f => f.kind === 'tennis-tournament').map(f => f.ref),
       hasFavorites: favs.all.length > 0
     }

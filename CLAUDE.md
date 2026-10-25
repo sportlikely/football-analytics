@@ -43,6 +43,23 @@ is model work, the matching note, in the same commit.
   public lists (current season only; past seasons are admin-only).
 - **Live games:** Live games appear once — in the Live strip — and never again in the day lists, in every sport; live cards look the same in every sport (football is the reference).
 
+## Links (Yarin, 25 Oct 2026 — permanent, every sport, every language)
+
+- **Every public page is `/<lang?>/<sport>/<kind>/<slug>`**: teams, players, leagues, matches, any future page type, any future
+  sport (`/football/team/real-madrid`, `/es/basketball/match/lakers-vs-celtics-2026-10-26`, `/tennis/league/atp-paris-masters`).
+  `<sport>` = football | basketball | american-football | tennis (a new sport: its name with dashes); one word "match" for
+  every sport. Sport homes: `/football`, `/basketball`, `/american-football`, `/tennis` ("/" stays the site home).
+- **No ids or query strings in public links.** Links come from `frontend/src/lib/links.ts` (teamHref / playerHref /
+  leagueHref / matchHref, never a hand-built path); the server turns any old address into its slug one with `pubPath` /
+  `pubLinks` (`backend/src/services/slugs.ts`). The few allowed query params are `ALLOWED_QUERY` in the slug rules (one list).
+- Slug rules: one file, two copies that must stay identical (`backend/src/utils/slugRules.ts`, `frontend/src/lib/slugRules.ts`):
+  lowercase ASCII with dashes, common short name. Who gets a shared name: `utils/slugAssign.ts` (the bigger item keeps the
+  plain slug; the next gets name + country / team / birth year / -2). Table `slugs` (sport, kind, slug, id, is_primary).
+- **Old links 301 in one hop, forever**; a renamed item keeps its old slug as an alias (301 to the new); an unknown slug opens
+  the search (`/search?q=`), never a 404. New items get their slug from the worker's "slugs" job (15 min).
+- `npm run parity` fails on an id / query-string link or a missing `/<sport>/<kind>/:slug` route (scripts/links-check.ts);
+  `npm run test:fix229` (backend) checks the rules, uniqueness, one-hop 301s and the sitemaps. Notes: docs/notes/links.md.
+
 ## How to work here
 
 - Branches: for normal fixes and features push to `main` when Yarin says so ("push to main"). For anything touching
@@ -148,6 +165,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
 - Season forecast (fix215): `utils/seasonSim.ts` (engine, pure), `utils/seasonRules.ts` (per-league rules), `utils/seasonFit.ts`
   (thread part), `services/seasonForecast.ts` (inputs, runs 10 min after each finished game + nightly, Free view, data health).
   Frontend `components/sport/forecast/*`, `lib/seasonForecast.ts`. Notes: docs/notes/season-forecast.md.
+- Clean links (fix229): `services/slugs.ts` (table slugs + slug_ids, worker job "slugs", state `slugs:<sport>`, the 301s in
+  app.ts's page route, `/api/slug*`), rules `utils/slugRules.ts` (= frontend `lib/slugRules.ts`), `utils/slugAssign.ts`;
+  frontend `lib/links.ts` (every item link), `components/SlugRoute.tsx` (slug → id for the page, old in-app links move on).
 - `OPEN_API` in `app.ts` lists the public routes; everything else is admin/staff only (answered by the worker).
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):

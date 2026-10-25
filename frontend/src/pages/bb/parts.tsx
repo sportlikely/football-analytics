@@ -8,6 +8,7 @@ import { BB_STATUS, BB_COUNTRY, liveLabel, bbRank, timeOf, useBbFavorites, type 
 import { useStuck, stuckBg } from '../../lib/useStuck'
 import { LiveChancePanel } from '../../components/sport/game/LiveChance'
 import { ScorersToggle, RowScorersLine, useScorersOpen } from '../../components/sport/RowScorers'
+import { leagueHref, matchHref } from '../../lib/links'
 
 /** Shared pieces of the basketball pages — the same look as the football pages. */
 
@@ -92,7 +93,7 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
 
   return (
     <div>
-    <Link to={`/basketball/game/${g.id}#prediction`} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
+    <Link to={`${matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })}#prediction`} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
       {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       {/* time / status */}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
@@ -193,7 +194,7 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
       </div>
       )}
     </Link>
-      {scOpen && <RowScorersLine href={`/basketball/game/${g.id}`} live={isLive} homeName={g.home.name} awayName={g.away.name} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+      {scOpen && <RowScorersLine href={matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} live={isLive} homeName={g.home.name} awayName={g.away.name} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
     </div>
   )
 }
@@ -209,7 +210,7 @@ export function LeagueCards({ games, logos }: { games: BbGame[]; logos?: Record<
         const list = by.get(code)!
         return (
           <div key={code} className="card overflow-hidden">
-            <LeagueBar country={BB_COUNTRY[code] || 'world'} name={list[0].league.name} logo={logos?.[code]} to={`/basketball/league/${code}`} count={list.length} />
+            <LeagueBar country={BB_COUNTRY[code] || 'world'} name={list[0].league.name} logo={logos?.[code]} to={leagueHref('basketball', code, list[0].league.name)!} count={list.length} />
             <div className="divide-y divide-line/40">{list.map(g => <GameRow key={g.id} g={g} />)}</div>
           </div>
         )
@@ -255,7 +256,7 @@ export function dayTitle(iso: string) {
  *  (the live win chance stays on the game page). */
 export function LiveRow({ g }: { g: BbGame }) {
   return (
-    <Link to={`/basketball/game/${g.id}`} className="block rounded-xl px-2 py-2 hover:bg-surface2 transition-colors">
+    <Link to={matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} className="block rounded-xl px-2 py-2 hover:bg-surface2 transition-colors">
       <div className="flex items-center justify-between text-[10px] text-faint mb-1">
         <span className="truncate">{g.league.name}</span>
         <span className="font-bold text-live tracking-wider">{liveLabel(g, true)}</span>

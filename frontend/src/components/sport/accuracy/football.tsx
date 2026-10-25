@@ -5,6 +5,7 @@ import { dcLabel } from '../../../lib/predict'
 import { DcTag } from '../../DcPick'
 import AccuracyDetailed from '../../../pages/Accuracy'
 import { Card, Bar, Tick, pct, StatCard, SectionHead, type AccuracyAdapter, type AccData } from '../Accuracy'
+import { leagueHref, matchHref } from '../../../lib/links'
 
 /** Football's Accuracy adapter (/public/record): the double chance up top, then the hard and the safer calls. */
 type Outcome = 'H' | 'D' | 'A'
@@ -93,11 +94,11 @@ export const footballAccuracy: AccuracyAdapter = {
       leagues: rec.byCompetition.map(c => ({
         key: c.code || c.name,
         name: <span className="inline-flex items-center gap-2 min-w-0"><Flag code={footballCountry({ code: c.code, name: c.name })} size={16} /><span className="truncate">{leagueShortName(c.name)}</span></span>,
-        href: c.code ? `/league/${c.code}` : null,
+        href: leagueHref('football', c.code, c.name),
         n: c.n, main: c.v3, cols: [c.dc ?? null, c.btts ?? null, c.over25 ?? null]
       })),
       recent: rec.recent.map(x => ({
-        id: x.matchId, href: `/match/${x.matchId}`, date: x.date, comp: x.competition, compHref: (() => { const c = rec.byCompetition.find(b => b.name === x.competition)?.code; return c ? `/league/${c}` : null })(), home: x.home, away: x.away, score: x.score,
+        id: x.matchId, href: matchHref('football', x.matchId, { home: x.home, away: x.away, date: x.date })!, date: x.date, comp: x.competition, compHref: leagueHref('football', rec.byCompetition.find(b => b.name === x.competition)?.code, x.competition), home: x.home, away: x.away, score: x.score,
         cells: [
           x.dc ? <span className="inline-flex items-center gap-1.5"><Tick hit={x.dc.hit} /> <DcTag code={x.dc.pick} /> <span className="text-ink truncate">{dcLabel(x.dc.pick, x.home, x.away)}</span></span> : <span className="text-faint">–</span>,
           <span className="inline-flex items-center gap-1.5"><Tick hit={x.result.hit} /> <span className="text-muted truncate">{name(x, x.result.pick)}</span></span>,

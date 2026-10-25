@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { matchHref, playerHref, leagueHref } from './links'
 import axios from 'axios'
 import { API_URL } from './socket'
 import { t, LOCALE, lang } from './i18n'
@@ -205,10 +206,12 @@ export function isoOfCountry(name: string | null | undefined): string {
 
 /* ---------- links ---------- */
 
+// fix229: slug links (/tennis/match/<player>-vs-<player>-<day>, /tennis/player/<slug>, /tennis/league/<tournament key>)
+type TLinkSide = { id: number | null; name: string }
 export const tennisHref = {
-  match: (id: number) => `/tennis/match/${id}`,
-  player: (id: number | null | undefined) => (id ? `/tennis/player/${id}` : null),
-  tournament: (key: string) => `/tennis/tournament/${key}`
+  match: (m: { id: number; start: string; home: TLinkSide; away: TLinkSide }) => matchHref('tennis', m.id, { home: m.home.name, away: m.away.name, homeId: m.home.id, awayId: m.away.id, date: m.start })!,
+  player: (id: number | null | undefined, name: string | null | undefined) => playerHref('tennis', id, name),
+  tournament: (key: string) => leagueHref('tennis', key)!
 }
 export const timeOf = (iso: string) => new Date(iso).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })
 

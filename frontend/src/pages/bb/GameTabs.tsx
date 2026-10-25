@@ -7,6 +7,7 @@ import { Card, TeamLogo } from './parts'
 import { StandingsTable, type Standings, type StandRow } from './BbLeague'
 import { teamPlace, groupShort, groupIn, ordinal } from '../../lib/bbTable'
 import type { Avg, Sched, Brief, H2H } from './BbGame'
+import { teamHref, matchHref } from '../../lib/links'
 
 /** The richer game-page tabs (Oct 2026): statistics, schedule & rest, head-to-head and standings. */
 
@@ -20,7 +21,7 @@ function TeamsHead({ g, sub }: { g: Game; sub?: (s: Side) => ReactNode }) {
   const side = (s: Side) => {
     const team = s === 'H' ? g.home : g.away
     return (
-      <Link to={`/basketball/team/${team.id}`} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 group text-center ${s === 'A' ? 'sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
+      <Link to={teamHref('basketball', team.id, team.name)!} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 group text-center ${s === 'A' ? 'sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
         <span className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-surface2/80 border border-line/60 grid place-items-center shrink-0"><TeamLogo team={team} size={30} /></span>
         <span className="min-w-0 max-w-full">
           <span className="block font-display font-bold text-ink truncate group-hover:text-accent">{team.name}</span>
@@ -159,12 +160,16 @@ const Ico = {
   next: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
 }
 
-function Result({ b, base }: { b: Brief; base: string }) {
+/** fix229: a game of a team's schedule: the slug link from the team, the opponent and the day */
+const briefHref = (b: Brief, team: { id: number; name: string }, nfl: boolean) =>
+  matchHref(nfl ? 'american-football' : 'basketball', b.id, b.home ? { home: team.name, homeId: team.id, away: b.opponent, date: b.kickoff } : { home: b.opponent, away: team.name, awayId: team.id, date: b.kickoff })!
+
+function Result({ b, team, nfl }: { b: Brief; team: { id: number; name: string }; nfl: boolean }) {
   const [x, y] = (b.score || '').split('-').map(Number)
   const margin = Number.isFinite(x) && Number.isFinite(y) ? Math.abs(x - y) : null
   return (
     <li>
-      <Link to={`${base}/game/${b.id}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
+      <Link to={briefHref(b, team, nfl)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
         <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${b.result === 'W' ? 'bg-win/15 text-win' : b.result === 'L' ? 'bg-loss/15 text-loss' : 'bg-surface2 text-faint'}`}>{b.result === 'W' ? t('W') : b.result === 'L' ? t('L') : b.result === 'T' ? t('T') : '–'}</span>
         <span className="num text-faint w-12 shrink-0">{new Date(b.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
         <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${b.home ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{b.home ? t('H') : t('A')}</span>
@@ -177,11 +182,11 @@ function Result({ b, base }: { b: Brief; base: string }) {
   )
 }
 
-function Upcoming({ b, from, base }: { b: Brief; from: number; base: string }) {
+function Upcoming({ b, from, team, nfl }: { b: Brief; from: number; team: { id: number; name: string }; nfl: boolean }) {
   const days = Math.max(0, Math.round((new Date(b.kickoff).getTime() - from) / DAY))
   return (
     <li>
-      <Link to={`${base}/game/${b.id}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
+      <Link to={briefHref(b, team, nfl)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
         <span className="w-6 h-6 rounded-md grid place-items-center border border-dashed border-line text-faint shrink-0">
           <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></svg>
         </span>
@@ -197,8 +202,8 @@ function Upcoming({ b, from, base }: { b: Brief; from: number; base: string }) {
 
 /** Schedule & rest — basketball (back-to-backs) and, since fix174, NFL + college (short weeks and byes). */
 export function RestTab({ g, home, away, sport = 'basketball' }: { g: Pick<Game, 'kickoff' | 'home' | 'away'>; home: Sched; away: Sched; sport?: 'basketball' | 'nfl' }) {
-  const nfl = sport === 'nfl', base = nfl ? '/american-football' : '/basketball'
-  const teamHref = (id: number) => (nfl ? href.nflTeam(id) : href.bbTeam(id))
+  const nfl = sport === 'nfl'
+  const teamHref = (id: number, name: string) => (nfl ? href.nflTeam(id, name) : href.bbTeam(id, name))
   const shortLabel = nfl ? t('Short week') : t('B2B')
   const from = new Date(g.kickoff).getTime()
   const restTone = (s: Sched): Tone => (s.restDays === null ? 'none' : s.backToBack ? 'bad' : s.restDays < 2 ? 'mid' : 'good')
@@ -220,7 +225,7 @@ export function RestTab({ g, home, away, sport = 'basketball' }: { g: Pick<Game,
         <div className="flex items-center gap-2 mb-3">
           <span className={`w-1 h-6 rounded-full ${BG[s]}`} />
           <TeamLogo team={team} size={22} />
-          <NameLink to={teamHref(team.id)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
+          <NameLink to={teamHref(team.id, team.name)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
           {x.backToBack && <span className="ml-auto rounded-full bg-loss/15 text-loss px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{shortLabel}</span>}
           {x.offBye && <span className="ml-auto rounded-full bg-win/15 text-win px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{t('Off a bye')}</span>}
         </div>
@@ -232,13 +237,13 @@ export function RestTab({ g, home, away, sport = 'basketball' }: { g: Pick<Game,
         {x.recent.length > 0 && (
           <>
             <div className="label pb-1 px-2">{t('Before this game')}</div>
-            <ul className="mb-3">{x.recent.map(b => <Result key={b.id} b={b} base={base} />)}</ul>
+            <ul className="mb-3">{x.recent.map(b => <Result key={b.id} b={b} team={team} nfl={nfl} />)}</ul>
           </>
         )}
         {x.upcoming.length > 0 && (
           <>
             <div className="label pb-1 px-2">{t('After this game')}</div>
-            <ul>{x.upcoming.map(b => <Upcoming key={b.id} b={b} from={from} base={base} />)}</ul>
+            <ul>{x.upcoming.map(b => <Upcoming key={b.id} b={b} from={from} team={team} nfl={nfl} />)}</ul>
           </>
         )}
       </div>
@@ -285,7 +290,7 @@ export function H2HTab({ g, list }: { g: Game; list: H2H[] }) {
                 <div key={s} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
                   <span className="w-12 h-12 rounded-2xl bg-surface border border-line/60 grid place-items-center shrink-0"><TeamLogo team={teamOf(s)} size={30} /></span>
                   <span className="min-w-0 max-w-full">
-                    <NameLink to={href.bbTeam(teamOf(s).id)} className="block font-display font-bold text-ink truncate">{teamOf(s).name}</NameLink>
+                    <NameLink to={href.bbTeam(teamOf(s).id, teamOf(s).name)} className="block font-display font-bold text-ink truncate">{teamOf(s).name}</NameLink>
                     <span className="block text-[11px] text-faint num">{t('{0} pts a game', { 0: avg(s === 'H' ? hp : ap) })}</span>
                   </span>
                 </div>
@@ -312,7 +317,7 @@ export function H2HTab({ g, list }: { g: Game; list: H2H[] }) {
               const winner: Side = homeWon ? hs : as
               return (
                 <li key={m.id}>
-                  <Link to={`/basketball/game/${m.id}`} className="grid grid-cols-[3.5rem_1fr_auto_1fr_2.5rem] sm:grid-cols-[5.5rem_1fr_auto_1fr_3rem] items-center gap-2 sm:gap-3 py-2 px-1 rounded-lg hover:bg-surface2/50 text-sm">
+                  <Link to={matchHref('basketball', m.id, { home: m.home, away: m.away, homeId: m.homeId, date: m.kickoff })!} className="grid grid-cols-[3.5rem_1fr_auto_1fr_2.5rem] sm:grid-cols-[5.5rem_1fr_auto_1fr_3rem] items-center gap-2 sm:gap-3 py-2 px-1 rounded-lg hover:bg-surface2/50 text-sm">
                     <span className="text-[11px] text-faint leading-tight">
                       {new Date(m.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}
                       <span className="hidden sm:block text-[10px] truncate">{m.league}</span>
@@ -363,7 +368,7 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
         <span className={`absolute top-0 ${s === 'H' ? 'left-0' : 'right-0'} w-1 h-full ${BG[s]}`} />
         <div className={`flex items-center gap-2 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
           <TeamLogo team={team} size={22} />
-          <NameLink to={href.bbTeam(team.id)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
+          <NameLink to={href.bbTeam(team.id, team.name)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
         </div>
         {x ? (
           <div className={`mt-3 flex items-end gap-4 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
@@ -400,7 +405,7 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
       )}
       {h && a && same && gap > 0 && (
         <p className="mt-3 text-center text-xs text-muted">
-          <b className={TEXT[h.r.position < a.r.position ? 'H' : 'A']}><NameLink to={href.bbTeam(h.r.position < a.r.position ? g.home.id : g.away.id)}>{h.r.position < a.r.position ? g.home.name : g.away.name}</NameLink></b> {gap === 1 ? t('are one place higher') : t('are {0} places higher', { 0: gap })}
+          <b className={TEXT[h.r.position < a.r.position ? 'H' : 'A']}><NameLink to={href.bbTeam(h.r.position < a.r.position ? g.home.id : g.away.id, h.r.position < a.r.position ? g.home.name : g.away.name)}>{h.r.position < a.r.position ? g.home.name : g.away.name}</NameLink></b> {gap === 1 ? t('are one place higher') : t('are {0} places higher', { 0: gap })}
         </p>
       )}
       <div className="mt-5">

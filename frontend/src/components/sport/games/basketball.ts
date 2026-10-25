@@ -7,6 +7,7 @@ import { useAuth } from '../../../lib/auth'
 import { useBbConfig, useBbFavorites, bbLeagueFav, bbRank, BB_COUNTRY, type BbGame } from '../../../lib/bb'
 import { toGame, toResult } from '../../SportHome/basketball'
 import type { GamesAdapter, GamesData, SGame, SLeague, SChip } from '../types'
+import { teamHref, leagueHref } from '../../../lib/links'
 
 /** Basketball's adapter for the shared Games page (fix152a): data + labels only. */
 
@@ -40,13 +41,13 @@ function useData(): GamesData {
   }, [access])
 
   return useMemo(() => {
-    const leagues: SLeague[] = (cfg?.leagues || []).map(l => ({ code: l.code, name: l.name, logo: l.logo, country: BB_COUNTRY[l.code] || 'world', rank: bbRank(l.code), href: `/basketball/league/${l.code}`, fav: bbLeagueFav(l) }))
+    const leagues: SLeague[] = (cfg?.leagues || []).map(l => ({ code: l.code, name: l.name, logo: l.logo, country: BB_COUNTRY[l.code] || 'world', rank: bbRank(l.code), href: leagueHref('basketball', l.code, l.name)!, fav: bbLeagueFav(l) }))
     const byCode = new Map(leagues.map(l => [l.code, l]))
     const list: SGame[] = (games || []).filter(g => g.state === 'upcoming' || g.state === 'live').map(g => {
       const h = toGame(g)
       const p = g.prediction
       const open = !!p && !p.locked && typeof p.pHome === 'number'
-      const league = byCode.get(g.league.code) || { code: g.league.code, name: g.league.name, logo: null, country: BB_COUNTRY[g.league.code] || 'world', rank: bbRank(g.league.code), href: `/basketball/league/${g.league.code}`, fav: bbLeagueFav({ code: g.league.code, name: g.league.name, logo: null }) }
+      const league = byCode.get(g.league.code) || { code: g.league.code, name: g.league.name, logo: null, country: BB_COUNTRY[g.league.code] || 'world', rank: bbRank(g.league.code), href: leagueHref('basketball', g.league.code, g.league.name)!, fav: bbLeagueFav({ code: g.league.code, name: g.league.name, logo: null }) }
       // Spotlight: the bigger the league, then the closer the game
       const weight = open ? Math.max(0, 20 - bbRank(g.league.code)) / 4 + (1 - Math.abs(p!.pHome! - 50) / 50) : 0
       let note: SGame['note'] = null
@@ -56,7 +57,7 @@ function useData(): GamesData {
     return {
       loading: games === null, error, games: list, leagues,
       results: { rows: results ? results.slice(0, 40).map(toResult) : null, days: 7, link: { to: '/basketball/accuracy', label: tt("How accurate is the model? →") } },
-      favTeams: favs.teams.map(f => ({ key: f.ref, name: f.name, logo: f.img || null, to: `/basketball/team/${f.ref}` })),
+      favTeams: favs.teams.map(f => ({ key: f.ref, name: f.name, logo: f.img || null, to: teamHref('basketball', f.ref, f.name)! })),
       favLeagues: favs.leagues.map(f => f.ref),
       hasFavorites: favs.all.length > 0
     }

@@ -11,6 +11,7 @@
  * is set up. About 80 players; the first run of a week costs a few hundred API-Football calls, later ones are cached.
  */
 import { db } from '../db';
+import { pubPath } from './slugs';
 import logger from '../utils/logger';
 import footballDataAPI from './footballDataAPI';
 import { findPlayer, playerPage, FD_TO_AF } from './playerPage';
@@ -166,7 +167,7 @@ export function auditEmail(report: any) {
   const tone = pct >= 98 ? C.green : pct >= 93 ? C.amber : C.red;
   const day = new Date(report.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   const playerLink = (i: AuditIssue) =>
-    i.playerId ? `<a href="${SITE}/player/${i.playerId}" style="color:${C.ink};font-weight:700;text-decoration:none">${esc(i.player)}</a>` : `<b>${esc(i.player || leagueName(i.league))}</b>`;
+    i.playerId ? `<a href="${SITE}${pubPath(`/player/${i.playerId}`)}" style="color:${C.ink};font-weight:700;text-decoration:none">${esc(i.player)}</a>` : `<b>${esc(i.player || leagueName(i.league))}</b>`;
   const chip = (t: string) => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${C.muted};background:${C.chip};border-radius:6px;padding:2px 7px;margin-left:6px">${esc(t)}</span>`;
 
   // score

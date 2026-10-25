@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
@@ -9,6 +10,7 @@ import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
 import { FavStar } from '../../lib/favorites'
 import { bbPlayerFav } from '../../lib/bb'
 import type { PhotoCreditT } from '../../components/sport/PlayerPhoto'
+import { teamHref, leagueHref, matchHref } from '../../lib/links'
 
 interface Side { id: number; name: string; logo: string | null }
 interface SeasonRow { code: string; league: string; season: string; team: Side; gp: number; starts: number; min: number | null; pts: number | null; reb: number | null; ast: number | null; fgPct: number | null; tpPct: number | null; ftPct: number | null; tpm: number | null }
@@ -48,7 +50,7 @@ const money = (x: number | null) => (x === null ? '–' : x >= 1e6 ? `$${(x / 1e
 
 /** A basketball player: season numbers, form, game log; NBA players also bio, advanced stats, ranks, injury and contract. */
 export default function BbPlayer() {
-  const { id = '' } = useParams()
+  const id = useEntityId() || ''
   const [d, setD] = useState<PlayerData | null | undefined>(undefined)
   useEffect(() => {
     setD(undefined)
@@ -80,11 +82,11 @@ export default function BbPlayer() {
           jersey ? <span className="num">#{jersey}</span> : null,
           nba?.injury ? <Chip tone="out">{nba.injury.status}</Chip> : nba ? <Chip tone="ok">{t('Available')}</Chip> : null
         ].filter(Boolean)}
-        team={{ name: d.player.team.name, logo: <TeamLogo team={d.player.team} size={20} />, href: `/basketball/team/${d.player.team.id}` }}
+        team={{ name: d.player.team.name, logo: <TeamLogo team={d.player.team} size={20} />, href: teamHref('basketball', d.player.team.id, d.player.team.name)! }}
         facts={([
           rb?.age ? [t('Age'), <span className="num">{rb.age}</span>] : null,
           (!bio && rb?.country) ? [t('Nationality'), rb.country] : null,
-          [t('League'), <Link to={`/basketball/league/${d.player.league.code}`} className="hover:text-accent">{d.player.league.name}</Link>]
+          [t('League'), <Link to={leagueHref('basketball', d.player.league.code, d.player.league.name)!} className="hover:text-accent">{d.player.league.name}</Link>]
         ] as ([string, ReactNode] | null)[]).filter((x): x is [string, ReactNode] => !!x)}
         note={<>
         {nba?.injury && (
@@ -147,12 +149,12 @@ export default function BbPlayer() {
           {/* form */}
           {d.form.length > 1 && (
             <Card title={t('Points, last {0} games', { 0: d.form.length })}>
-              <PointsChart form={d.form} />
+              <PointsChart form={d.form} log={d.log} team={d.player.team} />
             </Card>
           )}
 
           {/* game log */}
-          {d.log.length > 0 && <GameLog log={d.log} />}
+          {d.log.length > 0 && <GameLog log={d.log} team={d.player.team} />}
           {!line && d.seasons.length === 0 && <Card><p className="text-sm text-muted">{t('No games in our leagues yet. His numbers appear here after his first game.')}</p></Card>}
         </div>
 
@@ -176,7 +178,7 @@ export default function BbPlayer() {
                 {nba.contract.map((c, i) => (
                   <li key={i} className="flex items-center gap-2 py-2">
                     <span className="num text-muted w-16">{c.season ?? '–'}</span>
-                    <NameLink to={href.bbTeam(c.teamId)} className="truncate text-muted">{c.team ?? ''}</NameLink>
+                    <NameLink to={href.bbTeam(c.teamId, c.team)} className="truncate text-muted">{c.team ?? ''}</NameLink>
                     <span className="ml-auto num font-bold text-ink">{money(c.amount)}</span>
                   </li>
                 ))}
@@ -204,7 +206,7 @@ export default function BbPlayer() {
                       <tr key={`${s.code}${s.season}`} className="border-t border-line/40">
                         <td className="py-1.5 px-2 font-sans whitespace-nowrap">
                           <span className="text-ink">{s.season}</span>
-                          <span className="ml-1.5 text-[10px] text-faint"><NameLink to={href.bbLeague(s.code)}>{s.code}</NameLink> · <NameLink to={href.bbTeam(s.team.id)}>{s.team.name}</NameLink></span>
+                          <span className="ml-1.5 text-[10px] text-faint"><NameLink to={href.bbLeague(s.code)}>{s.code}</NameLink> · <NameLink to={href.bbTeam(s.team.id, s.team.name)}>{s.team.name}</NameLink></span>
                         </td>
                         <td className="text-right px-1 text-muted">{s.gp}</td>
                         <td className="text-right px-1 text-muted">{v(s.min)}</td>
@@ -284,7 +286,7 @@ function Stat({ k, val }: { k: string; val: string }) {
   )
 }
 
-function PointsChart({ form }: { form: PlayerData['form'] }) {
+function PointsChart({ form, log, team }: { form: PlayerData['form']; log: LogRow[]; team: Side }) {
   const max = Math.max(10, ...form.map(f => f.pts))
   const avg = form.reduce((a, f) => a + f.pts, 0) / form.length
   return (
@@ -292,7 +294,7 @@ function PointsChart({ form }: { form: PlayerData['form'] }) {
       <div className="relative flex items-end gap-1.5 h-36">
         <span className="absolute left-0 right-0 border-t border-dashed border-line" style={{ bottom: `${(avg / max) * 100}%` }} />
         {form.map(f => (
-          <Link key={f.gameId} to={`/basketball/game/${f.gameId}`} className="group relative flex-1 h-full flex items-end" title={`${new Date(f.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}: ${f.pts} pts, ${f.min ?? '–'} min`}>
+          <Link key={f.gameId} to={gameTo(f.gameId, f.kickoff, team, log.find(r => r.gameId === f.gameId))} className="group relative flex-1 h-full flex items-end" title={`${new Date(f.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}: ${f.pts} pts, ${f.min ?? '–'} min`}>
             <span className={`w-full rounded-t-md ${f.pts >= avg ? 'bg-accent' : 'bg-accent/40'} group-hover:opacity-80`} style={{ height: `${Math.max(3, (f.pts / max) * 100)}%` }} />
             <span className="absolute -top-4 left-0 right-0 text-center text-[10px] num text-muted">{f.pts}</span>
           </Link>
@@ -303,7 +305,11 @@ function PointsChart({ form }: { form: PlayerData['form'] }) {
   )
 }
 
-function GameLog({ log }: { log: LogRow[] }) {
+/** fix229: a game of the player's log: the slug link from his team, the opponent and the day */
+const gameTo = (id: number, kickoff: string, team: Side, r?: LogRow) =>
+  matchHref('basketball', id, !r ? { home: team.name, away: '', date: kickoff } : r.home ? { home: team.name, homeId: team.id, away: r.opponent, awayId: r.opponentId, date: kickoff } : { home: r.opponent, homeId: r.opponentId, away: team.name, awayId: team.id, date: kickoff })!
+
+function GameLog({ log, team }: { log: LogRow[]; team: Side }) {
   const more = log.some(r => r.plusMinus !== null)
   return (
     <Card title={t('Game log')}>
@@ -325,7 +331,7 @@ function GameLog({ log }: { log: LogRow[] }) {
             {log.map(r => (
               <tr key={r.gameId} className="border-t border-line/40 hover:bg-surface2/40">
                 <td className="py-1.5 px-2 font-sans whitespace-nowrap">
-                  <Link to={`/basketball/game/${r.gameId}`} className="flex items-center gap-1.5">
+                  <Link to={gameTo(r.gameId, r.kickoff, team, r)} className="flex items-center gap-1.5">
                     <span className="text-faint w-12 num">{new Date(r.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
                     <span className="text-faint">{r.home ? t('vs') : '@'}</span>
                     <TeamLogo team={{ name: r.opponent, logo: r.opponentLogo }} size={14} />

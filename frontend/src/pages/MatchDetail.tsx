@@ -1,7 +1,8 @@
 import YourPicks from '../components/YourPicks'
+import { useEntityId } from '../components/SlugRoute'
 import UnlockPrompt from '../components/UnlockPrompt'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link, useParams, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL, socket } from '../lib/socket'
 import { modelInfo, isV3, score10, CONFIDENCE_LABEL, MATCH_TYPE_LABEL, pickOfPrediction, doubleChance, dcLabel, shortTeam, type DC, type Prediction } from '../lib/predict'
@@ -25,6 +26,7 @@ import { ModelName } from '../components/sport/game/ModelName'
 import MorePredictions from '../components/sport/game/MorePredictions'
 import GameMeaning from '../components/sport/forecast/GameMeaning'
 import { footballScorers } from '../lib/scorers'
+import { playerHref, leagueHref } from '../lib/links'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
 const CompCode = createContext<string | undefined>(undefined)
@@ -368,7 +370,7 @@ function GridBreakdown({ p, home, away }: { p: Prediction; home: Team; away: Tea
 }
 
 function MatchDetail() {
-  const { id } = useParams()
+  const id = useEntityId()
   const matchId = Number(id)
   const location = useLocation()
   // opened from a list: show the header and the prediction from the list at once, fill the rest when details arrive
@@ -518,7 +520,7 @@ function MatchDetail() {
     // fix174: the player's name opens the player page
     const pHref = (pl: { id: number; name: string } | null | undefined, teamId: number) => {
       const team = teamId === m.homeTeam?.id ? m.homeTeam : teamId === m.awayTeam?.id ? m.awayTeam : null
-      return pl && team ? playerHref(pl, team as Team, m.competition?.code) : null
+      return pl && team ? lineupHref(pl, team as Team, m.competition?.code) : null
     }
     ;(m.goals || []).forEach(g =>
       list.push({
@@ -1043,7 +1045,7 @@ function MatchDetail() {
   const scorerHref = new Map<number, string>()
   for (const x of [...(m.goals || []).map(g => ({ pl: g.scorer, team: g.team.id })), ...(m.bookings || []).map(b => ({ pl: b.player, team: b.team.id }))]) {
     const team = x.team === home.id ? home : x.team === away.id ? away : null
-    const h = team && x.pl?.id ? playerHref(x.pl, team, m.competition?.code) : null
+    const h = team && x.pl?.id ? lineupHref(x.pl, team, m.competition?.code) : null
     if (h) scorerHref.set(x.pl.id, h)
   }
   const side = (team: Team) => ({
@@ -1062,7 +1064,7 @@ function MatchDetail() {
       back={{ to: '/matches', label: tt("All matches") }}
       srTitle={tabTitle ? `${tabTitle}${m.competition?.name ? ` · ${m.competition.name}` : ''} ${tt("prediction")}` : undefined}
       league={{
-        name: m.competition.name, href: `/league/${m.competition.code}`, logo: m.competition.emblem || null, bits: roundBits,
+        name: m.competition.name, href: leagueHref('football', m.competition.code, m.competition.name) || '/football', logo: m.competition.emblem || null, bits: roundBits,
         star: m.competition.code ? <FavStar size="sm" fav={{ kind: 'league', ref: m.competition.code, code: m.competition.code, name: m.competition.name, img: m.competition.emblem || null }} /> : undefined
       }}
       date={fmtDate(m.utcDate)}
@@ -1593,13 +1595,13 @@ function TeamPanel({ team, side, row, recent }: { team: Team; side: SideK; row: 
             const r = resultFor(team.id, m)
             return (
               <li key={m.id}>
-                <RowLink to={hrefOf.match(m.id)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
+                <RowLink to={hrefOf.match(m.id, fbSides(m))} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
                   <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${r ? RES_CLS[r] : 'bg-surface2 text-faint'}`}>{r || '–'}</span>
-                  <NameLink to={hrefOf.match(m.id)} className="num text-faint w-14 shrink-0 whitespace-nowrap">{new Date(m.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</NameLink>
+                  <NameLink to={hrefOf.match(m.id, fbSides(m))} className="num text-faint w-14 shrink-0 whitespace-nowrap">{new Date(m.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</NameLink>
                   <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${isHome ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{isHome ? tt("H") : tt("A")}</span>
                   {opp.crest ? <img src={opp.crest} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
                   <TeamName team={opp} className="text-ink font-medium truncate" />
-                  <NameLink to={hrefOf.match(m.id)} className="ml-auto num font-bold text-ink shrink-0">{gf}–{ga}</NameLink>
+                  <NameLink to={hrefOf.match(m.id, fbSides(m))} className="ml-auto num font-bold text-ink shrink-0">{gf}–{ga}</NameLink>
                 </RowLink>
               </li>
             )
@@ -1665,16 +1667,16 @@ function H2H({ h2h, home, away }: { h2h: H2HData; home: Team; away: Team }) {
           const dot = ours > 0 ? 'bg-home' : ours < 0 ? 'bg-away' : 'bg-muted/50'
           return (
             <li key={h.id}>
-              <RowLink to={hrefOf.match(h.id)} className="grid grid-cols-[3.5rem_1fr_auto_1fr_0.75rem] sm:grid-cols-[6rem_1fr_auto_1fr_1rem] items-center gap-2 sm:gap-3 py-2 px-1 text-sm rounded-lg">
+              <RowLink to={hrefOf.match(h.id, fbSides(h))} className="grid grid-cols-[3.5rem_1fr_auto_1fr_0.75rem] sm:grid-cols-[6rem_1fr_auto_1fr_1rem] items-center gap-2 sm:gap-3 py-2 px-1 text-sm rounded-lg">
                 <span className="text-[11px] text-faint leading-tight min-w-0">
-                  <NameLink to={hrefOf.match(h.id)} className="num block whitespace-nowrap">{new Date(h.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</NameLink>
+                  <NameLink to={hrefOf.match(h.id, fbSides(h))} className="num block whitespace-nowrap">{new Date(h.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</NameLink>
                   <NameLink to={hrefOf.league(h.competition?.code)} className="hidden sm:block text-[10px] truncate">{h.competition?.name}</NameLink>
                 </span>
                 <span className="flex items-center justify-end gap-2 min-w-0">
                   <TeamName team={h.homeTeam} className={`truncate ${hg > ag ? 'font-bold text-ink' : 'text-muted'}`} />
                   {h.homeTeam.crest && <img src={h.homeTeam.crest} alt="" className="w-[18px] h-[18px] object-contain shrink-0" loading="lazy" />}
                 </span>
-                <NameLink to={hrefOf.match(h.id)} className="num font-extrabold text-ink rounded-lg bg-surface2/80 px-2.5 py-1 text-center min-w-[56px]">
+                <NameLink to={hrefOf.match(h.id, fbSides(h))} className="num font-extrabold text-ink rounded-lg bg-surface2/80 px-2.5 py-1 text-center min-w-[56px]">
                   <span className={hg >= ag ? '' : 'text-muted'}>{hg}</span><span className="text-faint">–</span><span className={ag >= hg ? '' : 'text-muted'}>{ag}</span>
                 </NameLink>
                 <span className="flex items-center gap-2 min-w-0">
@@ -1746,7 +1748,7 @@ function InjuryList({ team, list }: { team: Team; list: Injury[] }) {
             <li key={x.id ?? i} className="flex items-center gap-3 py-2 text-sm">
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${x.out ? 'bg-loss' : 'bg-draw'}`} />
               <span className="min-w-0 flex-1">
-                {x.id ? <Link to={`/player/${x.id}`} className="block text-ink hover:text-accent truncate font-medium">{x.name}</Link> : <span className="block text-ink truncate font-medium">{x.name}</span>}
+                {x.id ? <Link to={playerHref('football', x.id, x.name)!} className="block text-ink hover:text-accent truncate font-medium">{x.name}</Link> : <span className="block text-ink truncate font-medium">{x.name}</span>}
                 <span className="block text-[11px] text-faint truncate">{x.out ? tt("Out") : tt("Doubtful")}{x.reason ? ` · ${x.reason}` : ''}</span>
               </span>
               <span className="shrink-0"><Importance x={x} /></span>
@@ -1786,6 +1788,10 @@ function RestSummary({ home, away, h, a }: { home: Team; away: Team; h: TeamSche
   )
 }
 
+/** fix229: a Football-Data-shaped match → the two sides and the day of its slug link */
+const fbSides = (m: { utcDate: string; homeTeam: { id?: number | null; name?: string | null; shortName?: string | null }; awayTeam: { id?: number | null; name?: string | null; shortName?: string | null } }) =>
+  ({ home: m.homeTeam.name || m.homeTeam.shortName, homeId: m.homeTeam.id, away: m.awayTeam.name || m.awayTeam.shortName, awayId: m.awayTeam.id, date: m.utcDate })
+
 function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule }) {
   const rest = s.previous?.days
   const restTone: Tone = rest == null ? 'none' : rest < 3 ? 'bad' : rest < 4 ? 'mid' : 'good'
@@ -1797,6 +1803,8 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
     return x > y ? 'W' : x < y ? 'L' : 'D'
   }
   const date = (f: Fixture1) => new Date(f.date).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })
+  // fix229: the game's slug link from the two sides in match order
+  const gameTo = (f: Fixture1) => (f.matchId ? hrefOf.match(f.matchId, f.home ? { home: team.name, homeId: team.id, away: f.opponent, awayId: f.opponentId, date: f.date } : { home: f.opponent, homeId: f.opponentId, away: team.name, awayId: team.id, date: f.date }) : null)
   const opp = (f: Fixture1) => (
     <>
       <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${f.home ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{f.home ? tt("H") : tt("A")}</span>
@@ -1823,7 +1831,7 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
               const r = res(f)
               return (
                 <li key={i}>
-                  <RowLink to={f.matchId ? hrefOf.match(f.matchId) : null} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
+                  <RowLink to={gameTo(f)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
                     <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${r ? RES_CLS[r] : 'bg-surface2 text-faint'}`}>{r || '–'}</span>
                     <span className="num text-faint w-12 shrink-0">{date(f)}</span>
                     {opp(f)}
@@ -1841,7 +1849,7 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
           <ul>
             {s.upcoming.map((f, i) => (
               <li key={i}>
-                <RowLink to={f.matchId ? hrefOf.match(f.matchId) : null} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
+                <RowLink to={gameTo(f)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs">
                   <span className="w-6 h-6 rounded-md grid place-items-center border border-dashed border-line text-faint shrink-0">{ICO.clock}</span>
                   <span className="num text-faint w-12 shrink-0">{date(f)}</span>
                   {opp(f)}
@@ -2165,10 +2173,11 @@ function formationRows(team: Team): PitchPlayer[][] {
 }
 
 /** Player page link: API-Football ids open directly; other ids are looked up by name within the team. */
-function playerHref(pl: { id: number; name: string }, team: Team, code?: string) {
-  if (pl.id >= 1_000_000_000) return `/player/${pl.id}`
+function lineupHref(pl: { id: number; name: string }, team: Team, _code?: string) {
+  if (pl.id >= 1_000_000_000) return playerHref('football', pl.id, pl.name)
   if (!pl.name || pl.name === '?' || pl.id < 0 && !team.id) return null
-  return `/player/find?${new URLSearchParams({ name: pl.name, team: String(team.id), ...(code ? { c: code } : {}), n: team.name }).toString()}`
+  // fix229: no page id (a Football-Data.org line-up): the search with the player's name
+  return `/search?q=${encodeURIComponent(pl.name)}`
 }
 
 function lastName(name: string) {
@@ -2235,7 +2244,7 @@ function XiList({ team, side, of, code }: { team: Team; side: 'home' | 'away'; o
               <div className="text-[10px] font-bold uppercase tracking-wide text-faint mb-1">{tt(g.label)}</div>
               <ul className="space-y-1">
                 {list.map(pl => {
-                  const href = playerHref(pl, team, code)
+                  const href = lineupHref(pl, team, code)
                   return (
                     <li key={pl.id} className="flex items-center gap-2.5 text-sm">
                       <span className={`num w-6 h-6 rounded-full grid place-items-center text-[11px] font-bold text-white shrink-0 ${side === 'home' ? 'bg-home' : 'bg-away'}`}>{pl.shirtNumber ?? ''}</span>
@@ -2301,7 +2310,7 @@ function Pitch({ home, away, probable = false, code }: { home: Team; away: Team;
         </svg>
         {dots.map(d => (
           <div key={`${d.side}${d.pl.id}`} className="absolute -translate-x-1/2 -translate-y-[22px]" style={{ left: `${d.a}%`, top: `${d.b}%` }}>
-            <PitchToken p={d.pl} side={d.side} of={ofOf(d.team)} href={playerHref(d.pl, d.team, code)} />
+            <PitchToken p={d.pl} side={d.side} of={ofOf(d.team)} href={lineupHref(d.pl, d.team, code)} />
           </div>
         ))}
       </div>
@@ -2317,7 +2326,7 @@ function Pitch({ home, away, probable = false, code }: { home: Team; away: Team;
         </svg>
         {dots.map(d => (
           <div key={`${d.side}${d.pl.id}`} className="absolute -translate-x-1/2 -translate-y-[20px]" style={{ top: `${4 + (100 - d.a) * 0.88}%`, left: `${d.b}%` }}>
-            <PitchToken p={d.pl} side={d.side} of={ofOf(d.team)} href={playerHref(d.pl, d.team, code)} />
+            <PitchToken p={d.pl} side={d.side} of={ofOf(d.team)} href={lineupHref(d.pl, d.team, code)} />
           </div>
         ))}
       </div>
@@ -2420,7 +2429,7 @@ function LivePitch({ m, home, away, live }: { m: Match; home: Team; away: Team; 
                 {chain.length > 0 && <Mark cls="-bottom-1 -left-2 w-4 h-4 bg-win text-black">⇅</Mark>}
               </div>
               {(() => {
-                const href = playerHref(cur, isHome ? home : away, m.competition?.code)
+                const href = lineupHref(cur, isHome ? home : away, m.competition?.code)
                 const cls = 'mt-0.5 text-[10px] sm:text-[11px] leading-tight text-white font-semibold text-center drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] truncate max-w-full'
                 return href ? <Link to={href} className={`${cls} hover:underline`}>{lastName(cur.name)}</Link> : <span className={cls}>{lastName(cur.name)}</span>
               })()}
@@ -2459,7 +2468,7 @@ function Bench({ team, code }: { team: Team; code?: string }) {
             <li key={pl.id} className="flex items-center gap-2 min-w-0">
               <span className="num w-5 text-right text-faint">{pl.shirtNumber ?? ''}</span>
               {(() => {
-                const href = playerHref(pl, team, code)
+                const href = lineupHref(pl, team, code)
                 return href ? <Link to={href} className="truncate hover:text-ink hover:underline">{pl.name}</Link> : <span className="truncate">{pl.name}</span>
               })()}
             </li>

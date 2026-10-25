@@ -4,6 +4,7 @@ import Games from '../../components/sport/Games'
 import TodayPage from '../../components/sport/Today'
 import { useNflGames } from '../../components/sport/games/nfl'
 import { NflLeagueChips } from './parts'
+import { matchHref, leagueHref } from '../../lib/links'
 
 /**
  * NFL + college games (fix152): the Games list (fix152a) and Today (fix152b) are the shared pages — football's layout —
@@ -24,8 +25,8 @@ function NflToday() {
     <TodayPage a={{
       title: t('American football today'),
       params: { sport: 'american-football', league: param },
-      gameHref: id => `/american-football/game/${id}`,
-      leagueHref: code => (code === 'NCAA' ? '/american-football/college/league' : '/american-football/league'),
+      gameHref: g => matchHref('american-football', g.id, { ...g, date: g.kickoff })!,
+      leagueHref: code => leagueHref('american-football', code === 'NCAA' ? '2' : '1'),
       all: { to: `/american-football/games${filter === 'all' ? '' : `?league=${filter === 2 ? 'college' : 'nfl'}`}`, label: t('All games →') },
       top: <NflLeagueChips />
     }} />

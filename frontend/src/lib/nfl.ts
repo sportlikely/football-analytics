@@ -152,13 +152,13 @@ export function setNflLeague(l: NflLeague | undefined | null) {
   remembered = l
   subs.forEach(f => f())
 }
-const LEAGUE_PAGE = /^\/american-football(\/college)?\/league\/?$/
+const LEAGUE_PAGE = /^\/american-football\/league\/(nfl|college-football)\/?$/ // fix229: /american-football/league/<slug>
 /** The league of a per-league page (standings: from the path; game / team / player pages set it). */
 export function useNflLeague() {
   const { pathname } = useLocation()
   const mem = useSyncExternalStore(cb => { subs.add(cb); return () => { subs.delete(cb) } }, () => remembered)
   const m = pathname.match(LEAGUE_PAGE)
-  const league: NflLeague = m ? (m[1] ? 2 : 1) : mem
+  const league: NflLeague = m ? (m[1] === 'college-football' ? 2 : 1) : mem
   useEffect(() => { if (m) setNflLeague(league) }, [league, !!m])
   return { league, base: nflBase(league), name: nflLeagueName(league), model: nflModelOf(league), strong: nflStrongAt(league), sub: m ? 'league' : null }
 }

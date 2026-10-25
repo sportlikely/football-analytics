@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE, lang } from '../../lib/i18n'
@@ -44,7 +45,7 @@ const TABS = ['prediction', 'stats', 'form', 'rest', 'h2h', 'draw', 'highlights'
  * a live win chance from our Markov chain and the swing chart.
  */
 export default function TennisMatch() {
-  const { id } = useParams()
+  const id = useEntityId()
   const navigate = useNavigate()
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
@@ -74,7 +75,7 @@ export default function TennisMatch() {
   const hs = surname(m.home), as = surname(m.away)
   const side = (s: TMatch['home']) => ({
     // fix211: the player's photo (flag as a badge); none: the flag as before
-    name: s.name, logo: s.logo ? <PlayerPhoto src={s.logo} name={s.name} flag={flagOf(s.country)} size={72} /> : <span className="text-5xl sm:text-6xl leading-none" aria-hidden>{flagOf(s.country) || '🎾'}</span>, href: tennisHref.player(s.id) || '/tennis',
+    name: s.name, logo: s.logo ? <PlayerPhoto src={s.logo} name={s.name} flag={flagOf(s.country)} size={72} /> : <span className="text-5xl sm:text-6xl leading-none" aria-hidden>{flagOf(s.country) || '🎾'}</span>, href: tennisHref.player(s.id, s.name) || '/tennis',
     title: t('{0}: player page', { 0: s.name }), linkLabel: t('Player page →'), star: s.id ? <FavStar fav={tennisPlayerFav(s)} size="sm" /> : undefined,
     sub: s.rank ? t('World No. {0}', { 0: s.rank }) : null
   })
@@ -368,7 +369,7 @@ function H2H({ m, d }: { m: TMatch; d: Data }) {
               const homeWon = (g.winner === 1 ? g.home.id : g.away.id) === m.home.id
               return (
                 <li key={g.id}>
-                  <Link to={tennisHref.match(g.id)} className="flex items-center gap-3 py-2 text-sm hover:bg-surface2/50 rounded-lg px-1">
+                  <Link to={tennisHref.match(g)} className="flex items-center gap-3 py-2 text-sm hover:bg-surface2/50 rounded-lg px-1">
                     <span className="w-20 text-xs text-faint shrink-0">{new Date(g.start).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</span>
                     <span className="min-w-0 flex-1 truncate">{g.tournament.name}{roundName(g) ? ` · ${roundName(g)}` : ''}<span className="block text-[11px] text-faint"><SurfaceTag surface={g.tournament.surface} /></span></span>
                     <span className="text-xs text-right shrink-0"><span className="font-bold text-ink">{surname(homeWon ? m.home : m.away)}</span><span className="block num text-muted">{setsText(g.score, g.winner === 2)}</span></span>

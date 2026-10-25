@@ -30,16 +30,16 @@ function Item({ it, href }: { it: ScorerItem; href?: string | null }) {
   )
 }
 
-function Side({ items, align, playerHref }: { items: ScorerItem[]; align: 'left' | 'right' | 'center'; playerHref?: (id: number) => string | null }) {
+function Side({ items, align, playerHref }: { items: ScorerItem[]; align: 'left' | 'right' | 'center'; playerHref?: (id: number, name: string) => string | null }) {
   return (
     <div className={`flex flex-wrap gap-x-2.5 gap-y-0.5 min-w-0 ${align === 'right' ? 'justify-center sm:justify-end' : align === 'left' ? 'justify-center sm:justify-start' : 'justify-center'}`}>
-      {items.map((it, i) => <Item key={i} it={it} href={it.id && it.mark !== 'pending' && playerHref ? playerHref(it.id) : null} />)}
+      {items.map((it, i) => <Item key={i} it={it} href={it.id && it.mark !== 'pending' && playerHref ? playerHref(it.id, it.name || '') : null} />)}
     </div>
   )
 }
 
 /** Under the hero: home items under the home team, away under the away team. */
-export function HeaderScorers({ lines, playerHref }: { lines: ScorerLines; playerHref?: (id: number) => string | null }) {
+export function HeaderScorers({ lines, playerHref }: { lines: ScorerLines; playerHref?: (id: number, name: string) => string | null }) {
   return (
     <div data-scorers="header" aria-label={t('Scorers')} className="relative mt-4 sm:mt-5 grid grid-cols-[1fr_auto_1fr] items-start gap-2 sm:gap-8 text-[11px] sm:text-xs text-muted">
       <Side items={lines.home} align="right" playerHref={playerHref} />

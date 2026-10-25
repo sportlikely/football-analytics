@@ -24,6 +24,8 @@ import { HUBS } from './lib/hubs'
 import { howPath } from './lib/howItWorks'
 import { SOCIAL, type SocialId } from './lib/social'
 import { t as tt, basename, applyHeadLang, LANGS, lang, setLang, type Lang } from './lib/i18n'
+import { SlugRoute, OldLink } from './components/SlugRoute'
+import { useSlugVersion } from './lib/links'
 
 /**
  * Speed (Oct 2026): every page is its own small file, loaded when it is first opened, so the home page no longer
@@ -58,6 +60,7 @@ const MatchDetail = page(loadMatch)
 const League = page(loadLeague)
 const Team = page(() => import('./pages/Team'))
 const Player = page(() => import('./pages/Player'))
+const Search = page(() => import('./pages/Search'))
 const AccuracySimple = page(() => import('./pages/AccuracySimple'))
 const Past = page(() => import('./pages/Past'))
 const DrawAlerts = page(() => import('./pages/DrawAlerts'))
@@ -632,10 +635,10 @@ const TITLES: [RegExp, string][] = [
   [/^\/matches/, tt('Matches')],
   [/^\/predictions\/today/, tt('Football predictions today')],
   [/^\/favorites/, tt('Favorites')],
-  [/^\/team\//, tt('Team')],
-  [/^\/league\//, tt('League')],
-  [/^\/player\//, tt('Player')],
-  [/^\/match\//, tt('Match')],
+  [/^\/(football\/)?team\//, tt('Team')],
+  [/^\/(football\/)?league\//, tt('League')],
+  [/^\/(football\/)?player\//, tt('Player')],
+  [/^\/(football\/)?match\//, tt('Match')],
   [/^\/accuracy/, tt('Accuracy')],
   [/^\/changelog/, tt('Changelog')],
   [/^\/credits/, tt('Photo credits')],
@@ -676,6 +679,7 @@ function App() {
 }
 
 function Shell() {
+  useSlugVersion() // fix229: links are drawn again when a sport's slug exceptions arrive
   const [connected, setConnected] = useState(socket.connected)
   const { theme, toggle } = useTheme()
 
@@ -750,10 +754,18 @@ function Shell() {
             <Route path="/guides/:slug" element={<Guide />} />
             <Route path="/favorites" element={<Favorites />} />
             <Route path="/my-picks" element={<MyPicks />} />
-            <Route path="/team/:id" element={<Team />} />
-            <Route path="/league/:code" element={<League />} />
-            <Route path="/player/:id" element={<Player />} />
-            <Route path="/match/:id" element={<MatchDetail />} />
+            {/* fix229: clean links — /football/<kind>/<slug>; the old id addresses move to them (the server 301s them on load) */}
+            <Route path="/football" element={<Home />} />
+            <Route path="/football/team/:slug" element={<SlugRoute sport="football" kind="team"><Team /></SlugRoute>} />
+            <Route path="/football/league/:slug" element={<SlugRoute sport="football" kind="league"><League /></SlugRoute>} />
+            <Route path="/football/player/:slug" element={<SlugRoute sport="football" kind="player"><Player /></SlugRoute>} />
+            <Route path="/football/match/:slug" element={<SlugRoute sport="football" kind="match"><MatchDetail /></SlugRoute>} />
+            <Route path="/team/:id" element={<OldLink sport="football" kind="team" />} />
+            <Route path="/league/:code" element={<OldLink sport="football" kind="league" />} />
+            <Route path="/player/find" element={<Player />} />
+            <Route path="/player/:id" element={<OldLink sport="football" kind="player" />} />
+            <Route path="/match/:id" element={<OldLink sport="football" kind="match" />} />
+            <Route path="/search" element={<Search />} />
             <Route
               path="/accuracy"
               element={<RecordGate home="/"><AccuracySimple /></RecordGate>}
@@ -843,10 +855,11 @@ function TennisRoutes() {
       <Route index element={<TennisHome />} />
       <Route path="matches" element={<TennisMatches />} />
       <Route path="today" element={<TennisMatches today />} />
-      <Route path="match/:id" element={<TennisMatch />} />
-      <Route path="player/:id" element={<TennisPlayer />} />
-      <Route path="tournament/:key" element={<TennisTournament />} />
-      <Route path="predictions/:key" element={<TennisTournament />} />
+      <Route path="match/:slug" element={<SlugRoute sport="tennis" kind="match"><TennisMatch /></SlugRoute>} />
+      <Route path="player/:slug" element={<SlugRoute sport="tennis" kind="player"><TennisPlayer /></SlugRoute>} />
+      <Route path="league/:slug" element={<SlugRoute sport="tennis" kind="league"><TennisTournament /></SlugRoute>} />
+      <Route path="tournament/:key" element={<OldLink sport="tennis" kind="league" />} />
+      <Route path="predictions/:key" element={<OldLink sport="tennis" kind="league" />} />
       <Route path="rankings" element={<TennisRankings />} />
       <Route path="favorites" element={<TennisFavorites />} />
       <Route path="accuracy" element={<RecordGate home="/tennis"><TennisAccuracy /></RecordGate>} />
@@ -873,11 +886,13 @@ function NflRoutes() {
       <Route path="college" element={<Navigate to="/american-football?league=college" replace />} />
       <Route path="college/games" element={<Navigate to="/american-football/games?league=college" replace />} />
       <Route path="college/today" element={<Navigate to="/american-football/today?league=college" replace />} />
-      <Route path="college/league" element={<NflLeague />} />
-      <Route path="game/:id" element={<NflGame />} />
-      <Route path="league" element={<NflLeague />} />
-      <Route path="team/:id" element={<NflTeam />} />
-      <Route path="player/:id" element={<NflPlayer />} />
+      <Route path="college/league" element={<OldLink sport="american-football" kind="league" id="2" />} />
+      <Route path="league" element={<OldLink sport="american-football" kind="league" id="1" />} />
+      <Route path="game/:id" element={<OldLink sport="american-football" kind="match" />} />
+      <Route path="match/:slug" element={<SlugRoute sport="american-football" kind="match"><NflGame /></SlugRoute>} />
+      <Route path="league/:slug" element={<SlugRoute sport="american-football" kind="league"><NflLeague /></SlugRoute>} />
+      <Route path="team/:slug" element={<SlugRoute sport="american-football" kind="team"><NflTeam /></SlugRoute>} />
+      <Route path="player/:slug" element={<SlugRoute sport="american-football" kind="player"><NflPlayer /></SlugRoute>} />
       <Route path="favorites" element={<NflFavorites />} />
       {/* fix144: the same pages as football */}
       <Route path="my-picks" element={<MyPicks initial="nfl" />} />
@@ -901,10 +916,11 @@ function BbRoutes() {
       <Route index element={<BbHome />} />
       <Route path="games" element={<BbGames />} />
       <Route path="predictions/today" element={<Today sport="basketball" />} />
-      <Route path="game/:id" element={<BbGame />} />
-      <Route path="league/:code" element={<BbLeague />} />
-      <Route path="team/:id" element={<BbTeam />} />
-      <Route path="player/:id" element={<BbPlayer />} />
+      <Route path="game/:id" element={<OldLink sport="basketball" kind="match" />} />
+      <Route path="match/:slug" element={<SlugRoute sport="basketball" kind="match"><BbGame /></SlugRoute>} />
+      <Route path="league/:slug" element={<SlugRoute sport="basketball" kind="league"><BbLeague /></SlugRoute>} />
+      <Route path="team/:slug" element={<SlugRoute sport="basketball" kind="team"><BbTeam /></SlugRoute>} />
+      <Route path="player/:slug" element={<SlugRoute sport="basketball" kind="player"><BbPlayer /></SlugRoute>} />
       <Route path="favorites" element={<BbFavorites />} />
       {/* fix144: the same pages as football */}
       <Route path="my-picks" element={<MyPicks initial="bb" />} />

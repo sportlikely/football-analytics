@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
@@ -27,7 +28,7 @@ interface Data {
   model: Model | null; modelLocked: boolean
   analysis: Analysis | null
   recent: Played[]; upcoming: TMatch[]
-  stoppages: { kind: 'medical' | 'retired' | 'other'; at: string; matchId: number; tournament: string | null }[]
+  stoppages: { kind: 'medical' | 'retired' | 'other'; at: string; matchId: number; tournament: string | null; link: string }[]
   record: { games: number; right: number; strong: number; strongRight: number }
   /** fix193c: the ranking around the player (the team page's mini table) and the titles in our data (career) */
   around: { tour: 'atp' | 'wta'; date: string; rows: { rank: number; id: number | null; name: string; country: string | null; points: number | null; me: boolean }[] } | null
@@ -54,7 +55,7 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).map(w => w[
  * left; our record on the player, the next match, the ranking over 12 months, stoppages and news on the right.
  */
 export default function TennisPlayer() {
-  const { id } = useParams()
+  const id = useEntityId()
   const [d, setD] = useState<Data | null | undefined>(undefined)
   const news = useNews({ sport: 'tennis', playerId: id, limit: 8 })
   useEffect(() => {
@@ -130,7 +131,7 @@ export default function TennisPlayer() {
                 {d.around.rows.map(r => (
                   <li key={r.rank} className={`flex items-center gap-2 py-1.5 text-sm min-w-0 ${r.me ? 'bg-accent/10 -mx-2 px-2 rounded-lg' : ''}`}>
                     <span className="w-8 num text-faint shrink-0">{r.rank}</span>
-                    {r.id && !r.me ? <Link to={tennisHref.player(r.id)!} className="min-w-0 truncate text-ink hover:text-accent">{flagOf(r.country)} {r.name}</Link> : <span className={`min-w-0 truncate ${r.me ? 'font-bold text-ink' : 'text-ink'}`}>{flagOf(r.country)} {r.name}</span>}
+                    {r.id && !r.me ? <Link to={tennisHref.player(r.id, r.name)!} className="min-w-0 truncate text-ink hover:text-accent">{flagOf(r.country)} {r.name}</Link> : <span className={`min-w-0 truncate ${r.me ? 'font-bold text-ink' : 'text-ink'}`}>{flagOf(r.country)} {r.name}</span>}
                     <span className="ml-auto num text-xs text-muted shrink-0">{r.points !== null ? r.points.toLocaleString(LOCALE) : ''}</span>
                   </li>
                 ))}
@@ -144,7 +145,7 @@ export default function TennisPlayer() {
                 {d.stoppages.map(s => (
                   <li key={`${s.matchId}${s.kind}${s.at}`} className="flex items-center justify-between gap-2 py-1.5 text-sm">
                     <span className={s.kind === 'retired' ? 'text-loss font-semibold' : 'text-ink'}>{s.kind === 'medical' ? t('Medical timeout') : s.kind === 'retired' ? t('Retired') : t('Stoppage')}</span>
-                    <Link to={tennisHref.match(s.matchId)} className="min-w-0 truncate text-xs text-muted hover:text-accent">{[s.tournament, new Date(s.at).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })].filter(Boolean).join(' · ')}</Link>
+                    <Link to={s.link} className="min-w-0 truncate text-xs text-muted hover:text-accent">{[s.tournament, new Date(s.at).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })].filter(Boolean).join(' · ')}</Link>
                   </li>
                 ))}
               </ul>
@@ -188,7 +189,7 @@ function ModelCard({ d }: { d: Data }) {
   ]
   if (next && nextPct !== null) {
     const opp = me === 'home' ? next.away : next.home
-    tiles.push({ label: t('Win chance next match'), value: `${Math.round(nextPct)}%`, sub: <>{t('vs')} {opp.id ? <Link to={tennisHref.player(opp.id)!} className="hover:text-accent">{opp.name}</Link> : opp.name}</> })
+    tiles.push({ label: t('Win chance next match'), value: `${Math.round(nextPct)}%`, sub: <>{t('vs')} {opp.id ? <Link to={tennisHref.player(opp.id, opp.name)!} className="hover:text-accent">{opp.name}</Link> : opp.name}</> })
   }
   return (
     <Card title={t('How our model rates them')} action={<span className="text-xs text-faint">{t('1500 is a typical tour player')}</span>}>

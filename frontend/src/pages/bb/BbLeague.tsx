@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t } from '../../lib/i18n'
@@ -10,6 +11,7 @@ import SeasonForecast from '../../components/sport/forecast/SeasonForecast'
 import LeaguePage, { LCard as Card } from '../../components/sport/page/LeaguePage'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { hasDivisions, tablesToShow, type Standings } from '../../lib/bbTable'
+import { teamHref, playerHref, leagueHref } from '../../lib/links'
 
 export type { StandRow, Standings } from '../../lib/bbTable'
 
@@ -55,7 +57,7 @@ export function StandingsTable({ data, mark = [], colors }: { data: Standings; m
                       <span className={`ml-1.5 inline-grid place-items-center w-5 h-5 rounded-md num text-[10px] font-bold ${r.position <= 3 ? 'bg-accent/15 text-accent' : 'text-faint'}`}>{r.position}</span>
                     </td>
                     <td className="py-1.5 pr-2">
-                      <Link to={`/basketball/team/${r.team.id}`} className={`flex items-center gap-2 hover:text-accent ${on ? 'font-bold text-ink' : 'text-ink'}`}>
+                      <Link to={teamHref('basketball', r.team.id, r.team.name)!} className={`flex items-center gap-2 hover:text-accent ${on ? 'font-bold text-ink' : 'text-ink'}`}>
                         <TeamLogo team={r.team} size={18} /><span className="truncate">{r.team.name}</span>
                       </Link>
                     </td>
@@ -84,7 +86,7 @@ export function StandingsTable({ data, mark = [], colors }: { data: Standings; m
 
 /** A league: standings, next games, latest results. */
 export default function BbLeague() {
-  const { code = '' } = useParams()
+  const code = useEntityId() || ''
   const cfg = useBbConfig()
   const league = cfg?.leagues.find(l => l.code === code.toUpperCase())
   const [table, setTable] = useState<Standings | null | undefined>(undefined)
@@ -135,7 +137,7 @@ export default function BbLeague() {
       hub={hub ? { to: `/predictions/${hub.slug}`, label: t("This week's predictions →") } : null}
       fav={league ? bbLeagueFav(league) : null}
       record={record}
-      forecast={<SeasonForecast sport="basketball" code={code} teamHref={id => `/basketball/team/${id}`} />}
+      forecast={<SeasonForecast sport="basketball" code={code} teamHref={(id, name) => teamHref('basketball', id, name)!} />}
       left={<>
         <Card title={t('Table')}>
           {table === undefined ? <Skeleton rows={10} h="h-7" /> : table ? <StandingsTable data={table} /> : <p className="text-sm text-faint">{t('No table yet.')}</p>}
@@ -180,7 +182,7 @@ export function LeadersCard({ data }: { data: Leaders }) {
         {list.top.map(x => (
           <li key={x.name} className="flex items-center gap-3 py-2 text-sm">
             <span className="w-5 num text-faint">{x.rank}</span>
-            {x.id ? <Link to={`/basketball/player/${x.id}`} className="text-ink font-semibold hover:text-accent truncate">{x.name}</Link> : <span className="text-ink font-semibold truncate">{x.name}</span>}
+            {x.id ? <Link to={playerHref('basketball', x.id, x.name)!} className="text-ink font-semibold hover:text-accent truncate">{x.name}</Link> : <span className="text-ink font-semibold truncate">{x.name}</span>}
             <span className="ml-auto num font-bold text-ink">{x.value}</span>
             <span className="text-[10px] text-faint w-12 text-right">{t('{0} GP', { 0: x.games })}</span>
           </li>
@@ -217,7 +219,7 @@ export function BbLeaguePanel({ code }: { code: string }) {
           {table === undefined ? <Skeleton rows={8} h="h-6" /> : table ? <StandingsTable data={table} /> : <p className="text-xs text-faint p-2">{t('No table for this league yet.')}</p>}
         </section>
       )}
-      <Link to={`/basketball/league/${code}`} className="block text-center text-xs font-bold text-accent">{t('League page →')}</Link>
+      <Link to={leagueHref('basketball', code)!} className="block text-center text-xs font-bold text-accent">{t('League page →')}</Link>
     </aside>
   )
 }

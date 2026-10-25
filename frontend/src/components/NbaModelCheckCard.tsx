@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { slAdmin } from '../lib/modelNames'
+import { matchHref } from '../lib/links'
 
 type Score = { games: number; logLoss: number; brier: number; hitRate: number }
 type Removed = { id: number; name: string; status: string; min: number; keep: number }
@@ -83,7 +84,7 @@ export default function NbaModelCheckCard() {
               <div className="flex flex-wrap items-baseline gap-x-3">
                 <span className="w-24 text-[11px] text-faint num">{new Date(x.kickoff).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                 <span className="text-[11px] text-faint num w-12">−{x.checkpoint} min</span>
-                <Link to={`/basketball/game/${x.gameId}`} className="font-semibold text-ink hover:underline">{x.home} – {x.away}</Link>
+                <Link to={matchHref('basketball', x.gameId, { home: x.home, away: x.away, date: x.kickoff })!} className="font-semibold text-ink hover:underline">{x.home} – {x.away}</Link>
                 {x.score && <span className="text-xs text-muted num">{x.score}</span>}
                 <span className="text-xs num text-muted">home {pct(x.pV3)} → <b className="text-ink">{pct(x.pV4)}</b> · margin {x.marginAfter > 0 ? '+' : ''}{x.marginAfter}{moved !== null && moved !== 0 ? ` (${moved > 0 ? '+' : ''}${moved} since last save)` : ''} · same-day {x.sameDay > 0 ? '+' : ''}{x.sameDay}{x.lineups ? ' · line-ups' : ''}</span>
               </div>

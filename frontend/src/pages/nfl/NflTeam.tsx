@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
@@ -11,6 +12,7 @@ import { NflGameRow, LeagueSwitch, StandTable } from './parts'
 import RecordLink from '../../components/RecordLink'
 import TeamForecast from '../../components/sport/forecast/TeamForecast'
 import { useNews, NewsRows } from '../../components/NewsList'
+import { playerHref } from '../../lib/links'
 
 interface Measure { id: string; label: string; better: 'high' | 'low'; value: number | null; text: string | null; rank: number | null; of: number | null; score: number | null }
 interface Analysis { season: number; measures: Measure[]; strengths: Measure[]; weaknesses: Measure[]; rankByWeek: { week: number; rank: number; of: number }[]; locked?: boolean; notesCount?: number }
@@ -44,7 +46,7 @@ const SENTENCE: Record<string, { good: string; bad: string }> = {
 
 /** NFL team page (fix137): record, team analysis (rule-based), roster by position, schedule, results, injuries. */
 export default function NflTeam() {
-  const { id } = useParams()
+  const id = useEntityId()
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
   const news = useNews({ sport: 'american-football', teamId: id, limit: 8 })
@@ -89,7 +91,7 @@ export default function NflTeam() {
               {d.leaders.map(p => (
                 <li key={`${p.position}${p.id}`} className="flex items-center gap-3 py-1.5 text-sm min-w-0">
                   <span className="w-14 shrink-0 text-[10px] font-bold uppercase tracking-wide text-faint">{t(p.position)}</span>
-                  <Link to={`/american-football/player/${p.id}`} className="min-w-0 flex-1 truncate font-semibold text-ink hover:text-accent">{p.name}</Link>
+                  <Link to={playerHref('american-football', p.id, p.name)!} className="min-w-0 flex-1 truncate font-semibold text-ink hover:text-accent">{p.name}</Link>
                   {p.line && <span className="shrink-0 text-[11px] text-faint">{p.line}</span>}
                 </li>
               ))}
@@ -105,7 +107,7 @@ export default function NflTeam() {
                   <ul className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
                     {gr.players.map(p => (
                       <li key={p.id}>
-                        <Link to={`/american-football/player/${p.id}`} className="flex items-center gap-2 text-sm hover:text-accent">
+                        <Link to={playerHref('american-football', p.id, p.name)!} className="flex items-center gap-2 text-sm hover:text-accent">
                           <span className="w-7 text-right num text-faint">{p.number ?? ''}</span>
                           <span className="w-9 text-[11px] font-bold text-muted">{p.position || ''}</span>
                           <span className="truncate text-ink">{p.name}</span>
@@ -131,7 +133,7 @@ export default function NflTeam() {
             <ul className="divide-y divide-line/50">
               {d.injuries.map(i => (
                 <li key={i.id} className="py-1.5 text-sm flex items-baseline justify-between gap-2">
-                  <Link to={`/american-football/player/${i.id}`} className="text-ink hover:text-accent truncate">{i.name}</Link>
+                  <Link to={playerHref('american-football', i.id, i.name)!} className="text-ink hover:text-accent truncate">{i.name}</Link>
                   <span className="text-xs text-faint truncate">{[i.status, i.description].filter(Boolean).join(' · ')}</span>
                 </li>
               ))}
@@ -221,11 +223,11 @@ function ModelTiles({ d }: { d: Data }) {
   if (!m) return null
   const tiles: { label: string; value: ReactNode; sub: ReactNode }[] = [
     { label: t('Elo rating'), value: String(m.elo), sub: t('#{0} of {1}', { 0: m.rank, 1: m.teams }) },
-    { label: t('Quarterback'), value: m.qb ? <NameLink to={href.nflPlayer(m.qb.id)}>{m.qb.name}</NameLink> : '–', sub: m.qb ? t('{0} net yards per pass attempt (league {1})', { 0: m.qb.value.toFixed(1), 1: m.qb.league.toFixed(1) }) : '' },
+    { label: t('Quarterback'), value: m.qb ? <NameLink to={href.nflPlayer(m.qb.id, m.qb.name)}>{m.qb.name}</NameLink> : '–', sub: m.qb ? t('{0} net yards per pass attempt (league {1})', { 0: m.qb.value.toFixed(1), 1: m.qb.league.toFixed(1) }) : '' },
     { label: t('Attack rating'), value: t('{0} pts', { 0: m.offense.toFixed(1) }), sub: t('#{0} of {1} · league {2}', { 0: m.offRank, 1: m.teams, 2: m.leaguePoints.toFixed(1) }) },
     { label: t('Defence rating'), value: t('{0} pts', { 0: m.defense.toFixed(1) }), sub: t('#{0} of {1} · allowed per game', { 0: m.defRank, 1: m.teams }) }
   ]
-  if (next && nextPct !== null) tiles.push({ label: t('Win chance next game'), value: `${Math.round(nextPct)}%`, sub: <>{home ? t('vs') : '@'} <NameLink to={href.nflTeam((home ? next.away : next.home).id)}>{(home ? next.away : next.home).name}</NameLink></> })
+  if (next && nextPct !== null) tiles.push({ label: t('Win chance next game'), value: `${Math.round(nextPct)}%`, sub: <>{home ? t('vs') : '@'} <NameLink to={href.nflTeam((home ? next.away : next.home).id, (home ? next.away : next.home).name)}>{(home ? next.away : next.home).name}</NameLink></> })
   return (
     <div className="mt-5 grid gap-3 grid-cols-2 lg:grid-cols-3">
       {tiles.map(x => (

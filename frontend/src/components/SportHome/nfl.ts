@@ -7,6 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { useNflConfig, useNflFavorites, useNflFilter, NFL_STATUS, weekLabel, nick, rowName, nflRid, nflRstatus, nflStrongAt, type NflGame, type Standings, type NflLeague } from '../../lib/nfl'
 import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats, recordAside } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
+import { teamHref, leagueHref, matchHref } from '../../lib/links'
 
 /** American football's adapter for components/SportHome (fix141). fix185: NFL and college together (one sport), every
  *  row labelled with its league; ?league=nfl|college (the old college URLs) shows one. */
@@ -23,10 +24,10 @@ export const nflClock = (g: NflGame) => { const q = NFL_STATUS[g.status] || tt('
 
 export function toGame(g: NflGame): HGame {
   const lg = lgOf(g)
-  const team = (s: NflGame['home']) => ({ id: s.id, name: s.name, short: rowName(s.name, lg), logo: s.logo, href: `/american-football/team/${s.id}` })
+  const team = (s: NflGame['home']) => ({ id: s.id, name: s.name, short: rowName(s.name, lg), logo: s.logo, href: teamHref('american-football', s.id, s.name)! })
   return {
-    id: g.id, href: `/american-football/game/${g.id}`, reveal: { id: nflRid(g), status: nflRstatus(g) }, kickoff: g.kickoff,
-    competition: { name: compOf(g), href: lg === 2 ? '/american-football/college/league' : '/american-football/league' }, home: team(g.home), away: team(g.away),
+    id: g.id, href: matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, reveal: { id: nflRid(g), status: nflRstatus(g) }, kickoff: g.kickoff,
+    competition: { name: compOf(g), href: leagueHref('american-football', lg === 2 ? '2' : '1')! }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: nflClock(g), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
     pred: winnerPred(g.prediction, rowName(g.home.name, lg), rowName(g.away.name, lg), nflStrongAt(lg))
   }
@@ -43,7 +44,7 @@ export function toResult(g: NflGame): HResult {
     const lg = lgOf(g)
     const won = (s: 'H' | 'A') => !!g.score && (s === 'H' ? g.score.home > g.score.away : g.score.away > g.score.home)
     return {
-      id: g.id, href: `/american-football/game/${g.id}`, competition: compOf(g), date: g.kickoff,
+      id: g.id, href: matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, competition: compOf(g), date: g.kickoff,
       home: { name: g.home.name, logo: g.home.logo, score: g.score?.home ?? '', won: won('H') },
       away: { name: g.away.name, logo: g.away.logo, score: g.score?.away ?? '', won: won('A') },
       pick: pick ? { words: nick(pick === 'H' ? g.home.name : g.away.name, lg), pct: null, strong: false } : null,
@@ -116,7 +117,7 @@ function useNflData(): SportHomeData {
     },
     special: {
       title: tt("Upset watch"), tone: 'loss', open: full,
-      items: upsetItems(notStarted, g => g.prediction ? { id: g.id, href: `/american-football/game/${g.id}`, league: compOf(g), date: g.kickoff, home: nick(g.home.name, lgOf(g)), away: nick(g.away.name, lgOf(g)), pHome: g.prediction.pHome, pAway: g.prediction.pAway, locked: g.prediction.locked } : null),
+      items: upsetItems(notStarted, g => g.prediction ? { id: g.id, href: matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, league: compOf(g), date: g.kickoff, home: nick(g.home.name, lgOf(g)), away: nick(g.away.name, lgOf(g)), pHome: g.prediction.pHome, pAway: g.prediction.pAway, locked: g.prediction.locked } : null),
       empty: tt("No upsets on the radar this week."),
       locked: { title: tt("Upset watch"), text: tt("The 2 games where our model gives the underdog the best chance. Part of Pro.") },
       link: full ? { to: '/american-football/games', label: tt("All games →") } : { to: '/premium', label: tt("Unlock upset watch →") }

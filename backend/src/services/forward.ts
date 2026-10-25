@@ -42,7 +42,7 @@ export type WorkerAnswer = { status: number; headers: http.IncomingHttpHeaders; 
  * fix210: a GET request answered by the worker, read whole (the web process keeps the answer for signed-out visitors:
  * services/workerRoutes.ts). Rejects when the worker is not there or takes longer than `timeoutMs`.
  */
-export function fetchFromWorker(req: express.Request, timeoutMs = 20_000): Promise<WorkerAnswer> {
+export function fetchFromWorker(req: express.Request, timeoutMs = 20_000, pathOverride?: string): Promise<WorkerAnswer> {
   if (!workerConnected()) return Promise.reject(new Error('worker not running'));
   const headers: http.OutgoingHttpHeaders = { ...req.headers };
   headers['x-forwarded-for'] = req.ip || '';
@@ -51,7 +51,7 @@ export function fetchFromWorker(req: express.Request, timeoutMs = 20_000): Promi
   delete headers['content-length'];
   delete headers['accept-encoding']; // the answer is stored as it is
   return new Promise<WorkerAnswer>((resolve, reject) => {
-    const up = http.request({ host: '127.0.0.1', port: WORKER_PORT, method: 'GET', path: req.originalUrl, headers, agent }, r => {
+    const up = http.request({ host: '127.0.0.1', port: WORKER_PORT, method: 'GET', path: pathOverride || req.originalUrl, headers, agent }, r => {
       const chunks: Buffer[] = [];
       r.on('data', (c: Buffer) => chunks.push(c));
       r.on('end', () => resolve({ status: r.statusCode || 502, headers: r.headers, body: Buffer.concat(chunks) }));

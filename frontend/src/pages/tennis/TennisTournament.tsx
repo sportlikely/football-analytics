@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEntityId } from '../../components/SlugRoute'
+import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
@@ -28,7 +29,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { day: 'nu
  * right.
  */
 export default function TennisTournament() {
-  const { key } = useParams()
+  const key = useEntityId()
   const [d, setD] = useState<Data | null | undefined>(undefined)
   const news = useNews({ sport: 'tennis', limit: 8 })
   useEffect(() => {
@@ -56,8 +57,8 @@ export default function TennisTournament() {
       name={d.name}
       sub={[first ? tierLabel(first) : null, surfaceName(d.surface, d.indoor) || null, dates].filter(Boolean).join(' · ')}
       fav={tennisTournamentFav(d)}
-      // fix193c: the weekly hub ("ATP Vienna predictions") while the tournament is on
-      hub={next.length || live.length ? { to: `/tennis/predictions/${d.key}`, label: t("This week's predictions →") } : null}
+      // fix229: the weekly hub is this page (/tennis/league/<key>; the old /tennis/predictions/<key> moves here)
+      hub={null}
       record={d.record.n > 0 && d.record.pct !== null ? { hitRate: d.record.pct, n: d.record.n } : null}
       left={<>
         <DrawTab m={null} rounds={d.draw} />
@@ -67,7 +68,7 @@ export default function TennisTournament() {
               {d.champions.map(c => (
                 <li key={c.year} className="flex items-center gap-3 py-1.5 text-sm min-w-0">
                   <span className="w-10 num text-faint shrink-0">{c.year}</span>
-                  {c.winner.id ? <Link to={tennisHref.player(c.winner.id)!} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{c.winner.name}</Link> : <span className="min-w-0 truncate font-semibold text-ink">{c.winner.name}</span>}
+                  {c.winner.id ? <Link to={tennisHref.player(c.winner.id, c.winner.name)!} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{c.winner.name}</Link> : <span className="min-w-0 truncate font-semibold text-ink">{c.winner.name}</span>}
                   <span className="hidden sm:inline min-w-0 truncate text-xs text-faint">{t('beat {0}', { 0: c.runnerUp })}</span>
                   <span className="ml-auto num text-xs text-muted shrink-0">{c.score}</span>
                 </li>

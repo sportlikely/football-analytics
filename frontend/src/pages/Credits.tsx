@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { t } from '../lib/i18n'
+import { playerHref } from '../lib/links'
 
 /**
  * fix211: photo credits — every player photo shown on the site (Wikimedia Commons, free licences), with its author,
@@ -10,7 +11,7 @@ import { t } from '../lib/i18n'
  */
 interface Credit { sport: 'tennis' | 'basketball'; id: number; name: string; author: string; licence: string; licenceUrl: string | null; source: string }
 
-const PLAYER_HREF: Record<Credit['sport'], (id: number) => string> = { tennis: id => `/tennis/player/${id}`, basketball: id => `/basketball/player/${id}` }
+const playerTo = (c: Credit) => playerHref(c.sport, c.id, c.name)!
 
 export default function Credits() {
   const [list, setList] = useState<Credit[] | null>(null)
@@ -44,7 +45,7 @@ export default function Credits() {
               <ul className="divide-y divide-line/60 text-sm">
                 {rows.map(c => (
                   <li key={`${c.sport}${c.id}`} className="py-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <Link to={PLAYER_HREF[c.sport](c.id)} className="font-semibold text-ink hover:text-accent">{c.name}</Link>
+                    <Link to={playerTo(c)} className="font-semibold text-ink hover:text-accent">{c.name}</Link>
                     <span className="text-muted min-w-0 [overflow-wrap:anywhere]">
                       {t('Photo: {0}', { 0: c.author })} · {c.licenceUrl ? <a href={c.licenceUrl} target="_blank" rel="noopener noreferrer nofollow" className="hover:text-ink underline decoration-dotted">{c.licence}</a> : c.licence} · <a href={c.source} target="_blank" rel="noopener noreferrer nofollow" className="hover:text-ink underline decoration-dotted">{t('Wikimedia Commons')}</a>
                     </span>

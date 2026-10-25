@@ -21,6 +21,7 @@ import { HUBS, hubBySlug, hubByOld, hubForCode, hubOpen, buildHub, hubDescriptio
 import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, ui, longDate } from './seoText';
 import { fbLast as fbLastRaw, fbNext as fbNextRaw, fbH2h as fbH2hRaw, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById as bbGameByIdRaw, bbLast as bbLastRaw, bbNext as bbNextRaw, bbH2h as bbH2hRaw, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName as bbTeamNameRaw, BbGameRow } from './seoFacts';
 import { cleanText } from './sponsorNames';
+import { pubPath, pubLinks, parseNew, parseOld, idOfSlug, internalPath } from './slugs';
 
 /*
  * fix175: the crawler pages' data, cached 10 minutes by function + arguments — never by language, so /it/match/1,
@@ -89,6 +90,8 @@ export interface SeoInfo {
   noindex?: boolean;
   /** English-only page (guides): canonical points at the English URL from every language version */
   canonicalEn?: boolean;
+  /** fix229: the item a slug address shows (the app reads it from the page instead of asking the server) */
+  ent?: { sport: string; kind: string; slug: string; id: string };
 }
 
 /** NFL (fix137): "Week 7" / "Playoffs", and the nickname for short titles ("Kansas City Chiefs" → "Chiefs"). */
@@ -99,7 +102,8 @@ const nflNick = (name: string, league: 1 | 2 = 1) => (league === 2 ? schoolName(
 // fix182: every text a crawler page shows goes through the betting-sponsor cleaner (sponsorNames.ts)
 const esc = (s: unknown) => cleanText(String(s ?? '')).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const short = (iso: string, lang: Lang) => titleDate(iso, lang).replace(/[\s.,]*\d{4}\.?$/, '');
-const link = (lang: Lang, p: string) => (lang === 'en' ? p : `/${lang}${p === '/' ? '' : p}`);
+// fix229: every link is the item's slug address (an old id address is turned into it here)
+const link = (lang: Lang, p0: string) => { const p = pubPath(p0); return lang === 'en' ? p : `/${lang}${p === '/' ? '' : p}`; };
 
 /* ---------- football data from our predictions table (every match we predict is stored before kick-off) ---------- */
 
@@ -277,7 +281,7 @@ function buildToday(sport: TodaySport, lang: Lang, dayIso: string, leagues: 1 | 
 const NAV = (lang: Lang) => `<nav><a href="${link(lang, '/')}">${BRAND}</a> · <a href="${link(lang, '/matches')}">${ui(lang, 'matches')}</a> · <a href="${link(lang, '/predictions/today')}">${ui(lang, 'today')}</a> · <a href="${link(lang, '/premium')}">Premium</a>${bbPublic() ? ` · <a href="${link(lang, '/basketball')}">${ui(lang, 'basketball')}</a>` : ''}${nflPublic() ? ` · <a href="/american-football">American football</a>` : ''}${tennisPublic() ? ` · <a href="${link(lang, '/tennis')}">${TENNIS_WORD[lang]}</a>` : ''}</nav>`;
 /** fix193c: "Tennis" in the nav of the crawler pages */
 const TENNIS_WORD: Record<Lang, string> = { en: 'Tennis', es: 'Tenis', pt: 'Ténis', de: 'Tennis', fr: 'Tennis', it: 'Tennis', tr: 'Tenis' };
-const PRIVATE = /^\/(admin|account|verify|forgot|login|signup|favorites|my-picks|join|crm)(\/|$)|^\/basketball\/(favorites|past)(\/|$)|^\/past(\/|$)/;
+const PRIVATE = /^\/(admin|account|verify|forgot|login|signup|favorites|my-picks|join|crm|search)(\/|$)|^\/basketball\/(favorites|past)(\/|$)|^\/past(\/|$)/;
 
 /*
  * fix196: basketball game pages for search engines (Googlebot reads old games, many an hour: 0.4–1 s each on 20 Oct)
@@ -325,9 +329,9 @@ export function bbFactsFreshMs(f: BbGameFacts | null): number {
   return done ? (ttl >= 24 * 3600 * 1000 ? 7 * 86400000 : ttl) : Math.max(60 * 1000, ttl);
 }
 /** the page in one language from the stored facts (no database, no build) */
-export function bbGameSeo(f: BbGameFacts, lang: Lang): SeoInfo {
+export function bbGameSeo(f: BbGameFacts, lang: Lang, slug?: string): SeoInfo {
   const { g, rh, ra, fh, fa, h2 } = f;
-  const pk = pack(lang), path = `/basketball/game/${g.id}`;
+  const pk = pack(lang), path = slug ? `/basketball/match/${slug}` : pubPath(`/basketball/game/${g.id}`);
   const name = `${g.home} vs ${g.away}`, lg = bbLeagueName(g.code);
   const desc = fitDescription([`${name}, ${lg}, ${shortDate(g.date, lang)}`, `${name}, ${shortDate(g.date, lang)}`],
     [
@@ -344,7 +348,8 @@ export function bbGameSeo(f: BbGameFacts, lang: Lang): SeoInfo {
   return {
     title: `${name} ${lang === 'en' ? 'prediction & preview' : pk.previewTitle} · ${lg} · ${titleDate(g.date, lang)} | ${BRAND}`, description: desc, path, lang,
     body: `${NAV(lang)}<main>${body}</main>`,
-    jsonld: [sportsEvent(name, g.date, g.home, g.away, SITE + link(lang, path), lg, 'Basketball', pv ? firstSentence(pv) : undefined)]
+    jsonld: [sportsEvent(name, g.date, g.home, g.away, SITE + link(lang, path), lg, 'Basketball', pv ? firstSentence(pv) : undefined)],
+    ...(slug ? { ent: { sport: 'basketball', kind: 'match', slug, id: String(g.id) } } : {})
   };
 }
 /** /basketball/game/:id or /<lang>/basketball/game/:id → { id, lang } (the web process renders these from facts) */
@@ -359,8 +364,20 @@ export function seoPage(rawPath: string): SeoInfo {
   const m0 = path.match(/^\/(es|pt|de|fr|it|tr)(\/|$)/);
   if (m0) { lang = m0[1] as Lang; path = path.slice(3) || '/'; }
   const pk = pack(lang);
+  // fix229: a slug address shows its item's page (built from the id inside); the page's own address stays the slug one
+  let ent: SeoInfo['ent'];
+  const nw = parseNew(path);
+  if (nw) {
+    const hit = idOfSlug(nw.sport, nw.kind, nw.slug);
+    if (hit) { ent = { sport: nw.sport, kind: nw.kind, slug: hit.canonical, id: hit.id }; path = internalPath(nw.sport, nw.kind, hit.id); }
+    else return { title: `Not found | ${BRAND}`, description: 'This page does not exist.', path, lang, body: `${NAV(lang)}<main><h1>Not found</h1></main>`, noindex: true };
+  }
+  // (an old id address reaches this only while its item has no slug yet — new in the last minutes: its page as before)
+  const pubOf = (p: string) => (ent && p === path ? `/${ent.sport}/${ent.kind}/${ent.slug}` : pubPath(p));
   const page = (title: string, description: string, body: string, extra: Partial<SeoInfo> = {}): SeoInfo =>
-    ({ title, description, path, lang, body: `${NAV(lang)}<main>${body}</main>`, ...extra });
+    ({ title, description, path: pubOf(path), lang, body: pubLinks(`${NAV(lang)}<main>${body}</main>`), ...extra,
+      ...(extra.jsonld ? { jsonld: JSON.parse(pubLinks(JSON.stringify(extra.jsonld))) } : {}),
+      ...(ent ? { ent } : {}) });
   const S = (k: keyof typeof STATIC) => STATIC[k][lang];
 
   if (PRIVATE.test(path)) return page(BRAND, 'SportLikely account page.', '', { noindex: true });
@@ -373,6 +390,11 @@ export function seoPage(rawPath: string): SeoInfo {
     // fix193c: tennis (services/seoTennis.ts) — "coming soon" + noindex until TENNIS_PUBLIC=1
     const tn = tennisSeoPage(path, lang);
     if (tn) return page(tn.title, tn.description, tn.body, { noindex: tn.noindex, canonicalEn: tn.canonicalEn, jsonld: tn.jsonld });
+    // fix229: the football home has its own address (/football); "/" stays the site home
+    if (path === '/football') {
+      return page(`Football predictions: today's matches, form and the reasons behind every pick | ${BRAND}`, S('matches'),
+        `<h1>Football predictions</h1><p><a href="${link(lang, '/predictions/today')}">Football predictions today</a> · <a href="${link(lang, '/matches')}">${ui(lang, 'matches')}</a></p><h2>Next football matches</h2>${fbList(lang, fbUpcoming(60))}<h2>Competitions</h2><ul>${fbCompetitions().map(c => `<li><a href="${link(lang, `/league/${c.code}`)}">${esc(c.name)}</a></li>`).join('')}</ul>`);
+    }
     if (path === '/') {
       return page(`${BRAND} · Sports predictions, tested in public`, S('home'),
         `<h1>Sports predictions, tested in public</h1><p>Football predictions for the top leagues, cups and national teams, and basketball (NBA, EuroLeague and more): form, head-to-head, goals and the reasons behind every pick. Every prediction is saved before kick-off and scored after the game.</p><p><a href="${link(lang, '/predictions/today')}">Football predictions today</a>${bbPublic() ? ` · <a href="${link(lang, '/basketball/predictions/today')}">Basketball predictions today</a>` : ''}${nflPublic() ? ` · <a href="/american-football">American football (NFL)</a>` : ''}</p><h2>Next football matches</h2>${fbList(lang, fbUpcoming(30))}`,
@@ -687,6 +709,8 @@ export function renderIndex(html: string, s: SeoInfo): string {
     head.push(`<link rel="alternate" hreflang="x-default" href="${SITE + s.path}" />`);
   }
   for (const j of s.jsonld || []) head.push(`<script type="application/ld+json">${JSON.stringify(j).replace(/</g, '\\u003c')}</script>`);
+  // fix229: the item of a slug address, so the app opens its page without asking which id the slug is
+  if (s.ent) head.push(`<script type="application/json" id="sl-ent">${JSON.stringify(s.ent).replace(/</g, '\\u003c')}</script>`);
   out = out.replace('</head>', `    ${head.join('\n    ')}\n  </head>`);
   // fix227: the plain version is in the HTML for everyone (crawlers read it), shown only without JavaScript: with it,
   // index.html's loader hides it (.js .sl-seo) until the app replaces it, or shows "Updating SportLikely…" if the app
@@ -700,7 +724,10 @@ export function renderIndex(html: string, s: SeoInfo): string {
 type SmUrl = { loc: string; freq: string; pri: string; mod: string; enOnly?: boolean };
 const isoDay = (x?: string | null) => (x ? new Date(x).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
 const SEASON_DAYS = 300; // teams / leagues with a game in the last ~10 months (this season), never older
-function urlset(urls: SmUrl[]) {
+function urlset(urls0: SmUrl[]) {
+  // fix229: every item at its slug address; one without a slug yet is left out until the next build (never an old id address)
+  const seen = new Set<string>();
+  const urls = urls0.map(u => ({ ...u, loc: pubPath(u.loc) })).filter(u => !parseOld(u.loc) && !seen.has(u.loc) && !!seen.add(u.loc));
   const alt = (p: string) => LANGS.map(l => `<xhtml:link rel="alternate" hreflang="${l}" href="${SITE + link(l, p)}"/>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls
     .map(u => `  <url><loc>${SITE}${u.loc}</loc>${u.enOnly ? '' : alt(u.loc)}<lastmod>${u.mod}</lastmod><changefreq>${u.freq}</changefreq><priority>${u.pri}</priority></url>`).join('\n')}\n</urlset>\n`;
@@ -713,7 +740,7 @@ function sitemapFootball(): string {
   const urls: SmUrl[] = [];
   const today = isoDay();
   const add = (loc: string, freq: string, pri: string, mod = today) => urls.push({ loc, freq, pri, mod });
-  add('/', 'hourly', '1.0'); add('/matches', 'hourly', '0.9'); add('/predictions/today', 'daily', '0.9');
+  add('/', 'hourly', '1.0'); add('/football', 'hourly', '0.9'); add('/matches', 'hourly', '0.9'); add('/predictions/today', 'daily', '0.9');
   add('/draw-alerts', 'daily', '0.6'); add('/premium', 'monthly', '0.5', '2026-10-01');
   for (const p of ['/terms', '/privacy', '/accessibility', '/contact']) add(p, 'yearly', '0.2', '2026-10-01');
   // fix206: how it works + changelog, every language

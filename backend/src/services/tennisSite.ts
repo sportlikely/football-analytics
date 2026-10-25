@@ -7,6 +7,7 @@
  * Admin-only until TENNIS_PUBLIC=1 (the routes in index.ts check). Every read is indexed or bounded by date.
  */
 import { db } from '../db';
+import { pubPath } from './slugs';
 import { tennisModelInternals, tennisStrongLine, tennisPlayerModel, tennisLiveChance, tennisServeChances, tennisRecordSince, TENNIS_MODEL } from './tennisModel';
 import { tournamentKey, setTennisLiveHook, eventGender } from './tennis';
 import { yieldLoop } from './perf';
@@ -331,12 +332,14 @@ export function playedBefore(pid: number | null, before: string, limit = 10, sin
     const code = normRound(r.round_code, r.round, !!r.is_qualifying || /\b(qualification|qualifying)\b/i.test(String(r.tournament || '')));
     const opp = me === 1 ? { id: r.p2_id, name: sideName(r.p2_name, r.n2, r.f2, r.l2), last: r.f2 && r.l2 ? r.l2 : null, country: r.c2 || null }
       : { id: r.p1_id, name: sideName(r.p1_name, r.n1, r.f1, r.l1), last: r.f1 && r.l1 ? r.l1 : null, country: r.c1 || null };
+    // fix229: both sides in match order (the match's slug link: /tennis/match/<p1>-vs-<p2>-<day>)
+    const p1 = { id: r.p1_id, name: sideName(r.p1_name, r.n1, r.f1, r.l1) }, p2 = { id: r.p2_id, name: sideName(r.p2_name, r.n2, r.f2, r.l2) };
     return {
       id: r.id, start: r.scheduled_at, tournament: r.tournament, tkey: slugOf(r.tour, r.tier, r.tournament || '', r.source || 'live'), surface: r.surface ? String(r.surface).toLowerCase() : null,
       round: roundEn(code), roundCode: code,
       opponent: { id: opp.id, name: opp.name, short: shortName(opp.name, opp.last), country: opp.country },
       won: r.winner === me, score: sets.join(' '), sets: sets.length, minutes: r.dur ? Math.round(r.dur / 60) : ex?.minutes ? Math.round(ex.minutes) : null,
-      retired: /retired/.test(String(r.outcome || ''))
+      retired: /retired/.test(String(r.outcome || '')), p1, p2
     };
   });
 }
@@ -644,9 +647,9 @@ export function tennisPlayer(pid: number, full: boolean | ((rid: number) => bool
   // stoppages of the last 12 months: medical timeouts and the like (tennis_stoppages) + retirements from the results
   const stops = (db.prepare(`SELECT s.kind, s.at, s.match_id, m.tournament FROM tennis_stoppages s LEFT JOIN tennis_matches m ON m.id = s.match_id
       WHERE s.player_id = ? AND s.at >= ? ORDER BY s.at DESC LIMIT 20`).all(pid, new Date(Date.now() - 365 * DAY).toISOString()) as any[])
-    .map(s => ({ kind: /medical|injur|timeout/i.test(s.kind) ? 'medical' : /retir/i.test(s.kind) ? 'retired' : 'other', at: s.at, matchId: s.match_id, tournament: s.tournament || null }));
+    .map(s => ({ kind: /medical|injur|timeout/i.test(s.kind) ? 'medical' : /retir/i.test(s.kind) ? 'retired' : 'other', at: s.at, matchId: s.match_id, tournament: s.tournament || null, link: pubPath(`/tennis/match/${s.match_id}`) }));
   const retired = playedBefore(pid, now, 60, new Date(Date.now() - 365 * DAY).toISOString()).filter(x => x.retired && !x.won)
-    .map(x => ({ kind: 'retired', at: x.start, matchId: x.id, tournament: x.tournament }));
+    .map(x => ({ kind: 'retired', at: x.start, matchId: x.id, tournament: x.tournament, link: pubPath(`/tennis/match/${x.id}`) }));
   const seen = new Set(stops.map(s => `${s.matchId}${s.kind}`));
   const stoppages = [...stops, ...retired.filter(r => !seen.has(`${r.matchId}retired`))].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 12);
   const year = new Date().getUTCFullYear();

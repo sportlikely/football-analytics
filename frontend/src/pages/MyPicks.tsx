@@ -5,6 +5,7 @@ import { API_URL } from '../lib/socket'
 import { useAuth } from '../lib/auth'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { marketLabel, optionsFor, ResultBadge } from '../components/YourPicks'
+import { matchHref } from '../lib/links'
 
 /* Personal record (Oct 2026): the account's own picks, hit rate per pick type, and every pick with its result.
  * fix144: every sport (football, basketball, NFL + college); each sport's menu opens it filtered on that sport. */
@@ -25,7 +26,8 @@ const TYPES: { key: string; sport: SportKey; market: string }[] = [
   { key: 'nfl:win', sport: 'nfl', market: 'win' }
 ]
 const SPORT_LABEL = (s: SportKey) => (s === 'fb' ? tt('Football') : s === 'bb' ? tt('Basketball') : tt('American football'))
-const GAME_HREF = (s: SportKey, id: number) => (s === 'fb' ? `/match/${id}` : s === 'bb' ? `/basketball/game/${id}` : `/american-football/game/${id}`)
+const GAME_HREF = (r: Row) => matchHref(s2l(r.sport), r.gameId, { home: r.home, away: r.away, date: r.kickoff })!
+const s2l = (s: SportKey) => (s === 'fb' ? 'football' : s === 'bb' ? 'basketball' : 'american-football')
 const GAMES_HREF: Record<SportKey, string> = { fb: '/matches', bb: '/basketball/games', nfl: '/american-football/games' }
 const pct = (s: { settled: number; hits: number }) => (s.settled ? Math.round((s.hits / s.settled) * 1000) / 10 : null)
 
@@ -127,7 +129,7 @@ export default function MyPicks({ initial = 'all' }: { initial?: 'all' | SportKe
                   return (
                     <li key={`${r.sport}-${r.gameId}-${r.market}`} className="py-3 flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1">
                       <span className="text-[11px] text-faint num w-14 shrink-0">{day(r.kickoff)}</span>
-                      <Link to={GAME_HREF(r.sport, r.gameId)} className="flex-1 min-w-0 text-sm text-ink hover:text-accent truncate">
+                      <Link to={GAME_HREF(r)} className="flex-1 min-w-0 text-sm text-ink hover:text-accent truncate">
                         <span className="font-semibold">{r.home || '?'} – {r.away || '?'}</span>
                         {r.league && <span className="text-faint text-xs"> · {r.league}</span>}
                       </Link>

@@ -21,6 +21,7 @@
  * no betting words; the footer carries the site's 18+ / responsible-use line. Words: locales/email/<lang>.json.
  */
 import crypto from 'crypto';
+import { pubPath } from './slugs';
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
@@ -613,7 +614,9 @@ const HELP_URL = 'https://www.begambleaware.org';
 
 /** The page link with the language prefix and UTM tags. */
 const linkTo = (lang: EmailLang, p: string, campaign: string) => {
-  const [pathPart, hash] = p.split('#');
+  const [path0, hash] = p.split('#');
+  const pathPart = pubPath(path0); // fix229: the item's slug address
+
   return `${SITE}${lang === 'en' ? '' : `/${lang}`}${pathPart}${pathPart.includes('?') ? '&' : '?'}utm_source=email&utm_medium=email&utm_campaign=${campaign}${hash ? `#${hash}` : ''}`;
 };
 

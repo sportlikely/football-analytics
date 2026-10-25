@@ -17,6 +17,7 @@
  * sent and the account page says alerts are not switched on yet.
  */
 import crypto from 'crypto';
+import { pubPath } from './slugs';
 import axios from 'axios';
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -228,7 +229,7 @@ export function footballSnaps(now: number): Snap[] {
     const g = live.get(r.match_id);
     const s = base({
       sport: 'football', id: r.match_id, rid: r.match_id, state: 'pre', start: r.utc_date, league: r.competition_name || r.competition_code || '',
-      home: r.home_team, away: r.away_team, teamIds: [r.home_team_id, r.away_team_id].filter(Boolean), path: `/match/${r.match_id}`,
+      home: r.home_team, away: r.away_team, teamIds: [r.home_team_id, r.away_team_id].filter(Boolean), path: pubPath(`/match/${r.match_id}`),
       pre: { ph: pc(r.p_home), pd: pc(r.p_draw), pa: pc(r.p_away) }
     });
     const st = String(g?.status || '').toUpperCase();
@@ -261,7 +262,7 @@ export function basketballSnaps(now: number): Snap[] {
     const st = String(r.status || 'NS').toUpperCase();
     const s = base({
       sport: 'basketball', id: r.game_id, rid: -r.game_id, state: 'pre', start: r.kickoff, league: r.league || r.code, home: r.home_name, away: r.away_name,
-      teamIds: [r.home_id, r.away_id], path: `/basketball/game/${r.game_id}`, pre: twoWay(r.p_home), hs: r.hs, as: r.as_
+      teamIds: [r.home_id, r.away_id], path: pubPath(`/basketball/game/${r.game_id}`), pre: twoWay(r.p_home), hs: r.hs, as: r.as_
     });
     if (st === 'NS') { if (now >= Date.parse(r.kickoff) + 2 * MIN) continue; }
     else if (BB_DONE.has(st)) Object.assign(s, { state: 'done', winner: (r.hs ?? 0) > (r.as_ ?? 0) ? 'H' : 'A' });
@@ -291,7 +292,7 @@ export function nflSnaps(now: number): Snap[] {
     const st = String(r.status || 'NS').toUpperCase();
     const s = base({
       sport: 'american-football', id: r.game_id, rid: -(2e9 + r.game_id), state: 'pre', start: r.kickoff, league: r.league === 2 ? 'College football' : 'NFL',
-      home: r.home_name || 'TBD', away: r.away_name || 'TBD', teamIds: [r.home_id, r.away_id].filter(Boolean), path: `/american-football/game/${r.game_id}`,
+      home: r.home_name || 'TBD', away: r.away_name || 'TBD', teamIds: [r.home_id, r.away_id].filter(Boolean), path: pubPath(`/american-football/game/${r.game_id}`),
       pre: twoWay(r.p_home), hs: r.home_pts, as: r.away_pts
     });
     if (st === 'NS') { if (now >= Date.parse(r.kickoff) + 2 * MIN) continue; }
@@ -321,7 +322,7 @@ export function tennisSnaps(now: number): Snap[] {
     const s = base({
       sport: 'tennis', id: m.id, rid: m.rid, state: m.state === 'upcoming' ? 'pre' : m.state, start: m.start,
       league: [m.tournament.name, m.round].filter(Boolean).join(' · '), home: m.home.name, away: m.away.name,
-      teamIds: [m.home.id, m.away.id].filter((x): x is number => !!x), path: `/tennis/match/${m.id}`, pre,
+      teamIds: [m.home.id, m.away.id].filter((x): x is number => !!x), path: pubPath(`/tennis/match/${m.id}`), pre,
       sets: m.score ? [m.score.won[0], m.score.won[1]] : null, lastSet: done.length ? done[done.length - 1] : null,
       winner: m.winner === 1 ? 'H' : m.winner === 2 ? 'A' : null
     });

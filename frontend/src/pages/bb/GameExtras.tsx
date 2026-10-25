@@ -4,6 +4,7 @@ import { t } from '../../lib/i18n'
 import type { BbGame as Game } from '../../lib/bb'
 import { Card, TeamLogo } from './parts'
 import ModelParts from '../../components/sport/game/ModelParts'
+import { teamHref, playerHref } from '../../lib/links'
 
 /** Extra sections of the basketball game page (Oct 2026): points markets, team comparison, players, model table. */
 
@@ -172,7 +173,7 @@ export function CompareCard({ g, home, away, table, form }: {
             <div key={sd} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
               <span className="w-11 h-11 rounded-2xl bg-surface2/80 border border-line/60 grid place-items-center shrink-0"><TeamLogo team={team} size={28} /></span>
               <span className="min-w-0 max-w-full">
-                <NameLink to={href.bbTeam(team.id)} className="block text-sm font-bold text-ink leading-tight line-clamp-2">{team.name}</NameLink>
+                <NameLink to={href.bbTeam(team.id, team.name)} className="block text-sm font-bold text-ink leading-tight line-clamp-2">{team.name}</NameLink>
                 {f.length > 0 && <span className={`mt-1 flex justify-center ${i === 1 ? 'sm:justify-end' : 'sm:justify-start'}`}><FormDots f={f} /></span>}
               </span>
             </div>
@@ -221,12 +222,12 @@ export function PlayersCard({ g, home, away, limit, title }: { g: Game; home: Ga
         <div className="flex items-center gap-2 mb-3">
           <span className={`w-1 h-6 rounded-full ${tone.bg}`} />
           <TeamLogo team={team} size={22} />
-          <Link to={`/basketball/team/${team.id}`} className="font-display font-bold text-ink hover:text-accent truncate">{team.name}</Link>
+          <Link to={teamHref('basketball', team.id, team.name)!} className="font-display font-bold text-ink hover:text-accent truncate">{team.name}</Link>
         </div>
         {rows.length === 0 ? <p className="text-sm text-faint">{t('No player stats yet.')}</p> : (
           <>
             {top && (
-              <Link to={`/basketball/player/${top.id}`} className={`group flex items-center gap-3 rounded-2xl border border-line/60 bg-gradient-to-r ${tone.soft} to-transparent p-3 mb-3 hover:border-accent/40 transition-colors`}>
+              <Link to={playerHref('basketball', top.id, top.name)!} className={`group flex items-center gap-3 rounded-2xl border border-line/60 bg-gradient-to-r ${tone.soft} to-transparent p-3 mb-3 hover:border-accent/40 transition-colors`}>
                 <span className={`w-12 h-12 rounded-xl grid place-items-center font-display text-lg font-extrabold text-bg shrink-0 ${tone.bg}`}>{top.number ?? '★'}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-faint">{t('Top scorer')}{top.position ? ` · ${top.position}` : ''}</span>
@@ -248,7 +249,7 @@ export function PlayersCard({ g, home, away, limit, title }: { g: Game; home: Ga
             <ul className="divide-y divide-line/40">
               {rows.map(p => (
                 <li key={p.id}>
-                  <Link to={`/basketball/player/${p.id}`} className="grid grid-cols-[1fr_2.5rem_2rem_2rem] sm:grid-cols-[1fr_6.5rem_2.25rem_2.25rem_2.5rem] gap-x-2 items-center px-1 py-1.5 rounded-lg hover:bg-surface2/50 text-xs">
+                  <Link to={playerHref('basketball', p.id, p.name)!} className="grid grid-cols-[1fr_2.5rem_2rem_2rem] sm:grid-cols-[1fr_6.5rem_2.25rem_2.25rem_2.5rem] gap-x-2 items-center px-1 py-1.5 rounded-lg hover:bg-surface2/50 text-xs">
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="w-6 h-6 rounded-md bg-surface2 grid place-items-center num text-[10px] font-bold text-muted shrink-0">{p.number ?? '–'}</span>
                       <span className="min-w-0 truncate">
@@ -306,7 +307,7 @@ export function ModelTable({ g, model, ratings }: {
   // fix174: the shared parts table (NFL + college use it too)
   return (
     <ModelParts
-      home={<NameLink to={href.bbTeam(g.home.id)}>{g.home.name}</NameLink>} away={<NameLink to={href.bbTeam(g.away.id)}>{g.away.name}</NameLink>}
+      home={<NameLink to={href.bbTeam(g.home.id, g.home.name)}>{g.home.name}</NameLink>} away={<NameLink to={href.bbTeam(g.away.id, g.away.name)}>{g.away.name}</NameLink>}
       rows={rows} total={p.score ? { label: t('Predicted points'), h: String(p.score.home), a: String(p.score.away) } : null}
       note={t('Ratings are points per game compared with an average team. Model {0}, {1} games rated; possession ratings and pace adjust the final numbers slightly.', { 0: model.version, 1: model.gamesRated })}
     />

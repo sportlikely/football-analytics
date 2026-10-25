@@ -4,11 +4,12 @@ import { API_URL } from '../../../lib/socket'
 import { t as tt } from '../../../lib/i18n'
 import { useAuth } from '../../../lib/auth'
 import { useFavorites, type Favorite } from '../../../lib/favorites'
-import { useNflFavorites, useNflFilter, nflLeagueName, nflBase, type NflGame, type NflLeague } from '../../../lib/nfl'
+import { useNflFavorites, useNflFilter, nflLeagueName, type NflGame, type NflLeague } from '../../../lib/nfl'
 import { toGame, toResult } from '../../SportHome/nfl'
 import { NflLeagueChips, NflLeaguePanel } from '../../../pages/nfl/parts'
 import { winnerChips } from './basketball'
 import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
+import { teamHref, leagueHref } from '../../../lib/links'
 
 /** NFL + college football's adapter for the shared Games page (fix152a): data + labels only; the league from the URL. */
 
@@ -16,7 +17,7 @@ const leagueOf = (l: NflLeague): SLeague => {
   const code = l === 2 ? 'NCAA' : 'NFL', name = nflLeagueName(l)
   const fav: Favorite = { kind: 'nfl-league', ref: code, code, name, img: null }
   // fix213: NFL first, college second (sidebar, Live box); the address keeps its words (?league=nfl / college)
-  return { code, name, logo: null, country: 'us', rank: l === 2 ? 1 : 0, href: `${nflBase(l)}/league`, fav, param: l === 2 ? 'college' : 'nfl' }
+  return { code, name, logo: null, country: 'us', rank: l === 2 ? 1 : 0, href: leagueHref('american-football', String(l))!, fav, param: l === 2 ? 'college' : 'nfl' }
 }
 /** Primetime: Thursday / Sunday / Monday night games start 00:00–03:59 UTC (8:15 pm Eastern). */
 const primetime = (g: NflGame) => new Date(g.kickoff).getUTCHours() < 4
@@ -62,7 +63,7 @@ function useData(): GamesData {
     return {
       loading: games === null, error, games: listOut, leagues: [...lgs.values()],
       results: { rows: results ? results.map(toResult) : null, days: 30, link: null },
-      favTeams: favs.teams.map(f => ({ key: f.ref, name: f.name, logo: f.img || null, to: `/american-football/team/${f.ref}` })),
+      favTeams: favs.teams.map(f => ({ key: f.ref, name: f.name, logo: f.img || null, to: teamHref('american-football', f.ref, f.name)! })),
       favLeagues: list.filter(f => f.kind === 'nfl-league').map(f => f.ref),
       hasFavorites: favs.all.length > 0
     }

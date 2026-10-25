@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { footballTeamHref } from '../../lib/teamLink'
+import { teamHref, playerHref, leagueHref, matchHref } from '../../lib/links'
 
 /**
  * fix174: a team / player / competition name that opens its page — same look as the text around it, underline on
@@ -15,20 +15,22 @@ export default function NameLink({ to, children, className = '' }: { to?: string
   )
 }
 
-/** Page links of every sport (one place, so every list links the same way). */
+type M = { home: string | null | undefined; away: string | null | undefined; date: string | null | undefined; homeId?: number | string | null; awayId?: number | string | null }
+type Id = number | null | undefined
+/** Page links of every sport (one place, so every list links the same way). fix229: slug addresses (lib/links.ts) */
 export const href = {
-  /** football competition: Football-Data code (PL, CL…) or API-Football id / `AF<id>` (the page redirects AF39 → PL) */
-  league: (c: string | number | null | undefined) => c == null || c === '' ? null : `/league/${typeof c === 'number' ? `AF${c}` : c}`,
-  team: (id: number | null | undefined, comp?: string | null, name?: string | null) => id ? footballTeamHref(id, name || '', comp) : null,
-  player: (id: number | null | undefined) => id ? `/player/${id}` : null,
-  match: (id: number | null | undefined) => id ? `/match/${id}` : null,
-  bbTeam: (id: number | null | undefined) => id ? `/basketball/team/${id}` : null,
-  bbPlayer: (id: number | null | undefined) => id ? `/basketball/player/${id}` : null,
-  bbLeague: (code: string | null | undefined) => code ? `/basketball/league/${code}` : null,
-  bbGame: (id: number | null | undefined) => id ? `/basketball/game/${id}` : null,
-  nflTeam: (id: number | null | undefined) => id ? `/american-football/team/${id}` : null,
-  nflPlayer: (id: number | null | undefined) => id ? `/american-football/player/${id}` : null,
-  nflGame: (id: number | null | undefined) => id ? `/american-football/game/${id}` : null,
+  /** football competition: Football-Data code (PL, CL…) or API-Football id / `AF<id>` */
+  league: (c: string | number | null | undefined, name?: string | null) => leagueHref('football', c, name),
+  team: (id: Id, _comp?: string | null, name?: string | null) => teamHref('football', id, name),
+  player: (id: Id, name: string | null | undefined) => playerHref('football', id, name),
+  match: (id: Id, m: M) => matchHref('football', id, m),
+  bbTeam: (id: Id, name: string | null | undefined) => teamHref('basketball', id, name),
+  bbPlayer: (id: Id, name: string | null | undefined) => playerHref('basketball', id, name),
+  bbLeague: (code: string | null | undefined, name?: string | null) => leagueHref('basketball', code, name),
+  bbGame: (id: Id, m: M) => matchHref('basketball', id, m),
+  nflTeam: (id: Id, name: string | null | undefined) => teamHref('american-football', id, name),
+  nflPlayer: (id: Id, name: string | null | undefined) => playerHref('american-football', id, name),
+  nflGame: (id: Id, m: M) => matchHref('american-football', id, m),
   /** NFL (league 1) or college (league 2) standings */
-  nflStandings: (league?: number | string | null) => String(league) === '2' || /college|ncaa/i.test(String(league ?? '')) ? '/american-football/college/league' : '/american-football/league'
+  nflStandings: (league?: number | string | null) => leagueHref('american-football', String(league) === '2' || /college|ncaa/i.test(String(league ?? '')) ? '2' : '1')!
 }

@@ -1,7 +1,8 @@
 import TeamPage, { TCard } from '../components/sport/page/TeamPage'
+import { useEntityId } from '../components/SlugRoute'
 import { useEffect, useMemo, useState } from 'react'
 import { useNews, NewsRows } from '../components/NewsList'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
@@ -11,6 +12,7 @@ import { t, LOCALE } from '../lib/i18n'
 import { slModel } from '../lib/modelNames'
 import NameLink, { href } from '../components/sport/NameLink'
 import TeamForecast from '../components/sport/forecast/TeamForecast'
+import { teamHref, playerHref, matchHref } from '../lib/links'
 
 interface Side { id: number; name: string; logo: string }
 interface Fixture { matchId: number | null; date: string; status: string; comp: string; compCode?: string | null; home: Side; away: Side; hg: number | null; ag: number | null }
@@ -75,7 +77,7 @@ function FixtureRow({ f, teamId }: { f: Fixture; teamId: number }) {
       )}
     </div>
   )
-  return f.matchId ? <Link to={`/match/${f.matchId}`} className="block hover:bg-surface2/40 rounded-lg">{body}</Link> : body
+  return f.matchId ? <Link to={matchHref('football', f.matchId, { home: f.home.name, away: f.away.name, homeId: f.home.id, awayId: f.away.id, date: f.date })!} className="block hover:bg-surface2/40 rounded-lg">{body}</Link> : body
 }
 
 function Leaders({ items, label, squad }: { items: Leader[]; label: string; squad: Player[] }) {
@@ -87,7 +89,7 @@ function Leaders({ items, label, squad }: { items: Leader[]; label: string; squa
         <div key={s.name} className="flex items-center gap-3">
           <span className="w-5 font-display text-sm font-bold text-faint">{i + 1}</span>
           <span className="flex-1 min-w-0">
-            <NameLink to={href.player(s.id ?? squad.find(p => p.name === s.name)?.id)} className="block truncate text-sm font-semibold">{s.name}</NameLink>
+            <NameLink to={href.player(s.id ?? squad.find(p => p.name === s.name)?.id, s.name)} className="block truncate text-sm font-semibold">{s.name}</NameLink>
             {s.detail && <span className="block truncate text-[11px] text-faint">{s.detail}</span>}
           </span>
           <span className="w-24 sm:w-32 h-2 rounded-full bg-surface2"><span className="block h-full rounded-full bg-accent" style={{ width: `${(s.value / max) * 100}%` }} /></span>
@@ -99,7 +101,7 @@ function Leaders({ items, label, squad }: { items: Leader[]; label: string; squa
 }
 
 export default function Team() {
-  const { id } = useParams()
+  const id = useEntityId()
   const [sp] = useSearchParams()
   const { access } = useAuth()
   const [data, setData] = useState<TeamData | null>(null)
@@ -180,7 +182,7 @@ export default function Team() {
           {/* Team analysis: model's view, form & trends, strengths & weaknesses (paid); locked preview for free */}
           <TeamAnalysisCard a={data.analysis} full={full} />
           {/* fix215: the season forecast of the team's league (chances, average place, how they moved) */}
-          <TeamForecast sport="football" id={Number(id)} leagueHref={c => href.league(c) || `/league/${c}`} />
+          <TeamForecast sport="football" id={Number(id)} leagueHref={c => href.league(c) || '/football'} />
 
           {nextMatch && (
             <Card title={t("Next match")} action={<NameLink to={href.league(nextMatch.compCode)} className="text-xs text-faint">{nextMatch.comp}</NameLink>}>
@@ -192,7 +194,7 @@ export default function Team() {
                 </div>
                 <div className="flex-1 flex items-center justify-end gap-3 min-w-0"><NameLink to={nextMatch.away.id === team.id ? null : href.team(nextMatch.away.id)} className="font-bold truncate text-right">{nextMatch.away.name}</NameLink><img src={nextMatch.away.logo} alt="" className="w-9 h-9 object-contain" /></div>
               </div>
-              {nextMatch.matchId && <Link to={`/match/${nextMatch.matchId}`} className="mt-4 inline-block text-sm font-bold text-accent">{t("{0} prediction and analysis →", { 0: slModel('football') })}</Link>}
+              {nextMatch.matchId && <Link to={matchHref('football', nextMatch.matchId, { home: nextMatch.home.name, away: nextMatch.away.name, homeId: nextMatch.home.id, awayId: nextMatch.away.id, date: nextMatch.date })!} className="mt-4 inline-block text-sm font-bold text-accent">{t("{0} prediction and analysis →", { 0: slModel('football') })}</Link>}
             </Card>
           )}
 
@@ -224,7 +226,7 @@ export default function Team() {
                             <td className="px-2 py-2">
                               <span className="flex items-center gap-2.5">
                                 {p.photo ? <span className="photo-duo w-7 h-7 rounded-full overflow-hidden flex-shrink-0"><img src={p.photo} alt="" className="w-full h-full object-cover" loading="lazy" /></span> : <span className="w-7 h-7 rounded-full bg-surface2" />}
-                                {p.noPage ? <span className="font-semibold text-ink truncate">{p.name}</span> : <Link to={`/player/${p.id}`} className="font-semibold text-ink truncate hover:text-accent">{p.name}</Link>}
+                                {p.noPage ? <span className="font-semibold text-ink truncate">{p.name}</span> : <Link to={playerHref('football', p.id, p.name)!} className="font-semibold text-ink truncate hover:text-accent">{p.name}</Link>}
                               </span>
                             </td>
                             {hasClubs && (
@@ -295,7 +297,7 @@ export default function Team() {
                   {rows.map(r => (
                     <tr key={r.id} className={`border-t border-line/40 ${r.me ? 'bg-accent/10' : ''}`}>
                       <td className="py-2 pl-1 font-display text-xs font-bold text-faint">{r.rank}</td>
-                      <td className="py-2"><Link to={`/team/${r.id}`} className="flex items-center gap-2 min-w-0"><img src={r.logo} alt="" className="w-5 h-5 object-contain" /><span className={`truncate ${r.me ? 'font-bold text-ink' : 'text-muted hover:text-ink'}`}>{r.name}</span></Link></td>
+                      <td className="py-2"><Link to={teamHref('football', r.id, r.name)!} className="flex items-center gap-2 min-w-0"><img src={r.logo} alt="" className="w-5 h-5 object-contain" /><span className={`truncate ${r.me ? 'font-bold text-ink' : 'text-muted hover:text-ink'}`}>{r.name}</span></Link></td>
                       <td className="py-2 text-right num text-muted">{r.played}</td>
                       <td className="py-2 text-right num text-muted">{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
                       <td className="py-2 pr-1 text-right num font-bold">{r.points}</td>

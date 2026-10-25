@@ -15,6 +15,7 @@ import NewsInjuriesCard from '../components/NewsInjuriesCard'
 import BbGridCard from '../components/BbGridCard'
 import { PARITY_REPORT } from '../lib/sportParity.report'
 import { slAdmin } from '../lib/modelNames'
+import { matchHref } from '../lib/links'
 
 type Row = User & { lastLoginAt: string | null }
 
@@ -738,7 +739,7 @@ function BbResultsCard() {
           {d.open.map(x => (
             <li key={x.game_id} className="py-2 flex flex-wrap items-baseline gap-x-3">
               <span className="w-16 text-[11px] text-faint num">{day(x.kickoff)}</span>
-              <Link to={`/basketball/game/${x.game_id}`} className="font-semibold text-draw hover:underline">{x.home_name} {x.hs}–{x.as_} {x.away_name}</Link>
+              <Link to={matchHref('basketball', x.game_id, { home: x.home_name, away: x.away_name, date: x.kickoff })!} className="font-semibold text-draw hover:underline">{x.home_name} {x.hs}–{x.as_} {x.away_name}</Link>
               <span className="text-[11px] text-muted">{x.code} · {x.detail}</span>
             </li>
           ))}
@@ -748,7 +749,7 @@ function BbResultsCard() {
         <details className="mt-3 text-xs text-muted">
           <summary className="cursor-pointer">Corrections ({d.fixes.length})</summary>
           <ul className="mt-2 space-y-1">
-            {d.fixes.map(f => <li key={f.game_id}>{day(f.kickoff)} · <Link to={`/basketball/game/${f.game_id}`} className="underline">{f.home_name} – {f.away_name}</Link>: {f.provider_hs}–{f.provider_as} → <b className="text-ink">{f.hs}–{f.as_}</b> ({f.source}{f.by_user ? `, ${f.by_user}` : ''})</li>)}
+            {d.fixes.map(f => <li key={f.game_id}>{day(f.kickoff)} · <Link to={matchHref('basketball', f.game_id, { home: f.home_name, away: f.away_name, date: f.kickoff })!} className="underline">{f.home_name} – {f.away_name}</Link>: {f.provider_hs}–{f.provider_as} → <b className="text-ink">{f.hs}–{f.as_}</b> ({f.source}{f.by_user ? `, ${f.by_user}` : ''})</li>)}
           </ul>
         </details>
       )}

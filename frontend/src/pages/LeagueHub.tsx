@@ -5,6 +5,7 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { hubByOld } from '../lib/hubs'
+import { leagueHref } from '../lib/links'
 
 /*
  * Weekly league hub (fix125): /predictions/<league> — intro, then this week's games with their preview text and a
@@ -44,7 +45,7 @@ export default function LeagueHub() {
   if (missing) return <div className="max-w-2xl mx-auto px-4 py-16 text-center text-muted">{tt("Page not found.")}</div>
   if (!hub) return <div className="min-h-[50vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={tt('Loading…')} /></div>
   const bb = hub.sport !== 'football' // basketball and NFL say "game"
-  const leagueUrl = hub.sport === 'basketball' ? `/basketball/league/${hub.code}` : hub.sport === 'american-football' ? (hub.code === 'NCAA' ? '/american-football/college/league' : '/american-football/league') : `/league/${hub.code}`
+  const leagueUrl = hub.sport === 'basketball' ? leagueHref('basketball', hub.code, hub.name)! : hub.sport === 'american-football' ? leagueHref('american-football', hub.code === 'NCAA' ? '2' : '1')! : leagueHref('football', hub.code, hub.name)!
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 sm:py-10 space-y-5">
       <header className="space-y-2">

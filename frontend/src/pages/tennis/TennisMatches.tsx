@@ -4,6 +4,7 @@ import Games from '../../components/sport/Games'
 import TodayPage from '../../components/sport/Today'
 import { useTennisGames } from '../../components/sport/games/tennis'
 import { TennisTourChips } from './parts'
+import { matchHref } from '../../lib/links'
 
 /**
  * Tennis matches (fix193): the shared Matches list and Today page — football's layout — with the tennis adapters. The
@@ -19,7 +20,7 @@ function TennisToday() {
     <TodayPage a={{
       title: t('Tennis today'),
       params: { sport: 'tennis', tour },
-      gameHref: id => tennisHref.match(id),
+      gameHref: g => matchHref('tennis', g.id, { ...g, date: g.kickoff })!,
       leagueHref: code => (code ? tennisHref.tournament(code) : null),
       all: { to: `/tennis/matches${tour === 'all' ? '' : `?tour=${tour}`}`, label: t('All matches →') },
       top: <TennisTourChips />

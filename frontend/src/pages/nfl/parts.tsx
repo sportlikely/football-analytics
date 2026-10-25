@@ -8,6 +8,7 @@ import { NFL_STATUS, timeOf, nick, record, useNflFavorites, nflRid, nflRstatus, 
 import { SectionTitle, TeamLogo, dayTitle, BbPickBlock, LockIcon } from '../bb/parts'
 import { useReveal, justRevealed } from '../../lib/reveal'
 import { ScorersToggle, RowScorersLine, useScorersOpen } from '../../components/sport/RowScorers'
+import { teamHref, leagueHref, matchHref } from '../../lib/links'
 
 /** Shared pieces of the NFL pages (fix137) — the same look as basketball's and football's. */
 
@@ -68,7 +69,7 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
   const [scOpen, scToggle] = useScorersOpen()
   return (
     <div>
-    <Link to={`/american-football/game/${g.id}${p ? '#prediction' : ''}`} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
+    <Link to={`${matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })}${p ? '#prediction' : ''}`} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
       {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
         {favWhy.length > 0 && (
@@ -146,7 +147,7 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
         {(isLive || done) && <ScorersToggle open={scOpen} onToggle={scToggle} />}
       </div>
     </Link>
-      {scOpen && <RowScorersLine href={`/american-football/game/${g.id}`} live={isLive} homeName={nick(g.home.name, g.league)} awayName={nick(g.away.name, g.league)} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+      {scOpen && <RowScorersLine href={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} live={isLive} homeName={nick(g.home.name, g.league)} awayName={nick(g.away.name, g.league)} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
     </div>
   )
 }
@@ -176,7 +177,7 @@ export function NflGamesByDay({ games, empty }: { games: NflGame[]; empty: strin
 /** Live game card (football-style): LIVE / quarter, both teams, score. Live games are shown only in the live strip. */
 export function NflLiveCard({ g }: { g: NflGame }) {
   return (
-    <Link to={`/american-football/game/${g.id}`} className="card card-hover snap-start flex-shrink-0 w-[248px] p-3.5 block">
+    <Link to={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} className="card card-hover snap-start flex-shrink-0 w-[248px] p-3.5 block">
       <div className="flex items-center justify-between text-[10px] text-faint mb-1.5">
         <span>{g.league === 2 ? t('College football') : 'NFL'}</span>
         <span className="inline-flex items-center gap-1 font-bold text-live tracking-wider"><span className="w-1.5 h-1.5 rounded-full bg-live animate-pulseDot" />{NFL_STATUS[g.status] || t('LIVE')}</span>
@@ -219,7 +220,7 @@ export function StandTable({ title, rows, compact = false, highlight, league = 1
             {rows.map(r => (
               <tr key={r.team.id} className={`border-t border-line/50 ${marked(r.team.id) ? 'bg-accent/10' : ''}`}>
                 <td className="py-1.5 px-1">
-                  <Link to={`/american-football/team/${r.team.id}`} className="flex items-center gap-2 min-w-0 hover:text-accent">
+                  <Link to={teamHref('american-football', r.team.id, r.team.name)!} className="flex items-center gap-2 min-w-0 hover:text-accent">
                     <TeamLogo team={r.team} size={18} />
                     <span className="truncate text-ink"><span className="sm:hidden">{nick(r.team.name, league)}</span><span className="hidden sm:inline">{r.team.name}</span></span>
                   </Link>
@@ -291,7 +292,7 @@ export function NflLeaguePanel({ league }: { league: NflLeague }) {
           : !d || !d.conferences.length ? <p className="text-xs text-faint p-2">{t('Standings appear once the season has started.')}</p>
           : <div className="space-y-4">{d.conferences.flatMap(c => c.divisions.map(dv => <StandTable key={`${c.name}|${dv.name}`} title={dv.name !== c.name ? `${c.name} · ${dv.name}` : c.name} rows={dv.rows} compact league={league} />))}</div>}
       </section>
-      <Link to={league === 2 ? '/american-football/college/league' : '/american-football/league'} className="block text-center text-xs font-bold text-accent">{t('Full table →')}</Link>
+      <Link to={leagueHref('american-football', league === 2 ? '2' : '1')!} className="block text-center text-xs font-bold text-accent">{t('Full table →')}</Link>
     </aside>
   )
 }

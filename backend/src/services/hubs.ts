@@ -5,6 +5,7 @@
  * Used by the app (GET /api/hub/:slug), the crawler HTML and the sitemap (seo.ts).
  */
 import { db } from '../db';
+import { pubPath } from './slugs';
 import { getPreview } from './matchPreview';
 import { bbPreview } from './bbPreview';
 import { bbPublic } from './bbSite';
@@ -123,6 +124,8 @@ function* hubSteps(h: HubDef): Generator<void, Hub> {
     }
     if (!games.length) next = (db.prepare(`SELECT MIN(kickoff) AS d FROM bb_games WHERE code = ? AND kickoff > ?`).get(h.code, to) as any)?.d || null;
   }
+  // fix229: every link at its slug address
+  games = games.map(g => ({ ...g, url: pubPath(g.url), homeUrl: g.homeUrl ? pubPath(g.homeUrl) : g.homeUrl, awayUrl: g.awayUrl ? pubPath(g.awayUrl) : g.awayUrl }));
   const hub: Hub = { slug: h.slug, code: h.code, sport: h.sport, name: h.name, intro: h.intro, from, to, games, next };
   cache.set(h.slug, { at: Date.now(), hub });
   publishState(`hub:${h.slug}`, { at: Date.now(), hub });

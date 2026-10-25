@@ -5,6 +5,7 @@ import { API_URL } from '../lib/socket'
 import { errorText } from '../lib/auth'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { OurPickBadge } from '../components/DcPick'
+import { matchHref } from '../lib/links'
 
 /*
  * Upset watch (Pro): games of the coming 7 days where our model gives the underdog 20–45% (fix188; and the favourite
@@ -14,7 +15,8 @@ import { OurPickBadge } from '../components/DcPick'
  */
 export type UpsetSport = 'football' | 'basketball' | 'american-football' | 'tennis'
 const API_OF: Record<UpsetSport, string> = { football: '/upset-watch', basketball: '/basketball/upset-watch', 'american-football': '/nfl/upset-watch', tennis: '/tennis/upset-watch' }
-const GAME_OF: Record<UpsetSport, (id: number) => string> = { football: id => `/match/${id}`, basketball: id => `/basketball/game/${id}`, 'american-football': id => `/american-football/game/${id}`, tennis: id => `/tennis/match/${id}` }
+/** fix229: the game's slug link (the sides as listed, the day) */
+const GAME_OF = (sport: UpsetSport, g: { matchId: number; home: string; away: string; date: string }) => matchHref(sport, g.matchId, { home: g.home, away: g.away, date: g.date })!
 
 interface Watch {
   matchId: number; league: string; date: string; home: string; away: string
@@ -53,7 +55,7 @@ function WatchCard({ w, sport }: { w: Watch; sport: UpsetSport }) {
     { k: 'A', label: w.away, v: w.away_p, bar: 'bg-away' }
   ].filter(r => draws || r.k !== 'D')
   return (
-    <Link to={GAME_OF[sport](w.matchId)} className="card card-hover p-4 sm:p-5 flex flex-col gap-4 min-w-0">
+    <Link to={GAME_OF(sport, w)} className="card card-hover p-4 sm:p-5 flex flex-col gap-4 min-w-0">
       <div className="flex items-center justify-between gap-3 text-xs">
         <span className="inline-flex items-center gap-2 min-w-0">
           <span className="px-2 py-0.5 rounded-full bg-loss/15 text-loss font-extrabold uppercase tracking-wider text-[10px] whitespace-nowrap">{tt("Upset watch")}</span>
@@ -167,7 +169,7 @@ export default function UpsetWatch({ sport = 'football' }: { sport?: UpsetSport 
             <ul className="divide-y divide-line/50 -mx-4 sm:-mx-5 border-t border-line/50">
               {rec.recent.map(r => (
                 <li key={r.matchId}>
-                  <Link to={GAME_OF[sport](r.matchId)} className="flex items-center gap-3 px-4 sm:px-5 py-2 hover:bg-surface2/50 text-sm">
+                  <Link to={GAME_OF(sport, r)} className="flex items-center gap-3 px-4 sm:px-5 py-2 hover:bg-surface2/50 text-sm">
                     <span className="w-14 text-[11px] text-faint shrink-0">{new Date(r.date).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
                     <span className="flex-1 min-w-0 truncate">
                       <span className={r.underdog === 'H' ? 'font-bold text-ink' : 'text-muted'}>{r.home}</span>

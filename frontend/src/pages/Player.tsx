@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useEntityId } from '../components/SlugRoute'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText } from '../lib/auth'
@@ -8,6 +9,7 @@ import { t as tt, LOCALE } from '../lib/i18n'
 import PlayerHeader, { Chip } from '../components/sport/page/PlayerHeader'
 import NameLink, { href } from '../components/sport/NameLink'
 import { tNodes } from '../lib/tNodes'
+import { teamHref as footballTeamOf, playerHref, leagueHref } from '../lib/links'
 
 /**
  * Player page: /player/<API-Football id>. /player/find?name=&team=&c=&n= looks a scorer up first (Football-Data ids).
@@ -93,10 +95,10 @@ function Lock() {
 const mon = (d: string) => new Date(d).toLocaleDateString(LOCALE, { month: 'short', year: 'numeric' })
 const span = (a: string | null, b: string | null) => (a && b ? (mon(a) === mon(b) ? mon(a) : `${mon(a)} – ${mon(b)}`) : '')
 
-const teamHref = (t: SiteTeam) => `/team/${t.id}`
+const teamHref = (t: SiteTeam) => footballTeamOf('football', t.id, t.name)!
 
 export default function Player() {
-  const { id = '' } = useParams()
+  const id = useEntityId() || ''
   const [params] = useSearchParams()
   const nav = useNavigate()
   const [data, setData] = useState<PlayerData | null>(null)
@@ -114,7 +116,7 @@ export default function Player() {
     if (id === 'find') {
       axios
         .get(`${API_URL}/player-page/find`, { params: Object.fromEntries(params.entries()) })
-        .then(r => !cancelled && (r.data.pending ? setError(tt("More details soon. This page is being prepared — please check back a little later.")) : nav(`/player/${r.data.data.id}`, { replace: true })))
+        .then(r => !cancelled && (r.data.pending ? setError(tt("More details soon. This page is being prepared — please check back a little later.")) : nav(playerHref('football', r.data.data.id, params.get('name'))!, { replace: true })))
         .catch(() => !cancelled && setError(tt("We couldn't find {0}'s page yet.", { 0: params.get('name') || 'this player' })))
     } else {
       axios
@@ -231,7 +233,7 @@ export default function Player() {
                         <span className="flex items-center gap-2 min-w-0">
                           {r.league.logo && <img src={r.league.logo} alt="" className="w-5 h-5 object-contain bg-white/90 rounded p-0.5" />}
                           {r.league.code ? (
-                            <Link to={`/league/${r.league.code}`} className="truncate text-ink hover:text-accent">{r.league.name}</Link>
+                            <Link to={leagueHref('football', r.league.code, r.league.name)!} className="truncate text-ink hover:text-accent">{r.league.name}</Link>
                           ) : (
                             <span className="truncate text-ink">{r.league.name}</span>
                           )}
@@ -265,7 +267,7 @@ export default function Player() {
           </Card>
 
           {full && main && (
-            <Card title={tNodes("Detail · {0}", { 0: <NameLink to={main.league.code ? `/league/${main.league.code}` : href.league(main.league.id)}>{main.league.name}</NameLink> })}>
+            <Card title={tNodes("Detail · {0}", { 0: <NameLink to={href.league(main.league.code || main.league.id, main.league.name)}>{main.league.name}</NameLink> })}>
               <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
                 {gk ? (
                   <>
@@ -378,7 +380,7 @@ export default function Player() {
                     <td className="py-2 pl-2">
                       <span className="flex items-center gap-2 min-w-0">
                         {r.team && <img src={r.team.logo} alt="" className="w-4 h-4 object-contain" />}
-                        <NameLink to={r.league.code ? `/league/${r.league.code}` : href.league(r.league.id)} className="truncate text-ink">{r.league.name}</NameLink>
+                        <NameLink to={href.league(r.league.code || r.league.id, r.league.name)} className="truncate text-ink">{r.league.name}</NameLink>
                         {r.team && <span className="text-[11px] text-faint truncate">· <NameLink to={teamHref(r.team)}>{r.team.name}</NameLink></span>}
                       </span>
                     </td>

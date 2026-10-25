@@ -41,7 +41,7 @@ export function sportNav(sport: SportId, nflBase = '/american-football'): NavIte
     { key: 'home', label: 'Home', to: '/american-football', end: true, tab: 'Home' },
     { key: 'games', label: 'Games', to: '/american-football/games', tab: 'Games' },
     { key: 'today', label: 'Today', to: '/american-football/today' },
-    { key: 'standings', label: 'Standings', to: `${nflBase}/league` },
+    { key: 'standings', label: 'Standings', to: nflBase.endsWith('/college') ? '/american-football/league/college-football' : '/american-football/league/nfl' },
     { key: 'favorites', label: 'Favorites', to: '/american-football/favorites', tab: 'Favorites' },
     { key: 'myPicks', label: 'My picks', to: '/american-football/my-picks' },
     { key: 'upsets', label: 'Upset watch', to: '/american-football/upset-watch', tab: 'Upsets' },
