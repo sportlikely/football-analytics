@@ -1,5 +1,21 @@
 # SportLikely — instructions for Claude (read first, every session)
 
+## Shipping (read first)
+
+Every fix ends on **main** (Yarin, fix233: fix228–231 sat on claude/* branches and Railway never built them). Whatever
+branch this chat is on (claude/*, a worktree, anything):
+
+- `git pull --rebase origin main` → on conflict keep both sides → typecheck (backend + frontend, `npm run parity`) + this
+  fix's tests → `git push origin HEAD:main`.
+- Never stop at "pushed to my branch". If `git push origin HEAD:main` is refused, pull --rebase again and retry (up to 3
+  times), then report the error.
+- After pushing, check: `git fetch origin && git branch -r --contains HEAD` shows `origin/main`. Reply with the commit
+  hash on main and the first line of the commit message.
+- Never force-push main. Never push to main with a failing typecheck.
+- Payments changes are the only exception: they go on a branch and Yarin merges (existing rule).
+- The Stop hook (`.claude/settings.json` → `.claude/hooks/check-on-main.mjs`) asks once at the end of a task when HEAD is
+  not on origin/main, then warns.
+
 SportLikely (sportlikely.com) is a sports-prediction site: football live, basketball launching ~18 Oct 2026, more sports later.
 Owner: Yarin. One repo, one Railway service (`railway.json`, Dockerfile) serving the API and the built site. SQLite on a
 Railway volume (`DATA_DIR=/data`). Push to `main` = deploy.
@@ -62,8 +78,8 @@ is model work, the matching note, in the same commit.
 
 ## How to work here
 
-- Branches: for normal fixes and features push to `main` when Yarin says so ("push to main"). For anything touching
-  payments, accounts, auth or data deletion, push a branch and ask him to merge.
+- Branches: every fix lands on `main` (see "Shipping" at the top). For anything touching payments, push a branch and
+  ask him to merge.
 - Commit message style: `fixNNN: short description` (next number: see the top of `docs/notes/backlog.md`). Keep the
   counter going.
 - Before pushing: `cd backend && npx tsc --noEmit -p .` and `cd frontend && npx tsc --noEmit -p .` must pass
