@@ -10,7 +10,8 @@
  * the thread number in the subject; the customer's answer arrives in the support@ Gmail inbox (no inbound webhook yet).
  * Internal notes stay in the site. Status: open → waiting (we replied) → closed.
  *
- * Campaigns: only to accounts that ticked "email updates" (marketing_opt_in = 1) and confirmed their email. Every
+ * Campaigns: only to accounts with the "Product news" switch on (email_prefs.news = 1, fix218; before: "email updates",
+ * users.marketing_opt_in) and a confirmed email. Every
  * email carries a one-click unsubscribe link (HMAC-signed, no login) and List-Unsubscribe headers. Sent in the
  * background, about 2 per second (Resend limit), each recipient recorded.
  */
@@ -18,6 +19,7 @@ import crypto from 'crypto';
 import { db } from '../db';
 import { trustOf } from './signupGuard';
 import logger from '../utils/logger';
+import { saveEmailPrefs } from './pickEmails';
 import { sendMail, emailEnabled, layout, esc, SITE } from './email';
 import { PLANS } from './billing';
 
@@ -216,11 +218,12 @@ function cleanSegment(s: any): Segment {
   };
 }
 
-/** Accounts in a segment. Only confirmed emails that opted in to updates are ever included. */
+const NEWS_ON = `email_verified = 1 AND id IN (SELECT user_id FROM email_prefs WHERE news = 1)`;
+/** Accounts in a segment. Only confirmed emails with "Product news" on are ever included. */
 export function segmentUsers(segIn: any): { id: number; email: string; name: string | null; plan: string }[] {
   const seg = cleanSegment(segIn);
   const nowIso = new Date().toISOString();
-  const rows = db.prepare(`SELECT id, email, name, plan, premium_until, created_at, last_login_at, role FROM users WHERE marketing_opt_in = 1 AND email_verified = 1`).all() as any[];
+  const rows = db.prepare(`SELECT id, email, name, plan, premium_until, created_at, last_login_at, role FROM users WHERE ${NEWS_ON}`).all() as any[];
   const daysAgo = (d: number) => new Date(Date.now() - d * 86400000).toISOString();
   return rows.filter(r => {
     const plan = (r.plan === 'premium' || r.plan === 'pro') && (!r.premium_until || r.premium_until > nowIso) ? r.plan : 'free';
@@ -237,7 +240,7 @@ export function segmentUsers(segIn: any): { id: number; email: string; name: str
 
 export function segmentPreview(seg: any) {
   const list = segmentUsers(seg);
-  const optedIn = (db.prepare(`SELECT COUNT(*) AS n FROM users WHERE marketing_opt_in = 1 AND email_verified = 1`).get() as any).n;
+  const optedIn = (db.prepare(`SELECT COUNT(*) AS n FROM users WHERE ${NEWS_ON}`).get() as any).n;
   return { count: list.length, optedIn, sample: list.slice(0, 8).map(u => ({ email: u.email.replace(/^(.{2}).*(@.*)$/, '$1•••$2'), plan: u.plan })) };
 }
 
@@ -260,6 +263,7 @@ export function unsubscribe(u: unknown, t: unknown): boolean {
   const want = unsubSig(id), got = String(t || '');
   if (got.length !== want.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want))) return false;
   db.prepare(`UPDATE users SET marketing_opt_in = 0, marketing_opt_in_at = ? WHERE id = ?`).run(now(), id);
+  saveEmailPrefs(id, { news: false }, 'unsubscribe-link'); // fix218
   return true;
 }
 
@@ -300,8 +304,8 @@ export async function startCampaign(subject: unknown, body: unknown, segIn: any,
     let sent = 0, failed = 0;
     for (const u of list) {
       // re-check: someone may unsubscribe while the campaign is going out
-      const still = db.prepare(`SELECT marketing_opt_in FROM users WHERE id = ?`).get(u.id) as any;
-      if (!still?.marketing_opt_in) { db.prepare(`UPDATE campaign_recipients SET status = 'skipped', at = ? WHERE campaign_id = ? AND user_id = ?`).run(now(), id, u.id); continue; }
+      const still = db.prepare(`SELECT 1 ok FROM users WHERE id = ? AND ${NEWS_ON}`).get(u.id) as any;
+      if (!still?.ok) { db.prepare(`UPDATE campaign_recipients SET status = 'skipped', at = ? WHERE campaign_id = ? AND user_id = ?`).run(now(), id, u.id); continue; }
       const url = unsubscribeUrl(u.id);
       try {
         await sendMail({

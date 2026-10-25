@@ -27,7 +27,7 @@ import logger from '../utils/logger';
 import { yieldLoop, yieldEvery, every, after, heavy } from './perf';
 import { threadJobsOn, inThread } from './threadJob';
 import { simulateSeason, simulateSeasonAsync, probitOf, marginOf, hashSeed, type LeagueRules, type SimGame, type SimPlayed, type SimParams, type SimOut, type ZoneKey, type SimSport } from '../utils/seasonSim';
-import { fitRatings, tableOf, rankNow, median, r4, type LeagueInput, type ReplayLeague, replayHere } from '../utils/seasonFit';
+import { fitRatings, tableOf, rankNow, median, r4, type LeagueInput, type ReplayLeague, type ReplayOut, replayHere, fitNoiseHere } from '../utils/seasonFit';
 import { FD_TWIN, FOOTBALL_RULES, FOOTBALL_SKIP, BASKETBALL_RULES, NFL_RULES, rulesFor, SIM_PARAMS } from '../utils/seasonRules';
 import { AF_LEAGUES, afGet, afBudgetLeft, afConfigured } from './apiFootball';
 import { AF_OFFSET, EXTRA_COMPETITIONS, currentSeason, afStandingsCached } from './afMatches';
@@ -235,7 +235,7 @@ async function footballInput(L: { code: string; afId: number; own: boolean }, no
   const gp = played.length || 1;
   const params: SimParams = {
     runs: SIM_PARAMS.runs, seed: hashSeed(`football|${L.code}|${nowIso.slice(0, 10)}`), home: fit.home,
-    drawBand: Number.isFinite(median(ws)) ? median(ws) : base.drawBand, sigma: 1, noise: base.noise,
+    drawBand: Number.isFinite(median(ws)) ? median(ws) : base.drawBand, sigma: 1, noise: noiseFor('football').noise, walk: noiseFor('football').walk,
     goalsH: played.length >= 20 ? played.reduce((s, g) => s + g.hg, 0) / gp : base.goalsH,
     goalsA: played.length >= 20 ? played.reduce((s, g) => s + g.ag, 0) / gp : base.goalsA
   };
@@ -304,7 +304,7 @@ async function basketballInput(L: { code: string; name: string }, nowIso: string
   const rank = rankNow(teams, 'basketball');
   return {
     sport: 'basketball', code: L.code, name: L.name, season, rules, teams, played, games,
-    params: { runs: SIM_PARAMS.runs, seed: hashSeed(`basketball|${L.code}|${nowIso.slice(0, 10)}`), home: fit.home, drawBand: 0, sigma: base.sigma, noise: base.noise, goalsH: 0, goalsA: 0 },
+    params: { runs: SIM_PARAMS.runs, seed: hashSeed(`basketball|${L.code}|${nowIso.slice(0, 10)}`), home: fit.home, drawBand: 0, sigma: base.sigma, noise: noiseFor('basketball').noise, walk: noiseFor('basketball').walk, goalsH: 0, goalsA: 0 },
     meta: Object.fromEntries(ids.map(id => [id, { logo: logos.get(id) || null, rank: rank.get(id) || 0 }])), lastFinal
   };
 }
@@ -363,7 +363,7 @@ async function nflInput(code: string, nowIso: string): Promise<LeagueInput | Ski
   const rank = rankNow(teams, 'nfl');
   return {
     sport: 'nfl', code, name, season: String(season), rules: rulesFor('nfl', code), teams, played, games,
-    params: { runs: SIM_PARAMS.runs, seed: hashSeed(`nfl|${code}|${nowIso.slice(0, 10)}`), home: fit.home, drawBand: 0, sigma: base.sigma, noise: base.noise, goalsH: 0, goalsA: 0 },
+    params: { runs: SIM_PARAMS.runs, seed: hashSeed(`nfl|${code}|${nowIso.slice(0, 10)}`), home: fit.home, drawBand: 0, sigma: base.sigma, noise: noiseFor('nfl').noise, walk: noiseFor('nfl').walk, goalsH: 0, goalsA: 0 },
     meta: Object.fromEntries(list.map(id => [id, { logo: teamRows.get(id)?.logo || null, rank: rank.get(id) || 0 }])), lastFinal
   };
 }
@@ -402,6 +402,38 @@ async function inputOf(ref: LeagueRef, nowIso: string): Promise<LeagueInput | Sk
 /* ---------- runs ---------- */
 
 const status = { running: false, lastAt: null as string | null, lastLeagues: 0, lastMs: 0, lastError: null as string | null };
+
+/* ---------- fix218: the season uncertainty, fitted by last season's replay (per sport) ---------- */
+
+db.exec(`CREATE TABLE IF NOT EXISTS season_forecast_params (sport TEXT PRIMARY KEY, noise REAL NOT NULL, walk REAL NOT NULL, json TEXT, at TEXT NOT NULL)`);
+/** the noise / walk a sport's forecasts use: the fitted pair when the replay has run, else the base (walk 0) */
+export function noiseFor(sport: FcSport): { noise: number; walk: number; fitted: boolean } {
+  const r = db.prepare(`SELECT noise, walk FROM season_forecast_params WHERE sport = ?`).get(sport) as any;
+  if (r) return { noise: r.noise, walk: r.walk, fitted: true };
+  return { noise: SIM_PARAMS[sport].noise, walk: 0, fitted: false };
+}
+/**
+ * ">99 %" / "<1 %" are shown only when the replay says that level is calibrated: at least 20 forecasts at ≥ 99 % with
+ * 98.5 %+ of them coming true (and the mirror for ≤ 1 %). Else the page says "99 %" / "1 %".
+ */
+export function extremesFor(sport: FcSport): { hi: boolean; lo: boolean } {
+  let hi = { n: 0, hits: 0 }, lo = { n: 0, hits: 0 };
+  for (const r of db.prepare(`SELECT json FROM season_forecast_accuracy WHERE sport = ?`).all(sport) as any[]) {
+    const e = JSON.parse(r.json)?.extremes;
+    if (!e) continue;
+    hi = { n: hi.n + e.hi.n, hits: hi.hits + e.hi.hits }; lo = { n: lo.n + e.lo.n, hits: lo.hits + e.lo.hits };
+  }
+  return { hi: hi.n >= 20 && hi.hits / hi.n >= 0.985, lo: lo.n >= 20 && lo.hits / lo.n <= 0.015 };
+}
+/** fix218: position chances rounded to 4 decimals with the largest remainder, so a row adds up to exactly 100 % */
+export function roundRow(pos: number[], dp = 4): number[] {
+  const k = 10 ** dp;
+  const scaled = pos.map(p => p * k), floor = scaled.map(Math.floor);
+  let left = Math.round(k - floor.reduce((a, b) => a + b, 0));
+  const order = scaled.map((v, i) => ({ i, rem: v - floor[i] })).sort((a, b) => b.rem - a.rem);
+  for (let j = 0; j < order.length && left > 0; j++, left--) floor[order[j].i]++;
+  return floor.map(v => v / k);
+}
 export const seasonForecastStatus = () => ({ ...status, dirty: [...dirtySince.entries()].map(([k, at]) => ({ league: k, since: new Date(at).toISOString() })) });
 
 /** build, run and store the given leagues; returns how many ran */
@@ -453,7 +485,8 @@ function store(x: LeagueInput, out: SimOut, ms: number, nowIso: string) {
       now: { rank: x.meta[t.id]?.rank || 0, pts: src.pts, played: src.played, w: src.w, d: src.d, l: src.l, diff: src.gf - src.ga },
       avgPts: Math.round(t.avgPts * 10) / 10, avgPos: Math.round(t.avgPos * 100) / 100,
       zones: Object.fromEntries(Object.entries(t.zones).map(([k, v]) => [k, r4(v as number)])),
-      pos: t.pos.map(r4)
+      // fix218: the row adds up to exactly 100 % after rounding; the unrounded sum is kept for the data-health check
+      pos: roundRow(t.pos), psum: t.pos.reduce((a, b) => a + b, 0)
     };
   });
   const seen = finalSeen.get(`${x.sport}|${x.code}`) || null;
@@ -513,14 +546,18 @@ async function tick() {
 export function startSeasonForecastScheduler() {
   after('season forecast start', () => tick(), 5 * MIN);
   every('season forecast check', () => tick(), 5 * MIN);
-  // accuracy replay of last season: Mondays 03:xx UTC (admin only)
-  every('season forecast accuracy', async () => {
+  // accuracy replay of last season (+ the noise fit, fix218): ~8 min after the start when none is stored or it is over
+  // 7 days old, then Mondays 03:xx UTC (admin only). The forecasts are re-run with the fitted noise right after.
+  const replay = async (force: boolean) => {
     const d = new Date();
-    if (d.getUTCDay() !== 1 || d.getUTCHours() !== 3) return;
+    if (!force && (d.getUTCDay() !== 1 || d.getUTCHours() !== 3)) return;
     const last: any = db.prepare(`SELECT MAX(at) at FROM season_forecast_accuracy`).get();
-    if (last?.at && Date.now() - Date.parse(last.at) < 5 * DAY) return;
-    await heavy('season forecast accuracy', () => runSeasonAccuracy());
-  }, 30 * MIN);
+    if (last?.at && Date.now() - Date.parse(last.at) < (force ? 7 : 5) * DAY) return;
+    const n = await heavy('season forecast accuracy', () => runSeasonAccuracy());
+    if (n) await heavy('season forecast', () => runSeasonForecast(allLeagues(), 'after the noise fit'));
+  };
+  after('season forecast accuracy', () => replay(true), 8 * MIN);
+  every('season forecast accuracy', () => replay(false), 30 * MIN);
 }
 
 /* ---------- reads for the pages ---------- */
@@ -579,9 +616,11 @@ export function seasonForecastChecks(): { id: string; label: string; level: 'ok'
       const since = seen ? Date.parse(seen) : Date.parse(fin);
       if (Date.now() - since > 30 * MIN) late.push(`${r.sport} ${r.name || r.code}: last run ${r.run_at.slice(0, 16)}, a game finished since (${fin.slice(0, 16)})`);
     }
-    for (const t of JSON.parse(r.teams) as FcTeamRow[]) {
-      const s = t.pos.reduce((a, b) => a + b, 0);
-      if (Math.abs(s - 1) > 0.002) bad.push(`${r.sport} ${r.code} ${t.name}: positions add up to ${(s * 100).toFixed(1)}%`);
+    for (const t of JSON.parse(r.teams) as (FcTeamRow & { psum?: number })[]) {
+      // fix218: the unrounded sum of the run counts (exact up to floating point); a stored row from before the rounding
+      // fix is judged by its rounded values until its next run
+      const s = t.psum ?? t.pos.reduce((a, b) => a + b, 0);
+      if (Math.abs(s - 1) > (t.psum != null ? 1e-6 : 0.002)) bad.push(`${r.sport} ${r.code} ${t.name}: positions add up to ${(s * 100).toFixed(2)}%`);
     }
   }
   const unknown = rows.filter(r => !r.known).map(r => `${r.sport} ${r.name || r.code} (${r.code}): no zone rules — position chances only`);
@@ -594,7 +633,7 @@ export function seasonForecastChecks(): { id: string; label: string; level: 'ok'
       const s = accuracySummary()[sport];
       return { id: `season-forecast-calibrated-${sport}`, label: `Season forecast calibrated (${sport === 'nfl' ? 'American football' : sport})`,
         level: (!s ? 'warn' : s.beats ? 'ok' : 'warn') as 'ok' | 'warn',
-        detail: !s ? 'No replay of last season yet (Mondays 03:00 UTC, or Admin → Season forecast)' : `Last season replayed: Brier ${s.sim.toFixed(4)} vs table order ${s.base.toFixed(4)} over ${s.n} forecasts${s.beats ? '' : ' — admin only until it beats the table'}` };
+        detail: !s ? 'No replay of last season yet (first run ~8 min after the start, then Mondays 03:00 UTC, or Admin → Season forecast)' : `Last season replayed: Brier ${s.sim.toFixed(4)} vs table order ${s.base.toFixed(4)} over ${s.n} forecasts${s.beats ? '' : ' — admin only until it beats the table'} · season noise ${noiseFor(sport).fitted ? `fitted: ${noiseFor(sport).noise} + drift ${noiseFor(sport).walk}` : 'not fitted yet (base)'} · ">99%" ${extremesFor(sport).hi ? 'calibrated' : 'capped at 99%'}, "<1%" ${extremesFor(sport).lo ? 'calibrated' : 'capped at 1%'}` };
     })
   ];
 }
@@ -660,10 +699,35 @@ function pastNfl(): ReplayLeague[] {
 
 export async function runSeasonAccuracy(): Promise<number> {
   const leagues = [...pastFootball(), ...pastBasketball(), ...pastNfl()];
+  // fix218: 1. the noise fit per league (matchweeks 5 / 10 / 20, 600 runs a pair) → one (noise, walk) a sport: the
+  // pair with the best mean Brier over its leagues, weighted by forecasts; stored and used by every forecast from now
+  const fits = new Map<FcSport, { noise: number; walk: number; brier: number; n: number }[]>();
+  for (const L of leagues) {
+    try {
+      const f = threadJobsOn() ? await inThread<ReturnType<typeof fitNoiseHere>>('season sim', [null, L, 'fit']) : fitNoiseHere(L);
+      const list = fits.get(L.sport) || []; fits.set(L.sport, list);
+      for (const t of f.tried) list.push({ ...t, n: 1 });
+      logger.info(`season noise fit ${L.sport} ${L.code}: best noise ${f.noise} drift ${f.walk} (Brier ${f.brier})`);
+    } catch (e: any) { logger.warn(`season noise fit ${L.code}: ${e?.message || e}`); }
+    await yieldLoop();
+  }
+  for (const [sport, list] of fits) {
+    // mean Brier per pair over the sport's leagues
+    const by = new Map<string, { noise: number; walk: number; sum: number; n: number }>();
+    for (const t of list) { const k = `${t.noise}|${t.walk}`; const x = by.get(k) || { noise: t.noise, walk: t.walk, sum: 0, n: 0 }; x.sum += t.brier; x.n++; by.set(k, x); }
+    const best = [...by.values()].sort((a, b) => a.sum / a.n - b.sum / b.n)[0];
+    if (!best) continue;
+    db.prepare(`INSERT OR REPLACE INTO season_forecast_params (sport, noise, walk, json, at) VALUES (?, ?, ?, ?, ?)`)
+      .run(sport, best.noise, best.walk, JSON.stringify([...by.values()].map(x => ({ noise: x.noise, walk: x.walk, brier: r4(x.sum / x.n), leagues: x.n }))), new Date().toISOString());
+    logger.info(`season noise ${sport}: noise ${best.noise}, drift ${best.walk} (mean Brier ${r4(best.sum / best.n)} over ${best.n} league(s))`);
+  }
+  // 2. the full weekly replay with the fitted pair: the calibration check (Brier vs the table, the ">99 %" bins)
   let done = 0;
   for (const L of leagues) {
     try {
-      const r = threadJobsOn() ? await inThread<ReturnType<typeof replayHere>>('season sim', [null, L]) : replayHere(L);
+      const nz = noiseFor(L.sport);
+      const LL: ReplayLeague = { ...L, base: { ...L.base, noise: nz.noise, walk: nz.walk } };
+      const r = threadJobsOn() ? await inThread<ReplayOut>('season sim', [null, LL]) : replayHere(LL);
       db.prepare(`INSERT OR REPLACE INTO season_forecast_accuracy (sport, code, season, json, at) VALUES (?, ?, ?, ?, ?)`).run(L.sport, L.code, L.season, JSON.stringify(r), new Date().toISOString());
       done++;
     } catch (e: any) { logger.warn(`season forecast accuracy ${L.code}: ${e?.message || e}`); }
@@ -698,7 +762,8 @@ export function visibleIds(lg: FcLeague, favs: Set<string>): Set<string> {
   return keep;
 }
 export function leagueView(lg: FcLeague, full: boolean, favs: Set<string>) {
-  if (full) return { ...lg, full: true, locked: 0 };
+  const extremes = extremesFor(lg.sport);
+  if (full) return { ...lg, extremes, full: true, locked: 0 };
   const keep = visibleIds(lg, favs);
   const open = lg.teams.filter(t => keep.has(t.id));
   // a locked row keeps the team and today's table, not the forecast (ordered by today's place, so it gives nothing away)
@@ -713,7 +778,7 @@ export function leagueView(lg: FcLeague, full: boolean, favs: Set<string>) {
     const edge = o.filter(t => !fav.includes(t));
     teams.push(...edge.slice(0, 3), ...fav, ...shut.filter(t => (t.group || '') === g), ...edge.slice(3));
   }
-  return { ...lg, teams, full: false, locked: shut.length };
+  return { ...lg, extremes, teams, full: false, locked: shut.length };
 }
 
 /** "What this game means": per side, the zones whose chance moves by 2 points or more with the result */

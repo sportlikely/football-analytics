@@ -274,8 +274,6 @@
  "See plans": "Tarife ansehen",
  "Guess first": "Zuerst selbst tippen",
  "Hide our prediction on upcoming games until you tap \"Reveal prediction\", so you can make your own call first. Saved on this device.": "Blendet unsere Prognose bei anstehenden Spielen aus, bis du auf \"Prognose anzeigen\" tippst, damit du zuerst selbst tippen kannst. Wird auf diesem Gerät gespeichert.",
- "Email updates": "E-Mail-Updates",
- "New features, Premium news and weekly picks. No spam.": "Neue Funktionen, Premium-News und wöchentliche Tipps. Kein Spam.",
  "Change password": "Passwort ändern",
  "Current password": "Aktuelles Passwort",
  "New password": "Neues Passwort",
@@ -2472,5 +2470,7 @@
  "A team’s chance of the title, Europe, the play-offs or relegation is the share of runs where it happened.": "Die Chance eines Teams auf den Titel, Europa, die Play-offs oder den Abstieg ist der Anteil der Durchläufe, in denen es so kam.",
  "The forecast runs again 10 minutes after every finished game of the league, and every night.": "Die Prognose läuft 10 Minuten nach jedem beendeten Spiel der Liga neu und zusätzlich jede Nacht.",
  "We replay last season week by week with only what was known then. Its accuracy appears here once it beats simply reading the table as it stands.": "Wir spielen die letzte Saison Woche für Woche nach, nur mit dem damaligen Wissensstand. Die Genauigkeit erscheint hier, sobald sie besser ist als ein einfacher Blick auf die aktuelle Tabelle.",
- "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Letzte Saison Woche für Woche nachgespielt: Brier-Score {0}, gegenüber {1} für die damalige Tabelle. Niedriger ist besser."
+ "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Letzte Saison Woche für Woche nachgespielt: Brier-Score {0}, gegenüber {1} für die damalige Tabelle. Niedriger ist besser.",
+ "Product news": "Produkt-News",
+ "New features and Premium news, a few times a year. Off unless you turn it on.": "Neue Funktionen und Premium-News, ein paar Mal im Jahr. Aus, solange du es nicht einschaltest."
 }

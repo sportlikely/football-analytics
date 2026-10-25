@@ -59,7 +59,8 @@ test('football: inputs from af_fixtures + settled results, run, stored, Free vie
   const pastRounds = roundRobin(20).filter((_, r) => t0 + r * 7 * DAY + 3600000 < Date.now() - DAY).length;
   for (const t of lg.teams) assert.equal(t.now.played, pastRounds, `${t.name} played`);
   assert.ok(lg.teams.some(t => t.now.d > 0), 'the settled draws are in the table');
-  for (const t of lg.teams) assert.ok(Math.abs(t.pos.reduce((a, b) => a + b, 0) - 1) < 0.002);
+  // fix218: every stored row adds up to exactly 100 % after rounding (largest remainder), 4 decimals each
+  for (const t of lg.teams) { assert.equal(Math.round(t.pos.reduce((a, b) => a + b, 0) * 1e6), 1e6, `${t.name} row sum`); for (const p of t.pos) assert.equal(p, Math.round(p * 1e4) / 1e4); }
   // team ids: no FD twin map here → API-Football + offset
   assert.ok(lg.teams.some(t => t.id === String(AF_OFFSET + 100)));
   // Free: top three, bottom three, + a favourite; the rest locked, in today's order
@@ -132,4 +133,39 @@ test('NFL: divisions from nfl_teams, 14 play-off teams, Elo for games without a 
   assert.ok(Math.abs(sum('div_title') - 8) < 0.01);
   assert.ok(Math.abs(sum('title') - 1) < 0.01);
   assert.deepEqual(lg.groups, ['AFC', 'NFC']);
+});
+
+test('fix218: largest-remainder rounding, the noise fit on a replayed season, the ">99%" calibration flag', async () => {
+  // rows that used to add up to 100.2 %
+  const row = F.roundRow([0.33335, 0.33335, 0.3333]);
+  assert.equal(Math.round(row.reduce((a, b) => a + b, 0) * 1e4), 1e4);
+  assert.deepEqual(F.roundRow([0.5, 0.25, 0.25]), [0.5, 0.25, 0.25]);
+  assert.equal(Math.round(F.roundRow(Array.from({ length: 12 }, () => 1 / 12)).reduce((a, b) => a + b, 0) * 1e4), 1e4);
+  // before the replay: base noise, no drift, extremes capped
+  assert.deepEqual(F.noiseFor('football'), { noise: 0.1, walk: 0, fitted: false });
+  assert.deepEqual(F.extremesFor('football'), { hi: false, lo: false });
+  // a past season to replay: the fit tries the grid at matchweeks 5 / 10 / 20 and stores one pair per sport
+  const { fitNoiseHere, replayHere } = require('../dist/utils/seasonFit.js');
+  const { rulesFor } = require('../dist/utils/seasonRules.js');
+  const teams = Array.from({ length: 20 }, (_, i) => ({ id: `t${i}`, name: `Club ${i}` }));
+  const start = Date.parse('2025-08-10T14:00:00Z');
+  const games = [];
+  let r = 0;
+  for (let round = 0; round < 38; round++) for (let k = 0; k < 10; k++) {
+    const h = (round + k) % 20, a = (round * 3 + 19 - k) % 20; if (h === a) continue;
+    const str = i => 1.5 - i * 0.06;
+    games.push({ home: `t${h}`, away: `t${a}`, hg: Math.round(Math.max(0, str(h) + 0.2 + ((r * 7) % 5 - 2) * 0.4)), ag: Math.round(Math.max(0, str(a) + ((r * 11) % 5 - 2) * 0.4)), kickoff: new Date(start + round * 7 * DAY + k * 3600e3).toISOString() }); r++;
+  }
+  const L = { sport: 'football', code: 'PL', name: 'PL', season: '2025', rules: rulesFor('football', 'PL'), teams, games, preds: [], base: { runs: 400, seed: 7, home: 0.2, drawBand: 0.33, sigma: 1, noise: 0.1, goalsH: 1.5, goalsA: 1.2 } };
+  const fit = fitNoiseHere(L);
+  assert.equal(fit.tried.length, 20, 'every (noise, walk) pair of the grid tried');
+  assert.ok(Number.isFinite(fit.brier) && fit.noise > 0);
+  const rep = replayHere({ ...L, base: { ...L.base, noise: fit.noise, walk: fit.walk } });
+  assert.ok(rep.steps > 20 && rep.extremes && typeof rep.extremes.hi.n === 'number');
+  // stored like the job does → used by the next forecast, and the flag answers from the bins
+  db.prepare(`INSERT OR REPLACE INTO season_forecast_params (sport, noise, walk, json, at) VALUES ('football', ?, ?, '[]', ?)`).run(fit.noise, fit.walk, new Date().toISOString());
+  assert.deepEqual(F.noiseFor('football'), { noise: fit.noise, walk: fit.walk, fitted: true });
+  db.prepare(`INSERT OR REPLACE INTO season_forecast_accuracy (sport, code, season, json, at) VALUES ('football', 'PL', '2025', ?, ?)`).run(JSON.stringify({ ...rep, extremes: { hi: { n: 40, hits: 40 }, lo: { n: 40, hits: 3 } } }), new Date().toISOString());
+  assert.deepEqual(F.extremesFor('football'), { hi: true, lo: false });
+  assert.equal(F.leagueView(F.leagueForecast('football', 'PL'), true, new Set()).extremes.hi, true);
 });

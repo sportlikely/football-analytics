@@ -130,40 +130,51 @@ const freePort = () => new Promise(res => { const s = net.createServer(); s.list
 const tryConnect = port => new Promise(res => { const s = net.connect(port, '127.0.0.1'); s.once('connect', () => { s.destroy(); res(true); }); s.once('error', () => res(false)); });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-test('start-up: the web role with a big shared blob does not accept a connection before the state is loaded; 0 stalls after ready', async () => {
+test('start-up (fix218): the web role listens at once, answers 503 then 200, never waits over 500 ms in the first 60 s, and skips the nfl engine blob', async () => {
   const { e, dir } = env({ WORKER_SPAWN: '0', PORT: String(await freePort()), GEO_OFF: '1' });
-  // the database with a big state the web process must load first (an nfl live state: its applier exists in the web role)
+  // a database with a big nfl engine state: the web role must not load it any more (its applier is worker-only since fix218)
   const db = new DatabaseSync(path.join(dir, 'bet-to-beat.sqlite'));
   db.exec(`CREATE TABLE IF NOT EXISTS shared_state (key TEXT PRIMARY KEY, ver INTEGER NOT NULL, at TEXT NOT NULL, bytes INTEGER NOT NULL, ms INTEGER NOT NULL, data BLOB NOT NULL)`);
   const big = v8.serialize({ rows: Array.from({ length: 400000 }, (_, i) => ({ i, s: `row ${i}`, v: [i, i + 1, i + 2] })) });
-  db.prepare(`INSERT INTO shared_state (key, ver, at, bytes, ms, data) VALUES (?, ?, ?, ?, ?, ?)`).run('nfl:live:test', 1, new Date().toISOString(), big.length, 1, big);
+  db.prepare(`INSERT INTO shared_state (key, ver, at, bytes, ms, data) VALUES (?, ?, ?, ?, ?, ?)`).run('nfl:live:1', 1, new Date().toISOString(), big.length, 1, big);
   db.close();
   const p = spawn(process.execPath, [path.join(DIST, 'index.js')], { env: { ...e, SL_ROLE: 'web' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { out += d; });
   const port = Number(e.PORT);
   const t0 = Date.now();
-  let firstAccept = null, first = null;
+  const WINDOW = Number(process.env.STARTUP_WINDOW_MS || 60000);
+  const waits = []; // every request's wait in the first 60 s
+  let firstAccept = null, first = null, readyAt = null, last = null;
   try {
-    for (let i = 0; i < 600; i++) {
-      if (await tryConnect(port)) {
+    while (Date.now() - t0 < WINDOW) {
+      if (firstAccept === null) {
+        if (!(await tryConnect(port))) { await sleep(50); continue; }
         firstAccept = Date.now() - t0;
-        first = await fetch(`http://127.0.0.1:${port}/api/health`).then(async r => ({ status: r.status, body: await r.json() })).catch(e => ({ status: 0, body: String(e) }));
-        break;
       }
-      await sleep(100);
+      const s = Date.now();
+      const r = await fetch(`http://127.0.0.1:${port}/health`).then(async r => ({ status: r.status, body: await r.json(), retry: r.headers.get('retry-after') })).catch(e => ({ status: 0, body: String(e) }));
+      waits.push(Date.now() - s);
+      first ??= r;
+      if (r.status === 200 && readyAt === null) readyAt = Date.now() - t0;
+      last = r;
+      await sleep(250);
     }
     assert.ok(firstAccept !== null, `never listened: ${out.slice(-800)}`);
-    // the very first answer: ready, with the big state counted in the load
-    assert.equal(first.status, 200, JSON.stringify(first.body).slice(0, 300));
-    assert.equal(first.body.ready, true);
-    assert.ok(first.body.statesLoaded >= 1, `states loaded: ${first.body.statesLoaded}`);
-    assert.ok(first.body.stateLoadMs >= 0);
-    // a little later: still ready, and no stall over 500 ms since (the load's own stalls are counted apart)
-    await sleep(1500);
-    const later = await fetch(`http://127.0.0.1:${port}/api/health`).then(r => r.json());
-    assert.equal(later.ready, true);
-    assert.equal(later.stallsSinceReady, 0, `stalls after ready: ${later.stallsSinceReady}`);
+    // listening within a second of the start (before the state load) — a deploy's health check gets an answer, not a refused connection
+    assert.ok(firstAccept < 5000, `first connection after ${firstAccept} ms`);
+    assert.ok(first.status === 503 || first.status === 200, `first answer ${first.status}: ${JSON.stringify(first.body).slice(0, 200)}`);
+    if (first.status === 503) { assert.equal(first.body.ready, false); assert.equal(first.retry, '5'); }
+    assert.ok(readyAt !== null, `never ready: ${JSON.stringify(last)} ${out.slice(-600)}`);
+    assert.equal(last.status, 200);
+    assert.equal(last.body.ready, true);
+    // the nfl engine blob was not parsed by the web role: a short load, and nothing waited behind it
+    assert.ok(last.body.stateLoadMs < 2000, `state load took ${last.body.stateLoadMs} ms (the nfl blob must stay in the worker)`);
+    const slow = waits.filter(w => w > 500);
+    assert.equal(slow.length, 0, `${slow.length} of ${waits.length} requests waited over 500 ms in the first ${WINDOW / 1000} s: ${slow.join(', ')} ms`);
+    assert.equal(last.body.stallsSinceReady, 0, `stalls after ready: ${last.body.stallsSinceReady}`);
+    assert.equal(last.body.slowSinceReady, 0, `slow requests after ready: ${last.body.slowSinceReady}`);
+    assert.ok(waits.length > 20, `only ${waits.length} requests in the window`);
   } finally {
     p.kill('SIGTERM');
     await sleep(300);

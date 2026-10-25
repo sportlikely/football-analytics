@@ -30,7 +30,7 @@ import { db } from '../db';
 import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import logger from '../utils/logger';
 import { yieldLoop, timed, slicer } from './perf';
-import { runsJobs } from './role';
+import { runsJobs, isWeb } from './role';
 import { onState, publishState } from './shared';
 import { teamBox, NflGame } from './nflSite';
 import { rememberFirstPrediction } from './nflGameExtras';
@@ -732,7 +732,10 @@ function publishLive(league: LeagueId) {
   void ctx;
   publishState(`nfl:live:${league}`, { params: L.params, blend: L.blend, trained: L.trained, builtAt: L.builtAt, finishedCount: L.finishedCount, engine, applied: L.applied, lastT: L.lastT });
 }
-onState('nfl:live:', (key, v) => {
+// fix218: the web process never loads this state — every route that reads the engine is answered by the worker
+// (workerRoutes.ts), the predictions and the live chance come from the tables; it was the 8 s "state load nfl" at
+// every start. Registered in the worker / one process only (loadNewerStates skips keys nobody wants).
+if (!isWeb) onState('nfl:live:', (key, v) => {
   const league = (Number(key.slice(9)) === 2 ? 2 : 1) as LeagueId;
   return (async () => {
     const games = await loadGamesAsync(league), ctx = await loadCtxAsync(league);

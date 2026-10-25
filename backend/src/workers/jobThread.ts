@@ -15,7 +15,8 @@ async function run(): Promise<unknown> {
   if (job === 'photo crop') { const r = await (await import('../services/playerPhotos')).faceSquare(Buffer.from(args[0] as Uint8Array)); return r ? { ...r, data: new Uint8Array(r.data) } : null; }
   if (job === 'more backtest') return (await import('../services/morePredictions')).moreBacktestHere(args[0] as any, args[1], args[2] as any);
   // fix215: season forecast — a batch of league simulations, or one past season's replay (pure, no database)
-  if (job === 'season sim') { const f = await import('../utils/seasonFit'); return args[0] ? f.simulateHere(args[0] as any) : f.replayHere(args[1] as any); }
+  // fix218: + the noise fit of one past season (args[2] === 'fit')
+  if (job === 'season sim') { const f = await import('../utils/seasonFit'); return args[0] ? f.simulateHere(args[0] as any) : args[2] === 'fit' ? f.fitNoiseHere(args[1] as any) : f.replayHere(args[1] as any); }
   throw new Error(`unknown thread job ${job}`);
 }
 

@@ -186,22 +186,23 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 const PORT = process.env.PORT || 3001;
 /*
- * fix210b: the web process loads the model state the worker left (and the live list) BEFORE it listens: on 24 Oct the
- * first requests after a deploy waited behind the state loads (6.8 s "state load nfl", 3.1 s "state load squad").
- * Railway keeps the old instance serving until /api/health answers, so nobody waits for this.
+ * fix210b / fix212b / fix218: the web process listens at once and answers 503 + Retry-After (app.ts) until the model
+ * state the worker left (and the live list) is loaded; then it is ready. Listening first means Railway's health check
+ * gets a 503 (keeps the old instance serving) instead of a refused connection — on 25 Oct the site answered 502 for a
+ * minute during the deploy because the new instance was not listening while it loaded. fix218 also took the 8 s
+ * "state load nfl" out of the web role (nflModel.ts): the web only loads what its pages read, so this is short.
  */
-const ready: Promise<void> = isWeb
-  ? (async () => {
-    const t0 = Date.now();
-    setJob('start: state load');
-    try { loadLiveRows(); await loadNewerStates(); } finally { setJob(null); }
-    // fix212b: only now may a request be answered (app.ts answers 503 before); the load's stalls are counted apart
-    markReady({ loadMs: Date.now() - t0, states: Object.keys(sharedStatus()).length });
-    markStartupDone();
-    logger.info(`start: ${Object.keys(sharedStatus()).length} shared state(s) loaded in ${Date.now() - t0} ms — listening now`);
-  })()
-  : (markReady({ loadMs: 0, states: 0 }), markStartupDone(), Promise.resolve());
-ready.catch(e => { logger.warn(`start: state load: ${e?.message || e}`); markReady({ loadMs: -1, states: 0 }); markStartupDone(); }).finally(() => server.listen(PORT, () => {
+const loadState = async () => {
+  if (!isWeb) { markReady({ loadMs: 0, states: 0 }); markStartupDone(); return; }
+  const t0 = Date.now();
+  setJob('start: state load');
+  try { loadLiveRows(); await loadNewerStates(); } catch (e: any) { logger.warn(`start: state load: ${e?.message || e}`); } finally { setJob(null); }
+  markReady({ loadMs: Date.now() - t0, states: Object.keys(sharedStatus()).length });
+  markStartupDone();
+  logger.info(`start: ${Object.keys(sharedStatus()).length} shared state(s) loaded in ${Date.now() - t0} ms — ready`);
+};
+server.listen(PORT, () => {
+  setImmediate(() => void loadState());
   setJob('boot (scheduler start)'); setImmediate(() => setJob(null)); // fix165: the sync start-up work is named in /api/perf
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
@@ -214,6 +215,6 @@ ready.catch(e => { logger.warn(`start: state load: ${e?.message || e}`); markRea
     // WORKER=0: every job in this process (the scheduler module is only loaded here)
     void import('./jobs').then(j => j.startJobs()).catch(e => logger.error(`jobs: ${e?.message || e}`));
   }
-}));
+});
 
 export { app, io };

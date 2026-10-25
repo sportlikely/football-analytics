@@ -11,7 +11,7 @@ import { t, lang, LANGS } from '../lib/i18n'
  * every change). Each change is saved at once; the server stores when and where a switch was turned on.
  */
 type Sport = 'football' | 'basketball' | 'american-football' | 'tennis'
-interface Settings { daily: boolean; weekly: boolean; sports: Sport[]; sendHour: number; tz: string; lang: string; sportsOpen: Sport[]; emailConfirmed: boolean; enabled: boolean; stopped: string | null }
+interface Settings { daily: boolean; weekly: boolean; news: boolean; sports: Sport[]; sendHour: number; tz: string; lang: string; sportsOpen: Sport[]; emailConfirmed: boolean; enabled: boolean; stopped: string | null }
 
 /** The browser's IANA time zone (UTC when it can't tell). */
 export function browserTz(): string {
@@ -37,7 +37,7 @@ export default function EmailsCard() {
     return [...extra, ...list]
   }, [s?.tz])
 
-  const save = async (patch: Partial<Pick<Settings, 'daily' | 'weekly' | 'sports' | 'sendHour' | 'tz'>>) => {
+  const save = async (patch: Partial<Pick<Settings, 'daily' | 'weekly' | 'news' | 'sports' | 'sendHour' | 'tz'>>) => {
     if (!s) return
     const prev = s
     setS({ ...s, ...patch })
@@ -76,6 +76,7 @@ export default function EmailsCard() {
         <>
           {toggle(t("Daily picks"), t("Each morning: today's strongest picks and your teams' games, with how we did yesterday."), s.daily, () => save({ daily: !s.daily }))}
           {toggle(t("Weekly digest"), t("Every Monday: last week's record, the best call and this week's big games."), s.weekly, () => save({ weekly: !s.weekly }))}
+          {toggle(t("Product news"), t("New features and Premium news, a few times a year. Off unless you turn it on."), s.news, () => save({ news: !s.news }))}
 
           {(s.daily || s.weekly) && (
             <div className="space-y-3 pt-1">

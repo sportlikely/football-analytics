@@ -39,14 +39,14 @@ function Side({ d, side, sport }: { d: FcMeaning; side: 'home' | 'away'; sport: 
       <div className="space-y-1.5">
         {s.lines.map(l => (
           <div key={l.zone} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm num">
-            <span className="text-muted min-w-[8rem]">{zoneLabel(l.zone, sport)} <span className="text-faint">{t('now')} {pct(l.now)}</span></span>
+            <span className="text-muted min-w-[8rem]">{zoneLabel(l.zone, sport)} <span className="text-faint">{t('now')} {pct(l.now, d.extremes)}</span></span>
             {order.map((i, k) => {
               const v = l.byResult[i], up = v != null && l.now != null && v > l.now
               const good = BAD_ZONE(l.zone) ? !up : up
               return (
                 <span key={k} className="whitespace-nowrap">
                   <span className="text-faint text-xs">{names[k]}</span>{' '}
-                  <b className={v == null ? 'text-faint' : good ? 'text-win' : 'text-loss'}>{pct(v)}</b>
+                  <b className={v == null ? 'text-faint' : good ? 'text-win' : 'text-loss'}>{pct(v, d.extremes)}</b>
                 </span>
               )
             })}

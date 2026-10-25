@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { t, LOCALE } from '../../../lib/i18n'
-import { useLeagueForecast, zoneLabel, tableZones, pct, BAD_ZONE, type FcSport, type FcTeam, type FcLeague } from '../../../lib/seasonForecast'
+import { useLeagueForecast, zoneLabel, tableZones, pct, rowPct, BAD_ZONE, type FcSport, type FcTeam, type FcLeague, type FcExtremes } from '../../../lib/seasonForecast'
 import { LCard, Lines } from '../page/LeaguePage'
 
 /**
@@ -39,7 +39,7 @@ export default function SeasonForecast({ sport, code, teamHref }: { sport: FcSpo
           return (
             <div key={g} className="min-w-0">
               {groups.length > 1 && <h3 className="text-sm font-bold text-ink mb-2">{g}</h3>}
-              {heat ? <HeatMap rows={rows} teamHref={teamHref} /> : <ChanceTable data={data} rows={rows} teamHref={teamHref} />}
+              {heat ? <HeatMap rows={rows} teamHref={teamHref} extremes={data.extremes} /> : <ChanceTable data={data} rows={rows} teamHref={teamHref} />}
             </div>
           )
         })}
@@ -67,6 +67,7 @@ function Name({ x, teamHref }: { x: FcTeam; teamHref: (id: string, name: string)
 const nowText = (sport: FcSport, x: FcTeam) => sport === 'football' ? String(x.now.pts) : `${x.now.w}–${x.now.l}${x.now.d ? `–${x.now.d}` : ''}`
 
 function ChanceTable({ data, rows, teamHref }: { data: FcLeague; rows: FcTeam[]; teamHref: (id: string, name: string) => string }) {
+  const extremes = data.extremes
   const zones = tableZones(data.zones)
   const sport = data.sport
   return (
@@ -101,7 +102,7 @@ function ChanceTable({ data, rows, teamHref }: { data: FcLeague; rows: FcTeam[];
                     return (
                       <td key={z} className="py-2 px-2 text-right">
                         <span className={`inline-block min-w-[2.75rem] rounded-md px-1.5 py-0.5 ${v >= 0.005 ? (BAD_ZONE(z) ? 'text-loss' : 'text-ink') : 'text-faint'}`}
-                          style={v >= 0.005 ? { background: `rgb(var(--${BAD_ZONE(z) ? 'loss' : 'accent'}) / ${Math.min(0.35, v * 0.35 + 0.04)})` } : undefined}>{pct(v)}</span>
+                          style={v >= 0.005 ? { background: `rgb(var(--${BAD_ZONE(z) ? 'loss' : 'accent'}) / ${Math.min(0.35, v * 0.35 + 0.04)})` } : undefined}>{pct(v, extremes)}</span>
                       </td>
                     )
                   })}
@@ -115,7 +116,7 @@ function ChanceTable({ data, rows, teamHref }: { data: FcLeague; rows: FcTeam[];
   )
 }
 
-function HeatMap({ rows, teamHref }: { rows: FcTeam[]; teamHref: (id: string, name: string) => string }) {
+function HeatMap({ rows, teamHref, extremes }: { rows: FcTeam[]; teamHref: (id: string, name: string) => string; extremes?: FcExtremes }) {
   const open = rows.filter(x => !x.locked && x.pos)
   const n = Math.max(0, ...open.map(x => x.pos!.length))
   if (!open.length) return <p className="text-sm text-muted">{t('Pro shows every position for every team.')}</p>
@@ -129,19 +130,21 @@ function HeatMap({ rows, teamHref }: { rows: FcTeam[]; teamHref: (id: string, na
           </tr>
         </thead>
         <tbody>
-          {open.map(x => (
+          {open.map(x => {
+            const whole = rowPct(x.pos!) // fix218: the row adds up to 100
+            return (
             <Fragment key={x.id}>
               <tr>
                 <td className="pr-2 sticky left-0 bg-surface min-w-[7rem] max-w-[10rem]"><Name x={x} teamHref={teamHref} /></td>
                 {x.pos!.map((p, k) => (
-                  <td key={k} className="w-8 h-7 text-center rounded" title={`${x.name} · ${k + 1} · ${pct(p)}`}
+                  <td key={k} className="w-8 h-7 text-center rounded" title={`${x.name} · ${k + 1} · ${pct(p, extremes)}`}
                     style={{ background: p > 0 ? `rgb(var(--accent) / ${Math.min(0.85, p * 1.6)})` : undefined, color: p > 0.4 ? 'rgb(var(--bg))' : undefined }}>
-                    {p >= 0.005 ? Math.round(p * 100) : ''}
+                    {whole[k] > 0 ? whole[k] : ''}
                   </td>
                 ))}
               </tr>
             </Fragment>
-          ))}
+          )})}
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-faint">{t('Each cell: the chance (%) of finishing in that position.')}</p>

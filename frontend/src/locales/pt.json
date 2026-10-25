@@ -274,8 +274,6 @@
  "See plans": "Ver planos",
  "Guess first": "Palpite primeiro",
  "Hide our prediction on upcoming games until you tap \"Reveal prediction\", so you can make your own call first. Saved on this device.": "Esconde nossa previsão nos próximos jogos até você tocar em \"Revelar previsão\", para que você faça seu próprio palpite primeiro. Salvo neste dispositivo.",
- "Email updates": "Novidades por e-mail",
- "New features, Premium news and weekly picks. No spam.": "Novos recursos, notícias do Premium e palpites semanais. Sem spam.",
  "Change password": "Alterar senha",
  "Current password": "Senha atual",
  "New password": "Nova senha",
@@ -2472,5 +2470,7 @@
  "A team’s chance of the title, Europe, the play-offs or relegation is the share of runs where it happened.": "A probabilidade de uma equipa conquistar o título, ir à Europa, aos play-offs ou descer é a parte das simulações em que isso aconteceu.",
  "The forecast runs again 10 minutes after every finished game of the league, and every night.": "A previsão volta a correr 10 minutos depois de cada jogo terminado da liga, e todas as noites.",
  "We replay last season week by week with only what was known then. Its accuracy appears here once it beats simply reading the table as it stands.": "Repetimos a temporada passada semana a semana só com o que se sabia na altura. A precisão aparece aqui quando superar simplesmente ler a tabela tal como está.",
- "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Temporada passada repetida semana a semana: pontuação Brier {0}, contra {1} lendo a tabela de cada momento. Mais baixo é melhor."
+ "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Temporada passada repetida semana a semana: pontuação Brier {0}, contra {1} lendo a tabela de cada momento. Mais baixo é melhor.",
+ "Product news": "Novidades do produto",
+ "New features and Premium news, a few times a year. Off unless you turn it on.": "Novas funções e novidades do Premium, algumas vezes por ano. Desligado até você ativar."
 }

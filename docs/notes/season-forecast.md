@@ -71,6 +71,17 @@ promotion or play-offs) / relegation against what happened, next to the "current
 once it beats the baseline; the how-it-works page shows the numbers only then. NBA is not replayed (past conferences are
 not stored). Not yet run on the server: write the numbers here after the first replay.
 
+### Season uncertainty (fix218)
+A team's strength is not fixed for the rest of the season: every run draws a season-level shift per team (`noise`, sd in
+rating units) and lets it drift game by game (`walk`: a random walk whose total drift to the season's end has sd `walk`;
+step = walk / √games left). Both are fitted, not guessed: `fitNoiseHere` replays last season at matchweeks 5, 10 and 20
+with every pair of noise × {0.5, 1, 1.5, 2, 3} and walk × {0, 0.5, 1, 2} (multiples of the base noise, 600 runs a pair)
+and keeps the pair with the best mean Brier on title / first zone / relegation; one pair per sport (the mean over its
+leagues) in `season_forecast_params`, used by every forecast from then on. Until the first fit: the base noise, no drift.
+The fit + replay run ~8 min after a start when none is stored or it is over 7 days old, then Mondays 03:00 UTC.
+">99%" / "<1%" on the pages only when the replay found ≥ 20 forecasts at that level and 98.5 %+ of them came true
+(`extremesFor`); else "99%" / "1%". Fitted values on the server: not yet run — write them here after the first fit.
+
 ## Not done / to decide
 - Cups' group stages (Champions League league phase), MLS / Argentina / Liga MX formats, college CFP bracket.
 - Basketball leagues other than NBA, EuroLeague, ACB, LBA, BBL: position chances only (their play-off formats differ by

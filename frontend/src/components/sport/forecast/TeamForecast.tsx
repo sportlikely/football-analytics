@@ -33,9 +33,9 @@ function Card({ c, sport, leagueHref }: { c: FcTeamCard; sport: FcSport; leagueH
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         <Tile label={t('Avg place')} value={x.avgPos?.toFixed(1) || '–'} sub={t('of {0}', { 0: c.size })} />
         <Tile label={sport === 'football' ? t('Avg points') : t('Avg wins')} value={x.avgPts?.toFixed(1) || '–'} />
-        {zones.map(z => <Tile key={z} label={zoneLabel(z, sport)} value={pct(x.zones?.[z])} bad={BAD_ZONE(z)} />)}
+        {zones.map(z => <Tile key={z} label={zoneLabel(z, sport)} value={pct(x.zones?.[z], c.extremes)} bad={BAD_ZONE(z)} />)}
       </div>
-      {lines.length > 0 && c.history.length >= 2 && <Trend history={c.history} zones={lines} sport={sport} />}
+      {lines.length > 0 && c.history.length >= 2 && <Trend history={c.history} zones={lines} sport={sport} extremes={c.extremes} />}
     </TCard>
   )
 }
@@ -51,7 +51,7 @@ function Tile({ label, value, sub, bad }: { label: string; value: string; sub?: 
 
 const COLORS = ['accent', 'loss']
 /** a small line chart of the zone chances over the season (0–100%), one point a day */
-function Trend({ history, zones, sport }: { history: FcTeamCard['history']; zones: ZoneKey[]; sport: FcSport }) {
+function Trend({ history, zones, sport, extremes }: { history: FcTeamCard['history']; zones: ZoneKey[]; sport: FcSport; extremes?: FcTeamCard['extremes'] }) {
   const [hover, setHover] = useState<number | null>(null)
   const W = 320, H = 110, padL = 30, padR = 10, padT = 10, padB = 20
   const pts = history.slice(-120)
@@ -66,7 +66,7 @@ function Trend({ history, zones, sport }: { history: FcTeamCard['history']; zone
       </div>
       <div className="relative">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img"
-          aria-label={zones.map(z => `${zoneLabel(z, sport)}: ${pts.map(p => `${day(p.day)} ${pct(p.zones[z])}`).join(', ')}`).join('; ')}>
+          aria-label={zones.map(z => `${zoneLabel(z, sport)}: ${pts.map(p => `${day(p.day)} ${pct(p.zones[z], extremes)}`).join(', ')}`).join('; ')}>
           {[0, 0.5, 1].map(v => (
             <g key={v}>
               <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="rgb(var(--line))" strokeWidth="1" strokeDasharray={v === 0 ? undefined : '2 4'} />
@@ -89,7 +89,7 @@ function Trend({ history, zones, sport }: { history: FcTeamCard['history']; zone
           <div className="absolute -top-2 pointer-events-none rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[11px] shadow-lift whitespace-nowrap"
             style={{ left: `${(x(hover!) / W) * 100}%`, transform: 'translate(-50%, -100%)' }}>
             <div className="font-bold text-ink">{day(h.day)}</div>
-            {zones.map(z => <div key={z} className="text-muted">{zoneLabel(z, sport)} {pct(h.zones[z])}</div>)}
+            {zones.map(z => <div key={z} className="text-muted">{zoneLabel(z, sport)} {pct(h.zones[z], extremes)}</div>)}
           </div>
         )}
       </div>

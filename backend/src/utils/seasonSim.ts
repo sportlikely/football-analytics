@@ -86,6 +86,9 @@ export interface SimParams {
   drawBand: number; sigma: number;
   /** per-run team rating noise (season uncertainty), same units as the ratings */
   noise: number;
+  /** fix218: the drift of a team's strength over the rest of the season (a random walk, one step a game; sd of the
+   *  total drift to the end, same units) — fitted with `noise` by last season's replay; 0 = fixed strength */
+  walk?: number;
   /** football: the league's average goals of the home / away side (games without expected goals) */
   goalsH: number; goalsA: number;
 }
@@ -183,6 +186,8 @@ interface Prep {
   h2hPts: Float64Array; h2hGd: Float64Array; h2hGf: Float64Array; h2hW: Float64Array; h2hG: Float64Array;
   /** division / conference record so far (NFL): wins, games */
   divW: Float64Array; divG: Float64Array; confW: Float64Array; confG: Float64Array;
+  /** fix218: the random-walk step of each team (walk / √games left) */
+  walkStep: Float64Array;
 }
 
 function prepare(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[], games: SimGame[], P: SimParams): Prep {
@@ -211,12 +216,16 @@ function prepare(rules: LeagueRules, teams: SimTeam[], played: SimPlayed[], game
     }
   }
   const prepped = [] as Prep['games'];
+  const left = new Float64Array(n);
   for (const g of games) {
     const h = idx.get(g.home), a = idx.get(g.away);
     if (h === undefined || a === undefined || h === a) continue;
     prepped.push(gameOf(rules, teams, h, a, !!g.neutral, P, g));
+    left[h]++; left[a]++;
   }
-  return { n, teams, idx, groupOf, groups, divOf, divs, games: prepped, h2hPts, h2hGd, h2hGf, h2hW, h2hG, divW, divG, confW, confG };
+  const walkStep = new Float64Array(n);
+  for (let i = 0; i < n; i++) walkStep[i] = (P.walk || 0) / Math.sqrt(Math.max(1, left[i]));
+  return { n, teams, idx, groupOf, groups, divOf, divs, games: prepped, h2hPts, h2hGd, h2hGf, h2hW, h2hG, divW, divG, confW, confG, walkStep };
 }
 
 function gameOf(rules: LeagueRules, teams: SimTeam[], h: number, a: number, neutral: boolean, P: SimParams, g?: SimGame): Prep['games'][number] {
@@ -262,6 +271,9 @@ function resetRun(p: Prep, R: Run, rng: Rng, P: SimParams) {
 /** play one game; returns 0 home win, 1 draw, 2 away win */
 function play(rules: LeagueRules, p: Prep, R: Run, rng: Rng, G: Prep['games'][number], pts: { win: number; draw: number; loss: number }): { r: number; x: number; y: number } {
   const { h, a } = G;
+  // fix218: the season-level shift (drawn once a run) drifts a little with every game the team plays
+  if (p.walkStep[h] > 0) R.noise[h] += p.walkStep[h] * rng.normal();
+  if (p.walkStep[a] > 0) R.noise[a] += p.walkStep[a] * rng.normal();
   const shift = R.noise[h] - R.noise[a];
   let r: number, x: number, y: number;
   if (rules.sport === 'football') {

@@ -50,6 +50,9 @@ import trLang from '../locales/email/tr.json';
 db.exec(`
   CREATE TABLE IF NOT EXISTS email_prefs (
     user_id       INTEGER PRIMARY KEY,
+    news          INTEGER NOT NULL DEFAULT 0,
+    news_at       TEXT,
+    news_source   TEXT,
     daily         INTEGER NOT NULL DEFAULT 0,
     daily_at      TEXT,
     daily_source  TEXT,
@@ -114,6 +117,8 @@ export const SPORT_NAME: Record<ESport, string> = { football: 'Football', basket
 export interface EmailPrefs {
   daily: boolean; weekly: boolean; sports: ESport[]; sendHour: number; tz: string; lang: EmailLang
   dailyAt: string | null; dailySource: string | null; weeklyAt: string | null; weeklySource: string | null
+  /** fix218: "Product news" — new features and Premium news, a few times a year (off by default) */
+  news: boolean; newsAt: string | null; newsSource: string | null
 }
 export const validTz = (tz: unknown): tz is string => {
   if (typeof tz !== 'string' || !tz || tz.length > 64) return false;
@@ -123,28 +128,51 @@ const asSports = (x: unknown): ESport[] => {
   const list = (Array.isArray(x) ? x : String(x || '').split(',')).map(s => String(s).trim()).filter((s): s is ESport => (EMAIL_SPORTS as readonly string[]).includes(s));
   return [...new Set(list)];
 };
-const DEFAULTS = { daily: 0, weekly: 0, sports: EMAIL_SPORTS.join(','), send_hour: 8, tz: 'UTC', lang: 'en' };
+const DEFAULTS = { daily: 0, weekly: 0, news: 0, sports: EMAIL_SPORTS.join(','), send_hour: 8, tz: 'UTC', lang: 'en' };
 const rowToPrefs = (r: any): EmailPrefs => ({
   daily: !!r.daily, weekly: !!r.weekly, sports: asSports(r.sports), sendHour: Number(r.send_hour) || 0, tz: validTz(r.tz) ? r.tz : 'UTC', lang: asEmailLang(r.lang),
-  dailyAt: r.daily_at || null, dailySource: r.daily_source || null, weeklyAt: r.weekly_at || null, weeklySource: r.weekly_source || null
+  dailyAt: r.daily_at || null, dailySource: r.daily_source || null, weeklyAt: r.weekly_at || null, weeklySource: r.weekly_source || null,
+  news: !!r.news, newsAt: r.news_at || null, newsSource: r.news_source || null
 });
+// fix218: the column on a database made before this version; then the old "Email updates" switch (users.marketing_opt_in,
+// "new features, Premium news and weekly picks") folds into these: whoever had it on keeps the weekly digest on (that was
+// the consent given), once; the "product news" part is a new switch, off for everyone until turned on
+try { if (!(db.prepare(`PRAGMA table_info(email_prefs)`).all() as any[]).some(c => c.name === 'news')) db.exec(`ALTER TABLE email_prefs ADD COLUMN news INTEGER NOT NULL DEFAULT 0; ALTER TABLE email_prefs ADD COLUMN news_at TEXT; ALTER TABLE email_prefs ADD COLUMN news_source TEXT`); } catch { /* read-only copy */ }
+export function migrateMarketingOptIn(): number {
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    if (db.prepare(`SELECT 1 FROM app_secrets WHERE name = 'fix218-email-updates'`).get()) return 0;
+    const users = db.prepare(`SELECT id, marketing_opt_in_at FROM users WHERE marketing_opt_in = 1`).all() as any[];
+    let n = 0;
+    for (const u of users) {
+      const cur = db.prepare(`SELECT weekly, weekly_source FROM email_prefs WHERE user_id = ?`).get(u.id) as any;
+      if (cur && (cur.weekly || cur.weekly_source === 'account' || cur.weekly_source === 'unsubscribe-link' || cur.weekly_source === 'one-click' || cur.weekly_source === 'complaint')) continue; // chose already, or turned it off themselves
+      saveEmailPrefs(u.id, { weekly: true }, 'migrated');
+      n++;
+    }
+    db.prepare(`INSERT OR REPLACE INTO app_secrets (name, value) VALUES ('fix218-email-updates', ?)`).run(`${n} at ${nowIso()}`);
+    if (n) logger.info(`emails: ${n} account(s) with the old "Email updates" switch on now have the weekly digest on`);
+    return n;
+  } catch (e: any) { logger.warn(`emails: marketing opt-in migration: ${e?.message || e}`); return 0; }
+}
 export function emailPrefs(userId: number): EmailPrefs {
   return rowToPrefs(db.prepare(`SELECT * FROM email_prefs WHERE user_id = ?`).get(userId) || DEFAULTS);
 }
 
 export class EmailPrefsError extends Error { constructor(public status: number, msg: string) { super(msg); } }
-export type ConsentSource = 'signup' | 'account' | 'unsubscribe-link' | 'one-click' | 'complaint' | 'admin';
+export type ConsentSource = 'signup' | 'account' | 'unsubscribe-link' | 'one-click' | 'complaint' | 'admin' | 'migrated';
 
 /**
  * Save the settings. Only the fields given change; a switch that changes is logged with its time and source.
  * Returns the saved settings.
  */
-export function saveEmailPrefs(userId: number, input: Partial<{ daily: unknown; weekly: unknown; sports: unknown; sendHour: unknown; tz: unknown; lang: unknown }>, source: ConsentSource): EmailPrefs {
+export function saveEmailPrefs(userId: number, input: Partial<{ daily: unknown; weekly: unknown; news: unknown; sports: unknown; sendHour: unknown; tz: unknown; lang: unknown }>, source: ConsentSource): EmailPrefs {
   const cur = emailPrefs(userId);
   const at = nowIso();
   const next = { ...cur };
   if (input.daily !== undefined) next.daily = input.daily === true;
   if (input.weekly !== undefined) next.weekly = input.weekly === true;
+  if (input.news !== undefined) next.news = input.news === true;
   if (input.sports !== undefined) {
     const s = asSports(input.sports);
     if (!s.length) throw new EmailPrefsError(400, 'Choose at least one sport.');
@@ -165,12 +193,13 @@ export function saveEmailPrefs(userId: number, input: Partial<{ daily: unknown; 
   // a switch that changes (or is turned on in a new row, e.g. at sign-up) is stored with its time and source
   if (next.daily !== cur.daily || (!exists && next.daily)) { next.dailyAt = at; next.dailySource = source; log.run(userId, at, 'daily', next.daily ? 1 : 0, source); }
   if (next.weekly !== cur.weekly || (!exists && next.weekly)) { next.weeklyAt = at; next.weeklySource = source; log.run(userId, at, 'weekly', next.weekly ? 1 : 0, source); }
-  db.prepare(`INSERT INTO email_prefs (user_id, daily, daily_at, daily_source, weekly, weekly_at, weekly_source, sports, send_hour, tz, lang, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  if (next.news !== cur.news || (!exists && next.news)) { next.newsAt = at; next.newsSource = source; log.run(userId, at, 'news', next.news ? 1 : 0, source); }
+  db.prepare(`INSERT INTO email_prefs (user_id, daily, daily_at, daily_source, weekly, weekly_at, weekly_source, news, news_at, news_source, sports, send_hour, tz, lang, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (user_id) DO UPDATE SET daily = excluded.daily, daily_at = excluded.daily_at, daily_source = excluded.daily_source,
-      weekly = excluded.weekly, weekly_at = excluded.weekly_at, weekly_source = excluded.weekly_source, sports = excluded.sports,
+      weekly = excluded.weekly, weekly_at = excluded.weekly_at, weekly_source = excluded.weekly_source, news = excluded.news, news_at = excluded.news_at, news_source = excluded.news_source, sports = excluded.sports,
       send_hour = excluded.send_hour, tz = excluded.tz, lang = excluded.lang, updated_at = excluded.updated_at`)
-    .run(userId, next.daily ? 1 : 0, next.dailyAt, next.dailySource, next.weekly ? 1 : 0, next.weeklyAt, next.weeklySource, next.sports.join(','), next.sendHour, next.tz, next.lang, at);
+    .run(userId, next.daily ? 1 : 0, next.dailyAt, next.dailySource, next.weekly ? 1 : 0, next.weeklyAt, next.weeklySource, next.news ? 1 : 0, next.newsAt, next.newsSource, next.sports.join(','), next.sendHour, next.tz, next.lang, at);
   return emailPrefs(userId);
 }
 
@@ -184,7 +213,7 @@ export function emailSettings(user: User) {
   const p = emailPrefs(user.id);
   const sup = db.prepare(`SELECT reason FROM email_suppressed WHERE email = ?`).get(String(user.email).toLowerCase()) as any;
   return {
-    daily: p.daily, weekly: p.weekly, sports: p.sports, sendHour: p.sendHour, tz: p.tz, lang: p.lang,
+    daily: p.daily, weekly: p.weekly, news: p.news, sports: p.sports, sendHour: p.sendHour, tz: p.tz, lang: p.lang,
     sportsOpen: EMAIL_SPORTS.filter(s => sportOpen(s, !!user.isAdmin)),
     emailConfirmed: user.emailVerified, enabled: emailEnabled, stopped: sup ? String(sup.reason) : null
   };

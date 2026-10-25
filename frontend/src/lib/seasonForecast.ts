@@ -18,16 +18,18 @@ export interface FcTeam {
   id: string; name: string; group: string | null; logo: string | null; now: FcNow
   avgPts?: number; avgPos?: number; zones?: Partial<Record<ZoneKey, number>>; pos?: number[]; locked?: boolean
 }
+/** fix218: whether last season's replay found ">99%" (hi) and "<1%" (lo) calibrated; else the page says 99% / 1% */
+export interface FcExtremes { hi: boolean; lo: boolean }
 export interface FcLeague {
   sport: FcSport; code: string; name: string; season: string; runAt: string; runs: number; known: boolean
-  zones: ZoneKey[]; groups: string[]; teams: FcTeam[]; gamesLeft: number; full: boolean; locked: number
+  zones: ZoneKey[]; groups: string[]; teams: FcTeam[]; gamesLeft: number; full: boolean; locked: number; extremes?: FcExtremes
 }
 export interface FcTeamCard {
-  code: string; league: string; season: string; runAt: string; runs: number; known: boolean; zones: ZoneKey[]; size: number
+  code: string; league: string; season: string; runAt: string; runs: number; known: boolean; zones: ZoneKey[]; size: number; extremes?: FcExtremes
   team: FcTeam; history: { day: string; zones: Partial<Record<ZoneKey, number>>; avgPos: number }[]
 }
 export interface FcMeaning {
-  locked?: boolean; league: string; runs?: number; results?: string[]; share?: number[]
+  locked?: boolean; league: string; runs?: number; results?: string[]; share?: number[]; extremes?: FcExtremes
   home: { id: string; name: string; lines?: { zone: ZoneKey; now: number | null; byResult: (number | null)[] }[] }
   away: { id: string; name: string; lines?: { zone: ZoneKey; now: number | null; byResult: (number | null)[] }[] }
 }
@@ -55,7 +57,19 @@ export const BAD_ZONE = (z: ZoneKey) => z === 'relegation' || z === 'releg_po'
 /** the zone columns a table shows (the final is in the heat map / team card only) */
 export const tableZones = (zones: ZoneKey[]) => zones.filter(z => z !== 'final')
 
-export const pct = (x: number | null | undefined) => x == null ? '–' : x >= 0.995 ? '>99%' : x > 0 && x < 0.005 ? '<1%' : `${Math.round(x * 100)}%`
+/** a chance as a whole %. ">99%" / "<1%" only when the replay says that level is calibrated (fix218); else 99% / 1% */
+export const pct = (x: number | null | undefined, ex?: FcExtremes) => x == null ? '–'
+  : x >= 0.995 ? (ex?.hi ? '>99%' : '99%')
+  : x > 0 && x < 0.005 ? (ex?.lo ? '<1%' : '1%')
+  : `${Math.round(x * 100)}%`
+/** fix218: a row of chances as whole percents that add up to exactly 100 (largest remainder) */
+export function rowPct(pos: number[]): number[] {
+  const scaled = pos.map(p => p * 100), floor = scaled.map(Math.floor)
+  let left = 100 - floor.reduce((a, b) => a + b, 0)
+  const order = scaled.map((v, i) => ({ i, rem: v - floor[i] })).sort((a, b) => b.rem - a.rem)
+  for (let j = 0; j < order.length && left > 0; j++, left--) floor[order[j].i]++
+  return floor
+}
 
 function useFc<T>(path: string | null): { data: T | null; loading: boolean } {
   const { access } = useAuth()

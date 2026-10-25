@@ -70,7 +70,29 @@ export function simulateHere(inputs: LeagueInput[]): { out: SimOut; ms: number }
   return inputs.map(x => { const t0 = Date.now(); const out = simulateSeason(x.rules, x.teams, x.played, x.games, x.params); return { out, ms: Date.now() - t0 }; });
 }
 
-export interface ReplayLeague { sport: FcSport; code: string; name: string; season: string; rules: LeagueRules; teams: { id: string; name: string; group?: string; div?: string }[]; games: { home: string; away: string; hg: number; ag: number; kickoff: string }[]; preds: { home: string; away: string; m: number; at: string }[]; base: SimParams }
+export interface ReplayLeague { sport: FcSport; code: string; name: string; season: string; rules: LeagueRules; teams: { id: string; name: string; group?: string; div?: string }[]; games: { home: string; away: string; hg: number; ag: number; kickoff: string }[]; preds: { home: string; away: string; m: number; at: string }[]; base: SimParams
+  /** fix218: replay only these matchweeks (week index from the first game; default: every week), fewer runs */
+  opts?: { weeks?: number[]; runs?: number } }
+export interface ReplayOut { steps: number; n: number; sim: Record<string, number>; base: Record<string, number>; simAll: number; baseAll: number
+  /** fix218: how the extreme forecasts came out — ≥ 99 % said (hi) and ≤ 1 % said (lo): n forecasts, how many happened */
+  extremes: { hi: { n: number; hits: number }; lo: { n: number; hits: number } } }
+/** fix218: the (noise, walk) pairs tried by the fit, as multiples of the sport's base noise */
+export const NOISE_GRID = { noise: [0.5, 1, 1.5, 2, 3], walk: [0, 0.5, 1, 2] };
+/**
+ * fix218: fit the season uncertainty on last season: every (noise, walk) pair of the grid replayed at matchweeks 5,
+ * 10 and 20 (600 runs); the pair with the best mean Brier on title / first zone / relegation wins. Pure (thread job).
+ */
+export function fitNoiseHere(L: ReplayLeague): { noise: number; walk: number; brier: number; tried: { noise: number; walk: number; brier: number }[] } {
+  const tried: { noise: number; walk: number; brier: number }[] = [];
+  const base = L.base.noise || 0.1;
+  for (const nm of NOISE_GRID.noise) for (const wm of NOISE_GRID.walk) {
+    const noise = r4(base * nm), walk = r4(base * wm);
+    const r = replayHere({ ...L, base: { ...L.base, noise, walk }, opts: { weeks: [5, 10, 20], runs: 600 } });
+    if (r.n) tried.push({ noise, walk, brier: r.simAll });
+  }
+  const best = tried.slice().sort((a, b) => a.brier - b.brier)[0] || { noise: base, walk: 0, brier: NaN };
+  return { ...best, tried };
+}
 
 /** the zones scored in the replay: title, the first "good" zone, relegation */
 export function scoredZones(rules: LeagueRules): ZoneKey[] {
@@ -82,7 +104,7 @@ export function scoredZones(rules: LeagueRules): ZoneKey[] {
 }
 
 /** thread job body: one league's replay (pure) */
-export function replayHere(L: ReplayLeague): { steps: number; n: number; sim: Record<string, number>; base: Record<string, number>; simAll: number; baseAll: number } {
+export function replayHere(L: ReplayLeague): ReplayOut {
   const ids = L.teams.map(t => t.id), meta = new Map(L.teams.map(t => [t.id, t]));
   const sport = L.sport, keys = scoredZones(L.rules);
   // what happened: one run over the whole season with no games left (post-season by the same rules, the playoffs
@@ -93,8 +115,13 @@ export function replayHere(L: ReplayLeague): { steps: number; n: number; sim: Re
   const truth = new Map(actual.teams.map(t => [t.id, t.zones]));
   const first = Date.parse(L.games[0].kickoff), last = Date.parse(L.games[L.games.length - 1].kickoff);
   const sim: Record<string, number> = {}, base: Record<string, number> = {}, cnt: Record<string, number> = {};
-  let steps = 0;
-  for (let t = first + 21 * DAY; t < last - 7 * DAY; t += 7 * DAY) {
+  const extremes = { hi: { n: 0, hits: 0 }, lo: { n: 0, hits: 0 } };
+  const runs = L.opts?.runs || L.base.runs;
+  const weeks = L.opts?.weeks ? new Set(L.opts.weeks) : null;
+  let steps = 0, week = 0;
+  for (let t = first + 7 * DAY; t < last - 7 * DAY; t += 7 * DAY) {
+    week++;
+    if (weeks ? !weeks.has(week) : week < 3) continue;
     const known = L.games.filter(g => Date.parse(g.kickoff) < t), rest = L.games.filter(g => Date.parse(g.kickoff) >= t);
     if (!rest.length) break;
     // ratings from what was known: the results' margins (football: on the latent scale, ×0.3 a goal)
@@ -102,18 +129,20 @@ export function replayHere(L: ReplayLeague): { steps: number; n: number; sim: Re
     const fit = fitRatings(ids, obs, L.base.home, sport === 'football' ? 4 : 3);
     const tab = tableOf(ids, known, sport);
     const teams = ids.map(id => ({ ...tab.get(id)!, name: meta.get(id)!.name, rating: fit.r.get(id) || 0, group: meta.get(id)!.group, div: meta.get(id)!.div }));
-    const out = simulateSeason(L.rules, teams, known, rest.map((g, k) => ({ id: String(k), home: g.home, away: g.away })), { ...L.base, home: fit.home, seed: L.base.seed + steps });
+    const out = simulateSeason(L.rules, teams, known, rest.map((g, k) => ({ id: String(k), home: g.home, away: g.away })), { ...L.base, runs, home: fit.home, seed: L.base.seed + steps });
     // baseline: the table as it stands, run with no games left
     const now = simulateSeason(L.rules, teams, known, [], { ...L.base, runs: 1, noise: 0 });
     const nowZ = new Map(now.teams.map(x => [x.id, x.zones]));
     for (const x of out.teams) for (const k of keys) {
       const y = truth.get(x.id)?.[k] ?? 0, p = x.zones[k] ?? 0, b = nowZ.get(x.id)?.[k] ?? 0;
       sim[k] = (sim[k] || 0) + (p - y) ** 2; base[k] = (base[k] || 0) + (b - y) ** 2; cnt[k] = (cnt[k] || 0) + 1;
+      if (p >= 0.99) { extremes.hi.n++; if (y) extremes.hi.hits++; }
+      if (p <= 0.01) { extremes.lo.n++; if (y) extremes.lo.hits++; }
     }
     steps++;
   }
   const n = Object.values(cnt).reduce((a, b) => a + b, 0);
   const simAll = Object.values(sim).reduce((a, b) => a + b, 0) / (n || 1), baseAll = Object.values(base).reduce((a, b) => a + b, 0) / (n || 1);
   for (const k of Object.keys(cnt)) { sim[k] = r4(sim[k] / cnt[k]); base[k] = r4(base[k] / cnt[k]); }
-  return { steps, n, sim, base, simAll: r4(simAll), baseAll: r4(baseAll) };
+  return { steps, n, sim, base, simAll: r4(simAll), baseAll: r4(baseAll), extremes };
 }

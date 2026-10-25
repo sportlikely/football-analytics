@@ -396,6 +396,8 @@ export function afterHeavy(label: string, fn: () => unknown, ms: number): NodeJS
 let startupDone = false;
 export const markStartupDone = () => { startupDone = true; };
 export const stallsSinceReady = () => stalls.filter(s => !s.startup && s.ms > 500).length;
+/** fix218: requests that took over 500 ms since the process was ready (http entries of the recent list) */
+export const slowSinceReady = () => recent.filter(r => r.label.startsWith('http ') && r.end - r.start > 500 && !(r as any).startup).length;
 export function perfStatus() {
   const since = Date.now() - 3600 * 1000;
   const recent = stalls.filter(s => new Date(s.at).getTime() >= since && !s.startup);

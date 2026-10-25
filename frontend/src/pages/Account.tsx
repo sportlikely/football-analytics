@@ -15,7 +15,7 @@ function fmtDay(iso: string | null) {
 }
 
 export default function Account() {
-  const { user, access, loading, logout, needsVerification, setOptIn } = useAuth()
+  const { user, access, loading, logout, needsVerification } = useAuth()
   const unlocks = useUnlocks(access === 'premium' || access === 'free')
   const nav = useNavigate()
   const [current, setCurrent] = useState('')
@@ -97,21 +97,7 @@ export default function Account() {
         </div>
       )}
 
-      <div className="card p-6">
-        <label className="flex items-start justify-between gap-4 cursor-pointer select-none">
-          <span>
-            <span className="font-display font-bold text-ink block">{t("Email updates")}</span>
-            <span className="text-sm text-muted">{t("New features, Premium news and weekly picks. No spam.")}</span>
-          </span>
-          <input
-            type="checkbox"
-            checked={user.marketingOptIn}
-            onChange={e => setOptIn(e.target.checked).catch(() => undefined)}
-            className="mt-1 w-5 h-5 accent-[rgb(var(--accent))]"
-          />
-        </label>
-      </div>
-
+      {/* fix218: every email switch lives in one card (the old "Email updates" switch became "Product news" there) */}
       <EmailsCard />
 
       <CalendarCard />

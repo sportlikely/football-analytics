@@ -80,7 +80,7 @@ import { db } from './db';
 import { liveList, liveAt } from './services/liveState';
 import { isWeb, isWorker, ROLE } from './services/role';
 import { isReady, readiness } from './services/readiness';
-import { stallsSinceReady } from './services/perf';
+import { stallsSinceReady, slowSinceReady } from './services/perf';
 import { workerRoutes, workerRoutesStatus } from './services/workerRoutes';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
 import { deferredStatus } from './services/deferredWrites';
@@ -116,7 +116,7 @@ import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, dailyRunn
 import { nflProbe, nflCurrentSeason, asLeague, asLeagues, LEAGUES } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
 import { withNflPrediction, nflRatings, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
-import { leagueForecast, leagueView, visibleIds, teamForecastCodes, teamHistory, gameMeaning, seasonForecastAdmin, allLeagues, runSeasonForecast, runSeasonAccuracy, type FcSport } from './services/seasonForecast';
+import { leagueForecast, leagueView, visibleIds, teamForecastCodes, teamHistory, gameMeaning, seasonForecastAdmin, allLeagues, runSeasonForecast, runSeasonAccuracy, type FcSport, extremesFor } from './services/seasonForecast';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame as nflGameB, nflStandings, nflTeam as nflTeamB, nflPlayer as nflPlayerB, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury, nflTeamRow } from './services/nflSite';
 import { nflLiveNow, nflLiveCurve } from './services/nflLive';
 import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents } from './services/nflGameExtras';
@@ -239,8 +239,8 @@ app.set('json replacer', (key: string, value: any) =>
     : value);
 app.use(express.urlencoded({ extended: true }));
 
-// fix212b: the web process answers nothing before its shared state is loaded (it listens after the load; this is the
-// guard for a request that slips in while the last states apply): 503 + Retry-After, the health check included
+// fix212b / fix218: the web process answers nothing before its shared state is loaded (it listens at once and loads
+// after, so a deploy's health check gets this 503 instead of a refused connection): 503 + Retry-After, /health included
 if (isWeb) app.use((_req, res, next) => {
   if (isReady()) return next();
   res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
@@ -295,7 +295,7 @@ const PUBLIC_FILES = new Set(['/favicon.svg', '/apple-touch-icon.png', '/og-imag
 // Health check stays open so the host can monitor the service. Unset = open site (local dev).
 if (SITE_PASSWORD) {
   app.use((req, res, next) => {
-    if (req.path === '/api/health' || PUBLIC_FILES.has(req.path) || req.path.startsWith('/fonts/') || req.path.startsWith('/cal/')) return next(); // fix205: the calendar link is its own key
+    if (req.path === '/api/health' || req.path === '/health' || PUBLIC_FILES.has(req.path) || req.path.startsWith('/fonts/') || req.path.startsWith('/cal/')) return next(); // fix205: the calendar link is its own key
     if (req.headers.authorization === SITE_AUTH) return next();
     if (req.method === 'GET' && req.path.startsWith('/api/') && tokenKind(req.query.token)) return next();
     res.set('WWW-Authenticate', 'Basic realm="SportLikely - private beta", charset="UTF-8"');
@@ -1051,7 +1051,7 @@ app.put('/api/email/settings', jsonOnly, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Sign in required' });
   try {
     const b = req.body || {};
-    saveEmailPrefs(req.user.id, { daily: b.daily, weekly: b.weekly, sports: b.sports, sendHour: b.sendHour, tz: b.tz, lang: b.lang }, 'account');
+    saveEmailPrefs(req.user.id, { daily: b.daily, weekly: b.weekly, news: b.news, sports: b.sports, sendHour: b.sendHour, tz: b.tz, lang: b.lang }, 'account');
     res.json({ data: emailSettings(req.user) });
   } catch (e: any) {
     if (e instanceof EmailPrefsError) return res.status(e.status).json({ error: e.message });
@@ -1736,10 +1736,13 @@ app.post('/api/visit/seen', (req, res) => {
   res.status(204).end();
 });
 
-app.get('/api/health', (_req, res) => {
-  // fix212b: + the start-up load (ready, when, how long) and this process's stalls since it was ready
-  res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime(), ...readiness(), stallsSinceReady: stallsSinceReady() });
-});
+// fix212b: + the start-up load (ready, when, how long) and this process's stalls since it was ready; fix218: + the
+// requests over 500 ms since ready, and /health answers the same (Railway's check; 503 before the state is loaded)
+const health = (_req: express.Request, res: express.Response) => {
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime(), ...readiness(), stallsSinceReady: stallsSinceReady(), slowSinceReady: slowSinceReady() });
+};
+app.get('/api/health', health);
+app.get('/health', health);
 
 // Upcoming + live matches. ?days=30 (1-30). Served from memory.
 /*
@@ -2455,7 +2458,7 @@ app.get('/api/season-forecast/:sport/team/:id(\\d+)', (req, res) => {
       const row = lg?.teams.find(t => t.id === id);
       if (!lg || !row) return null;
       const open = full || visibleIds(lg, favs).has(id);
-      return { code, league: lg.name, season: lg.season, runAt: lg.runAt, runs: lg.runs, known: lg.known, zones: lg.zones, size: row.pos.length,
+      return { code, league: lg.name, season: lg.season, runAt: lg.runAt, runs: lg.runs, known: lg.known, zones: lg.zones, size: row.pos.length, extremes: extremesFor(sport),
         team: open ? row : { id: row.id, name: row.name, now: row.now, locked: true },
         history: open ? teamHistory(sport, code, lg.season, id) : [] };
     }).filter(Boolean);
@@ -2471,7 +2474,7 @@ app.get('/api/season-forecast/:sport/game/:id(\\d+)', (req, res) => {
     // the same rule as the game's prediction: paid plans, or a free pick spent on this game
     const rid = sport === 'football' ? id : sport === 'basketball' ? -id : -(2e9 + id);
     const open = isPaid(req.access || 'anon') || (!!req.user && unlockedIds(req.user.id).has(rid));
-    res.set('Cache-Control', 'private, no-store').json({ data: open ? m : { locked: true, league: m.league, home: { id: m.home.id, name: m.home.name }, away: { id: m.away.id, name: m.away.name } } });
+    res.set('Cache-Control', 'private, no-store').json({ data: open ? { ...m, extremes: extremesFor(sport) } : { locked: true, league: m.league, home: { id: m.home.id, name: m.home.name }, away: { id: m.away.id, name: m.away.name } } });
   } catch (e: any) { sendError(res, e, 'Season forecast failed'); }
 });
 // admin: every league's run (rules used, runs, last run time), skipped leagues, last season's replay

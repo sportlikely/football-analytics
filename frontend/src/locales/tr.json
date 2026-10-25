@@ -274,8 +274,6 @@
  "See plans": "Planları gör",
  "Guess first": "Önce tahmin et",
  "Hide our prediction on upcoming games until you tap \"Reveal prediction\", so you can make your own call first. Saved on this device.": "Önce kendi tahminini yapabilmen için, \"Tahmini göster\"e dokunana kadar yaklaşan maçlardaki tahminimizi gizle. Bu cihazda kaydedilir.",
- "Email updates": "E-posta bildirimleri",
- "New features, Premium news and weekly picks. No spam.": "Yeni özellikler, Premium haberleri ve haftalık tahminler. Spam yok.",
  "Change password": "Şifreyi değiştir",
  "Current password": "Mevcut şifre",
  "New password": "Yeni şifre",
@@ -2472,5 +2470,7 @@
  "A team’s chance of the title, Europe, the play-offs or relegation is the share of runs where it happened.": "Bir takımın şampiyonluk, Avrupa, play-off veya küme düşme olasılığı, bunun gerçekleştiği simülasyonların payıdır.",
  "The forecast runs again 10 minutes after every finished game of the league, and every night.": "Tahmin, ligde biten her maçtan 10 dakika sonra ve her gece yeniden hesaplanır.",
  "We replay last season week by week with only what was known then. Its accuracy appears here once it beats simply reading the table as it stands.": "Geçen sezonu hafta hafta, yalnızca o an bilinenlerle yeniden oynatıyoruz. Doğruluğu, tabloya o anki haliyle bakmaktan daha iyi olduğunda burada görünür.",
- "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Geçen sezon hafta hafta yeniden oynatıldı: Brier skoru {0}, o anki tabloya göre {1}. Düşük olan daha iyidir."
+ "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Geçen sezon hafta hafta yeniden oynatıldı: Brier skoru {0}, o anki tabloya göre {1}. Düşük olan daha iyidir.",
+ "Product news": "Ürün haberleri",
+ "New features and Premium news, a few times a year. Off unless you turn it on.": "Yeni özellikler ve Premium haberleri, yılda birkaç kez. Siz açmadıkça kapalı."
 }

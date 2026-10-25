@@ -178,3 +178,16 @@ test('our 1X2 is kept: a single game simulated alone gives back its own chances'
   const m = S.marginOf(0.7, 6, 12);
   close(m.mu, 6, 1e-9, 'margin kept'); close(1 - S.probitOf(0.5, 0.2).w * 0, 1, 0, 'probit');
 });
+
+test('fix218: a strength drift (walk) widens the forecast, same seed stays reproducible', () => {
+  const { teams, played, games } = league(20, 10);
+  const P = params('football');
+  const fixed = S.simulateSeason(rulesFor('football', 'PL'), teams, played, games, { ...P, walk: 0 });
+  const drift = S.simulateSeason(rulesFor('football', 'PL'), teams, played, games, { ...P, walk: 0.3 });
+  const drift2 = S.simulateSeason(rulesFor('football', 'PL'), teams, played, games, { ...P, walk: 0.3 });
+  checkSums(drift, 'PL with drift');
+  assert.deepEqual(drift.teams.map(t => t.zones.title), drift2.teams.map(t => t.zones.title));
+  // the favourite is less certain and the bottom team's relegation chance lower with a drifting strength
+  assert.ok(drift.teams[0].zones.title < fixed.teams[0].zones.title, `title ${drift.teams[0].zones.title} vs fixed ${fixed.teams[0].zones.title}`);
+  assert.ok(drift.teams[19].zones.relegation < fixed.teams[19].zones.relegation);
+});
