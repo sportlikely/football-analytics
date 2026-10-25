@@ -1816,7 +1816,6 @@
  "Win chances, point spread, total points and the predicted score, with the reasons behind the pick.": "Chances de vitória, spread, total de pontos e o placar previsto, com os motivos do palpite.",
  "By confidence": "Por confiança",
  "American football accuracy": "Acerto no futebol americano",
- "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. Strong picks: 70%+ in the NFL, 75%+ in college football.": "Cada palpite é salvo antes do início e conferido após o apito final. Nada é removido. Palpites fortes: 70%+ na NFL, 75%+ no futebol americano universitário.",
  "Strong picks right": "Palpites fortes certos",
  "No games checked yet: every pick saved before kick-off counts as soon as the game is over.": "Nenhum jogo conferido ainda: cada palpite salvo antes do início conta assim que o jogo termina.",
  "picks saved before kick-off": "palpites salvos antes do início",
@@ -2485,5 +2484,10 @@
  "Matchups (style against style)": "Duelos (estilo contra estilo)",
  "Form: last 10 games against expectation": "Forma: últimos 10 jogos face ao esperado",
  "Motivation (late-season tanking)": "Motivação (equipas que desistem no fim da época)",
- "3-point volatility": "Volatilidade do triplo"
+ "3-point volatility": "Volatilidade do triplo",
+ "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. College games are shown by level, so easy FBS vs FCS games don't pad the number. Strong picks: from the chance where our picks were right at least 75% of the time in testing, set per league.": "Cada palpite é guardado antes do pontapé inicial e verificado depois do apito final. Nada é removido. Os jogos universitários aparecem por nível, para que jogos fáceis FBS contra FCS não inflacionem o número. Palpites fortes: a partir da probabilidade em que os nossos palpites acertaram pelo menos 75% das vezes nos testes, definida por liga.",
+ "College football · FBS vs FBS": "Futebol americano universitário · FBS contra FBS",
+ "College football · FBS vs FCS": "Futebol americano universitário · FBS contra FCS",
+ "College football · FCS vs FCS": "Futebol americano universitário · FCS contra FCS",
+ "College: FBS vs FBS {0}% right ({1} games), FBS vs FCS {2}% ({3} games).": "Universitário: FBS contra FBS {0}% de acertos ({1} jogos), FBS contra FCS {2}% ({3} jogos)."
 }

@@ -33,7 +33,8 @@ import { listFavorites } from './favorites';
 import { footballTeamIds, mainModelRank } from './calendar';
 import { publicRecord } from './tracking';
 import { bbRecord, isPreseason } from './bbModel';
-import { nflAccuracy, nflRecord, STRONG_OF } from './nflModel';
+import { nflAccuracy, nflRecord } from './nflModel';
+import { strongLineOf } from './afCalibState';
 import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
 import { doubleChance, DC_STRONG, type DC } from '../utils/doubleChance';
@@ -387,7 +388,7 @@ function nflCands(from: string, to: string): Cand[] {
     return {
       sport: 'american-football' as const, id: r.game_id, rid: -(2e9 + r.game_id), start: r.kickoff, league: lg === 2 ? 'College football' : 'NFL',
       home: r.home_name || 'TBD', away: r.away_name || 'TBD', homeImg: r.home_logo || null, awayImg: r.away_logo || null, path: `/american-football/game/${r.game_id}`,
-      pick: { side: (r.p_home >= 0.5 ? 'H' : 'A') as 'H' | 'A' }, pct: r1(100 * p), strong: p >= STRONG_OF[lg as 1 | 2],
+      pick: { side: (r.p_home >= 0.5 ? 'H' : 'A') as 'H' | 'A' }, pct: r1(100 * p), strong: p >= strongLineOf(lg as 1 | 2),
       teamIds: [r.home_id, r.away_id], size: lg === 1 ? 6 : 2
     };
   });

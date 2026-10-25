@@ -61,7 +61,7 @@ export default function HowItWorks({ sport }: { sport: HowSport }) {
 
   const rows = useMemo(() => {
     if (!d) return []
-    const name = (r: Row) => (sport === 'tennis' ? t(r.name) : r.name)
+    const name = (r: Row) => (sport === 'tennis' || sport === 'american-football' ? t(r.name) : r.name)
     const list = [...d.accuracy.rows]
     const v = (r: Row) => (sort.key === 'name' ? name(r) : r[sort.key] ?? -1)
     list.sort((a, b) => {

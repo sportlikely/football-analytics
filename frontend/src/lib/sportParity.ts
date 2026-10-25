@@ -97,7 +97,9 @@ export const PARITY = [
   { key: 'seo.sitemap.game', label: 'Sitemap: games', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'seo.sitemap.team', label: 'Sitemap: teams', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'seo.sitemap.player', label: 'Sitemap: players', football: true, basketball: true, nfl: true, tennis: true },
-  { key: 'seo.sitemap.league', label: 'Sitemap: leagues', football: true, basketball: true, nfl: true, tennis: true }
+  { key: 'seo.sitemap.league', label: 'Sitemap: leagues', football: true, basketball: true, nfl: true, tennis: true },
+  /* ---------- data health ---------- */
+  { key: 'health.calibration', label: 'Data health: calibration, said vs happened per band (fix220)', football: true, basketball: true, nfl: true, tennis: true }
 ] as const satisfies readonly ParityEntry[]
 
 export type ParityKey = (typeof PARITY)[number]['key']

@@ -1816,7 +1816,6 @@
  "Win chances, point spread, total points and the predicted score, with the reasons behind the pick.": "Chances de victoire, écart de points, total de points et score prévu, avec les raisons du pronostic.",
  "By confidence": "Selon la confiance",
  "American football accuracy": "Précision football américain",
- "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. Strong picks: 70%+ in the NFL, 75%+ in college football.": "Chaque pronostic est enregistré avant le coup d'envoi et vérifié après le coup de sifflet final. Rien n'est retiré. Pronostics forts : 70 %+ en NFL, 75 %+ en football universitaire.",
  "Strong picks right": "Pronostics forts justes",
  "No games checked yet: every pick saved before kick-off counts as soon as the game is over.": "Aucun match vérifié pour l'instant : chaque pronostic enregistré avant le coup d'envoi compte dès la fin du match.",
  "picks saved before kick-off": "pronostics enregistrés avant le coup d'envoi",
@@ -2485,5 +2484,10 @@
  "Matchups (style against style)": "Confrontations (style contre style)",
  "Form: last 10 games against expectation": "Forme : 10 derniers matchs par rapport aux attentes",
  "Motivation (late-season tanking)": "Motivation (équipes qui lâchent en fin de saison)",
- "3-point volatility": "Volatilité à 3 points"
+ "3-point volatility": "Volatilité à 3 points",
+ "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. College games are shown by level, so easy FBS vs FCS games don't pad the number. Strong picks: from the chance where our picks were right at least 75% of the time in testing, set per league.": "Chaque pronostic est enregistré avant le coup d’envoi et vérifié après le coup de sifflet final. Rien n’est supprimé. Les matchs universitaires sont montrés par niveau, pour que les matchs faciles FBS contre FCS ne gonflent pas le chiffre. Pronostics forts : à partir de la probabilité où nos pronostics ont été justes au moins 75 % du temps lors des tests, fixée par ligue.",
+ "College football · FBS vs FBS": "Football universitaire · FBS contre FBS",
+ "College football · FBS vs FCS": "Football universitaire · FBS contre FCS",
+ "College football · FCS vs FCS": "Football universitaire · FCS contre FCS",
+ "College: FBS vs FBS {0}% right ({1} games), FBS vs FCS {2}% ({3} games).": "Universitaire : FBS contre FBS {0} % de réussite ({1} matchs), FBS contre FCS {2} % ({3} matchs)."
 }

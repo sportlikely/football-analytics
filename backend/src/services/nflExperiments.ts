@@ -23,7 +23,7 @@ import { yieldLoop, timed, slicer } from './perf';
 import { teamBox } from './nflSite';
 import { modelInternals as M, type NflG as G, type NflPre as Pre, type NflCtx as Ctx, type NflRow as Row, type Params } from './nflModel';
 
-export const EXP_VERSION = 'fix149-1'; // a new version runs the experiments again on the next tick after deploy
+export const EXP_VERSION = 'fix220-1'; // a new version runs the experiments again on the next tick after deploy (fix220: to store the test rows)
 export const NFL_V2 = 'nfl-v2';
 const DAY = 86400000, WEEK = 7 * DAY;
 const bucketOf = (t: number) => Math.floor((t - 5 * DAY) / WEEK); // Tuesday to Monday
@@ -430,7 +430,7 @@ export async function runNflExperiments(): Promise<any> {
     logger.info(`nfl-exp: ${done.length} finished games, test seasons ${tests.join(', ')}`);
     const F = await buildFeats(games, ctx);
     const v1Report = M.readSync('model|report');
-    const rows: Record<string, (Row & { wk: number | null; season: number })[]> = Object.fromEntries(VARIANTS.map(v => [v, []]));
+    const rows: Record<string, (Row & { id: number; wk: number | null; season: number })[]> = Object.fromEntries(VARIANTS.map(v => [v, []]));
     const per: Record<string, any[]> = Object.fromEntries(VARIANTS.map(v => [v, []]));
     for (const S of tests) {
       const start = Math.min(...done.filter(g => g.season === S).map(g => g.t));
@@ -445,7 +445,7 @@ export async function runNflExperiments(): Promise<any> {
         let probs: number[];
         if (v === 'E1') probs = test.map(g => e1.get(g.id)!.p);
         else { const fit = fitVariant(v, train, e1, F); probs = test.map(g => predV(fit.m, xOf(v, g, e1.get(g.id)!, F, fit.c2, fit.c6))); }
-        const rs = test.map((g, i) => { const m = g.hs! - g.as!; return { p: probs[i], y: yOf(g), m, mHat: M.marginFromP(probs[i]), tot: g.hs! + g.as!, totHat: e1.get(g.id)!.total, wk: weekNo(g), season: S }; });
+        const rs = test.map((g, i) => { const m = g.hs! - g.as!; return { id: g.id, p: probs[i], y: yOf(g), m, mHat: M.marginFromP(probs[i]), tot: g.hs! + g.as!, totHat: e1.get(g.id)!.total, wk: weekNo(g), season: S }; });
         rows[v].push(...rs);
         const mt: any = M.metrics(rs);
         per[v].push({ season: S, games: mt.games, hit: mt.hit, logLoss: mt.logLoss, brier: mt.brier });
@@ -485,6 +485,8 @@ export async function runNflExperiments(): Promise<any> {
       data: { finished: done.length, seasons, withBox: [...F.eff.values()].filter(x => !x[6]).length }
     };
     M.sync('model|exp', report);
+    // fix220: the adopted variant's test predictions [game id, home win chance] — the NFL calibration layer is fitted on them
+    M.sync('model|exp-wf', adopt ? rows[best.id].map(r => [r.id, Math.round(r.p * 10000) / 10000]) : null);
     M.sync('model|v2', live);
     v2Cache = null;
     return report;

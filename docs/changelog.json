@@ -3,6 +3,21 @@
  "entries": [
   {
    "date": "2026-10-25",
+   "sport": "american-football",
+   "kind": "model",
+   "version": "1.1",
+   "text": {
+    "en": "American football: honest percentages and a stronger college model. Every chance is now checked against what really happened in past seasons, so 70% means about 7 in 10.",
+    "es": "Fútbol americano: porcentajes honestos y un modelo universitario más fuerte. Cada probabilidad se compara ahora con lo que pasó de verdad en temporadas anteriores, así que 70 % significa unas 7 de cada 10.",
+    "pt": "Futebol americano: percentagens honestas e um modelo universitário mais forte. Cada probabilidade é agora comparada com o que aconteceu de facto em temporadas anteriores, por isso 70% significa cerca de 7 em 10.",
+    "de": "American Football: ehrliche Prozentzahlen und ein stärkeres College-Modell. Jede Wahrscheinlichkeit wird jetzt mit dem abgeglichen, was in früheren Saisons wirklich passiert ist, also heißt 70 % etwa 7 von 10.",
+    "fr": "Football américain : des pourcentages honnêtes et un modèle universitaire plus solide. Chaque probabilité est maintenant comparée à ce qui s’est vraiment passé lors des saisons précédentes, donc 70 % veut dire environ 7 sur 10.",
+    "it": "Football americano: percentuali oneste e un modello universitario più forte. Ogni probabilità ora è confrontata con quello che è successo davvero nelle stagioni passate, quindi 70% vuol dire circa 7 su 10.",
+    "tr": "Amerikan futbolu: dürüst yüzdeler ve daha güçlü bir kolej modeli. Her olasılık artık geçmiş sezonlarda gerçekten olanlarla karşılaştırılıyor; yani %70, 10 maçta yaklaşık 7 demek."
+   }
+  },
+  {
+   "date": "2026-10-25",
    "sport": "basketball",
    "kind": "model",
    "version": "4.0",

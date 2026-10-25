@@ -1332,8 +1332,13 @@ app.get('/api/admin/nfl-model', (req, res) => {
     nflRebuilding = true;
     import('./services/nflExperiments').then(m => m.runNflExperiments()).catch(e => logger.warn(`nfl-exp: ${e.message}`)).finally(() => { nflRebuilding = false; });
   }
+  // fix220: ?calib=1 rebuilds the calibration layer + the ncaa-v2 test (background, heavy queue)
+  if (req.query.calib === '1' && !nflRebuilding) {
+    nflRebuilding = true;
+    import('./services/afCalibration').then(m => heavy('af calibration', () => m.buildAfCalibration())).catch(e => logger.warn(`af calibration: ${e.message}`)).finally(() => { nflRebuilding = false; });
+  }
   const experiments = league === 1 ? require('./services/nflExperiments').nflExperimentReport() : null;
-  res.json({ data: { model, league, rebuilding: nflRebuilding, report: nflModelReport(league), experiments } });
+  res.json({ data: { model, league, rebuilding: nflRebuilding, report: nflModelReport(league), experiments, calibration: require('./services/afCalibration').afCalibReport() } });
 });
 app.get('/api/admin/bb-league-coverage', async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -3107,7 +3112,7 @@ app.get('/api/nfl/accuracy', (req, res) => {
 // fix144: NFL past seasons (admins and the model permission; not under the open /api/nfl/): the walk-forward reports
 app.get('/api/nfl-past', (_req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ data: { nfl: nflModelReport(1), college: nflModelReport(2), experiments: require('./services/nflExperiments').nflExperimentReport() } });
+  res.json({ data: { nfl: nflModelReport(1), college: nflModelReport(2), experiments: require('./services/nflExperiments').nflExperimentReport(), calibration: require('./services/afCalibration').afCalibReport() } });
 });
 // fix141: home "Our record" — last 30 days, picks saved before kick-off only
 definePage({ name: 'nfl-record', freshMs: 5 * 60 * 1000, variants: VIEWS_PLAIN, warm: [{ days: 30 }], build: q => ({ data: nflRecord(Number(q.days) || 30, asLeagues(q.league)) }) });

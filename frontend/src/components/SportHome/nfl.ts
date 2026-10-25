@@ -51,13 +51,22 @@ export function toResult(g: NflGame): HResult {
     }
 }
 
+type RecBand = { min: number; n: number; pct: number | null }
+/** fix220: college by level, so FBS vs FCS mismatches don't pad the number (all picks = the band from 0%) */
+function splitNote(split: Record<'fbs' | 'mismatch' | 'fcs', RecBand[]> | null | undefined): string {
+  const all = (k: 'fbs' | 'mismatch') => split?.[k]?.find(b => b.min === 0)
+  const f = all('fbs'), m = all('mismatch')
+  if (!f?.n && !m?.n) return ''
+  return tt('College: FBS vs FBS {0}% right ({1} games), FBS vs FCS {2}% ({3} games).', { 0: f?.pct ?? '–', 1: f?.n ?? 0, 2: m?.pct ?? '–', 3: m?.n ?? 0 })
+}
+
 function useNflData(): SportHomeData {
   const { access } = useAuth()
   const { param: league } = useNflFilter()
   const full = access === 'pro' || access === 'admin'
   const [d, setD] = useState<Home | null>(null)
   const [loaded, setLoaded] = useState(false)
-  const [record, setRecord] = useState<{ bands?: { min: number; n: number; pct: number | null }[] } | null>(null)
+  const [record, setRecord] = useState<{ bands?: RecBand[]; split?: Record<'fbs' | 'mismatch' | 'fcs', RecBand[]> | null } | null>(null)
   const [news, setNews] = useState<HNews[]>([])
   useEffect(() => {
     setD(null); setLoaded(false); setRecord(null); setNews([])
@@ -101,7 +110,7 @@ function useNflData(): SportHomeData {
     featured: featured.map(toGame), live: (d?.live || []).map(toGame), soonest: soonest.map(toGame), favorites: favNext.map(toGame), next: next.map(toGame),
     record: {
       rows: record ? winnerRecordRows(record.bands) : null, aside: recordAside(record?.bands),
-      note: tt("Picks right, every game counted. Each prediction is saved before kick-off and never edited."),
+      note: [tt("Picks right, every game counted. Each prediction is saved before kick-off and never edited."), splitNote(record?.split)].filter(Boolean).join(' '),
       link: { to: '/american-football/accuracy', label: tt("See the full record →") },
       empty: { title: tt("Predictions start soon"), text: league === '2' ? tt("Once our college football model is live, every prediction is saved before kick-off and checked after the game, here and in public.") : tt("Once our NFL model is live, every prediction is saved before kick-off and checked after the game, here and in public.") }
     },

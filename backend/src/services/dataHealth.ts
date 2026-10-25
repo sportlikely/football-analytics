@@ -39,6 +39,7 @@ import { perfChecks } from './perfChecks';
 import { photoHealth } from './playerPhotos';
 import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdTwinless } from './fdReconcile';
 import { bestLive } from './liveScores';
+import { calibrationHealth } from './calibrationHealth';
 import { afIdOfFd } from './afMatches';
 import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
@@ -416,6 +417,9 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
       items: r.bad.slice(0, 30)
     });
   } catch (e: any) { logger.warn(`bb grid rows: ${e?.message || e}`); }
+  // fix220: calibration, every sport — said vs happened per band of the last 30 days' picks (error: a band of 50+
+  // games more than 5 points off, 100+ games in all)
+  try { checks.push(...calibrationHealth(now)); } catch (e: any) { logger.warn(`calibration health: ${e?.message || e}`); }
   // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 

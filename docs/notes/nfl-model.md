@@ -1,5 +1,44 @@
 # NFL model nfl-v1 (fix139, 16 Oct 2026) + college ncaa-v1 (fix142)
 
+## fix220 (25 Oct 2026): honest percentages + ncaa-v2
+
+**Why.** Live 25 Oct, last 30 days: 237 games, 62% right; said 55.7 → 49.1% happened (57 games), 64.4 → 53.8 (65), 74.7 → 69.8 (53), 87.2 → 75.8 (62). 223 of 237 were college (63.2%; the backtest said 72–75%), NFL 6 / 14. Football and basketball had a calibration step; American football had none.
+
+**Calibration layer** (`utils/afCalib.ts`, `services/afCalibration.ts`, read through `services/afCalibState.ts`):
+- p' = σ(a · logit(p) + b), Newton fit, a ≥ 0.05 (monotone). College: one fit per segment (FBS vs FCS, conference game = same conference, other) shrunk toward the league fit (ridge, 150 games). NFL: one fit.
+- Rows = the live model's own walk-forward test predictions: nfl-v2's experiment rows when nfl-v2 is adopted (stored as `model|exp-wf`), else nfl-v1's (`more-wf-1`); ncaa-v2's walk-forward rows when it passed its gate, else ncaa-v1's (`more-wf-2`). The walk-forward report now starts in 2021 (was: the last 5 seasons).
+- Season S is calibrated with a fit on 2021 … S − 1; the live layer on 2021–2025. 2026 is never in a fit (`assertCalibSeasons` throws).
+- Kept only when it beats the raw chances on the 2022–2025 walk-forward (per segment, one league fit, or none — the report says which and why).
+- Applied to every shown chance (`predictNfl`); the expected margin stays the model's (More predictions calibrates it, fix204c). The raw chance is saved in `nfl_predictions.p_raw`.
+- Strong line per league: the lowest chance where the shown (calibrated) picks of 2021–2025 were right ≥ 75% (50+ games); 70% / 75% until fitted.
+- Data health "Calibration (<sport>)", every sport: last 30 days' picks by band, error when a band of 50+ games is more than 5 points off (100+ games). American football counts only predictions made with the layer.
+
+**ncaa-v2** (`utils/ncaaV2.ts`): one pass over every college game, a game's numbers from earlier games only.
+- Opponent-adjusted points per play (plays from the box score, else 70), offence and defence, this season and carried; rating = k / (k + games) × last season's end + the rest × this season (k tuned) — the early-season prior.
+- Opponent-adjusted yards per play (box scores, 3+ games each). QB: the expected starter (the team's last starter — never this game's box score), ANY/A shrunk to replacement (200 attempts), a new starter (not last season's main passer, first 4 games) halfway more; the injury report's Out skips him (live).
+- Rest (bye / short week), travel (state centres, away team, not at neutral sites), level (Power 2 / other FBS 1 / FCS 0), returning QB × the early-season weight.
+- logit p = b + L · (wElo + wConf · conference + wMis · FBS-vs-FCS) + Σ w · x / spread, L = ncaa-v1's Elo logit. Pattern search on log loss (fix217's tuner), steps 0.4 → 0.02.
+- Test: train 2021–2024, test 2025 whole season and conference games only; every season 2022 → now walk-forward (fitted on the seasons before it); 2026 reported, never tuned. Live weights: 2021–2025.
+- **Gate**: ncaa-v2 goes live only if its log loss beats ncaa-v1 (as it ran in its walk-forward test) on 2025 conference games (100+). Else ncaa-v1 stays with the layer; the admin card says why.
+- Noted: ncaa-v1's own backtest uses the box score's starting QB on finished games (hindsight); ncaa-v2 never does.
+
+**Test tables (server).** Not known yet — the local database copy has no American football. After deploy: Admin → American football past seasons, last three cards (ncaa-v2 test, Calibration · NFL, Calibration · College football), or `/api/admin/nfl-model?league=2` → `calibration`. Paste here:
+
+| | games | ncaa-v1 hit · LL · Brier | ncaa-v2 hit · LL · Brier |
+|---|---|---|---|
+| 2025 whole season (test) | – | – | – |
+| 2025 conference games (gate) | – | – | – |
+| 2026 so far (never tuned) | – | – | – |
+
+| Calibration | raw hit · LL · Brier | calibrated | layer kept? | strong line |
+|---|---|---|---|---|
+| NFL, walk-forward 2022–2026 | – | – | – | – |
+| NFL, 2026 saved before kick-off | – | – | | |
+| College, walk-forward 2022–2026 | – | – | – | – |
+| College, 2026 saved before kick-off | – | – | | |
+
+Pipeline check only (synthetic 40-team college league, `npm run test:fix220`): gate on 2025 conference games ncaa-v2 LL 0.6658 vs ncaa-v1 0.6702 (186 games); an over-confident fixture (logit × 1.6) goes from a worst band 10+ points off to within 4 points on 2026 with a fit on 2021–2025.
+
 ## nfl-v2 experiments (fix146)
 
 `services/nflExperiments.ts`: E1–E7b compared walk-forward (test seasons 2021 → now, fitted only on earlier seasons); adopted as nfl-v2 only if total log loss beats nfl-v1 (as it runs, incl. its blend) and hit % is not lower. Results: `/api/admin/nfl-model` → `experiments`, /american-football/past. Synthetic test (8 fake seasons): nfl-v1 with blend LL 0.5947 best, E3 efficiency 0.5969, E7 stack 0.5974, E7b trees 0.6161 (overfit) → nfl-v1 kept. Real numbers: server log after deploy.

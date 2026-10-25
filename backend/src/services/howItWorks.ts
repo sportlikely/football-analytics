@@ -98,12 +98,16 @@ function accuracyRaw(sport: HiwSport): HiwAccuracy {
     sport === 'basketball' ? bbRecord(DAYS) : sport === 'american-football' ? nflAccuracy(DAYS) : tennisAccuracy(DAYS);
   const name = (code: string) =>
     sport === 'basketball' ? BB_LEAGUES.find(l => l.code === code)?.name || code
-      : sport === 'american-football' ? (code === 'NCAA' ? 'College football' : 'NFL')
+      : sport === 'american-football' ? (AF_ROW_NAME[code] || (code.startsWith('NCAA') ? 'College football' : 'NFL'))
         : TENNIS_GROUP[code] || code;
   // tennis: the tours only (the surface groups count the same matches twice)
   const leagues = sport === 'tennis' ? r.leagues.filter(l => !l.code.startsWith('s:')) : r.leagues;
   return { rows: leagues.map(l => ({ key: l.code, name: name(l.code), n: l.n, main: l.hitRate, brier: l.brier })), total: { n: r.total.n, hitRate: r.total.hitRate } };
 }
+/** fix220: college rows by level pairing (nflAccuracy) — the app translates these names */
+export const AF_ROW_NAME: Record<string, string> = {
+  NFL: 'NFL', 'NCAA-FBS': 'College football · FBS vs FBS', 'NCAA-MISMATCH': 'College football · FBS vs FCS', 'NCAA-FCS': 'College football · FCS vs FCS'
+};
 const accCache = new Map<HiwSport, { at: number; v: HiwAccuracy }>();
 const ACC_TTL = 60 * 60 * 1000;
 export function hiwAccuracy(sport: HiwSport): HiwAccuracy {

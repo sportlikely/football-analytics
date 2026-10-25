@@ -29,12 +29,13 @@
 import { db } from '../db';
 import { winnerBands, winnerCalibration, winnerByConfidence, winnerBrier } from '../utils/winnerBands';
 import logger from '../utils/logger';
-import { yieldLoop, timed, slicer } from './perf';
+import { yieldLoop, timed, slicer, heavy } from './perf';
 import { runsJobs, isWeb } from './role';
 import { onState, publishState } from './shared';
 import { teamBox, NflGame } from './nflSite';
 import { rememberFirstPrediction } from './nflGameExtras';
 import { HIDE_OTHER, type LeagueId } from './nfl';
+import { calibrated, strongLineOf, collegeSeg, ncaaV2Live } from './afCalibState';
 
 export const NFL_MODEL = 'nfl-v1';
 export const NCAA_MODEL = 'ncaa-v1';
@@ -43,7 +44,10 @@ const MODEL_OF: Record<LeagueId, string> = { 1: NFL_MODEL, 2: NCAA_MODEL };
 export const STRONG_OF: Record<LeagueId, number> = { 1: 0.7, 2: 0.75 };
 /** fix146: the experiments module, loaded when first needed (it imports this file's internals). */
 const exps = () => require('./nflExperiments') as typeof import('./nflExperiments');
-export const strongForModel = (model: string | null | undefined) => (model === NCAA_MODEL ? STRONG_OF[2] : STRONG_OF[1]);
+/** fix220: the calibration layer and ncaa-v2 (worker build, loaded when first needed: it imports this file's internals). */
+const afc = () => require('./afCalibration') as typeof import('./afCalibration');
+/** fix220: the league's strong line (where calibrated picks were right ≥ 75% in testing; STRONG_OF until fitted). */
+export const strongForModel = (model: string | null | undefined) => strongLineOf(/^ncaa/.test(model || '') ? 2 : 1);
 /** Settings / report keys in nfl_sync (NFL keeps its fix139 keys). */
 const KEY_OF: Record<LeagueId, string> = { 1: 'model', 2: 'model2' };
 const DAY = 86400000;
@@ -56,12 +60,14 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_nfl_pred_kickoff ON nfl_predictions(kickoff);
 `);
+// fix220: the model's own chance before the calibration layer (null on rows saved before it)
+try { db.exec(`ALTER TABLE nfl_predictions ADD COLUMN p_raw REAL`); } catch { /* already there */ }
 
 /* ---------- data ---------- */
 
 interface G { id: number; season: number; kickoff: string; t: number; stage: string | null; week: string | null; h: number; a: number; hn: string; an: string; hs: number | null; as: number | null; done: boolean; neutral: boolean }
 interface Passer { id: number; name: string; att: number; anya: number }
-interface Box { ypp: number | null; to: number | null; third: [number, number] | null; rz: [number, number] | null; sacks: number | null }
+interface Box { ypp: number | null; to: number | null; third: [number, number] | null; rz: [number, number] | null; sacks: number | null; plays?: number | null }
 /** conf / fcs: college teams (regression to the conference mean, FCS start); empty for the NFL */
 interface Ctx { qb: Map<string, Passer[]>; box: Map<string, Box>; teams: Map<number, { conf: string | null; fcs: boolean; fbs: boolean; isFcs?: boolean }> }
 
@@ -242,7 +248,7 @@ function ctxPass(league: LeagueId, limit: number): number {
     const b = teamBox(s);
     if (!b) continue;
     box.set(`${r.game_id}|${r.team_id}`, {
-      ypp: b.yardsPerPlay ?? (b.yards != null && b.plays ? b.yards / b.plays : null), to: b.turnovers, third: b.third, rz: b.redZone, sacks: b.sacks
+      ypp: b.yardsPerPlay ?? (b.yards != null && b.plays ? b.yards / b.plays : null), to: b.turnovers, third: b.third, rz: b.redZone, sacks: b.sacks, plays: b.plays
     });
   }
   // college teams: conference (regression target) and level (FCS start lower); a team we have no row for = FCS
@@ -575,7 +581,9 @@ export async function buildReport(league: LeagueId = 1): Promise<Report> {
   const fbsAll: Row[] = [], mixAll: Row[] = [];
   const finished = games.filter(g => g.done);
   const seasons = [...new Set(finished.map(g => g.season))].sort((a, b) => a - b);
-  const testSeasons = seasons.filter(s => finished.filter(g => g.season === s).length >= 30).slice(-5).filter(s => s !== seasons[0]);
+  // fix220: every season from 2021 (the calibration layer is fitted walk-forward on 2021–2025), at least the last 5
+  const enough = seasons.filter(s => finished.filter(g => g.season === s).length >= 30);
+  const testSeasons = enough.filter((s, i) => (s >= 2021 || i >= enough.length - 5) && s !== seasons[0]);
   const per: any[] = [];
   const all = { ab: [] as Row[], d: [] as Row[], elo: [] as Row[] };
   // fix204: every test game's pre-game numbers (both versions; the kept one is chosen below), for the More predictions backtest
@@ -797,7 +805,7 @@ function injuredOut(teamId: number): Set<number> {
 }
 
 export interface NflPred {
-  pHome: number; pAway: number; pick: 'H' | 'A'; margin: number; total: number; homePts: number; awayPts: number; strong: boolean; model: string;
+  pHome: number; pAway: number; /** fix220: the model's chance before the calibration layer (0–1) */ pRaw: number; pick: 'H' | 'A'; margin: number; total: number; homePts: number; awayPts: number; strong: boolean; model: string;
   why: { eloHome: number; eloAway: number; eloGap: number; homeField: number; neutral: boolean; rest: [number | null, number | null]; restAdj: [number, number];
     qb: [QbInfo | null, QbInfo | null]; eff: { yppHome: number; yppAway: number; toHome: number; toAway: number } | null; blend: boolean }
 }
@@ -818,11 +826,16 @@ export function predictNfl(gameId: number): NflPred | null {
   // fix146: the NFL uses nfl-v2 once the experiments adopted one (the reasons below stay nfl-v1's numbers)
   let model = MODEL_OF[league];
   if (league === 1) { const q = exps().v2Prob(g as any, pr as any); if (q !== null) { p = q; margin = marginFromP(q); model = exps().NFL_V2; } }
+  // fix220: ncaa-v2 once it passed its gate (on ncaa-v1's Elo chance + its own numbers)
+  if (league === 2 && ncaaV2Live()) { const q = afc().ncaaV2Prob(g.id, pr.p); if (q !== null) { p = q; margin = marginFromP(q); model = afc().NCAA_V2; } }
+  // fix220: the calibration layer (honest percentages); the margin stays the model's (More predictions calibrates it)
+  const pRaw = p;
+  p = calibrated(league, p, league === 2 ? collegeSeg(g.h, g.a) : null);
   const r1 = (v: number) => Math.round(v * 10) / 10;
   const pHome = Math.round(p * 1000) / 10;
   return {
-    pHome, pAway: r1(100 - pHome), pick: p >= 0.5 ? 'H' : 'A', margin: r1(margin), total: r1(pr.total),
-    homePts: r1((pr.total + margin) / 2), awayPts: r1((pr.total - margin) / 2), strong: Math.max(p, 1 - p) >= STRONG_OF[league], model,
+    pHome, pAway: r1(100 - pHome), pRaw, pick: p >= 0.5 ? 'H' : 'A', margin: r1(margin), total: r1(pr.total),
+    homePts: r1((pr.total + margin) / 2), awayPts: r1((pr.total - margin) / 2), strong: Math.max(p, 1 - p) >= strongLineOf(league), model,
     why: {
       eloHome: Math.round(pr.eloH), eloAway: Math.round(pr.eloA), eloGap: Math.round(pr.eloH - pr.eloA), homeField: Math.round(pr.hfa), neutral: g.neutral,
       rest: [pr.rest[0] === null ? null : Math.round(pr.rest[0]), pr.rest[1] === null ? null : Math.round(pr.rest[1])], restAdj: pr.restAdj,
@@ -848,13 +861,13 @@ export async function saveNflPredictions(): Promise<number> {
     if (pr) out.push({ r, pr });
     if (++i % 25 === 0) await yieldLoop();
   }
-  const up = db.prepare(`INSERT OR REPLACE INTO nfl_predictions (game_id, season, kickoff, model, p_home, margin, total, home_pts, away_pts, why, made_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const up = db.prepare(`INSERT OR REPLACE INTO nfl_predictions (game_id, season, kickoff, model, p_home, margin, total, home_pts, away_pts, why, made_at, p_raw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const at = new Date().toISOString();
   db.exec('BEGIN');
   try {
     // a game that kicked off while we were computing keeps the prediction it had at kick-off
     for (const { r, pr } of out) if (Date.parse(r.kickoff) > Date.now()) {
-      up.run(r.game_id, r.season, r.kickoff, pr.model, pr.pHome / 100, pr.margin, pr.total, pr.homePts, pr.awayPts, JSON.stringify(pr.why), at);
+      up.run(r.game_id, r.season, r.kickoff, pr.model, pr.pHome / 100, pr.margin, pr.total, pr.homePts, pr.awayPts, JSON.stringify(pr.why), at, Math.round(pr.pRaw * 10000) / 10000);
       // fix174: the first version of each game (who was out then), for "numbers changed because…"
       try { rememberFirstPrediction(r.game_id, r.home_id, r.away_id, pr.pHome / 100, pr.margin, pr.why?.qb, at); } catch { /* optional */ }
     }
@@ -899,11 +912,27 @@ export function withNflPrediction<T extends NflGame>(g: T, full: boolean): T & {
 export function nflRecord(days = 30, leagues: LeagueId | LeagueId[] = [1, 2]) {
   // fix185: one combined record of the leagues asked (both by default); the bands are the same 60 / 70 / 80 lines
   const lgs = (Array.isArray(leagues) ? leagues : [leagues]).filter(l => l === 1 || l === 2);
-  const rows = db.prepare(`SELECT p.p_home, g.home_pts AS hs, g.away_pts AS as_ FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
+  const rows = db.prepare(`SELECT p.p_home, g.league, g.home_id, g.away_id, g.home_pts AS hs, g.away_pts AS as_ FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
     WHERE g.league IN (${lgs.map(() => '?').join(',') || '1'}) AND p.kickoff >= ? AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.home_pts != g.away_pts`)
     .all(...lgs, new Date(Date.now() - days * 86400000).toISOString()) as any[];
-  return { days, bands: winnerBands(rows.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) }))) };
+  const band = (list: any[]) => winnerBands(list.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: (r.p_home >= 0.5) === (r.hs > r.as_) })));
+  // fix220: college split, so the number isn't padded by FBS vs FCS mismatches
+  const college = rows.filter(r => r.league === 2);
+  const split = college.length ? Object.fromEntries((['fbs', 'mismatch', 'fcs'] as const).map(k => [k, band(college.filter(r => collegeLevelCode(r.home_id, r.away_id) === k))])) : null;
+  return { days, bands: band(rows), split };
 }
+/** fix220: a college game's level pairing — both FBS, FBS vs FCS, or both FCS. */
+export function collegeLevelCode(home: number, away: number): 'fbs' | 'mismatch' | 'fcs' {
+  const s = collegeSeg(home, away);
+  if (s === 'mismatch') return 'mismatch';
+  const t = levelsOf();
+  return t.get(home) === 'FBS' && t.get(away) === 'FBS' ? 'fbs' : 'fcs';
+}
+let levelsAt = 0, levels = new Map<number, string | null>();
+const levelsOf = () => {
+  if (Date.now() - levelsAt > 10 * 60 * 1000) { levelsAt = Date.now(); levels = new Map((db.prepare(`SELECT team_id, level FROM nfl_teams WHERE league = 2`).all() as any[]).map(r => [r.team_id, r.level || null])); }
+  return levels;
+};
 
 /**
  * NFL accuracy page (fix144, admins): every pick saved before kick-off and checked after the game, both leagues, in the
@@ -921,19 +950,23 @@ export function scoreOff(rows: { margin: number | null; total: number | null; hs
   };
 }
 
+const LEAGUE_ROWS = ['NFL', 'NCAA-FBS', 'NCAA-MISMATCH', 'NCAA-FCS'];
 export function nflAccuracy(days = 3650, recentLimit = 50) {
-  const rows = db.prepare(`SELECT p.game_id, p.kickoff, p.p_home, p.margin, p.total, g.league, g.home_name, g.away_name, g.home_logo, g.away_logo, g.home_pts AS hs, g.away_pts AS as_
+  const rows = db.prepare(`SELECT p.game_id, p.kickoff, p.p_home, p.margin, p.total, g.league, g.home_id, g.away_id, g.home_name, g.away_name, g.home_logo, g.away_logo, g.home_pts AS hs, g.away_pts AS as_
     FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
     WHERE p.kickoff >= ? AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.home_pts != g.away_pts ORDER BY p.kickoff DESC`)
     .all(new Date(Date.now() - days * 86400000).toISOString()) as any[];
   const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
   const code = (l: number) => (l === 2 ? 'NCAA' : 'NFL');
+  // fix220: college in rows by level pairing (FBS vs FBS, FBS vs FCS, FCS vs FCS) — mismatches don't pad the number
+  const rowCode = (r: any) => (r.league === 2 ? `NCAA-${collegeLevelCode(r.home_id, r.away_id).toUpperCase()}` : 'NFL');
   const hit = (r: any) => (r.p_home >= 0.5) === (r.hs > r.as_);
   const tot = { n: 0, hits: 0, strongN: 0, strongHits: 0 };
   const by = new Map<string, typeof tot>();
   for (const r of rows) {
-    const strong = Math.max(r.p_home, 1 - r.p_home) >= STRONG_OF[r.league === 2 ? 2 : 1];
-    const lg = by.get(code(r.league)) || (by.set(code(r.league), { n: 0, hits: 0, strongN: 0, strongHits: 0 }), by.get(code(r.league))!);
+    const strong = Math.max(r.p_home, 1 - r.p_home) >= strongLineOf(r.league === 2 ? 2 : 1);
+    const c = rowCode(r);
+    const lg = by.get(c) || (by.set(c, { n: 0, hits: 0, strongN: 0, strongHits: 0 }), by.get(c)!);
     for (const b of [tot, lg]) { b.n++; if (hit(r)) b.hits++; if (strong) { b.strongN++; if (hit(r)) b.strongHits++; } }
   }
   const pending = (db.prepare(`SELECT p.game_id, p.kickoff, p.p_home, g.league, g.home_name, g.away_name, g.home_logo, g.away_logo, g.status, g.home_pts AS hs, g.away_pts AS as_
@@ -952,9 +985,11 @@ export function nflAccuracy(days = 3650, recentLimit = 50) {
     // fix152b: the shared Accuracy page (football's layout)
     calibration: winnerCalibration(rows.map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))),
     byConfidence: winnerByConfidence(rows.map(r => ({ p: Math.max(r.p_home, 1 - r.p_home), hit: hit(r) }))),
-    leagues: [...by.entries()].map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(rows.filter(r => code(r.league) === c)),
+    // fix220: NFL, NCAA-FBS, NCAA-MISMATCH, NCAA-FCS (in that order); strong = each league's own line
+    leagues: [...by.entries()].sort((x, y) => LEAGUE_ROWS.indexOf(x[0]) - LEAGUE_ROWS.indexOf(y[0])).map(([c, b]) => ({ code: c, ...b, hitRate: pct(b.hits, b.n), strongHitRate: pct(b.strongHits, b.strongN), ...scoreOff(rows.filter(r => rowCode(r) === c)),
+      strongLine: Math.round(100 * strongLineOf(c === 'NFL' ? 1 : 2)),
       // fix206: the how-it-works pages' accuracy table
-      brier: winnerBrier(rows.filter(r => code(r.league) === c).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))) })),
+      brier: winnerBrier(rows.filter(r => rowCode(r) === c).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))) })),
     // fix174: how far the expected margin and the total were off (football's goals numbers, for a points sport)
     scores: scoreOff(rows),
     recent: rows.slice(0, recentLimit).map(r => ({
@@ -968,7 +1003,7 @@ export function nflTeamRecord(teamId: number, season: number) {
   const rows = db.prepare(`SELECT p.p_home, g.home_pts AS hs, g.away_pts AS as_ FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
     WHERE p.season = ? AND (g.home_id = ? OR g.away_id = ?) AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.home_pts != g.away_pts`).all(season, teamId, teamId) as any[];
   const hit = (r: any) => (r.p_home >= 0.5) === (r.hs > r.as_);
-  const strong = rows.filter(r => Math.max(r.p_home, 1 - r.p_home) >= STRONG_OF[leagueOfTeam(teamId)]);
+  const strong = rows.filter(r => Math.max(r.p_home, 1 - r.p_home) >= strongLineOf(leagueOfTeam(teamId)));
   return { games: rows.length, right: rows.filter(hit).length, strong: strong.length, strongRight: strong.filter(hit).length };
 }
 
@@ -1019,15 +1054,20 @@ export async function nflModelTick(): Promise<void> {
   if (busy) return;
   busy = true;
   try {
-    let retrainedNfl = false;
+    let retrainedNfl = false, retrainedAny = false;
     for (const league of [1, 2] as LeagueId[]) {
       const MODEL = MODEL_OF[league];
       try {
         const stored = readSync(`${KEY_OF[league]}|params`);
         const last = stored?.at ? Date.parse(stored.at) : 0;
         const finished = (db.prepare(`SELECT COUNT(*) AS n FROM nfl_games WHERE league = ? AND status IN ('FT','AOT') AND home_pts IS NOT NULL`).get(league) as any)?.n || 0;
-        if (finished >= 200 && (!stored || (new Date().getUTCDay() === 2 && Date.now() - last > 5 * DAY) || Date.now() - last > 8 * DAY)) {
+        // fix220: once more when the stored walk-forward test starts after 2021 (the calibration layer is fitted on 2021–2025)
+        const rep0 = readSync(`${KEY_OF[league]}|report`);
+        const no2021 = !!rep0 && !readSync(`fix220|wf${league}`) && (rep0.data?.seasons || []).includes(2021) && !(rep0.seasons || []).some((s: any) => s.season === 2021);
+        if (no2021) sync(`fix220|wf${league}`, true); // once (a season with under 30 games never enters the test)
+        if (finished >= 200 && (!stored || no2021 || (new Date().getUTCDay() === 2 && Date.now() - last > 5 * DAY) || Date.now() - last > 8 * DAY)) {
           const rep = await retrain(league);
+          retrainedAny = true;
           if (league === 1) retrainedNfl = true;
           logger.info(`${MODEL}: re-tuned (${rep.live?.seasonsTrained.join(', ')}), test LL ${rep.blend.testLogLossAB}${rep.blend.used ? ` → blend ${rep.blend.testLogLossD}` : ''}`);
         }
@@ -1040,6 +1080,15 @@ export async function nflModelTick(): Promise<void> {
       if (fin >= 200 && (!ex || ex.version !== exps().EXP_VERSION || retrainedNfl)) await exps().runNflExperiments();
       await exps().refreshV2();
     } catch (e: any) { logger.warn(`nfl-exp: ${e.message}`); }
+    // fix220: ncaa-v2 test + gate and the calibration layer — after a deploy (new version), after a re-tune, weekly
+    try {
+      const A = afc();
+      const rep = A.afCalibReport();
+      if (retrainedAny || A.afCalibStale() || !rep || Date.now() - Date.parse(rep.at) > 7 * DAY) {
+        await heavy('af calibration', () => timed('af calibration', () => A.buildAfCalibration()));
+      }
+      await A.refreshNcaaV2();
+    } catch (e: any) { logger.warn(`af calibration: ${e.message}`); }
     const n = await saveNflPredictions();
     if (n) logger.info(`NFL / college: ${n} predictions saved`);
   } catch (e: any) {

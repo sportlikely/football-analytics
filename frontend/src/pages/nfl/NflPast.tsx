@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { Card, Skeleton } from '../bb/parts'
+import NflCalibration, { type AfCalibReport } from './NflCalibration'
 
 interface M { games: number; hit: number; logLoss: number; brier: number }
 interface Season { season: number; ab: M; blend: M | null; eloOnly: M; homeTeamHit: number; fbsOnly?: M; fbsFcs?: M }
@@ -15,7 +16,7 @@ interface Report { model: string; builtAt: string; seasons: Season[]; total: { a
  * the last 5 seasons tuned on the seasons before it. Internal, English only. Rebuild from /api/admin/nfl-model?rebuild=1.
  */
 export default function NflPast() {
-  const [d, setD] = useState<{ nfl: Report | null; college: Report | null; experiments?: Exp | null } | null>(null)
+  const [d, setD] = useState<{ nfl: Report | null; college: Report | null; experiments?: Exp | null; calibration?: AfCalibReport | null } | null>(null)
   useEffect(() => { axios.get(`${API_URL}/nfl-past`).then(r => setD(r.data.data)).catch(() => setD({ nfl: null, college: null })) }, [])
   const row = (label: string, m: M | null | undefined, home?: number) => (
     <tr key={label} className="border-t border-line/50">
@@ -67,7 +68,7 @@ export default function NflPast() {
           </table>
           <p className="mt-2 text-[11px] text-faint">Best {d.experiments.best}: {d.experiments.adopted ? 'adopted as nfl-v2' : 'nfl-v1 kept'} ({d.experiments.reason}). Built {new Date(d.experiments.builtAt).toLocaleString()}. Per season and calibration: /api/admin/nfl-model.</p>
         </div>
-      </Card>}{block('College football', d.college)}</>}
+      </Card>}{block('College football', d.college)}<NflCalibration r={d.calibration} /></>}
     </div>
   )
 }

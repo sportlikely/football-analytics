@@ -108,6 +108,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   `nflGameExtras.ts` (schedule & rest, standings, likely starters, numbers changed, written preview, scoring plays), `nfl_player_games` (career index).
   Basketball swing chart: `bbLive.ts` keeps `bb_live_samples` (fix178). `npm run parity` (frontend) must show zero 'todo'. **`NFL_PUBLIC=1`** opens /american-football to everyone (admins see it before);
   past seasons stay admin-only. Frontend `pages/nfl/*`, `lib/nfl.ts`.
+  fix220: calibration layer per league (`utils/afCalib.ts`, `afCalibration.ts` worker build, `afCalibState.ts` read everywhere: shown
+  chance = layer(model chance), raw in `nfl_predictions.p_raw`, strong line per league) and **ncaa-v2** (`utils/ncaaV2.ts`, live only
+  when it beats ncaa-v1 on 2025 conference games). Data health "Calibration (<sport>)" for every sport (`calibrationHealth.ts`).
 - Tennis (fix184, admin only, no pages or model yet): `tennis.ts` — data from Live Tennis API **Pro** (key `TENNIS_API_KEY`, 10,000 calls a day, reserve `TENNIS_RESERVE` 1,500), **singles only**, market prices (`tennis_prices`) are an **admin-only** benchmark, never on a public route. Stats computed from the point tape (`tennis_match_stats`). Admin: `/api/admin/tennis-probe`, `/api/admin/tennis/status`. Notes: `docs/notes/tennis-data.md`.
   fix190: `tennisModel.ts` = **tennis-v1** (admin only: surface Elo + serve/return Markov chain + context, blend only if it
   wins the monthly walk-forward test; `tennis_predictions`; `/api/admin/tennis-model`, `/api/admin/tennis/predictions`).

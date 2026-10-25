@@ -1816,7 +1816,6 @@
  "Win chances, point spread, total points and the predicted score, with the reasons behind the pick.": "Kazanma şansı, sayı farkı, toplam sayı ve tahmini skor; tahminin gerekçeleriyle.",
  "By confidence": "Güvene göre",
  "American football accuracy": "Amerikan futbolu isabeti",
- "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. Strong picks: 70%+ in the NFL, 75%+ in college football.": "Her tahmin maç başlamadan kaydedilir ve son düdükten sonra kontrol edilir. Hiçbir şey silinmez. Güçlü tahminler: NFL'de %70+, kolej futbolunda %75+.",
  "Strong picks right": "Doğru güçlü tahminler",
  "No games checked yet: every pick saved before kick-off counts as soon as the game is over.": "Henüz kontrol edilen maç yok: maç başlamadan kaydedilen her tahmin, maç biter bitmez sayılır.",
  "picks saved before kick-off": "maç başlamadan kaydedilen tahminler",
@@ -2485,5 +2484,10 @@
  "Matchups (style against style)": "Eşleşmeler (stile karşı stil)",
  "Form: last 10 games against expectation": "Form: beklentiye göre son 10 maç",
  "Motivation (late-season tanking)": "Motivasyon (sezon sonu bilerek kaybetme)",
- "3-point volatility": "Üçlük oynaklığı"
+ "3-point volatility": "Üçlük oynaklığı",
+ "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. College games are shown by level, so easy FBS vs FCS games don't pad the number. Strong picks: from the chance where our picks were right at least 75% of the time in testing, set per league.": "Her tahmin başlama vuruşundan önce kaydedilir ve son düdükten sonra kontrol edilir. Hiçbir şey silinmez. Kolej maçları seviyeye göre ayrı gösterilir, böylece kolay FBS–FCS maçları sayıyı şişirmez. Güçlü tahminler: testlerde tahminlerimizin en az %75 oranında doğru çıktığı olasılıktan itibaren, her lig için ayrı belirlenir.",
+ "College football · FBS vs FBS": "Kolej futbolu · FBS–FBS",
+ "College football · FBS vs FCS": "Kolej futbolu · FBS–FCS",
+ "College football · FCS vs FCS": "Kolej futbolu · FCS–FCS",
+ "College: FBS vs FBS {0}% right ({1} games), FBS vs FCS {2}% ({3} games).": "Kolej: FBS–FBS %{0} doğru ({1} maç), FBS–FCS %{2} ({3} maç)."
 }

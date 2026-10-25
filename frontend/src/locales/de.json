@@ -1816,7 +1816,6 @@
  "Win chances, point spread, total points and the predicted score, with the reasons behind the pick.": "Siegchancen, Punktespanne, Gesamtpunkte und das erwartete Ergebnis, mit den Gründen hinter dem Tipp.",
  "By confidence": "Nach Sicherheit",
  "American football accuracy": "American-Football-Trefferquote",
- "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. Strong picks: 70%+ in the NFL, 75%+ in college football.": "Jeder Tipp wird vor dem Anstoß gespeichert und nach dem Schlusspfiff überprüft. Nichts wird entfernt. Starke Tipps: 70 %+ in der NFL, 75 %+ im College Football.",
  "Strong picks right": "Starke Tipps richtig",
  "No games checked yet: every pick saved before kick-off counts as soon as the game is over.": "Noch keine Spiele überprüft: Jeder vor dem Anstoß gespeicherte Tipp zählt, sobald das Spiel vorbei ist.",
  "picks saved before kick-off": "vor dem Anstoß gespeicherte Tipps",
@@ -2485,5 +2484,10 @@
  "Matchups (style against style)": "Duelle (Stil gegen Stil)",
  "Form: last 10 games against expectation": "Form: letzte 10 Spiele gegenüber der Erwartung",
  "Motivation (late-season tanking)": "Motivation (absichtliches Verlieren spät in der Saison)",
- "3-point volatility": "Dreier-Schwankung"
+ "3-point volatility": "Dreier-Schwankung",
+ "Every pick is saved before kick-off and checked after the final whistle. Nothing is removed. College games are shown by level, so easy FBS vs FCS games don't pad the number. Strong picks: from the chance where our picks were right at least 75% of the time in testing, set per league.": "Jeder Tipp wird vor dem Anstoß gespeichert und nach dem Schlusspfiff überprüft. Nichts wird entfernt. College-Spiele werden nach Niveau getrennt gezeigt, damit leichte Spiele FBS gegen FCS die Zahl nicht schönen. Starke Tipps: ab der Wahrscheinlichkeit, bei der unsere Tipps im Test mindestens 75 % der Zeit richtig lagen, je Liga festgelegt.",
+ "College football · FBS vs FBS": "College Football · FBS gegen FBS",
+ "College football · FBS vs FCS": "College Football · FBS gegen FCS",
+ "College football · FCS vs FCS": "College Football · FCS gegen FCS",
+ "College: FBS vs FBS {0}% right ({1} games), FBS vs FCS {2}% ({3} games).": "College: FBS gegen FBS {0} % richtig ({1} Spiele), FBS gegen FCS {2} % ({3} Spiele)."
 }
