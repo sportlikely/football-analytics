@@ -121,6 +121,21 @@ Live 25 Oct: /api/bb/tuned stored:false (the code defaults from the 10 Oct resea
   names the games). `BB_REST=off` keeps the card and turns the model part off.
 - News injuries (`bb_news_injuries`): every league but the NBA; precision first (admin review list, dismissed never return).
 
+### In-season layer (fix222b, 25 Oct 2026) — behind a switch, off by default
+- Yarin chose to build it (25 Oct). A second Platt layer on top of the season layer, fitted on this season's finished
+  games (bb-v4's walk-forward rows of the live season, the season layer applied first), one fit per league shrunk toward
+  the all-leagues fit (utils/sportCalib.ts inSeasonLayer). Test, walk-forward by day: each day's games calibrated with a
+  fit on the games before that day only (the first 300 games of the season only fit); kept only when that beats the
+  season layer by 0.0005 log loss over 200+ tested games. Live fit: every finished game of the season so far, rebuilt
+  every 6 h with the calibration job. This is the one place a live season is fitted — always on games before the one
+  predicted.
+- Used only when the switch is on AND the test passed: Admin → "Basketball model v4 (grid)" → Calibration layer → In-season
+  layer "Switch on / off" (`/api/admin/calibration?sport=basketball&inseason=on|off`, stored in sport_calib
+  'basketball-inseason', security log "bb_inseason_layer"); `BB_INSEASON=on|off` in Railway overrides it. Switching
+  rebuilds the layer and re-saves the next 7 days' predictions.
+- 10 Oct copy: 633 live games, 325 tested walk-forward (from 25 Sep): season layer 0.5988 → with it 0.6026 → **not
+  kept** (too early in the season). On the server (≈3,200 live games by 25 Oct) the card shows the verdict.
+
 ## NBA model v4 — bb-v4 (fix217, 25 Oct 2026) — public "SL Basketball 4.0"
 (fix219: the grid above replaces this as the NBA base when the NBA group passes its gate; the re-pricing stays.)
 Why: live NBA 2026-27 started 14/30; the gap to the market is same-day information (injuries, rest, starters).

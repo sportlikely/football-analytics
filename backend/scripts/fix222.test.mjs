@@ -88,11 +88,13 @@ test('tennis: the symmetric layer (b = 0) gives p1 and p2 the same treatment', (
   }
 });
 
-/** stored bb-v4 rows for a scratch database: the grid's truth = GRID_DEFAULT (bb-v3 = a noisier copy) */
-function storeGrid(seed) {
+/** stored bb-v4 rows for a scratch database: the grid's truth = GRID_DEFAULT (bb-v3 = a noisier copy); liveFlat < 1 = the
+ * live season (2026) less sure than the model says, with its games in bb_games (kickoffs over 40 days) */
+function storeGrid(seed, liveFlat = 1) {
   const r = rng(seed);
   const gauss = () => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
-  db.exec(`DELETE FROM bb_grid_rows`);
+  db.exec(`DELETE FROM bb_grid_rows`); db.exec(`DELETE FROM bb_games`);
+  const gm = db.prepare(`INSERT INTO bb_games (game_id, code, league_id, season, kickoff, status, home_id, home_name, away_id, away_name, updated_at) VALUES (?, ?, 1, ?, ?, 'FT', 1, 'H', 2, 'A', ?)`);
   const ins = db.prepare(`INSERT INTO bb_grid_rows (game_id, code, season, ms, gp, y, v3, sig, hv, av, oracle) VALUES (?, ?, ?, 0, ?, ?, ?, 12, ?, ?, NULL)`);
   db.exec('BEGIN');
   let id = 1;
@@ -102,7 +104,9 @@ function storeGrid(seed) {
     const it = { hv, av, sig: 12 };
     const p = M.gridEval(M.GRID_DEFAULT, code, it).pHome;
     const v3 = sig(logit(p) * 0.6 + gauss() * 0.5);
-    ins.run(id++, code, `${year}-${year + 1}`, k % 40, r() < p ? 1 : 0, v3, JSON.stringify(hv), JSON.stringify(av));
+    const truth = year === 2026 ? sig(logit(p) * liveFlat) : p;
+    if (year === 2026) gm.run(id, code, `${year}-${year + 1}`, new Date(Date.UTC(2026, 9, 1) + Math.floor(k / 10.5) * 86400000).toISOString(), new Date().toISOString());
+    ins.run(id++, code, `${year}-${year + 1}`, k % 40, r() < truth ? 1 : 0, v3, JSON.stringify(hv), JSON.stringify(av));
   }
   db.exec('COMMIT');
 }
@@ -208,4 +212,55 @@ test('perf: start-up stalls are listed apart, a request waiting on the worker is
   const last = P.perfStatus().recentStalls.find(s => s.ms > 300);
   assert.ok(last, 'the stall was seen');
   assert.ok(!String(last.job || '').includes('/api/basketball/game'), `named: ${last.job}`);
+});
+
+// fix222b: the in-season layer (basketball, behind a switch)
+function liveRows(n, days, stretch, seed) {
+  const r = rng(seed), out = [];
+  for (let i = 0; i < n; i++) {
+    const q = sig((r() - 0.5) * 3);
+    out.push({ p: sig(stretch * logit(q)), y: r() < q ? 1 : 0, league: i % 3 ? 'NBA' : 'EL', t: Date.UTC(2026, 9, 1) + Math.floor((i * days) / n) * 86400000 + 3600000 });
+  }
+  return out;
+}
+
+test('in-season layer: kept for an over-confident live season, walk-forward by day, not kept when already calibrated', () => {
+  const over = liveRows(3000, 40, 1.6, 21);
+  const a = C.inSeasonLayer(over, { keep: true });
+  assert.ok(a.kept, a.why);
+  assert.ok(a.test.cal.logLoss < a.test.base.logLoss, `${a.test.base.logLoss} → ${a.test.cal.logLoss}`);
+  assert.ok(a.tested < over.length && a.tested >= 2000, 'the first games only fit');
+  // walk-forward: flipping the last day's results changes no earlier day's calibrated chance
+  const lastDay = Math.max(...over.map(x => Math.floor(x.t / 86400000)));
+  const b = C.inSeasonLayer(over.map(x => (Math.floor(x.t / 86400000) === lastDay ? { ...x, y: 1 - x.y } : x)), { keep: true });
+  const before = rows => rows.evaluated.filter(e => Math.floor(e.t / 86400000) < lastDay).map(e => e.p);
+  assert.deepEqual(before(b), before(a));
+  // calibrated already: no gain → not kept; too few games → not kept
+  const fair = C.inSeasonLayer(liveRows(3000, 40, 1, 22));
+  assert.equal(fair.kept, false, fair.why);
+  const few = C.inSeasonLayer(liveRows(350, 10, 1.6, 23));
+  assert.equal(few.kept, false);
+  assert.match(few.why, /needed/);
+});
+
+test('in-season switch: off = the season layer only; on = used once it passed its test', async () => {
+  storeGrid(31, 0.55);
+  db.exec(`DELETE FROM bb_tuned`);
+  SC.setInSeasonMode('off');
+  await SC.buildBbCalibrationHere('test off');
+  const rep = SC.calibReport('basketball');
+  assert.ok(rep.inSeason.kept, rep.inSeason.why);
+  assert.equal(rep.inSeason.used, false);
+  const st = SC.bbCalibState();
+  const seasonOnly = C.applyLayer(st.layer, 'NBA', 0.8);
+  assert.equal(SC.bbCalibrated('NBA', 0.8), seasonOnly, 'switch off: the season layer only');
+  SC.setInSeasonMode('on');
+  assert.equal(SC.inSeasonMode(), 'on');
+  await SC.buildBbCalibrationHere('test on');
+  assert.equal(SC.calibReport('basketball').inSeason.used, true);
+  assert.ok(SC.bbCalibrated('NBA', 0.8) < seasonOnly - 0.01, 'switch on: the live season is less sure → the chance comes down');
+  process.env.BB_INSEASON = 'off';
+  assert.equal(SC.bbCalibrated('NBA', 0.8), seasonOnly, 'BB_INSEASON=off overrides the stored switch');
+  delete process.env.BB_INSEASON;
+  SC.setInSeasonMode('off');
 });

@@ -106,9 +106,10 @@ export function startJobs() {
   after('bb tune (auto)', bbAutoTune, 20 * 60 * 1000).unref();
   every('bb tune (auto)', bbAutoTune, 3600 * 1000).unref();
   // fix222: the calibration layers of basketball (bb-v4's walk-forward rows) and tennis (tennis-v1's walk-forward months),
-  // ~25 min after the start, then daily (each kept only when it beats the raw chances on its test season)
+  // ~25 min after the start, then every 6 h (each kept only when it beats the raw chances on its test season; fix222b:
+  // the basketball in-season layer follows this season's games)
   afterHeavy('bb calibration', () => buildBbCalibration('start'), 25 * 60 * 1000).unref();
-  everyHeavy('bb calibration', () => buildBbCalibration('daily'), 24 * 3600 * 1000).unref();
+  everyHeavy('bb calibration', () => buildBbCalibration('6-hourly'), 6 * 3600 * 1000).unref();
   // fix224: basketball star-rest patterns (daily), injuries from news + what was applied to each game (every 30 min)
   startKeyPlayersScheduler();
   // fix216: the daily picks email and the weekly digest, at each person's own send hour (checked every 5 min)

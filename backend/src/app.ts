@@ -77,7 +77,7 @@ import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from '
 import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
 import { runTune, tunedInfo } from './services/bbTuner';
-import { buildBbCalibration, calibReport } from './services/sportCalibration';
+import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
@@ -3587,11 +3587,14 @@ app.get('/api/bb/tuned', (req, res) => {
 app.get('/api/admin/calibration', (req, res) => {
   res.set('Cache-Control', 'no-store');
   const sport = req.query.sport === 'tennis' ? 'tennis' : 'basketball';
-  if (req.query.rebuild === '1') {
+  // fix222b: the basketball in-season layer's switch (stored; BB_INSEASON overrides it), then a rebuild to use it
+  const inseason = req.query.inseason === 'on' || req.query.inseason === 'off' ? req.query.inseason : null;
+  if (sport === 'basketball' && inseason) { setInSeasonMode(inseason); securityLog(req, 'bb_inseason_layer', req.user, inseason); }
+  if (req.query.rebuild === '1' || (sport === 'basketball' && inseason)) {
     if (sport === 'basketball') void heavy('bb calibration', () => buildBbCalibration('admin'));
     else void tennisModelTick('report').catch(e => logger.warn(`tennis report: ${e?.message || e}`));
   }
-  try { res.json({ data: { sport, rebuilding: req.query.rebuild === '1', report: calibReport(sport) } }); } catch (e) { sendError(res, e, 'Failed'); }
+  try { res.json({ data: { sport, rebuilding: req.query.rebuild === '1' || !!inseason, inSeasonMode: sport === 'basketball' ? inSeasonMode() : null, inSeasonEnv: process.env.BB_INSEASON || null, report: calibReport(sport) } }); } catch (e) { sendError(res, e, 'Failed'); }
 });
 app.get('/api/bb/wf', (req, res) => res.json({ data: bbWalkForward(String(req.query.code || '').toUpperCase()), timestamp: new Date().toISOString() }));
 // Live scores: both providers' latest reading of every Football-Data.org match and the one shown (liveScores.ts)

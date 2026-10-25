@@ -47,6 +47,9 @@ export function assertSeasons(seasons: number[], first: number, last: number) {
 /** sport fit + per-league fits shrunk toward it, on `rows` (seasons checked against [first, last]) */
 export function fitLayer(rows: LRow[], first: number, last: number, symmetric: boolean): { sport: Platt | null; leagues: Record<string, Platt> } {
   assertSeasons([...new Set(rows.map(r => r.season))], first, last);
+  return fitShrunk(rows, symmetric);
+}
+function fitShrunk(rows: { p: number; y: number; league: string }[], symmetric: boolean): { sport: Platt | null; leagues: Record<string, Platt> } {
   const sport = rows.length >= 100 ? fit(rows, symmetric) : null;
   const leagues: Record<string, Platt> = {};
   if (sport) for (const lg of [...new Set(rows.map(r => r.league))]) {
@@ -62,6 +65,43 @@ export function applyLayer(L: LeagueLayer | null | undefined, league: string, p:
   if (!L) return p;
   const own = L.leagues[league];
   return own === null ? p : applyP(own ?? L.sport, p);
+}
+
+/*
+ * fix222b — the in-season layer (basketball, behind a switch): a second Platt layer on top of the season layer, fitted on
+ * this season's own finished games, for a live season that is less sure than the past ones (a live-vs-backtest gap the
+ * season layer cannot see). Walk-forward by day: each day's games are calibrated with a fit on the games before that day
+ * only; it is kept only when that beats the season layer on those later days (minTest+ games, by `margin` log loss).
+ * The live fit uses every finished game of the season so far.
+ */
+export interface TRow { p: number; y: number; league: string; t: number }
+export type InSeasonFit = { sport: Platt | null; leagues: Record<string, Platt> };
+export const applyInSeason = (f: InSeasonFit | null | undefined, league: string, p: number) => (f ? applyP(f.leagues[league] ?? f.sport, p) : p);
+export function inSeasonLayer(rows: TRow[], o: { minFit?: number; minTest?: number; margin?: number; symmetric?: boolean; keep?: boolean } = {}) {
+  const minFit = o.minFit ?? 300, minTest = o.minTest ?? 200, margin = o.margin ?? 0.0005, symmetric = !!o.symmetric;
+  const sorted = [...rows].sort((a, b) => a.t - b.t);
+  const dayOf = (t: number) => Math.floor(t / 86400000);
+  const evalBase: { p: number; y: number }[] = [], evalCal: { p: number; y: number; t: number }[] = [];
+  const days = [...new Set(sorted.map(r => dayOf(r.t)))];
+  let firstDay: number | null = null;
+  for (const d of days) {
+    const train = sorted.filter(r => dayOf(r.t) < d);
+    if (train.length < minFit) continue;
+    if (firstDay === null) firstDay = d;
+    const f = fitShrunk(train, symmetric);
+    for (const r of sorted.filter(x => dayOf(x.t) === d)) { evalBase.push({ p: r.p, y: r.y }); evalCal.push({ p: applyInSeason(f, r.league, r.p), y: r.y, t: r.t }); }
+  }
+  const base = scoreRows(evalBase), cal = scoreRows(evalCal);
+  const kept = evalBase.length >= minTest && base.logLoss !== null && cal.logLoss !== null && cal.logLoss < base.logLoss - margin;
+  const why = evalBase.length < minTest ? `${evalBase.length} games tested walk-forward (${minTest} needed; the first ${minFit} games of the season only fit)`
+    : `walk-forward by day on ${evalBase.length} games: season layer LL ${base.logLoss}, with the in-season layer ${cal.logLoss} → ${kept ? 'kept' : 'not kept'}`;
+  const fit = kept && sorted.length >= minFit ? fitShrunk(sorted, symmetric) : null;
+  return {
+    kept: !!fit, why, fit, games: sorted.length, tested: evalBase.length, from: firstDay === null ? null : new Date(firstDay * 86400000).toISOString().slice(0, 10),
+    test: { base, cal, baseBands: pickBands(evalBase), calBands: pickBands(evalCal) },
+    // (tests: every tested game's chance as it was calibrated that day)
+    ...(o.keep ? { evaluated: evalCal } : {})
+  };
 }
 
 export interface LeagueReport { league: string; games: number; raw: Score; cal: Score; kept: boolean; why: string; rawBands: Band[]; calBands: Band[] }

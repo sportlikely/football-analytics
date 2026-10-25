@@ -19,7 +19,8 @@ type CalScore = { games: number; logLoss: number | null; brier: number | null; h
 type CalBand = { lo: number; hi: number; n: number; said: number | null; happened: number | null }
 type Calib = { at: string; source: string; test: { season: number; fitOn: number[]; raw: CalScore; ownFit: CalScore; sportFit: CalScore; sportKept: boolean; rawBands: CalBand[]; calBands: CalBand[] }
   perLeague: { league: string; games: number; raw: CalScore; cal: CalScore; kept: boolean; why: string }[]; strong: Record<string, number>; strongSport: number
-  live: { games: number; raw: CalScore; cal: CalScore; rawBands: CalBand[]; calBands: CalBand[] } }
+  live: { games: number; raw: CalScore; cal: CalScore; rawBands: CalBand[]; calBands: CalBand[] }
+  inSeason?: { season: number; kept: boolean; used: boolean; mode: 'on' | 'off'; why: string; games: number; tested: number; from: string | null; test: { base: CalScore; cal: CalScore; baseBands: CalBand[]; calBands: CalBand[] } } }
 const ROWS = ['#1 Player impact', '#2 Net rating / 100', '#3 Team rating (bb-v3)', '#4 Missing players', '#5 Four factors', '#6 Rest', '#7 Home court', '#8 Carry-over', '#9 Matchups', '#10 Form', '#11 Motivation', '#12 3-pt volatility (sigma)', '#13 Head-to-head']
 
 /** fix219 (admin): bb-v4 grid — the gate per group, the fitted split, the test table, the live period, tune / apply. */
@@ -29,8 +30,9 @@ export default function BbGridCard() {
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<any>(null)
   const [cal, setCal] = useState<Calib | null>(null)
+  const [inMode, setInMode] = useState<{ mode: 'on' | 'off' | null; env: string | null }>({ mode: null, env: null })
   const load = (q = '') => axios.get(`${API_URL}/bb/tuned${q}`).then(r => setD(r.data.data)).catch(() => setD(null))
-  const loadCal = (q = '') => axios.get(`${API_URL}/admin/calibration?sport=basketball${q}`).then(r => setCal(r.data.data.report)).catch(() => setCal(null))
+  const loadCal = (q = '') => axios.get(`${API_URL}/admin/calibration?sport=basketball${q}`).then(r => { setCal(r.data.data.report); setInMode({ mode: r.data.data.inSeasonMode, env: r.data.data.inSeasonEnv }) }).catch(() => setCal(null))
   useEffect(() => { load(); loadCal() }, [])
   if (!d) return null
   const tune = (apply: boolean) => {
@@ -104,7 +106,20 @@ export default function BbGridCard() {
             <button type="button" className={btn} onClick={() => { loadCal('&rebuild=1'); setMsg('Building the calibration layer again (a minute)…') }}>Rebuild</button>
           </div>
           <p className="text-faint">{cal.source} · built {new Date(cal.at).toLocaleString('en-GB')} · fitted on {cal.test.fitOn.join(', ')}, tested on {cal.test.season}: log loss raw {cal.test.raw.logLoss} → own fits {cal.test.ownFit.logLoss} / one fit {cal.test.sportFit.logLoss} · strong line {Math.round(cal.strongSport * 100)}%</p>
-          <p className="text-faint">Live season (never fitted): {cal.live.games} games, log loss {cal.live.raw.logLoss} → {cal.live.cal.logLoss} · {cal.live.calBands.filter(b => b.n).map((b, i) => `${b.lo}%+: said ${cal.live.rawBands[i].said} → ${b.said}, happened ${b.happened} (${b.n})`).join(' · ')}</p>
+          <p className="text-faint">Live season (never fitted): {cal.live.games} games, log loss {cal.live.raw.logLoss} → {cal.live.cal.logLoss} · {cal.live.calBands.map((b, i) => (b.n ? `${b.lo}%+: said ${cal.live.rawBands[i].said} → ${b.said}, happened ${b.happened} (${b.n})` : '')).filter(Boolean).join(' · ')}</p>
+          {cal.inSeason && (
+            <div className="mt-2 rounded-lg border border-line/60 p-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-ink font-semibold">In-season layer ({cal.inSeason.season}) · switch {inMode.mode || cal.inSeason.mode}{inMode.env ? ` (BB_INSEASON=${inMode.env})` : ''} · {cal.inSeason.used ? <b className="text-win">in use</b> : cal.inSeason.kept ? 'passes its test, switch off' : <span className="text-faint">not used</span>}</span>
+                <span className="flex gap-2">
+                  <button type="button" className={btn} disabled={(inMode.mode || cal.inSeason.mode) === 'on'} onClick={() => { loadCal('&inseason=on'); setMsg('In-season layer switched on: used when it passes its walk-forward test (rebuilding).') }}>Switch on</button>
+                  <button type="button" className={btn} disabled={(inMode.mode || cal.inSeason.mode) === 'off'} onClick={() => { loadCal('&inseason=off'); setMsg('In-season layer switched off (rebuilding).') }}>Switch off</button>
+                </span>
+              </div>
+              <p className="text-faint">{cal.inSeason.why} · {cal.inSeason.games} finished games this season{cal.inSeason.from ? `, tested from ${cal.inSeason.from}` : ''}</p>
+              {cal.inSeason.tested > 0 && <p className="text-faint">{cal.inSeason.test.calBands.map((b, i) => (b.n ? `${b.lo}%+: said ${cal.inSeason!.test.baseBands[i].said} → ${b.said}, happened ${b.happened} (${b.n})` : '')).filter(Boolean).join(' · ')}</p>}
+            </div>
+          )}
           <div className="mt-1 grid sm:grid-cols-2 gap-x-6">
             {cal.perLeague.map(x => (
               <div key={x.league} className="flex justify-between border-t border-line/40 py-0.5" title={x.why}>
