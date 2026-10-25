@@ -58,6 +58,7 @@ import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
 import { pushAlertsTick } from './services/pushAlerts';
 import { buildSlugs } from './services/slugs';
 import { startGameExtrasScheduler } from './services/gameExtras';
+import { fillFromFinals } from './services/history';
 
 let started = false;
 
@@ -154,6 +155,11 @@ export function startJobs() {
   startKeyPlayersScheduler();
   // fix231: game-page extras — venues, weather (Open-Meteo) and referees for the next 72 h, every 3 h; coverage after
   startGameExtrasScheduler();
+  // fix234: football results the history files don't have yet, from our own final scores (every 20 min; the 6-hourly
+  // model fit uses them)
+  const fillHistory = () => { const f = fillFromFinals(); if (f.added || f.replaced) logger.info(`history fill: ${f.added} added, ${f.replaced} replaced by the files, ${f.unmapped} without team names`); };
+  after('history fill', fillHistory, 4 * 60 * 1000).unref();
+  every('history fill', fillHistory, 20 * 60 * 1000).unref();
   // fix216: the daily picks email and the weekly digest, at each person's own send hour (checked every 5 min)
   migrateMarketingOptIn(); // fix218: the old "Email updates" switch → weekly digest, once
   every('picks emails', () => picksEmailTick().catch(e => logger.warn(`picks emails: ${e?.message || e}`)), 5 * 60 * 1000).unref();

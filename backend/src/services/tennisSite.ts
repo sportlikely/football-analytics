@@ -54,8 +54,9 @@ export const MATCH_FROM = `FROM tennis_matches m LEFT JOIN tennis_players p1 ON 
 /** public rows: singles, our own feed (the archive has other player ids), with both players */
 export const MATCH_PUBLIC = `COALESCE(m.draw, 'singles') = 'singles' AND m.source <> 'archive' AND m.p1_name IS NOT NULL AND m.p2_name IS NOT NULL
   AND m.p1_name NOT IN ('TBD', 'TBA', 'Qualifier') AND m.p2_name NOT IN ('TBD', 'TBA', 'Qualifier')`;
-/** fix195: the lists (home, matches, draw, search): no match the provider lost track of ('unknown', fix195 stale check) */
-export const MATCH_LISTED = `${MATCH_PUBLIC} AND COALESCE(m.status, '') <> 'unknown'`;
+/** fix195: the lists (home, matches, draw, search): no match the provider lost track of ('unknown', fix195 stale check;
+ *  fix234: 'void' = still no result 48 h after the start) */
+export const MATCH_LISTED = `${MATCH_PUBLIC} AND COALESCE(m.status, '') NOT IN ('unknown', 'void')`;
 
 const LEVEL: Record<number, string> = { 0: 'Grand Slam', 1: '1000', 2: '500', 3: '250', 4: 'Challenger', 5: 'ITF' };
 /** "atp_500" → "ATP 500", "grand_slam" → "Grand Slam", "challenger_125" → "Challenger 125" */

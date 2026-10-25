@@ -76,7 +76,8 @@ import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
-import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit } from './services/bbTuner';
+import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit, storedLeagues, storedMiss, storedImpact } from './services/bbTuner';
+import { startAdminJob, adminJobAnswer } from './services/adminJobs';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
@@ -3652,47 +3653,41 @@ app.post('/api/admin/bb/news-injuries/:id(\d+)/:action(dismiss|ok)', jsonOnly, (
 });
 // fix219 (admin): bb-v4 grid tuner — ?train=2022,2023,2024&test=2025 (the live period 2026+ is refused), &apply=1 stores
 // and publishes the settings (no redeploy). Runs in the job thread, one heavy job at a time.
-app.get('/api/bb/tune', async (req, res) => {
+// fix234: these four fits answer at once — ?run=1 starts the job (heavy queue, job thread), every call answers with
+// the job's state, its result when done and the stored report (services/adminJobs.ts); the page polls
+const fitJob = (key: string, run: () => unknown, stored: () => unknown, shape?: (r: any) => unknown): express.RequestHandler => (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
-    const nums = (s: unknown) => String(s || '').split(',').map(x => parseInt(x, 10)).filter(Number.isFinite);
-    // fix223: apply=gate stores the fit when the gate passes (the first store on a database; later: not worse than live)
-    const apply = req.query.apply === '1' ? true : req.query.apply === 'gate' ? 'gate' as const : false;
-    const opt = { train: nums(req.query.train), test: req.query.test ? parseInt(String(req.query.test), 10) : undefined, apply };
-    const r = await heavy('bb tune', () => (threadJobsOn() ? inThread('bb tune', [opt]) : runTune(opt)));
-    res.json({ data: r });
-  } catch (e) { sendError(res, e, 'Basketball tune failed'); }
+    if (req.query.run === '1') startAdminJob(key, req.query, run);
+    res.json({ data: adminJobAnswer(key, stored(), shape) });
+  } catch (e) { sendError(res, e, `${key} failed`); }
+};
+const noParams = (r: any) => (r && typeof r === 'object' ? { ...r, params: undefined } : r);
+app.get('/api/bb/tune', (req, res, next) => {
+  const nums = (s: unknown) => String(s || '').split(',').map(x => parseInt(x, 10)).filter(Number.isFinite);
+  // fix223: apply=gate stores the fit when the gate passes (the first store on a database; later: not worse than live)
+  const apply = req.query.apply === '1' ? true : req.query.apply === 'gate' ? 'gate' as const : false;
+  const opt = { train: nums(req.query.train), test: req.query.test ? parseInt(String(req.query.test), 10) : undefined, apply };
+  return fitJob('bb tune', () => (threadJobsOn() ? inThread('bb tune', [opt]) : runTune(opt)), () => tunedInfo().report)(req, res, next);
 });
 // fix223 (admin): the per-league settings on top of the stored shared tune — a report; &apply=1 stores the leagues that
 // passed their gate (fit 2022-23 + 2023-24, test 2024-25, refit on the three; 2025-26 the untouched check). Job thread.
-app.get('/api/bb/league-tune', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  try {
-    const opt = { apply: req.query.apply === '1' };
-    const r = await heavy('bb league tune', () => (threadJobsOn() ? inThread('bb league tune', [opt]) : runLeagueTune(opt)));
-    res.json({ data: r });
-  } catch (e) { sendError(res, e, 'Basketball league settings failed'); }
+app.get('/api/bb/league-tune', (req, res, next) => {
+  const opt = { apply: req.query.apply === '1' };
+  return fitJob('bb league tune', () => (threadJobsOn() ? inThread('bb league tune', [opt]) : runLeagueTune(opt)), () => storedLeagues()?.report ?? null)(req, res, next);
 });
 // fix228 (admin): row #4 (missing players) fitted on who actually played (NBA; the other leagues' proxy weight the same
 // way), frozen in a shared tune around it; ?apply=gate (default) stores it when the gate passes, apply=1 always, apply=0 report only
-app.get('/api/bb/missing-fit', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  try {
-    const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
-    const opt = { apply };
-    const r: any = await heavy('bb miss fit', () => (threadJobsOn() ? inThread('bb miss fit', [opt]) : runMissFit(opt)));
-    res.json({ data: { ...r, params: undefined } });
-  } catch (e) { sendError(res, e, 'Basketball #4 fit failed'); }
+app.get('/api/bb/missing-fit', (req, res, next) => {
+  const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
+  const opt = { apply };
+  return fitJob('bb miss fit', () => (threadJobsOn() ? inThread('bb miss fit', [opt]) : runMissFit(opt)), () => noParams(storedMiss()), noParams)(req, res, next);
 });
 // fix225 (admin): player impact = box-score value blended with on/off + the star factor; ?apply=gate (default) | 1 | 0
-app.get('/api/bb/impact-fit', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  try {
-    const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
-    const opt = { apply };
-    const r: any = await heavy('bb impact fit', () => (threadJobsOn() ? inThread('bb impact fit', [opt]) : runImpactFit(opt)));
-    res.json({ data: { ...r, params: undefined } });
-  } catch (e) { sendError(res, e, 'Basketball impact fit failed'); }
+app.get('/api/bb/impact-fit', (req, res, next) => {
+  const apply = req.query.apply === '1' ? true : req.query.apply === '0' ? false : 'gate' as const;
+  const opt = { apply };
+  return fitJob('bb impact fit', () => (threadJobsOn() ? inThread('bb impact fit', [opt]) : runImpactFit(opt)), () => noParams(storedImpact()), noParams)(req, res, next);
 });
 // fix219 (admin): the stored bb-v4 settings, the last tune report and the gate; ?reload=1 publishes again, ?clear=1 = code defaults
 app.get('/api/bb/tuned', (req, res) => {
@@ -3745,8 +3740,11 @@ app.get('/api/admin/v3-mix', async (req, res) => {
       setModelConfig('mix_weight', String(w));
       clearPredictionCache();
     }
-    const bt = req.query.backtest === '1' ? await v3MixBacktest({ from: req.query.from ? String(req.query.from) : undefined, season: req.query.season ? String(req.query.season) : undefined }) : undefined;
-    res.json({ data: { status: featureModelStatus(), ...(bt ? { backtest: bt } : {}) }, timestamp: new Date().toISOString() });
+    // fix234: ?backtest=1 starts the backtest (heavy queue) and answers at once; later calls show it running or its result
+    const btOpt = { from: req.query.from ? String(req.query.from) : undefined, season: req.query.season ? String(req.query.season) : undefined };
+    if (req.query.backtest === '1') startAdminJob('v3-mix backtest', btOpt, () => v3MixBacktest(btOpt));
+    const bt = adminJobAnswer('v3-mix backtest', null);
+    res.json({ data: { status: featureModelStatus(), ...(bt.job ? { backtest: bt.result ?? { running: bt.job.running, state: bt.job.state, queuedAt: bt.job.queuedAt, startedAt: bt.job.startedAt, error: bt.job.error } } : {}) }, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'v3-mix failed');
   }
@@ -3827,7 +3825,12 @@ app.get('/api/af/xg', (_req, res) => {
 // fix164: broken team links (matches of the last and next 7 days, every sport; resolver only). ?run=1 checks now.
 app.get('/api/admin/link-check', async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  try { res.json({ data: req.query.run === '1' || !lastLinkCheck() ? await runLinkCheck() : lastLinkCheck(), timestamp: new Date().toISOString() }); } catch (e) { sendError(res, e, 'Link check failed'); }
+  // fix234: ?run=1 (or none stored yet) starts it in the background; the answer is the last stored check + the job's state
+  try {
+    if (req.query.run === '1' || !lastLinkCheck()) startAdminJob('link check', null, () => runLinkCheck());
+    const j = adminJobAnswer('link check', null);
+    res.json({ data: lastLinkCheck() ?? { running: true, queuedAt: j.job?.queuedAt ?? null, startedAt: j.job?.startedAt ?? null }, job: j.job, timestamp: new Date().toISOString() });
+  } catch (e) { sendError(res, e, 'Link check failed'); }
 });
 
 // Admin: event-loop stalls and how long the heavy jobs take (why the site feels slow)

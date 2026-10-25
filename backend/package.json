@@ -44,7 +44,8 @@
     "test:fix229": "tsc && node --no-warnings --test --test-force-exit scripts/slugs.test.mjs",
     "test:fix231": "tsc && node --no-warnings --test --test-force-exit scripts/game-extras.test.mjs",
     "test:fix232": "tsc && node --no-warnings --test --test-force-exit --test-name-pattern=fix232 scripts/deploy-restart.test.mjs",
-    "test:fix235": "tsc && node --no-warnings --test --test-force-exit scripts/links235.test.mjs"
+    "test:fix235": "tsc && node --no-warnings --test --test-force-exit scripts/links235.test.mjs",
+    "test:fix234": "tsc && node --no-warnings --test --test-force-exit scripts/fix234.test.mjs"
   },
   "keywords": [
     "football",

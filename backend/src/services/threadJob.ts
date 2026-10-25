@@ -37,8 +37,11 @@ const last = new Map<ThreadJob, { at: string; ms: number; ok: boolean; error?: s
 /** /api/perf: the last run of each thread job */
 export const threadJobStatus = () => Object.fromEntries(last);
 
-/** run `job` in a new thread; resolves with its result once every state it published was applied here */
-export function inThread<T>(job: ThreadJob, args: unknown[] = []): Promise<T> {
+/**
+ * run `job` in a new thread; resolves with its result once every state it published was applied here.
+ * fix234: `timeoutMs` ends a thread that has not answered by then (the job fails instead of holding its caller for ever)
+ */
+export function inThread<T>(job: ThreadJob, args: unknown[] = [], timeoutMs = 0): Promise<T> {
   const f = threadFile();
   if (!f) return Promise.reject(new Error('no job thread file'));
   const t0 = Date.now();
@@ -51,9 +54,12 @@ export function inThread<T>(job: ThreadJob, args: unknown[] = []): Promise<T> {
     let settled = false, states = 0, done = false;
     // one state a message, applied one per turn (a big state is one synchronous deserialize + apply)
     let chain: Promise<void> = Promise.resolve();
+    const timer = timeoutMs > 0 ? setTimeout(() => finish(new Error(`thread did not answer within ${Math.round(timeoutMs / 1000)} s`)), timeoutMs) : null;
+    timer?.unref();
     const finish = (err: Error | null, result?: T) => {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
       last.set(job, { at: new Date().toISOString(), ms: Date.now() - t0, ok: !err, error: err?.message, states });
       void w.terminate();
       if (err) reject(err); else resolve(result as T);

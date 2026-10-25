@@ -85,7 +85,8 @@ const AF_ABROAD: Record<string, string> = { london: 'United Kingdom', tottenham:
 /** football: the window's games of the next 72 h, with venue / city / referee from their API-Football fixture */
 async function collectFootball(now: number): Promise<number> {
   const until = now + 72 * HOUR;
-  const fd = await footballDataAPI.getUpcomingMatches(4).catch(() => [] as any[]);
+  const fd = await Promise.race([footballDataAPI.getUpcomingMatches(4), new Promise<any[]>((_, rej) => setTimeout(() => rej(new Error('upcoming matches: no answer in 30 s')), 30000).unref())])
+    .catch(e => { logger.warn(`game extras: ${e?.message || e}`); return [] as any[]; });
   const list = [...fd, ...afUpcoming(4)].filter(m => { const t = Date.parse(m.utcDate); return t > now - 2 * HOUR && t <= until; });
   const at = new Date(now).toISOString();
   const fids = new Map<number, any>();
@@ -104,6 +105,7 @@ async function collectFootball(now: number): Promise<number> {
     return !r?.league || !r.city || (near && !r.referee) || Date.parse(r.updated_at) < now - 6 * HOUR;
   }).map(([fid]) => fid);
   for (let i = 0; i < due.length && afRemaining() > 5000; i += 20) {
+    if (outOfTime()) { cutShort.add('fixture details'); break; }
     const chunk = due.slice(i, i + 20);
     let resp: any[] = [];
     try { resp = (await afFetch('/fixtures', { ids: chunk.join('-') }))?.response || []; } catch (e: any) { logger.warn(`game extras: fixtures ${e?.message || e}`); break; }
@@ -168,6 +170,7 @@ async function geocodeVenues(now: number, max = 40): Promise<number> {
     // a venue not found is tried again after 7 days (the provider may name its city by then)
     if (v && (v.lat != null || Date.parse(v.tried_at) > now - 7 * DAY)) continue;
     if (n >= max) break;
+    if (outOfTime()) { cutShort.add('venues'); break; }
     n++;
     let at: { lat: number; lon: number } | null = null, source = 'city';
     try {
@@ -253,6 +256,7 @@ async function refreshReferees(now: number): Promise<{ lists: number; details: n
   const listAt = db.prepare(`SELECT at FROM extras_ref_lists WHERE league = ? AND season = ?`);
   for (const l of leagues.values()) {
     if (afRemaining() < 5000) break;
+    if (outOfTime()) { cutShort.add('referees'); break; }
     const r: any = listAt.get(l.league, l.season);
     if (!r || Date.parse(r.at) < now - 12 * HOUR) {
       try {
@@ -468,28 +472,45 @@ export function teamExtras(sport: ExtrasSport, id: number, now = Date.now()) {
 
 /* ---------- the worker job, coverage, data health ---------- */
 
+/*
+ * fix234: the first build is promised ~6 min after the start, but the tick waited for every source in turn (40 venue
+ * look-ups at up to 20 s each, the referee lists) before it stored anything: "Not built yet" 9 min after the start on
+ * 25 Oct. Now each tick has a time budget (4 min; the venue look-ups and referee lists stop there and go on next
+ * tick), the coverage is stored right after the games are collected (what is ready) and again at the end, and a tick
+ * that was cut short is followed by a fill tick 15 min later instead of waiting 3 h.
+ */
+const TICK_BUDGET_MS = 4 * 60 * 1000;
+let deadline = Infinity;
+const cutShort = new Set<string>();
+const outOfTime = () => Date.now() > deadline;
+
 let running = false;
-let lastRun: { at: string; ms: number; games: Record<string, number>; geocoded: number; weather: { games: number; calls: number }; referees: { lists: number; details: number }; error?: string } | null = null;
-export async function extrasTick(now = Date.now(), opts: { football?: boolean } = {}) {
+let lastRun: { at: string; ms: number; games: Record<string, number>; geocoded: number; weather: { games: number; calls: number }; referees: { lists: number; details: number }; cutShort?: string[]; error?: string } | null = null;
+export async function extrasTick(now = Date.now(), opts: { football?: boolean; budgetMs?: number } = {}) {
   if (running) return lastRun;
   running = true;
   const t0 = Date.now();
+  deadline = t0 + (opts.budgetMs ?? TICK_BUDGET_MS);
+  cutShort.clear();
   try {
     const games: Record<string, number> = {};
     try { if (opts.football !== false) games.football = await collectFootball(now); } catch (e: any) { logger.warn(`game extras: football ${e?.message || e}`); }
     try { games.nfl = collectNfl(now); } catch (e: any) { logger.warn(`game extras: nfl ${e?.message || e}`); }
     try { games.tennis = collectTennis(now); } catch (e: any) { logger.warn(`game extras: tennis ${e?.message || e}`); }
+    // what is ready now (trends, difficulty, the weather and referees already stored) before the slow sources
+    await buildCoverage(now);
     const geocoded = await geocodeVenues(now);
     const weather = await fetchWeather(now);
     const referees = await refreshReferees(now);
     db.prepare(`DELETE FROM extras_games WHERE kickoff < ?`).run(new Date(now - 30 * DAY).toISOString());
-    lastRun = { at: new Date(now).toISOString(), ms: Date.now() - t0, games, geocoded, weather, referees };
+    lastRun = { at: new Date(now).toISOString(), ms: Date.now() - t0, games, geocoded, weather, referees, ...(cutShort.size ? { cutShort: [...cutShort] } : {}) };
     await buildCoverage(now);
-    logger.info(`game extras: ${JSON.stringify(games)} games, ${geocoded} venues looked up, weather for ${weather.games} (${weather.calls} calls), referees ${referees.lists} lists / ${referees.details} games`);
+    logger.info(`game extras: ${JSON.stringify(games)} games, ${geocoded} venues looked up, weather for ${weather.games} (${weather.calls} calls), referees ${referees.lists} lists / ${referees.details} games${cutShort.size ? ` — time budget reached (${[...cutShort].join(', ')}): the rest in 15 min` : ''}`);
+    if (cutShort.size) setTimeout(() => { void extrasTick(); }, 15 * 60 * 1000).unref();
   } catch (e: any) {
     lastRun = { at: new Date(now).toISOString(), ms: Date.now() - t0, games: {}, geocoded: 0, weather: { games: 0, calls: 0 }, referees: { lists: 0, details: 0 }, error: e?.message || String(e) };
     logger.warn(`game extras: ${e?.message || e}`);
-  } finally { running = false; }
+  } finally { running = false; deadline = Infinity; }
   return lastRun;
 }
 
@@ -545,7 +566,7 @@ export function gameExtrasAdmin() {
 /** data health "Game extras": warn when under 80% of the next 48 h's games have the cards they should have */
 export function gameExtrasHealth(now = Date.now()): Check[] {
   const c = coverage();
-  if (!c) return [{ id: 'game-extras', label: 'Game extras', level: 'warn', detail: 'Not built yet (the worker builds it every 3 h, first ~6 min after the start)' }];
+  if (!c) return [{ id: 'game-extras', label: 'Game extras', level: 'warn', detail: 'Not built yet (the worker builds it every 3 h, first ~2 min after the start)' }];
   const age = now - Date.parse(c.at);
   const parts: string[] = [];
   let should = 0, have = 0;
@@ -565,6 +586,8 @@ export function gameExtrasHealth(now = Date.now()): Check[] {
 
 export function startGameExtrasScheduler() {
   if (process.env.GAME_EXTRAS === '0') return;
-  after('game extras', () => extrasTick(), 6 * 60 * 1000).unref();
+  // fix234: the first tick 1 min after the scheduler starts (its coverage is stored right after the games are
+  // collected, well inside the promised 6 min)
+  after('game extras', () => extrasTick(), 60 * 1000).unref();
   every('game extras', () => extrasTick(), 3 * HOUR).unref();
 }

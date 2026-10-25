@@ -67,6 +67,22 @@ type Calib = { at: string; source: string; test: { season: number; fitOn: number
   inSeason?: { season: number; kept: boolean; used: boolean; mode: 'on' | 'off'; why: string; games: number; tested: number; from: string | null; test: { base: CalScore; cal: CalScore; baseBands: CalBand[]; calBands: CalBand[] } } }
 const ROWS = ['#1 Player impact', '#2 Net rating / 100', '#3 Team rating (bb-v3)', '#4 Missing players', '#5 Four factors', '#6 Rest', '#7 Home court', '#8 Carry-over', '#9 Matchups', '#10 Form', '#11 Motivation', '#12 3-pt volatility (sigma)', '#13 Head-to-head']
 
+/**
+ * fix234: the fit endpoints answer at once — ?run=1 starts the job, then the page asks every 5 s until it is done
+ * ("running, started <time>" meanwhile); resolves with the job's result
+ */
+function runFitJob(url: string, say: (m: string) => void): Promise<any> {
+  const sep = url.includes('?') ? '&' : '?'
+  const ask = (run: boolean): Promise<any> => axios.get(run ? `${url}${sep}run=1` : url).then(r => {
+    const a = r.data.data
+    if (a.job?.state === 'failed') throw new Error(a.job.error || 'The job failed')
+    if (a.job?.state === 'done') return a.result ?? a.stored
+    if (a.job?.running) say(a.job.startedAt ? `Running, started ${new Date(a.job.startedAt).toLocaleTimeString('en-GB')}…` : `Waiting in the job queue since ${new Date(a.job.queuedAt).toLocaleTimeString('en-GB')}…`)
+    return new Promise(res => setTimeout(res, 5000)).then(() => ask(false))
+  })
+  return ask(true)
+}
+
 /** fix219 (admin): bb-v4 grid — the gate per group, the fitted split, the test table, the live period, tune / apply. */
 export default function BbGridCard() {
   const [d, setD] = useState<Info | null>(null)
@@ -85,31 +101,31 @@ export default function BbGridCard() {
   if (!d) return null
   const tune = (apply: boolean | 'gate') => {
     setBusy(true); setMsg(apply ? 'Fitting (in the job thread)…' : 'Fitting a preview…')
-    axios.get(`${API_URL}/bb/tune?train=2022,2023,2024&test=2025${apply === 'gate' ? '&apply=gate' : apply ? '&apply=1' : ''}`)
-      .then(r => { setPreview(r.data.data); setMsg(r.data.data.auto ? r.data.data.auto.reason : apply ? 'Applied: live predictions use the new weights.' : 'Preview below (not applied).'); load() })
+    runFitJob(`${API_URL}/bb/tune?train=2022,2023,2024&test=2025${apply === 'gate' ? '&apply=gate' : apply ? '&apply=1' : ''}`, setMsg)
+      .then(data => { setPreview(data); setMsg(data.auto ? data.auto.reason : apply ? 'Applied: live predictions use the new weights.' : 'Preview below (not applied).'); load() })
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
   // fix223: the per-league settings (report, or stored when apply)
   const leagueTune = (apply: boolean) => {
     setBusy(true); setMsg(apply ? 'Fitting the league settings and storing the ones that pass…' : 'Fitting the league settings (preview)…')
-    axios.get(`${API_URL}/bb/league-tune${apply ? '?apply=1' : ''}`)
-      .then(r => { setLsPreview(r.data.data); setMsg(apply ? `Stored: own ${r.data.data.own.join(', ') || 'none'}, group ${r.data.data.group.join(', ') || 'none'}.` : 'League settings preview below (not stored).'); load() })
+    runFitJob(`${API_URL}/bb/league-tune${apply ? '?apply=1' : ''}`, setMsg)
+      .then(data => { setLsPreview(data); setMsg(apply ? `Stored: own ${data.own.join(', ') || 'none'}, group ${data.group.join(', ') || 'none'}.` : 'League settings preview below (not stored).'); load() })
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
   const ls = lsPreview || d.leagues?.report || null
   // fix228: row #4 on who actually played (report, or stored through its gate)
   const missFit = (apply: 'gate' | '0') => {
     setBusy(true); setMsg(apply === 'gate' ? 'Fitting #4 on who actually played, stored if the gate passes…' : 'Fitting #4 on who actually played (preview)…')
-    axios.get(`${API_URL}/bb/missing-fit?apply=${apply}`)
-      .then(r => { setMissPreview(r.data.data); setMsg(r.data.data.applied ? `Stored: ${r.data.data.gate.reason}` : `Not stored: ${r.data.data.gate.reason}`); load() })
+    runFitJob(`${API_URL}/bb/missing-fit?apply=${apply}`, setMsg)
+      .then(data => { setMissPreview(data); setMsg(data.applied ? `Stored: ${data.gate.reason}` : `Not stored: ${data.gate.reason}`); load() })
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
   const mr = missPreview || d.miss?.report || null
   // fix225: box-score value blended with on/off + the star factor (report, or stored through its gate)
   const impactFit = (apply: 'gate' | '0') => {
     setBusy(true); setMsg(apply === 'gate' ? 'Fitting the box-score impact (several minutes), stored if the gate passes…' : 'Fitting the box-score impact (preview, several minutes)…')
-    axios.get(`${API_URL}/bb/impact-fit?apply=${apply}`)
-      .then(r => { setImpPreview(r.data.data); setMsg(r.data.data.applied ? `Stored: ${r.data.data.gate.reason}` : `Not stored: ${r.data.data.gate.reason}`); load() })
+    runFitJob(`${API_URL}/bb/impact-fit?apply=${apply}`, setMsg)
+      .then(data => { setImpPreview(data); setMsg(data.applied ? `Stored: ${data.gate.reason}` : `Not stored: ${data.gate.reason}`); load() })
       .catch(e => setMsg(errorText(e))).finally(() => setBusy(false))
   }
   const ir = impPreview || d.impact?.report || null

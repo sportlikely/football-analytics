@@ -144,6 +144,8 @@ db.exec(`
     if (!cols.includes('referee')) db.exec(`ALTER TABLE history_matches ADD COLUMN referee TEXT`);
     db.exec(`DELETE FROM history_sync`);
   }
+  // fix234: 1 = a result filled from our own final scores until the football-data.co.uk row arrives
+  if (!cols.includes('provisional')) db.exec(`ALTER TABLE history_matches ADD COLUMN provisional INTEGER`);
 }
 
 /* ---------------- CSV ---------------- */
@@ -198,6 +200,10 @@ const insertMatch = db.prepare(`
 const upsertSync = db.prepare(
   `INSERT OR REPLACE INTO history_sync (division, season, rows, synced_at) VALUES (?, ?, ?, ?)`
 );
+/** fix234: a filled-in result whose football-data.co.uk row is now there (same teams, the date ±3 days: UTC vs local) */
+const dropReplacedProvisional = db.prepare(`DELETE FROM history_matches WHERE provisional = 1 AND division = ? AND EXISTS (
+  SELECT 1 FROM history_matches h WHERE COALESCE(h.provisional, 0) = 0 AND h.division = history_matches.division AND h.home = history_matches.home
+    AND h.away = history_matches.away AND h.date BETWEEN date(history_matches.date, '-3 days') AND date(history_matches.date, '+3 days'))`);
 
 async function fetchCSV(division: string, season: string): Promise<string> {
   const url = NEW_FORMAT_DIVS.has(division) ? `https://www.football-data.co.uk/new/${division}.csv` : `${BASE}/${season}/${division}.csv`;
@@ -253,6 +259,8 @@ export async function syncDivision(division: string, season: string, keepSeasons
     }
     if (newFormat) perSeason.forEach((n, sc) => upsertSync.run(division, sc, n, new Date().toISOString()));
     else upsertSync.run(division, season, stored, new Date().toISOString());
+    // fix234: the file's row replaces the one filled from our final scores (it keeps shots, cards, odds)
+    dropReplacedProvisional.run(division);
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
@@ -301,6 +309,9 @@ export async function syncAll(seasons: string[] = seasonCodes(3), force: boolean
       }
     }
   }
+  // fix234: the games the files don't have yet, from our own final scores (the model fit right after uses them)
+  try { const f = fillFromFinals(); if (f.added) logger.info(`History: ${f.added} result(s) filled from our final scores (${f.replaced} replaced by the files, ${f.unmapped} without team names)`); }
+  catch (e: any) { logger.warn(`History fill from final scores: ${e?.message || e}`); }
   const total = (db.prepare(`SELECT COUNT(*) AS c FROM history_matches`).get() as any).c;
   logger.info(`History sync done: ${total} matches in database`);
   return { total, summary };
@@ -334,6 +345,58 @@ export function storeAfHistory(division: string, rows: { date: string; home: str
     throw e;
   }
   return rows.length;
+}
+
+/**
+ * fix234 — the football-data.co.uk files lag up to a week (25 Oct: E0's last result 19 Oct, 5 games missing), so the
+ * ratings missed a week of games. A finished league game we already have is written at once from our own final score:
+ * API-Football's fixture (af_fixtures, FT) or the Football-Data.org result linked to it (fd_af_links, the fix212 match
+ * link; home / away swapped where the link says so). Team names are the file's names through af_teams.fd_name (the
+ * same mapping the model uses); a team without one is skipped. The row is marked provisional; the file's row replaces
+ * it when it arrives (dropReplacedProvisional, same teams within ±3 days). Leagues whose history is API-Football's own
+ * (AF_HISTORY_DIVS) are left alone. Runs after every history sync (the model fit follows) and every 20 minutes.
+ */
+const provisionalAt = db.prepare(`SELECT COALESCE(provisional, 0) AS p FROM history_matches WHERE division = ? AND home = ? AND away = ? AND date BETWEEN date(?, '-3 days') AND date(?, '+3 days')`);
+const insProvisional = db.prepare(`INSERT INTO history_matches (division, season, date, home, away, hg, ag, provisional) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+  ON CONFLICT(division, season, date, home, away) DO UPDATE SET hg = excluded.hg, ag = excluded.ag WHERE history_matches.provisional = 1`);
+export function fillFromFinals(now = Date.now()): { added: number; replaced: number; unmapped: number } {
+  const divs = [...new Set(Object.values(GROUPS).flatMap(g => g.divisions))].filter(d => !AF_HISTORY_DIVS.has(d));
+  if (!divs.length) return { added: 0, replaced: 0, unmapped: 0 };
+  const since = new Date(now - 21 * 86400000).toISOString();
+  let replaced = 0;
+  db.exec('BEGIN');
+  try {
+    for (const d of divs) replaced += Number(dropReplacedProvisional.run(d).changes || 0);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  let rows: any[];
+  try {
+    rows = db.prepare(`SELECT f.fixture_id, f.division, f.date, f.status, f.hg, f.ag, th.fd_name AS home, ta.fd_name AS away FROM af_fixtures f
+      LEFT JOIN af_teams th ON th.grp = f.grp AND th.team_id = f.home_id LEFT JOIN af_teams ta ON ta.grp = f.grp AND ta.team_id = f.away_id
+      WHERE f.kickoff >= ? AND f.kickoff < ? AND f.division IN (${divs.map(() => '?').join(',')})`).all(since, new Date(now).toISOString(), ...divs) as any[];
+  } catch { return { added: 0, replaced, unmapped: 0 }; } // no fixture store yet
+  // Football-Data.org finals through the fix212 link (they settle within minutes; API-Football's fixture list later)
+  const fd = new Map<number, { hg: number; ag: number }>();
+  try {
+    for (const r of db.prepare(`SELECT l.af_id, l.swapped, r.home_goals, r.away_goals FROM results r JOIN fd_af_links l ON l.fd_id = r.match_id
+      WHERE r.settled_at >= ? AND r.outcome IN ('H', 'D', 'A') AND r.home_goals IS NOT NULL AND r.away_goals IS NOT NULL`).all(since) as any[])
+      fd.set(r.af_id, r.swapped ? { hg: r.away_goals, ag: r.home_goals } : { hg: r.home_goals, ag: r.away_goals });
+  } catch { /* no links table yet */ }
+  let added = 0, unmapped = 0;
+  db.exec('BEGIN');
+  try {
+    for (const f of rows) {
+      const score = f.status === 'FT' && Number.isFinite(f.hg) && Number.isFinite(f.ag) && f.hg !== null && f.ag !== null ? { hg: f.hg, ag: f.ag } : fd.get(f.fixture_id);
+      if (!score) continue;
+      if (!f.home || !f.away) { unmapped++; continue; }
+      const have = provisionalAt.all(f.division, f.home, f.away, f.date, f.date) as any[];
+      if (have.some(h => !h.p)) continue; // the file has it
+      const r = insProvisional.run(f.division, seasonForDivision(f.division, f.date), f.date, f.home, f.away, score.hg, score.ag);
+      if (!have.length && r.changes) added++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { added, replaced, unmapped };
 }
 
 export interface HistoryMatch {

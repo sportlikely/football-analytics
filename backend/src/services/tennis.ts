@@ -91,6 +91,8 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_tennis_players_updated ON tennis_players
 try { db.exec(`ALTER TABLE tennis_players ADD COLUMN first_name TEXT`); } catch { /* column exists */ }
 try { db.exec(`ALTER TABLE tennis_players ADD COLUMN last_name TEXT`); } catch { /* column exists */ }
 db.exec(`CREATE TABLE IF NOT EXISTS tennis_id_moves (old_id INTEGER PRIMARY KEY, new_id INTEGER NOT NULL, at TEXT NOT NULL)`);
+// fix234: when the score of a live match last changed (a match "live" with no point for 4 h is asked for again)
+try { db.exec(`ALTER TABLE tennis_matches ADD COLUMN point_at TEXT`); } catch { /* column exists, or a read-only connection */ }
 /** fix195: the match id a merged (old fixture) id now lives under, or null */
 export function tennisMovedId(id: number): number | null {
   const r = db.prepare(`SELECT new_id FROM tennis_id_moves WHERE old_id = ?`).get(id) as any;
@@ -206,13 +208,23 @@ const nowIso = () => new Date().toISOString();
 
 const upMatch = db.prepare(`
   INSERT INTO tennis_matches (id, tournament_id, tournament, tour, tier, surface, indoor, draw, round, round_code, is_qualifying, best_of,
-    scheduled_at, status, event_status, p1_id, p1_name, p2_id, p2_name, sets, games, winner, outcome, retired, extra, source, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    scheduled_at, status, event_status, p1_id, p1_name, p2_id, p2_name, sets, games, winner, outcome, retired, extra, source, updated_at, point_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET tournament_id = COALESCE(excluded.tournament_id, tournament_id), tournament = COALESCE(excluded.tournament, tournament),
     tour = COALESCE(excluded.tour, tour), tier = COALESCE(excluded.tier, tier), surface = COALESCE(excluded.surface, surface), indoor = COALESCE(excluded.indoor, indoor),
     draw = COALESCE(excluded.draw, draw), round = COALESCE(excluded.round, round), round_code = COALESCE(excluded.round_code, round_code),
     is_qualifying = COALESCE(excluded.is_qualifying, is_qualifying), best_of = COALESCE(excluded.best_of, best_of),
-    scheduled_at = COALESCE(excluded.scheduled_at, scheduled_at), status = COALESCE(excluded.status, status), event_status = COALESCE(excluded.event_status, event_status),
+    scheduled_at = COALESCE(excluded.scheduled_at, scheduled_at),
+    -- fix234: a voided match stays void; one we marked unknown comes back only with a final, a new score or a later start
+    status = CASE WHEN status = 'void' THEN status
+      WHEN status = 'unknown' AND COALESCE(excluded.status, '') NOT IN ('completed', 'finished') AND COALESCE(excluded.sets, sets, '') = COALESCE(sets, '')
+        AND COALESCE(excluded.games, games, '') = COALESCE(games, '') AND COALESCE(excluded.scheduled_at, scheduled_at) <= scheduled_at THEN status
+      ELSE COALESCE(excluded.status, status) END,
+    point_at = CASE WHEN excluded.point_at IS NULL THEN point_at
+      WHEN point_at IS NULL OR COALESCE(excluded.sets, '') <> COALESCE(sets, '') OR COALESCE(excluded.games, '') <> COALESCE(games, '')
+        OR COALESCE(json_extract(excluded.extra, '$.livePoints'), '') <> COALESCE(json_extract(extra, '$.livePoints'), '') THEN excluded.point_at
+      ELSE point_at END,
+    event_status = COALESCE(excluded.event_status, event_status),
     p1_id = COALESCE(excluded.p1_id, p1_id), p1_name = COALESCE(excluded.p1_name, p1_name), p2_id = COALESCE(excluded.p2_id, p2_id), p2_name = COALESCE(excluded.p2_name, p2_name),
     sets = COALESCE(excluded.sets, sets), games = COALESCE(excluded.games, games), winner = COALESCE(excluded.winner, winner), outcome = COALESCE(excluded.outcome, outcome),
     retired = MAX(retired, excluded.retired), extra = COALESCE(excluded.extra, extra),
@@ -427,7 +439,7 @@ export function storeMatch(m: any, source: 'fixture' | 'live' | 'history'): bool
     str(m.draw) || 'singles', str(m.round), rc, m.is_qualifying == null ? null : m.is_qualifying ? 1 : 0, bestOf(m.format),
     str(m.scheduled_time) || str(m.live_at), str(m.status), str(m.event_status), num(p1.id), nm(p1), num(p2.id), nm(p2),
     sc?.sets ? JSON.stringify(sc.sets) : null, sc?.games ? JSON.stringify(sc.games) : null, num(m.winner), outcome,
-    outcome && /retired|walkover|default/.test(outcome) ? 1 : 0, source === 'live' ? liveExtra(m) : null, source, nowIso());
+    outcome && /retired|walkover|default/.test(outcome) ? 1 : 0, source === 'live' ? liveExtra(m) : null, source, nowIso(), source === 'live' ? nowIso() : null);
   for (const p of [p1, p2]) if (num(p.id) !== null) seePlayer.run(num(p.id), str(p.name), str(p.country), str(p.tour), num(p.ranking), num(p.ranking_points), nowIso());
   // fix197: never under an event of the other gender (the provider put the men's Cali Challenger under the WTA 125 "Cali");
   // fix197b: always the stored row (what the upsert kept + what the provider sent), never the provider's fields alone
@@ -1104,7 +1116,14 @@ function moveMatch(old: any, keep: any): 'deleted' | 'refetch' {
     db.prepare(`INSERT OR REPLACE INTO tennis_id_moves (old_id, new_id, at) VALUES (?, ?, ?)`).run(old.id, keep.id, at);
     db.prepare(`UPDATE tennis_id_moves SET new_id = ? WHERE new_id = ?`).run(keep.id, old.id);
   });
-  if (old.id > 0 && hasStatsQ.get(old.id)) {
+  // fix234: a real match id (not the fixture id space) is the same match twice: its tape moves to the keeper when the
+  // keeper has none (same player order), and the row goes (before, a row with a tape was kept as 'unknown' and the
+  // data check listed the pair for ever: 209413 = 209382 on 25 Oct)
+  if (old.id >= FIXTURE_ID_MAX) {
+    if (!swapped && !hasStatsQ.get(keep.id)) db.prepare(`UPDATE OR IGNORE tennis_match_stats SET match_id = ? WHERE match_id = ?`).run(keep.id, old.id);
+    db.prepare(`DELETE FROM tennis_match_stats WHERE match_id = ?`).run(old.id);
+  }
+  if (old.id > 0 && old.id < FIXTURE_ID_MAX && hasStatsQ.get(old.id)) {
     db.prepare(`UPDATE tennis_matches SET status = 'unknown', updated_at = ? WHERE id = ?`).run(at, old.id);
     meta.set(`refetch${old.id}`, at);
     db.prepare(`DELETE FROM tennis_id_moves WHERE old_id = ?`).run(old.id);
@@ -1114,33 +1133,45 @@ function moveMatch(old: any, keep: any): 'deleted' | 'refetch' {
   return 'deleted';
 }
 
-/** Same two players within a day = the same match: one row stays (keeperScore), the others are moved into it. */
-export async function mergeDuplicates(from: string, to: string): Promise<{ groups: number; merged: number; refetch: number }> {
-  const rows = db.prepare(`SELECT id, p1_id, p2_id, scheduled_at, status, source FROM tennis_matches INDEXED BY idx_tennis_matches_time
-    WHERE scheduled_at >= ? AND scheduled_at < ? AND p1_id IS NOT NULL AND p2_id IS NOT NULL AND id > 0 AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(from, to) as any[];
-  const byPair = new Map<string, any[]>();
+/**
+ * fix234: the one duplicate rule (the merge and the data check use it): the same two players in the same tournament
+ * (tournamentKey; a row without a tournament matches any) within 24 h of the group's first row = the same match.
+ */
+export function duplicateGroups<T extends { p1_id: number | null; p2_id: number | null; scheduled_at: string; tournament?: string | null }>(rows: T[]): T[][] {
+  const byPair = new Map<string, T[]>();
   for (const r of rows) {
+    if (!r.p1_id || !r.p2_id) continue;
     const k = `${Math.min(r.p1_id, r.p2_id)}-${Math.max(r.p1_id, r.p2_id)}`;
     const l = byPair.get(k); if (l) l.push(r); else byPair.set(k, [r]);
   }
-  let groups = 0, merged = 0, refetch = 0;
-  const slice = slicer();
+  const out: T[][] = [];
+  const tk = (r: T) => (r.tournament ? tournamentKey(r.tournament) : '');
   for (const list of byPair.values()) {
     if (list.length < 2) continue;
     list.sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
-    // clusters of rows within 24 h of the cluster's first row
-    for (let i = 0; i < list.length;) {
-      let j = i + 1;
-      while (j < list.length && Date.parse(list[j].scheduled_at) - Date.parse(list[i].scheduled_at) <= 86400000) j++;
-      const cl = list.slice(i, j);
-      i = j;
-      if (cl.length < 2) continue;
-      groups++;
-      const scored = cl.map(r => ({ r, s: keeperScore(r, !!hasPredQ.get(r.id)) })).sort((a, b) => b.s - a.s);
-      const keep = scored[0].r;
-      for (const { r } of scored.slice(1)) { if (moveMatch(r, keep) === 'refetch') refetch++; merged++; }
-      await slice();
+    const groups: { first: number; key: string; rows: T[] }[] = [];
+    for (const r of list) {
+      const t = Date.parse(r.scheduled_at), key = tk(r);
+      const g = groups.find(x => t - x.first <= 86400000 && (!key || !x.key || key === x.key));
+      if (g) { g.rows.push(r); if (!g.key) g.key = key; } else groups.push({ first: t, key, rows: [r] });
     }
+    for (const g of groups) if (g.rows.length > 1) out.push(g.rows);
+  }
+  return out;
+}
+
+/** The same match twice (duplicateGroups): one row stays (keeperScore), the others are moved into it. */
+export async function mergeDuplicates(from: string, to: string): Promise<{ groups: number; merged: number; refetch: number }> {
+  const rows = db.prepare(`SELECT id, p1_id, p2_id, scheduled_at, status, source, tournament FROM tennis_matches INDEXED BY idx_tennis_matches_time
+    WHERE scheduled_at >= ? AND scheduled_at < ? AND p1_id IS NOT NULL AND p2_id IS NOT NULL AND id > 0 AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(from, to) as any[];
+  let groups = 0, merged = 0, refetch = 0;
+  const slice = slicer();
+  for (const cl of duplicateGroups(rows)) {
+    groups++;
+    const scored = cl.map(r => ({ r, s: keeperScore(r, !!hasPredQ.get(r.id)) })).sort((a, b) => b.s - a.s);
+    const keep = scored[0].r;
+    for (const { r } of scored.slice(1)) { if (moveMatch(r, keep) === 'refetch') refetch++; merged++; }
+    await slice();
   }
   return { groups, merged, refetch };
 }
@@ -1265,43 +1296,67 @@ async function fix197Cleanup(key = 'fix197b_cleanup'): Promise<string> {
   return info;
 }
 
+const LIVE_STATES = ['live', 'in_progress', 'interrupted', 'suspended'];
+const HOUR_MS = 3600000;
 /**
- * A match still "upcoming" / "live" 6 h after its start with no update is asked for again (/matches/{id}, then the
- * history tape); if the provider has nothing (or still the old start), it becomes 'unknown' and leaves the lists. The
- * rows the fix195 clean-up flagged (refetch<id>) are refreshed the same way.
+ * fix234: why a row needs asking again (null = it doesn't): "live" with no point for 4 h (the provider's live list kept
+ * the M15 Sharm El Sheikh match "live" 12 h after the start, so a recent poll no longer counts as "still on"), or
+ * "upcoming" 6 h after its start.
+ */
+export function tennisStaleReason(r: { status: string | null; scheduled_at: string; point_at?: string | null }, now = Date.now()): string | null {
+  const s = String(r.status || ''), start = Date.parse(r.scheduled_at);
+  if (LIVE_STATES.includes(s)) {
+    const last = Date.parse(r.point_at || '') || start;
+    return last < now - 4 * HOUR_MS && start < now - 4 * HOUR_MS ? `still ${s}, no point for ${Math.round((now - last) / HOUR_MS)} h` : null;
+  }
+  if (s === 'upcoming' && start < now - 6 * HOUR_MS) return `still upcoming ${Math.round((now - start) / HOUR_MS)} h after the start`;
+  return null;
+}
+
+/**
+ * A stale match (tennisStaleReason) is asked for again: the history tape (/history/matches/{id}), then /matches/{id}.
+ * fix234: no result 12 h after the start → 'unknown' (out of the live lists; a final, a new score or a later start
+ * brings it back: upMatch); still nothing 48 h after the start → 'void' (outcome 'unresolved', never in the record).
+ * An unknown row is asked again every 2 h until then. The rows the fix195 clean-up flagged (refetch<id>) are refreshed
+ * the same way. Then the duplicate rule (mergeDuplicates) over the last 3 days and the next 10.
  */
 async function refreshStale(max = 60): Promise<string> {
-  const now = Date.now();
-  const stale = db.prepare(`SELECT id, status, scheduled_at, updated_at FROM tennis_matches INDEXED BY idx_tennis_matches_time
-    WHERE scheduled_at >= ? AND scheduled_at < ? AND status IN ('upcoming', 'live', 'in_progress', 'interrupted', 'suspended') AND id > 0 AND source <> 'archive'
-    ORDER BY scheduled_at DESC LIMIT ?`).all(new Date(now - 10 * 86400000).toISOString(), new Date(now - 6 * 3600000).toISOString(), max * 2) as any[];
-  // a live match polled in the last 20 minutes is still on (rain, a long fifth set)
-  const todo = stale.filter(r => !(r.status !== 'upcoming' && Date.parse(r.updated_at || '') > now - 20 * 60000)).slice(0, max);
+  const now = Date.now(), iso = (ms: number) => new Date(ms).toISOString();
+  const voided = Number(db.prepare(`UPDATE tennis_matches SET status = 'void', outcome = COALESCE(outcome, 'unresolved'), updated_at = ?
+    WHERE status = 'unknown' AND scheduled_at >= ? AND scheduled_at < ? AND id > 0`).run(nowIso(), iso(now - 30 * 86400000), iso(now - 48 * HOUR_MS)).changes || 0);
+  const rows = db.prepare(`SELECT id, status, scheduled_at, updated_at, point_at FROM tennis_matches INDEXED BY idx_tennis_matches_time
+    WHERE scheduled_at >= ? AND scheduled_at < ? AND status IN ('upcoming', 'live', 'in_progress', 'interrupted', 'suspended', 'unknown') AND id > 0 AND source <> 'archive'
+    ORDER BY scheduled_at DESC LIMIT ?`).all(iso(now - 10 * 86400000), iso(now - 4 * HOUR_MS), max * 4) as any[];
+  const todo = rows.filter(r => (r.status === 'unknown' ? Date.parse(r.updated_at || '') < now - 2 * HOUR_MS : !!tennisStaleReason(r, now))).slice(0, max);
   const flagged = (db.prepare(`SELECT k FROM tennis_meta WHERE k LIKE 'refetch%' LIMIT ?`).all(max) as any[]).map(r => ({ id: Number(r.k.slice(7)), flag: r.k }));
   const ids = [...new Map([...todo.map(r => [r.id, null as string | null] as const), ...flagged.map(f => [f.id, f.flag] as const)]).entries()];
-  const reread = db.prepare(`SELECT status, scheduled_at FROM tennis_matches WHERE id = ?`);
+  const reread = db.prepare(`SELECT status, scheduled_at, point_at FROM tennis_matches WHERE id = ?`);
   const slice = slicer();
   let fixed = 0, unknown = 0;
   for (const [id, flag] of ids) {
     if (!Number.isFinite(id) || !canSpend('bulk')) break;
     let got = false;
-    try {
-      const j = await tn(`/matches/${id}`, {}, { kind: 'bulk' });
-      const m = j?.data && !Array.isArray(j.data) ? j.data : j?.match || j;
-      if (m && num(m.id) === id) got = storeMatch(m, /completed|finished/.test(String(m.status)) ? 'history' : 'live');
-    } catch (e: any) { if (!(e instanceof TennisError && (e.status === 410 || e.status === 400))) throw e; }
-    if (!got || flag) {
-      try { const h = await tn(`/history/matches/${id}`, {}, { kind: 'bulk' }); if (h?.match && num(h.match.id) === id) got = storeTape(h) || got; }
-      catch (e: any) { if (!(e instanceof TennisError && (e.status === 410 || e.status === 400))) throw e; }
+    try { const h = await tn(`/history/matches/${id}`, {}, { kind: 'bulk' }); if (h?.match && num(h.match.id) === id) got = storeTape(h); }
+    catch (e: any) { if (!(e instanceof TennisError && (e.status === 410 || e.status === 400 || e.status === 404))) throw e; }
+    const done = () => /completed|finished/.test(String((reread.get(id) as any)?.status));
+    if (!done()) {
+      try {
+        const j = await tn(`/matches/${id}`, {}, { kind: 'bulk' });
+        const m = j?.data && !Array.isArray(j.data) ? j.data : j?.match || j;
+        if (m && num(m.id) === id) got = storeMatch(m, /completed|finished/.test(String(m.status)) ? 'history' : 'live') || got;
+      } catch (e: any) { if (!(e instanceof TennisError && (e.status === 410 || e.status === 400 || e.status === 404))) throw e; }
     }
     const r = reread.get(id) as any;
-    const stillStale = r && ['upcoming', 'live', 'in_progress', 'interrupted', 'suspended', 'unknown'].includes(String(r.status)) && Date.parse(r.scheduled_at) < now - 6 * 3600000;
-    if (r && stillStale) { db.prepare(`UPDATE tennis_matches SET status = 'unknown', updated_at = ? WHERE id = ?`).run(nowIso(), id); unknown++; }
-    else if (r && got) fixed++;
+    const open = r && !/completed|finished|void|cancel/.test(String(r.status)) && (r.status === 'unknown' || !!tennisStaleReason(r, now));
+    if (open && Date.parse(r.scheduled_at) < now - 12 * HOUR_MS) {
+      db.prepare(`UPDATE tennis_matches SET status = 'unknown', updated_at = ? WHERE id = ?`).run(nowIso(), id);
+      unknown++;
+    } else if (r && got) fixed++;
     if (flag) db.prepare(`DELETE FROM tennis_meta WHERE k = ?`).run(flag);
     await slice();
   }
-  return `${ids.length} checked, ${fixed} refreshed, ${unknown} unknown`;
+  const merged = await mergeDuplicates(iso(now - 3 * 86400000), iso(now + 10 * 86400000));
+  return `${ids.length} checked, ${fixed} refreshed, ${unknown} unknown, ${voided} voided (no result 48 h after the start)${merged.merged ? `, ${merged.merged} duplicates merged` : ''}`;
 }
 
 /**
@@ -1314,16 +1369,12 @@ export async function tennisDataCheck() {
   const slice = slicer(); // fix196: in slices (part of the data health job)
   const iso = (ms: number) => new Date(ms).toISOString();
   const name = (r: any) => `${r.p1_name || '?'} v ${r.p2_name || '?'} · ${r.tournament || '?'} · ${String(r.scheduled_at || '').slice(0, 16).replace('T', ' ')} UTC · id ${r.id}`;
-  const win = db.prepare(`SELECT id, tournament_id, tournament, tour, tier, p1_id, p1_name, p2_id, p2_name, scheduled_at, status, source, round, round_code, is_qualifying FROM tennis_matches INDEXED BY idx_tennis_matches_time
+  const win = db.prepare(`SELECT id, tournament_id, tournament, tour, tier, p1_id, p1_name, p2_id, p2_name, scheduled_at, status, source, point_at, round, round_code, is_qualifying FROM tennis_matches INDEXED BY idx_tennis_matches_time
     WHERE scheduled_at >= ? AND scheduled_at < ? AND id > 0 AND source <> 'archive' AND COALESCE(draw, 'singles') = 'singles'`).all(iso(now - 3 * 86400000), iso(now + 10 * 86400000)) as any[];
-  const pairs = new Map<string, any[]>();
   await slice();
-  for (const r of win) if (r.p1_id && r.p2_id) { const k = `${Math.min(r.p1_id, r.p2_id)}-${Math.max(r.p1_id, r.p2_id)}`; pairs.set(k, [...(pairs.get(k) || []), r]); }
+  // fix234: the merge's own rule (duplicateGroups); a voided row is not a match any more
   const duplicates: string[] = [];
-  for (const l of pairs.values()) {
-    l.sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
-    for (let i = 1; i < l.length; i++) if (Date.parse(l[i].scheduled_at) - Date.parse(l[i - 1].scheduled_at) <= 86400000) duplicates.push(`${name(l[i])} = id ${l[i - 1].id}`);
-  }
+  for (const l of duplicateGroups(win.filter(r => r.status !== 'void'))) for (let i = 1; i < l.length; i++) duplicates.push(`${name(l[i])} = id ${l[0].id}`);
   const fixtureIds = win.filter(r => r.id < FIXTURE_ID_MAX).map(r => `${name(r)} (fixture id)`);
   let classify: ((tour: string | null, tier: string | null, nm: string | null, src: string) => { cat: number } | null) | null = null;
   try { classify = require('./tennisModel').tennisModelInternals.classify; } catch { /* model not loaded */ }
@@ -1340,8 +1391,10 @@ export async function tennisDataCheck() {
       : r.id < FIXTURE_ID_MAX ? 'fixture id (not merged yet)' : 'not predicted yet (the model saves the next 48 h every 30 min)';
     noPrediction.push(`${name(r)} · ${why}`);
   }
-  const stale = win.filter(r => ['upcoming', 'live', 'in_progress', 'interrupted', 'suspended'].includes(String(r.status)) && Date.parse(r.scheduled_at) < now - 6 * 3600000)
-    .map(r => `${name(r)} · still ${r.status} ${Math.round((now - Date.parse(r.scheduled_at)) / 3600000)} h after the start`);
+  // fix234: the stale job's own rule (live with no point for 4 h, upcoming 6 h after the start), listed once the job had
+  // its 30 minutes to ask again
+  const stale = win.filter(r => tennisStaleReason(r, now - 30 * 60000))
+    .map(r => `${name(r)} · ${tennisStaleReason(r, now)} (${Math.round((now - Date.parse(r.scheduled_at)) / 3600000)} h after the start)`);
   // fix197: a match under an event of the other gender than its players; a match with no round code
   genCache.clear();
   const genderMismatch: string[] = [];
@@ -1398,8 +1451,10 @@ export function startTennisScheduler() {
       .then(() => heavy('tennis fix197b clean-up', () => job('fix197b clean-up', fix197Cleanup)))
       .then(() => heavy('tennis fixtures', () => job('fixtures', syncFixtures))).then(() => heavy('tennis tournaments', () => job('tournaments', syncTournaments)));
   }, 60 * 1000).unref();
-  // fix195: matches still upcoming / live 6 h after the start → asked again, else 'unknown'
-  everyHeavy('tennis stale', () => job('stale', () => refreshStale()), 30 * 60 * 1000).unref();
+  // fix195: matches still upcoming / live after the start → asked again, else 'unknown'; fix234: every 15 min on its own
+  // timer (≤ 60 small calls, sliced: it waited behind the heavy queue), the first 5 min after the start
+  after('tennis stale', () => job('stale', () => refreshStale()), 5 * 60 * 1000).unref();
+  every('tennis stale', () => job('stale', () => refreshStale()), 15 * 60 * 1000).unref();
   // fix195: the data check once a day in the log (the full list: /api/admin/tennis/check, Admin → Data health)
   every('tennis check', async () => {
     const c = await tennisDataCheck();

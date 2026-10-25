@@ -20,8 +20,15 @@
  * its copy is older than a day. Stored: season_forecast (one row per league), season_forecast_games (what each watched
  * game means), season_forecast_teams (team → league), season_forecast_history (one row per team per day).
  *
+ * fix234: the runs have their own lane, not the heavy-job queue (on 25 Oct they waited there and none ran for hours
+ * after a deploy): a check every 2 minutes, a league re-run ~3 minutes after its new finished game is seen, from the
+ * stored inputs only (no provider call); the first check 1 minute after the start; a run stuck over 20 minutes is
+ * released and a thread that does not answer in 10 minutes is ended. A change of the rules (utils/seasonRules.ts)
+ * re-runs every league once. The own-fixtures download (leagues outside the fixture feed) is its own job every 6 h.
+ *
  * Past seasons (the accuracy replay, seasonAccuracy) are admin-only.
  */
+import { createHash } from 'node:crypto';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { yieldLoop, yieldEvery, every, after, heavy } from './perf';
@@ -97,9 +104,18 @@ function footballLeagues(): { code: string; afId: number; own: boolean }[] {
   return [...out.values()];
 }
 
+/**
+ * fix234: a run from the stored inputs only (the scheduled re-runs after a finished game): no fixture download, the
+ * provider's table only from the cache (else one try of at most 15 s)
+ */
+let storedOnly = false;
+const within = <T>(p: Promise<T>, ms: number, what: string): Promise<T> =>
+  Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${what}: no answer within ${Math.round(ms / 1000)} s`)), ms).unref())]);
+
 /** leagues outside the API-Football fixture feed: their season's fixtures, every 6 h (1 call each) */
 async function syncOwnFixtures(afId: number): Promise<number | null> {
   const last: any = db.prepare(`SELECT MAX(at) at, MAX(season) season FROM sf_fixtures WHERE league_id = ?`).get(afId);
+  if (storedOnly && last?.season) return last.season;
   if (last?.at && Date.now() - Date.parse(last.at) < 6 * 3600 * 1000) return last.season;
   if (!afConfigured() || afBudgetLeft() < 1000) return last?.season ?? null;
   const season = await currentSeason(afId);
@@ -158,7 +174,7 @@ function providerGroups(st: any, ids: string[]): Map<string, string> | null {
   return out.size === ids.length && new Set(out.values()).size >= 2 ? out : null;
 }
 async function footballGroups(code: string, rules: LeagueRules, ids: string[], games: { home: string; away: string }[]): Promise<Map<string, string> | null> {
-  const st = afStandingsCached(code) || await getAfStandings(code).catch(() => null);
+  const st = afStandingsCached(code) || await within(getAfStandings(code), 15000, `table ${code}`).catch(() => null);
   return providerGroups(st, ids) || (rules.groupsFrom === 'schedule' ? inferGroups(ids, games) : null);
 }
 
@@ -355,7 +371,7 @@ async function basketballInput(L: { code: string; name: string }, nowIso: string
       groupOf = inferGroups(ids, rows.map(g => ({ home: String(g.home_id), away: String(g.away_id) }))) || new Map();
       if (ids.some(id => !groupOf.has(id))) return { sport: 'basketball', code: L.code, name: L.name, reason: 'groups not known yet (schedule)' };
     } else {
-      const st: any = await bbStandings(L.code).catch(() => null);
+      const st: any = await within(Promise.resolve(bbStandings(L.code)), 15000, `table ${L.code}`).catch(() => null);
       for (const gr of st?.groups || []) if (gr.level === 'conference' && gr.kind !== 'pre') for (const row of gr.rows) groupOf.set(String(row.team?.id), gr.name || '');
       if (ids.some(id => !groupOf.has(id))) return { sport: 'basketball', code: L.code, name: L.name, reason: 'conferences not known yet (provider table)' };
     }
@@ -483,7 +499,12 @@ async function inputOf(ref: LeagueRef, nowIso: string): Promise<LeagueInput | Sk
 
 /* ---------- runs ---------- */
 
-const status = { running: false, lastAt: null as string | null, lastLeagues: 0, lastMs: 0, lastError: null as string | null };
+const status = { running: false, startedAt: null as string | null, lastAt: null as string | null, lastLeagues: 0, lastMs: 0, lastError: null as string | null, lastWhy: null as string | null };
+/** fix234: a run is never "running" for more than this (a hung input or thread must not stop every later run) */
+const RUN_MAX = 20 * MIN;
+/** fix234: one thread batch (6 leagues × 20,000 runs takes ~1 min) */
+const THREAD_MAX = 10 * MIN;
+let runId = 0;
 
 /* ---------- fix218: the season uncertainty, fitted by last season's replay (per sport) ---------- */
 
@@ -519,17 +540,25 @@ export function roundRow(pos: number[], dp = 4): number[] {
 export const seasonForecastStatus = () => ({ ...status, dirty: [...dirtySince.entries()].map(([k, at]) => ({ league: k, since: new Date(at).toISOString() })) });
 
 /** build, run and store the given leagues; returns how many ran */
-export async function runSeasonForecast(refs: LeagueRef[] = allLeagues(), why = 'manual'): Promise<number> {
+export async function runSeasonForecast(refs: LeagueRef[] = allLeagues(), why = 'manual', opt: { stored?: boolean } = {}): Promise<number> {
+  if (status.running && status.startedAt && Date.now() - Date.parse(status.startedAt) > RUN_MAX) {
+    logger.warn(`season forecast: the run started ${status.startedAt} (${status.lastWhy}) is still not done after ${Math.round(RUN_MAX / MIN)} min: released`);
+    status.running = false;
+  }
   if (status.running) return 0;
+  const me = ++runId;
   status.running = true;
   const t0 = Date.now(), nowIso = new Date().toISOString();
+  status.startedAt = nowIso; status.lastWhy = why;
+  storedOnly = !!opt.stored;
   let ran = 0;
   try {
     const inputs: LeagueInput[] = [];
     for (const ref of refs) {
       let x: LeagueInput | Skip;
-      try { x = await inputOf(ref, nowIso); } catch (e: any) { x = { ...ref, name: ref.code, reason: `inputs failed: ${e?.message || e}` }; }
+      try { x = await within(inputOf(ref, nowIso), 3 * MIN, `inputs ${ref.code}`); } catch (e: any) { x = { ...ref, name: ref.code, reason: `inputs failed: ${e?.message || e}` }; }
       await yieldLoop();
+      if (me !== runId) throw new Error('released by the watchdog');
       if ('reason' in x) {
         db.prepare(`INSERT OR REPLACE INTO season_forecast_skips (sport, code, name, reason, at) VALUES (?, ?, ?, ?, ?)`).run(x.sport, x.code, x.name, x.reason, nowIso);
         continue;
@@ -541,20 +570,25 @@ export async function runSeasonForecast(refs: LeagueRef[] = allLeagues(), why = 
     for (let i = 0; i < inputs.length; i += 6) {
       const batch = inputs.slice(i, i + 6);
       let outs: { out: SimOut; ms: number }[];
-      if (threadJobsOn()) outs = await inThread<{ out: SimOut; ms: number }[]>('season sim', [batch]);
+      if (me !== runId) throw new Error('released by the watchdog');
+      if (threadJobsOn()) outs = await inThread<{ out: SimOut; ms: number }[]>('season sim', [batch], THREAD_MAX);
       else {
         outs = [];
         for (const x of batch) { const t1 = Date.now(); outs.push({ out: await simulateSeasonAsync(x.rules, x.teams, x.played, x.games, x.params, yieldLoop), ms: Date.now() - t1 }); }
       }
       for (let k = 0; k < batch.length; k++) { store(batch[k], outs[k].out, outs[k].ms, nowIso); ran++; await yieldLoop(); }
     }
+    // fix234: skip notes of leagues we no longer run ("not modelled yet" from before their rules) are dropped
+    const live = new Set(allLeagues().map(r => `${r.sport}|${r.code}`));
+    for (const s of db.prepare(`SELECT sport, code FROM season_forecast_skips`).all() as any[]) if (!live.has(`${s.sport}|${s.code}`)) db.prepare(`DELETE FROM season_forecast_skips WHERE sport = ? AND code = ?`).run(s.sport, s.code);
     status.lastError = null;
     logger.info(`season forecast (${why}): ${ran} league(s) in ${Math.round((Date.now() - t0) / 1000)} s`);
   } catch (e: any) {
     status.lastError = e?.message || String(e);
     logger.warn(`season forecast (${why}): ${status.lastError}`);
   } finally {
-    status.running = false; status.lastAt = nowIso; status.lastLeagues = ran; status.lastMs = Date.now() - t0;
+    // a run released by the watchdog leaves the status to the run after it
+    if (me === runId) { status.running = false; status.lastAt = nowIso; status.lastLeagues = ran; status.lastMs = Date.now() - t0; storedOnly = false; }
   }
   return ran;
 }
@@ -600,10 +634,30 @@ function store(x: LeagueInput, out: SimOut, ms: number, nowIso: string) {
 
 const dirtySince = new Map<string, number>();
 const finalSeen = new Map<string, string>();
-const DEBOUNCE = 10 * MIN;
+/** fix234: a league is re-run once its new finished game has been seen for this long (checks every 2 min: ≤ ~5 min) */
+const DEBOUNCE = 3 * MIN;
+
+/** fix234: the rules the runs use (seasonRules.ts); a new version re-runs every league once */
+db.exec(`CREATE TABLE IF NOT EXISTS season_forecast_meta (k TEXT PRIMARY KEY, v TEXT, at TEXT NOT NULL)`);
+export const rulesVersion = () => createHash('sha1').update(JSON.stringify({ FOOTBALL_RULES, FOOTBALL_SKIP, BASKETBALL_RULES, NFL_RULES })).digest('hex').slice(0, 12);
+function rulesChanged(): boolean {
+  const r: any = db.prepare(`SELECT v FROM season_forecast_meta WHERE k = 'rules'`).get();
+  return r?.v !== rulesVersion();
+}
 
 async function tick() {
-  if (status.running) return;
+  if (status.running && !(status.startedAt && Date.now() - Date.parse(status.startedAt) > RUN_MAX)) return;
+  // fix234: new rules (a deploy of seasonRules.ts): every league once, from the stored inputs
+  if (rulesChanged()) {
+    const ver = rulesVersion();
+    logger.info(`season forecast: rules ${ver} are new — every league is run again`);
+    const before = status.lastAt;
+    const n = await runSeasonForecast(allLeagues(), `new rules ${ver}`, { stored: true });
+    // stored once the run ended (a league that failed is caught by the 26 h rule, not by a full run every 2 min)
+    if (status.lastAt !== before) db.prepare(`INSERT OR REPLACE INTO season_forecast_meta (k, v, at) VALUES ('rules', ?, ?)`).run(ver, new Date().toISOString());
+    for (const k of [...dirtySince.keys()]) dirtySince.delete(k);
+    if (n) return;
+  }
   const finals = lastFinals();
   const stored = new Map((db.prepare(`SELECT sport, code, run_at, last_final FROM season_forecast`).all() as any[]).map(r => [`${r.sport}|${r.code}`, r]));
   const skipped = new Set((db.prepare(`SELECT sport, code, at FROM season_forecast_skips`).all() as any[]).filter(r => Date.now() - Date.parse(r.at) < DAY).map(r => `${r.sport}|${r.code}`));
@@ -618,16 +672,28 @@ async function tick() {
     if ((dirtySince.has(k) && now - dirtySince.get(k)! >= DEBOUNCE) || old) due.push(ref);
   }
   if (!due.length) return;
-  await heavy('season forecast', async () => {
-    const n = await runSeasonForecast(due, 'scheduled');
-    for (const ref of due) dirtySince.delete(`${ref.sport}|${ref.code}`);
-    return n;
-  });
+  // fix234: its own lane (not the heavy queue): the inputs are stored rows read in slices, the runs are in a thread
+  const before = status.lastAt;
+  await runSeasonForecast(due, 'scheduled', { stored: true });
+  if (status.lastAt !== before) for (const ref of due) dirtySince.delete(`${ref.sport}|${ref.code}`);
+}
+
+/** fix234: the fixtures of the leagues outside the API-Football feed (the scheduled runs read only what is stored) */
+async function refreshOwnFixtures(): Promise<string> {
+  let n = 0;
+  for (const L of footballLeagues()) {
+    if (!L.own) continue;
+    try { if (await syncOwnFixtures(L.afId) != null) n++; } catch (e: any) { logger.warn(`season forecast: fixtures ${L.code}: ${e?.message || e}`); }
+    await yieldLoop();
+  }
+  return `${n} league(s)`;
 }
 
 export function startSeasonForecastScheduler() {
-  after('season forecast start', () => tick(), 5 * MIN);
-  every('season forecast check', () => tick(), 5 * MIN);
+  after('season forecast start', () => tick(), MIN);
+  every('season forecast check', () => tick(), 2 * MIN);
+  after('season forecast fixtures', () => heavy('season forecast fixtures', refreshOwnFixtures), 3 * MIN);
+  every('season forecast fixtures', () => heavy('season forecast fixtures', refreshOwnFixtures), 6 * 3600 * 1000);
   // accuracy replay of last season (+ the noise fit, fix218): ~8 min after the start when none is stored or it is over
   // 7 days old, then Mondays 03:xx UTC (admin only). The forecasts are re-run with the fitted noise right after.
   const replay = async (force: boolean) => {
@@ -726,9 +792,11 @@ export function seasonForecastChecks(): { id: string; label: string; level: 'ok'
   const unknown = rows.filter(r => !r.known).sort((a, b) => vis(b) - vis(a) || `${a.sport}${a.code}`.localeCompare(`${b.sport}${b.code}`))
     .map(r => `${r.sport} ${r.name || r.code} (${r.code}, ${vis(r)} visitor${vis(r) === 1 ? '' : 's'} in 30 days): ${gateOf(r) ? `format added, zones waiting — ${gateOf(r)}` : 'no zone rules — position chances only'}`);
   const skips = (db.prepare(`SELECT sport, code, name, reason FROM season_forecast_skips`).all() as any[]).filter(s => /not modelled|not known yet/.test(s.reason)).map(s => `${s.sport} ${s.name || s.code}: ${s.reason}`);
+  // fix234: a league whose format is added and only waits for last season's replay is not "without rules"
+  const noFormat = rows.filter(r => !r.known && !gateOf(r)).length, waiting = rows.filter(r => !r.known && gateOf(r)).length;
   return [
     { id: 'season-forecast-fresh', label: 'Season forecast fresh', level: !rows.length ? 'warn' : late.length ? 'fail' : 'ok', detail: !rows.length ? 'No season forecast stored yet (first run ~5 min after start)' : late.length ? `${late.length} league(s) not re-run within 30 min of a finished game` : `${rows.length} leagues, each run after its last finished game`, items: late.slice(0, 30) },
-    { id: 'season-forecast-rules', label: 'Season forecast rules', level: unknown.length + skips.length ? 'warn' : 'ok', detail: unknown.length + skips.length ? `${unknown.length} league(s) without zone rules, ${skips.length} not simulated` : 'Every league has its rules', items: [...skips, ...unknown].slice(0, 40) },
+    { id: 'season-forecast-rules', label: 'Season forecast rules', level: noFormat + skips.length ? 'warn' : 'ok', detail: noFormat + skips.length ? `${noFormat} league(s) without a format (position chances only), ${skips.length} not simulated${waiting ? `; ${waiting} with the format added, zones waiting for the replay check` : ''}` : `Every league has its rules${waiting ? ` (${waiting} waiting for the replay check before their zones show)` : ''}`, items: [...skips, ...unknown].slice(0, 40) },
     { id: 'season-forecast-sums', label: 'Season forecast: position chances add up to 100%', level: bad.length ? 'fail' : 'ok', detail: bad.length ? `${bad.length} team(s) off` : 'Every team’s position chances add up to 100%', items: bad.slice(0, 20) },
     ...(['football', 'basketball', 'nfl'] as FcSport[]).map(sport => {
       const s = accuracySummary()[sport];
