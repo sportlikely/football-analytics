@@ -384,3 +384,16 @@ Live 25 Oct 13:45 UTC: web stalls 22 / h; worst 6,558 ms "boot (scheduler start)
 /api/perf (web) an hour after the deploy: `startup` has "module load before listen" and no "boot (scheduler start)";
 `stallsLastHour` ≤ 5; `topStalls` — if a list route is still there, its label now says read / pick / send: send Claude
 the exact label. `shared` (applied): af:window loaded in parts (bytes = the whole). Data health "Web stalls" ≤ 5 / h.
+
+## fix227 — restarts: never a raw text page
+
+Railway cannot overlap two deployments of a service with a volume, so a deploy or a variable change always has a short
+gap with no listener (Railway answers 502). fix227 keeps it short and lets the site recover from it:
+- `boot.ts` is the container entry: it listens on PORT before the modules load (`services/earlyStatic.ts` answers the
+  build files and the plain app page; 503 for the API and /health) and hands its server to `index.ts`.
+- The ready gate (app.ts) answers 503 only for /health, the API and the socket; files and pages go out before the state load.
+- Shutdown exits once open requests are answered and the worker has stopped (5 s at most).
+- A stored crawler page from an older build (it names a gone app file) is never sent.
+- Frontend: the loader in index.html (retry the app file, then the "Updating SportLikely…" card) and `lib/startupRetry.ts`.
+- Measured locally (`npm run test:fix227`): 0 errors for / and the app file over two restarts, gap 0.44 s.
+- Data health "Errors during the last deploy" (`services/deployErrors.ts`).

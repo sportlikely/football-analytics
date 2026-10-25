@@ -688,9 +688,10 @@ export function renderIndex(html: string, s: SeoInfo): string {
   }
   for (const j of s.jsonld || []) head.push(`<script type="application/ld+json">${JSON.stringify(j).replace(/</g, '\\u003c')}</script>`);
   out = out.replace('</head>', `    ${head.join('\n    ')}\n  </head>`);
-  // Visitors with JavaScript get the app within a moment: the plain version only fades in if the app has not started
-  // after 3 s (no flash of unstyled text). Crawlers read the HTML either way.
-  out = out.replace('<div id="root"></div>', `<div id="root"><div style="opacity:0;animation:slseo .2s 3s forwards;max-width:960px;margin:0 auto;padding:24px 16px;font-family:system-ui,sans-serif;line-height:1.6"><style>@keyframes slseo{to{opacity:1}}</style>${s.body}</div></div>`);
+  // fix227: the plain version is in the HTML for everyone (crawlers read it), shown only without JavaScript: with it,
+  // index.html's loader hides it (.js .sl-seo) until the app replaces it, or shows "Updating SportLikely…" if the app
+  // file never starts (25 Oct: the text faded in after 3 s and stayed on screen when the app file got a 503)
+  out = out.replace('<div id="root"></div>', `<div id="root"><div class="sl-seo" style="max-width:960px;margin:0 auto;padding:24px 16px;font-family:system-ui,sans-serif;line-height:1.6">${s.body}</div></div>`);
   return out;
 }
 

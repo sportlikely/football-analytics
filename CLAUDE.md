@@ -65,7 +65,7 @@ is model work, the matching note, in the same commit.
 ## Map of the code
 
 Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
-- Processes (fix202): `index.ts` = the web process (listens, live socket, reads the database, starts and restarts the
+- Processes (fix202): `boot.ts` = the container entry (fix227: listens before the modules load, then loads index.ts); `index.ts` = the web process (listens, live socket, reads the database, starts and restarts the
   worker); `worker.ts` + `jobs.ts` = every scheduled job. A new scheduled job goes in `jobs.ts` (or a service's
   start…Scheduler), never in app.ts / index.ts. Model state the pages read is published by the worker
   (`publishState` / `onState`, services/shared.ts); a heavy page every visitor opens is a stored page (`definePage`,

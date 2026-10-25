@@ -37,6 +37,86 @@
         if (t === 'dark') document.documentElement.classList.add('dark');
       } catch (e) {}
     </script>
+    <style>.js .sl-seo{display:none}</style>
+    <script>
+      // fix227: never a raw text page. The crawler text inside #root is for crawlers and browsers without JavaScript
+      // (hidden here until the app replaces it: same HTML for everyone). If the app file fails (a 502 / 503 while
+      // the server restarts) or hasn't started within 6 s, it is asked for again (2 tries, 2 s apart, a fresh
+      // address); then a "Updating SportLikely…" card with a Reload button, reloading itself every 10 s (6 times).
+      // main.tsx calls __slBoot.started() / mounted() / fail(). The card's words follow the address's language.
+      (function () {
+        var d = document, w = window, de = d.documentElement, KEY = 'sl-boot-reloads';
+        de.classList.add('js');
+        var attempt = 0, started = false, mounted = false, card = null;
+        var main = function () { return d.querySelector('script[type=module][src*="/assets/"]'); };
+        var store = function (v) { try { if (v === undefined) return Number(sessionStorage.getItem(KEY)) || 0; if (v) sessionStorage.setItem(KEY, String(v)); else sessionStorage.removeItem(KEY); } catch (e) { return 0; } };
+        var WORDS = {
+          en: ['Updating SportLikely…', 'Back in a moment.', 'Reload'],
+          de: ['SportLikely wird aktualisiert…', 'Gleich wieder da.', 'Neu laden'],
+          es: ['Actualizando SportLikely…', 'Volvemos en un momento.', 'Recargar'],
+          fr: ['Mise à jour de SportLikely…', 'De retour dans un instant.', 'Recharger'],
+          it: ['Aggiornamento di SportLikely…', 'Torniamo tra un momento.', 'Ricarica'],
+          pt: ['Atualizando o SportLikely…', 'Voltamos em um instante.', 'Recarregar'],
+          tr: ['SportLikely güncelleniyor…', 'Birazdan döneceğiz.', 'Yeniden yükle']
+        };
+        var report = function (why) {
+          try {
+            fetch('/api/client-error', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', keepalive: true,
+              body: JSON.stringify({ message: 'App did not load (fix227 loader): ' + why, page: location.pathname, kind: 'uncaught', version: (main() || {}).src || '', browser: navigator.userAgent.slice(0, 120) }) })['catch'](function () {});
+          } catch (e) {}
+        };
+        var showCard = function (why) {
+          if (card || mounted) return;
+          var lang = (/^\/(de|es|fr|it|pt|tr)(\/|$)/.exec(location.pathname) || [])[1] || 'en', t = WORDS[lang];
+          var dark = de.classList.contains('dark');
+          card = d.createElement('div');
+          card.setAttribute('role', 'alert');
+          card.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Manrope,system-ui,sans-serif;background:' + (dark ? '#07090d' : '#f6f7f9') + ';color:' + (dark ? '#e8ebf1' : '#10141c');
+          card.innerHTML = '<div style="max-width:340px;width:100%;text-align:center;padding:28px 20px;border-radius:16px;border:1px solid ' + (dark ? '#1f2633' : '#dde1e8') + ';background:' + (dark ? '#0e1219' : '#fff') + '">'
+            + '<img src="/favicon.svg" alt="" width="44" height="44" style="display:block;margin:0 auto 14px">'
+            + '<div style="font-weight:800;font-size:18px;margin-bottom:6px"></div><div style="opacity:.75;font-size:14px;margin-bottom:18px"></div>'
+            + '<button type="button" style="font:inherit;font-weight:700;font-size:15px;padding:10px 22px;border-radius:999px;border:0;cursor:pointer;background:#c6f432;color:#07090d"></button></div>';
+          var parts = card.firstChild.childNodes;
+          parts[1].textContent = t[0]; parts[2].textContent = t[1]; parts[3].textContent = t[2];
+          parts[3].onclick = function () { location.reload(); };
+          (d.body || de).appendChild(card);
+          report(why);
+          var n = store();
+          if (n < 6) setTimeout(function () { if (!mounted) { store(n + 1); location.reload(); } }, 10000);
+        };
+        var fail = function (a, why) {
+          if (a !== attempt || started || mounted) return;
+          if (attempt >= 2) return showCard(why);
+          var next = ++attempt;
+          setTimeout(function () { load(next); }, 2000);
+        };
+        var load = function (a) {
+          var s = main();
+          if (started || !s) return s ? undefined : showCard('no app file in the page');
+          var n = d.createElement('script');
+          n.type = 'module'; n.crossOrigin = '';
+          n.src = s.src.split('?')[0] + '?r=' + Date.now();
+          n.onerror = function () { fail(a, 'app file failed ' + (a + 1) + ' times'); };
+          d.head.appendChild(n);
+          setTimeout(function () { fail(a, 'app file not started after ' + (a + 1) + ' tries'); }, 6000);
+        };
+        // the page's own app file: an error (404 / 502 / 503) or no start within 6 s
+        w.addEventListener('error', function (e) {
+          var el = e.target;
+          if (el && el.tagName === 'SCRIPT' && el === main()) fail(0, 'app file failed');
+        }, true);
+        setTimeout(function () { fail(0, 'app file not started after 6 s'); }, 6000);
+        w.__slBoot = {
+          started: function () {
+            started = true;
+            // started but never on screen (a page file or the language file kept failing): the card after 20 s
+            setTimeout(function () { if (!mounted) showCard('app started, not shown after 20 s'); }, 20000);
+          },
+          mounted: function () { mounted = true; store(0); if (card) { card.remove(); card = null; } },
+          fail: function (why) { showCard(String(why || 'start failed')); }
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

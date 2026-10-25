@@ -5,6 +5,12 @@ import { loadLocale, redirectToPreferred } from './lib/i18n'
 import { watchErrors } from './lib/report'
 import { watchChunkErrors, isChunkError, reloadForNewVersion } from './lib/chunkReload'
 import { watchSeen } from './lib/seen'
+import { watchStartupRetry } from './lib/startupRetry'
+
+// fix227: the loader in index.html retries the app file and shows the 'Updating SportLikely…' card if it never starts
+type Boot = { started: () => void; mounted: () => void; fail: (why: string) => void }
+const boot = (window as unknown as { __slBoot?: Boot }).__slBoot
+boot?.started()
 
 // Broken pictures (Oct 2026): some teams and players have no image at our data provider. Instead of the browser's
 // broken-image icon, every picture that fails to load is swapped for a neutral badge, once.
@@ -23,6 +29,7 @@ window.addEventListener('error', e => {
 watchErrors()
 watchChunkErrors()
 watchSeen()
+watchStartupRetry()
 
 // The language comes from the address (/es/...). First visit without one: follow the browser's language.
 // The dictionary is loaded before the app's modules run, so labels built at module level are translated too.
@@ -33,8 +40,11 @@ if (!redirectToPreferred()) {
         <App />
       </React.StrictMode>
     )
+    boot?.mounted()
   }).catch(err => {
     // the app file itself from an old version (a cached page): load the new version once
-    if (!(isChunkError(err) && reloadForNewVersion())) throw err
+    if (isChunkError(err) && reloadForNewVersion()) return
+    boot?.fail(String((err as Error)?.message || err).slice(0, 200))
+    throw err
   })
 }

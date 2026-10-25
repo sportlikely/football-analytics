@@ -85,6 +85,8 @@ import { db } from './db';
 import { liveList, liveAt } from './services/liveState';
 import { isWeb, isWorker, ROLE } from './services/role';
 import { isReady, readiness } from './services/readiness';
+import { serveEarly, needsState, currentMainScript } from './services/earlyStatic';
+import { deployErrorsMiddleware } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
 import { workerRoutes, workerRoutesStatus } from './services/workerRoutes';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
@@ -247,9 +249,14 @@ app.set('json replacer', (key: string, value: any) =>
 app.use(express.urlencoded({ extended: true }));
 
 // fix212b / fix218: the web process answers nothing before its shared state is loaded (it listens at once and loads
-// after, so a deploy's health check gets this 503 instead of a refused connection): 503 + Retry-After, /health included
-if (isWeb) app.use((_req, res, next) => {
+// after, so a deploy's health check gets this 503 instead of a refused connection): 503 + Retry-After, /health included.
+// fix227: except the built site's files and the plain app page (services/earlyStatic.ts: they need no state) — the
+// 503 on the app file left visitors on the crawler text; the 503 stays for /health and the API only. Behind the beta
+// gate (SITE_PASSWORD) only the public files go early. Every 5xx in the first 5 minutes is counted (deployErrors.ts).
+if (isWeb) app.use(deployErrorsMiddleware);
+if (isWeb) app.use((req, res, next) => {
   if (isReady()) return next();
+  if (!needsState(req.path) && (!SITE_PASSWORD || req.path.startsWith('/assets/') || PUBLIC_FILES.has(req.path)) && serveEarly(req, res)) return;
   res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
 });
 // API responses are data, not pages: keep them out of search results (robots.txt stays open so tools can read them)
@@ -4144,6 +4151,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       // (the app renders it in the browser; the next request gets the stored copy)
       const s = home ? await getPage('seo', { path: home }) : await getPage('seo-page', { path: req.path.slice(0, 300) }, { waitMs: SEO_WAIT_MS });
       const html = s?.view('html');
+      // fix227: a copy stored before a deploy names the old build's app file (gone: a 404, no app, the crawler text
+      // left on screen) — the plain app page until the worker has made the new copy
+      const main = currentMainScript();
+      if (html?.text && main && !html.text.includes(main)) return res.sendFile(path.join(STATIC_DIR, 'index.html'));
       if (html?.text) {
         res.set('ETag', html.etag).vary('Accept-Encoding').type('html');
         if (req.fresh) return res.status(304).end();

@@ -42,4 +42,4 @@ EXPOSE 3001
 # fix202: two processes share the container — the web process (this one, WEB_HEAP_MB) and the worker it starts
 # (WORKER_HEAP_MB, default 1536, set in index.ts). WORKER=0 runs everything in this one process.
 # fix210: each heap is capped at its share of the container's memory limit (web 30%, worker 55%: utils/memLimit.ts)
-CMD ["sh", "-c", "exec node --max-old-space-size=$(node dist/utils/memLimit.js web 2>/dev/null || echo ${WEB_HEAP_MB:-1024}) dist/index.js"]
+CMD ["sh", "-c", "exec node --max-old-space-size=$(node dist/utils/memLimit.js web 2>/dev/null || echo ${WEB_HEAP_MB:-1024}) dist/boot.js"]

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/boot.js",
     "typecheck": "tsc --noEmit",
     "test:locked": "node scripts/locked-leak-test.mjs",
     "test:proxy": "node --no-warnings --test scripts/proxy-guard.test.ts",
@@ -34,6 +34,7 @@
     "test:fix222": "tsc && node --no-warnings --test --test-force-exit scripts/fix222.test.mjs",
     "test:fix221": "tsc && node --no-warnings --test --test-force-exit scripts/big-lists.test.mjs scripts/photo-matcher.test.mjs",
     "test:fix226": "tsc && node --no-warnings --test --test-force-exit scripts/push-alerts.test.mjs",
+    "test:fix227": "tsc && node --no-warnings --test --test-force-exit scripts/deploy-restart.test.mjs",
     "test:fix224": "tsc && node --no-warnings --test --test-force-exit scripts/key-players.test.mjs"
   },
   "keywords": [

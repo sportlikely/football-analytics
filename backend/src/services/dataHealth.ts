@@ -45,6 +45,7 @@ import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
 import { pushHealth } from './pushAlerts';
 import { keyPlayersHealth } from './keyPlayers';
+import { deployErrorsHealth } from './deployErrors';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -430,6 +431,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts
   try { checks.push(...perfChecks(now)); } catch (e: any) { logger.warn(`perf checks: ${e?.message || e}`); }
+  // fix227: 5xx answered in the 5 minutes after the last start (files and pages: target 0)
+  try { checks.push(...deployErrorsHealth()); } catch (e: any) { logger.warn(`deploy errors health: ${e?.message || e}`); }
 
   const level: Level = checks.some(c => c.level === 'fail') ? 'fail' : checks.some(c => c.level === 'warn') ? 'warn' : 'ok';
   return { level, at: new Date(now).toISOString(), checks };

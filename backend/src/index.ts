@@ -32,7 +32,11 @@ import { workerState, type WorkerReport } from './services/workerHealth';
 import { heapShareMb } from './utils/memLimit';
 import { exitReason, saveWorkerExit, startPerfHistory } from './services/perfHistory';
 
-const server = http.createServer(app);
+// fix227: boot.ts (the container's entry) already listens on PORT and answers the site's files while this loads: take
+// its server over (this app answers from now on). Started alone (node dist/index.js, tests) it listens itself.
+const early = (globalThis as any).__slBootServer as http.Server | undefined;
+const server = early ?? http.createServer(app);
+if (early) { early.removeAllListeners('request'); early.on('request', app); }
 const io = new Server(server, {
   cors: {
     origin: corsOrigin,
@@ -177,8 +181,15 @@ function startWorker() {
 const shutdown = (sig: string) => {
   stopping = true;
   logger.info(`${sig}: stopping`);
+  // fix227: with a volume Railway starts the new deployment only once this one is gone — leave as soon as the open
+  // requests are answered and the worker has stopped (at most 5 s), so the gap without a listener stays short
+  let left = worker ? 2 : 1;
+  const one = () => { if (--left <= 0) process.exit(0); };
+  worker?.once('exit', one);
   worker?.kill('SIGTERM');
-  server.close();
+  io.disconnectSockets(true); // the live sockets reconnect to the new instance
+  server.close(one);
+  server.closeIdleConnections?.();
   setTimeout(() => process.exit(0), 5000).unref();
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -201,7 +212,7 @@ const loadState = async () => {
   markStartupDone();
   logger.info(`start: ${Object.keys(sharedStatus()).length} shared state(s) loaded in ${Date.now() - t0} ms — ready`);
 };
-server.listen(PORT, () => {
+const onListening = () => {
   // fix222: the stall clock starts now (the module loading before listen is its own start-up entry, not a stall)
   markListening(process.uptime() * 1000);
   setImmediate(() => void loadState());
@@ -219,6 +230,7 @@ server.listen(PORT, () => {
     // WORKER=0: every job in this process (the scheduler module is only loaded here)
     void import('./jobs').then(j => j.startJobs()).catch(e => logger.error(`jobs: ${e?.message || e}`));
   }
-});
+};
+if (early) onListening(); else server.listen(PORT, onListening);
 
 export { app, io };

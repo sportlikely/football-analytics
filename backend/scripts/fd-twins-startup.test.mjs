@@ -138,13 +138,15 @@ test('start-up (fix218): the web role listens at once, answers 503 then 200, nev
   const big = v8.serialize({ rows: Array.from({ length: 400000 }, (_, i) => ({ i, s: `row ${i}`, v: [i, i + 1, i + 2] })) });
   db.prepare(`INSERT INTO shared_state (key, ver, at, bytes, ms, data) VALUES (?, ?, ?, ?, ?, ?)`).run('nfl:live:1', 1, new Date().toISOString(), big.length, 1, big);
   db.close();
-  const p = spawn(process.execPath, [path.join(DIST, 'index.js')], { env: { ...e, SL_ROLE: 'web' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  // fix227: the container's entry (boot.js listens before the modules load, then loads index.js)
+  const p = spawn(process.execPath, [path.join(DIST, 'boot.js')], { env: { ...e, SL_ROLE: 'web' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { out += d; });
   const port = Number(e.PORT);
   const t0 = Date.now();
   const WINDOW = Number(process.env.STARTUP_WINDOW_MS || 60000);
   const waits = []; // every request's wait in the first 60 s
+  let firstWait = 0;
   let firstAccept = null, first = null, readyAt = null, last = null;
   try {
     while (Date.now() - t0 < WINDOW) {
@@ -154,7 +156,9 @@ test('start-up (fix218): the web role listens at once, answers 503 then 200, nev
       }
       const s = Date.now();
       const r = await fetch(`http://127.0.0.1:${port}/health`).then(async r => ({ status: r.status, body: await r.json(), retry: r.headers.get('retry-after') })).catch(e => ({ status: 0, body: String(e) }));
-      waits.push(Date.now() - s);
+      // fix227: the first answer may wait for the module load (boot.js accepted the connection before it: a short
+      // wait instead of a refused connection = Railway's 502); every later one must be quick
+      if (first) waits.push(Date.now() - s); else firstWait = Date.now() - s;
       first ??= r;
       if (r.status === 200 && readyAt === null) readyAt = Date.now() - t0;
       last = r;
@@ -170,6 +174,7 @@ test('start-up (fix218): the web role listens at once, answers 503 then 200, nev
     assert.equal(last.body.ready, true);
     // the nfl engine blob was not parsed by the web role: a short load, and nothing waited behind it
     assert.ok(last.body.stateLoadMs < 2000, `state load took ${last.body.stateLoadMs} ms (the nfl blob must stay in the worker)`);
+    assert.ok(firstWait < 30000, `the first answer waited ${firstWait} ms`);
     const slow = waits.filter(w => w > 500);
     assert.equal(slow.length, 0, `${slow.length} of ${waits.length} requests waited over 500 ms in the first ${WINDOW / 1000} s: ${slow.join(', ')} ms`);
     assert.equal(last.body.stallsSinceReady, 0, `stalls after ready: ${last.body.stallsSinceReady}`);
