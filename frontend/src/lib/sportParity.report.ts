@@ -9,16 +9,28 @@ export interface ParityReport {
 }
 export const PARITY_REPORT: ParityReport = {
  "ok": true,
- "keys": 74,
+ "keys": 75,
  "gaps": [],
  "propGaps": [],
  "problems": [],
- "todo": [],
+ "todo": [
+  {
+   "key": "game.keyPlayers",
+   "label": "Key players card: top 5 per team by impact, photo, status for this game, \"team without him\" (fix224)",
+   "sport": "football",
+   "reason": "football has no per-player impact rating yet (v3 counts missing starters by starts in the last 10); built for basketball and the NFL first in fix224"
+  }
+ ],
  "na": [
   {
    "key": "game.beforeAfter",
    "sport": "tennis",
    "reason": "no line-up or injury news moves a tennis prediction (it only updates from new results until the first serve)"
+  },
+  {
+   "key": "game.keyPlayers",
+   "sport": "tennis",
+   "reason": "the player is the team (the match page is about the two players already)"
   },
   {
    "key": "game.lineups",

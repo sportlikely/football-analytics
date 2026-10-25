@@ -44,6 +44,7 @@ import { afIdOfFd } from './afMatches';
 import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
 import { pushHealth } from './pushAlerts';
+import { keyPlayersHealth } from './keyPlayers';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -424,6 +425,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // games more than 5 points off, 100+ games in all)
   try { checks.push(...calibrationHealth(now)); } catch (e: any) { logger.warn(`calibration health: ${e?.message || e}`); }
   // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
+  try { checks.push(...keyPlayersHealth(now)); } catch (e: any) { logger.warn(`key players health: ${e?.message || e}`); }
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts

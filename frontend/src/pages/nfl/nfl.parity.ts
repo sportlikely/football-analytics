@@ -31,6 +31,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.scorers', // fix209: the scoring plays under the score (nflScorers, games/events live too); the row arrow
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204
+    'game.keyPlayers', // fix224: KeyPlayers (starting QB + top players by production, injury report, the QB's price in nfl-v1)
     'game.howItWorks', // fix206: "How does this work?" in ModelName + the sport's how-it-works page (components/sport/HowItWorks)
     'game.modelName', // fix191: ModelName in the shared WinnerPrediction
     'team.analysis',

@@ -19,6 +19,7 @@ import { db } from '../db';
 import { yieldLoop } from './perf';
 import { onState, publishState } from './shared';
 import { nbaKey, playerKey, bdlGet, refreshNbaInjuries, nbaInjuryStatus } from './bbInjuries';
+import { nbaRestKeep } from './keyPlayers';
 import {
   replayV4, rotation, strength, projMinutes, statusKeep, v4Margin, repriceOnly, scoreP, rowP, tuneV4, probit,
   V4_TUNED, V4_TEST_SEASON, TEAM_SCALE, type RBase, type RGame, type RLine, type RRow, type V4Params, type RotPlayer
@@ -190,6 +191,14 @@ function sideOf(s: State, gameId: number, teamId: number, teamName: string): V4S
   const base = strength(rotation(players));
   const keep = new Map<number, number>(), why = new Map<number, string>();
   for (const [id, x] of injuryKeep(teamName, roster, s.names)) { keep.set(id, x.keep); why.set(id, x.status); }
+  // fix224: star-rest pattern (2nd night of a back-to-back / 3-in-4) for players not on the report, until it confirms
+  const listed = new Set((db.prepare(`SELECT player FROM bb_injuries WHERE team = ?`).all(nbaKey(teamName)) as any[]).map(x => playerKey(x.player)));
+  const ko = (db.prepare(`SELECT kickoff FROM bb_games WHERE game_id = ?`).get(gameId) as any)?.kickoff ?? null;
+  for (const [id, r] of nbaRestKeep(gameId, teamId, ko)) {
+    const n = s.names.get(id);
+    if (keep.has(id) || (n && listed.has(playerKey(n))) || !roster.includes(id)) continue;
+    keep.set(id, r.keep); why.set(id, `rest pattern (${r.kind})`);
+  }
   const lu = lineupOf(gameId, teamId, roster, s.names);
   let lineup = false;
   if (lu && lu.starters.size >= 5) {

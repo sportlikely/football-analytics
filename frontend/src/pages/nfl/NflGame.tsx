@@ -25,6 +25,7 @@ import Highlights from '../../components/sport/game/Highlights'
 import GamePreview from '../../components/sport/game/GamePreview'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { RestTab } from '../bb/GameTabs'
+import KeyPlayers from '../../components/sport/game/KeyPlayers'
 import { nflScorers } from '../../lib/scorers'
 import type { Sched } from '../bb/BbGame'
 
@@ -51,10 +52,13 @@ interface Data {
   schedule?: { home: Sched; away: Sched }
   standings?: { season: number; league: number; tables: { conference: string; name: string; rows: StandRow[] }[] } | null
   starters?: { home: Starter[]; away: Starter[] } | null
+  /** fix224: the starting QB + the most productive players; without = points the model takes off without him (QB only) */
+  keyPlayers?: { home: NflKey[]; away: NflKey[] } | null
   beforeAfter?: BeforeAfter | null
   writeup?: string | null
   events?: Play[] | null
 }
+interface NflKey { id: number; name: string; position: string | null; image: string | null; perGame: number; games: number; status: string | null; out: boolean; without: number | null }
 const TABS = ['prediction', 'stats', 'players', 'table', 'rest', 'h2h', 'plays', 'highlights']
 const OUT = /out|ir|reserve|doubtful/i
 
@@ -128,6 +132,7 @@ export default function NflGame() {
           {/* fix204: more predictions from the same model (locked like the prediction) */}
           <MorePredictions sport="nfl" id={g.id} rid={nflRid(g)} status={nflRstatus(g)} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />
           <GameMeaning sport="nfl" id={g.id} />
+          {d.keyPlayers && <NflKeyPlayers g={g} data={d.keyPlayers} />}
           {d.beforeAfter && <ChangeCard g={g} x={d.beforeAfter} />}
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
           {d.starters && (d.starters.home.length > 0 || d.starters.away.length > 0) && <Starters g={g} data={d.starters} />}
@@ -282,6 +287,20 @@ function ChangeCard({ g, x }: { g: Game; x: BeforeAfter }) {
 }
 
 /** Likely starters: QB, RB, WR1-2, TE and the defence leaders, with the injury report status. */
+/** fix224: the shared key players card — QB first, the injury report's status, the QB's price in our model */
+function NflKeyPlayers({ g, data }: { g: Game; data: { home: NflKey[]; away: NflKey[] } }) {
+  const side = (name: string, list: NflKey[]) => ({
+    name, players: list.map(p => ({
+      id: p.id, name: p.name, href: href.nflPlayer(p.id), photo: p.image,
+      detail: [p.position, t('{0} production points a game', { 0: p.perGame.toFixed(1) }), t('{0} games', { 0: p.games })].filter(Boolean).join(' · '),
+      status: p.status ? { tone: (p.out ? 'bad' : 'warn') as 'bad' | 'warn', label: p.status } : { tone: 'ok' as const, label: t('Playing') },
+      without: p.without
+    }))
+  })
+  return <KeyPlayers home={side(nick(g.home.name, g.league), data.home)} away={side(nick(g.away.name, g.league), data.away)}
+    note={t('Each team’s starting quarterback and its most productive players this season (yards and touchdowns a game), with the injury report. Our model prices the quarterback: the number is what it takes off the team without him.')} />
+}
+
 function Starters({ g, data }: { g: Game; data: { home: Starter[]; away: Starter[] } }) {
   const lg = g.league || 1
   return (

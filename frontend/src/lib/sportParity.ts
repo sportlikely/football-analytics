@@ -37,6 +37,7 @@ export const PARITY = [
   { key: 'game.howCalculated', label: 'How we calculated it', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.preview', label: 'Match / game preview text', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.beforeAfter', label: 'Before / after (saved prediction vs result)', football: true, basketball: true, nfl: true, tennis: 'na: no line-up or injury news moves a tennis prediction (it only updates from new results until the first serve)' },
+  { key: 'game.keyPlayers', label: 'Key players card: top 5 per team by impact, photo, status for this game, "team without him" (fix224)', football: 'todo: football has no per-player impact rating yet (v3 counts missing starters by starts in the last 10); built for basketball and the NFL first in fix224', basketball: true, nfl: true, tennis: 'na: the player is the team (the match page is about the two players already)' },
   { key: 'game.lineups', label: 'Starters / line-ups', football: true, basketball: true, nfl: true, tennis: 'na: individual sport, no line-ups' },
   { key: 'game.injuries', label: 'Injuries', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.h2h', label: 'Head-to-head', football: true, basketball: true, nfl: true, tennis: true },

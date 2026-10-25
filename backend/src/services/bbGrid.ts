@@ -62,6 +62,8 @@ const ffArr = (f: FF) => [f.efg, f.tov, f.orb, f.ftr, f.tpar];
 /** Team values at one moment (the live state keeps the last of these per team). */
 export type TeamSnap = {
   imp: number; miss: number; stay: number; net: number; ff: number[]; ffAg: number[]; form: number; wins: number; gp: number; season: string;
+  /** fix224 (live snapshot only): players of the team's last 10 games — [id, rating, projected minutes, team games since he last played] */
+  pl?: [number, number, number, number][];
 };
 export type LeagueSnap = {
   code: string; gameMin: number; teams: Map<number, TeamSnap>; lg: number[]; pace: number; seasonLen: number;
@@ -145,6 +147,7 @@ export async function replayLeague(code: string, base: Map<number, GridBase>): P
   const rs = new Map<number, number[]>(), pre = new Map<number, number[]>();
   let preSeason: string | null = null;
   const rosters = new Map<number, number[][]>();
+  const rosters10 = new Map<number, number[][]>(); // fix224: the last 10 games (key players)
   const seasonPlayers = new Map<string, Set<number>>(); // `${team}|${season}` → players who appeared
   const ewF = new Map<number, EW>(), ewA = new Map<number, EW>();
   let lg = [0.5, 0.14, 0.27, 0.2, 0.38], lgN = 0, pace = 75;
@@ -233,7 +236,10 @@ export async function replayLeague(code: string, base: Map<number, GridBase>): P
       else if (g.pre) { let r = pre.get(pid); if (!r) pre.set(pid, (r = [])); r.push(min); }
       if (!g.pre) { const k = `${team}|${g.season}`; let s = seasonPlayers.get(k); if (!s) seasonPlayers.set(k, (s = new Set())); s.add(pid); }
     }
-    for (const [team, ids] of per) { const r = rosters.get(team) || []; r.push(ids); if (r.length > 3) r.shift(); rosters.set(team, r); }
+    for (const [team, ids] of per) {
+      const r = rosters.get(team) || []; r.push(ids); if (r.length > 3) r.shift(); rosters.set(team, r);
+      if (!g.pre) { const r10 = rosters10.get(team) || []; r10.push(ids); if (r10.length > 10) r10.shift(); rosters10.set(team, r10); }
+    }
     if (!g.pre && (code !== 'NBA' || g.rs) && h.length >= 5 && a.length >= 5) fitRows.push({ home: h, away: a, margin: g.hs! - g.as_!, w: 1, s: startYear(g.season) });
     const bx = box.get(g.id);
     if (bx && bx.has(g.home) && bx.has(g.away) && !g.pre) {
@@ -286,7 +292,15 @@ export async function replayLeague(code: string, base: Map<number, GridBase>): P
   const teams = new Map<number, TeamSnap>();
   const recent = games.filter(g => g.finished && lastFinishedMs - g.ms < 400 * DAY);
   const cur = recent.length ? recent[recent.length - 1].season : '';
-  for (const g of recent) for (const t of [g.home, g.away]) if (!teams.has(t)) teams.set(t, snapOf(t, cur));
+  // fix224: each team's players of its last 10 games (key players card, row #4 with news / rest statuses)
+  const plOf = (team: number): [number, number, number, number][] => {
+    const r10 = rosters10.get(team) || [], seen = new Map<number, number>();
+    r10.forEach((ids, k) => { for (const id of ids) seen.set(id, r10.length - 1 - k); });
+    const out: [number, number, number, number][] = [];
+    for (const [id, since] of seen) { const m = projMinutes(rs.get(id), preSeason ? pre.get(id) : undefined); if (m !== null) out.push([id, r3(fit ? (fit.ratings.get(id) ?? -1) : 0), r3(m), since]); }
+    return out;
+  };
+  for (const g of recent) for (const t of [g.home, g.away]) if (!teams.has(t)) teams.set(t, { ...snapOf(t, cur), pl: plOf(t) });
   // seasonLen for the live tank rule: the last finished season
   const seasonLen = seasonGames.get(prevSeasonOf(cur)) || seasonGames.get(cur) || 0;
   return { items, snap: { code, gameMin: L, teams, lg, pace, seasonLen, h2h, builtAt: new Date().toISOString() } };
@@ -313,6 +327,28 @@ export function loadRows(codes?: string[]): GridItem[] {
 /* ---------- live state (every process that predicts) ---------- */
 const snaps = new Map<string, LeagueSnap>();
 let snapVer = 0;
+/**
+ * fix224: same-day statuses of players outside the NBA (news "reported out", EuroLeague double-week rest) for row #4:
+ * keep share per player id (services/keyPlayers.ts registers it; a hook keeps the import one way). null = none.
+ */
+type KeepHook = (g: { code: string; game_id?: number; kickoff: string }, teamId: number) => Map<number, number> | null;
+let keepHook: KeepHook | null = null;
+export function setKeepHook(f: KeepHook) { keepHook = f; }
+/** fix224: a new news / rest state changes the predictions (part of their cache key) */
+export function bumpGridVer() { snapVer++; }
+/**
+ * Row #4 of a team in an upcoming game with the hook's statuses on top of the usual rule (rotation players of the last 3
+ * games who missed the last 2 sit). undefined = the hook has nothing for the team (the snapshot's own value stays).
+ */
+function missWithHook(s: LeagueSnap, g: { code: string; game_id?: number; kickoff: string }, teamId: number, t: TeamSnap): number | undefined {
+  const extra = keepHook && t.pl ? keepHook(g, teamId) : null;
+  if (!extra || !extra.size || !t.pl) return undefined;
+  const pl = t.pl.filter(p => p[3] <= 2).map(p => ({ id: p[0], min: p[2], rating: p[1] }));
+  const keep = new Map<number, number>();
+  if (t.pl.some(p => p[3] >= 2)) for (const p of t.pl) if (p[3] === 2) keep.set(p[0], 0); // missed the last 2 (in the last 3)
+  for (const [id, k] of extra) keep.set(id, Math.min(k, keep.get(id) ?? 1));
+  return strength(rotation(pl, keep, s.gameMin), s.gameMin) - strength(rotation(pl, undefined, s.gameMin), s.gameMin);
+}
 onState('bb:grid:s:', (k, v: any) => { snaps.set(k.slice('bb:grid:s:'.length), v as LeagueSnap); snapVer++; });
 export const gridSnapVer = () => snapVer;
 export const gridSnap = (code: string) => snaps.get(code) || null;
@@ -327,7 +363,7 @@ export function threeInFour(teamId: number, kickoff: string): boolean {
 }
 
 /** Row values of an upcoming game (null: a team without values yet). */
-export function liveRows(g: { code: string; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null },
+export function liveRows(g: { code: string; game_id?: number; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null },
   base: { p: number; sig: number; hca: number; haH: number; haA: number; b2bH: boolean; b2bA: boolean }, miss?: { home: number; away: number }) {
   const s = snaps.get(g.code);
   if (!s) return null;
@@ -335,6 +371,10 @@ export function liveRows(g: { code: string; home_id: number; away_id: number; ki
   if (!h || !a) return null;
   const gpOf = (t: TeamSnap) => (t.season === g.season ? t.gp : 0);
   const hh = { ...h, gp: gpOf(h), wins: h.season === g.season ? h.wins : 0 }, aa = { ...a, gp: gpOf(a), wins: a.season === g.season ? a.wins : 0 };
+  if (!miss && keepHook) { // fix224: news / rest statuses outside the NBA (the NBA passes its own, nbaV4.sideOf)
+    const mh = missWithHook(s, g, g.home_id, h), ma = missWithHook(s, g, g.away_id, a);
+    if (mh !== undefined || ma !== undefined) miss = { home: mh ?? h.miss, away: ma ?? a.miss };
+  }
   return rowsOf(s, hh, aa, {
     base, home: g.home_id, away: g.away_id, ms: Date.parse(g.kickoff), rs: isRegular(g.week || null) && !isPre(g.code, g.kickoff), neutral: isNeutral(g.code, g.week || null),
     three: [threeInFour(g.home_id, g.kickoff), threeInFour(g.away_id, g.kickoff)], gpH: hh.gp, gpA: aa.gp, missH: miss?.home, missA: miss?.away

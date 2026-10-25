@@ -110,6 +110,16 @@ Live 25 Oct: /api/bb/tuned stored:false (the code defaults from the 10 Oct resea
   differs live (as fix220 suspected for college QBs). Strong lines on 2025 (fix220 rule): 60% in most leagues (picks of
   60%+ were right ~76%), EL 70%, BBL 68%, ACB 67%, JBL 64%, EC 63%, LKL 76% — lower than the old 70%: if "Strong" should
   stay rarer, change the rule in sportCalib.buildLayer (strongLine) for every sport at once.
+## Key players, star rest, injuries from news (fix224, 25 Oct 2026)
+- Card: top 5 per team by rating × projected minutes from the grid snapshot (`TeamSnap.pl`: players of the last 10 games),
+  "without him" = the model's points (row #4 weight × the strength lost when his minutes go to the rest of the rotation —
+  more than his own share when the bench is below average). Reasons line at 1.5+ points.
+- Rest patterns (`bb_rest_rates`, daily): keep = 1 − sat / (chances + 3); used with 4 chances (NBA) / 3 (EuroLeague double
+  weeks) and a 15% rate. Walk-forward (10 Oct copy, each chance priced from earlier games only, settings chosen on 2024-25):
+  2025-26+ Brier of "he plays" NBA 0.0679 → 0.0658, EuroLeague 0.1312 → 0.1233 (+1 / 20%: 0.0659 / 0.1263, over-predicted
+  28% sitting against 22–23% real). Not yet: the game-level log loss with / without (needs the server's rows; bb_rest_log
+  names the games). `BB_REST=off` keeps the card and turns the model part off.
+- News injuries (`bb_news_injuries`): every league but the NBA; precision first (admin review list, dismissed never return).
 
 ## NBA model v4 — bb-v4 (fix217, 25 Oct 2026) — public "SL Basketball 4.0"
 (fix219: the grid above replaces this as the NBA base when the NBA group passes its gate; the re-pricing stays.)

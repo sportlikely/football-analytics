@@ -15,6 +15,7 @@ import { yieldLoop, yieldEvery } from './perf';
 import { runsJobs } from './role';
 import { onState, publishState } from './shared';
 import { photoUrl, photoCredit } from './playerPhotos';
+import { playerImpact } from './keyPlayers';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_roster (
@@ -216,7 +217,9 @@ export async function bbPlayer(id: number) {
     seasons,
     form,
     log,
-    nba
+    nba,
+    // fix224: "Impact" — his rating, rank in the league, his team's record with and without him this season
+    impact: playerImpact(id)
   };
 }
 

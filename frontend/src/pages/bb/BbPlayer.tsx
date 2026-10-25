@@ -31,6 +31,8 @@ interface PlayerData {
   seasons: SeasonRow[]
   form: { gameId: number; kickoff: string; pts: number; min: number | null }[]
   log: LogRow[]
+  /** fix224: our player impact model — rating (points of margin per 48 / 40 min against an average player), rank, team record with / without him */
+  impact?: { code: string; season: string; rating: number; minutes: number; perGame: number; rank: number | null; of: number; with: { won: number; lost: number }; without: { won: number; lost: number } } | null
   nba: {
     bio: { position: string | null; height: string | null; weight: string | null; jersey: string | null; college: string | null; country: string | null; draft: { year: number; round: number | null; pick: number | null } | null }
     season: NbaLine | null
@@ -140,6 +142,8 @@ export default function BbPlayer() {
             </Card>
           )}
 
+          {d.impact && <ImpactCard x={d.impact} />}
+
           {/* form */}
           {d.form.length > 1 && (
             <Card title={t('Points, last {0} games', { 0: d.form.length })}>
@@ -227,6 +231,36 @@ function Big({ label, value }: { label: string; value: string }) {
       <div className="text-[10px] uppercase tracking-wide text-faint">{label}</div>
       <div className="font-display num text-xl font-extrabold text-ink">{value}</div>
     </div>
+  )
+}
+
+/** fix224: "Impact" — what he adds to his team in our player impact model, his rank, the team with and without him */
+function ImpactCard({ x }: { x: NonNullable<PlayerData['impact']> }) {
+  const rec = (r: { won: number; lost: number }) => (r.won + r.lost ? `${r.won}–${r.lost}` : '–')
+  const sg = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}`
+  return (
+    <Card title={t('Impact')} action={<span className="text-xs text-faint">{t('this season')}</span>}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="rounded-xl bg-surface2/60 px-3 py-2.5" title={t('Points of margin he adds per full game on the court against an average player, from who was on the floor in every game')}>
+          <div className="text-[11px] text-faint truncate">{t('Impact rating')}</div>
+          <div className="font-display num text-xl font-extrabold text-ink">{sg(x.rating)}</div>
+          <div className="text-[11px] font-semibold text-muted">{x.rank ? t('#{0} of {1} in the league', { 0: x.rank, 1: x.of }) : ' '}</div>
+        </div>
+        <div className="rounded-xl bg-surface2/60 px-3 py-2.5" title={t('His rating × his expected minutes')}>
+          <div className="text-[11px] text-faint truncate">{t('Points a game for his team')}</div>
+          <div className="font-display num text-xl font-extrabold text-ink">{sg(x.perGame)}</div>
+          <div className="text-[11px] text-muted">{t('{0} min', { 0: Math.round(x.minutes) })}</div>
+        </div>
+        <div className="rounded-xl bg-surface2/60 px-3 py-2.5">
+          <div className="text-[11px] text-faint truncate">{t('Team with him')}</div>
+          <div className="font-display num text-xl font-extrabold text-ink">{rec(x.with)}</div>
+        </div>
+        <div className="rounded-xl bg-surface2/60 px-3 py-2.5">
+          <div className="text-[11px] text-faint truncate">{t('Team without him')}</div>
+          <div className="font-display num text-xl font-extrabold text-ink">{rec(x.without)}</div>
+        </div>
+      </div>
+    </Card>
   )
 }
 

@@ -125,6 +125,52 @@ export function nflStarters(teamId: number, season: number): Starter[] {
   return out;
 }
 
+/* ---------- fix224: key players (the shared card: basketball's top 5 by impact) ---------- */
+
+/** points a game: passing yards / 25, rushing and receiving yards / 10, 6 a touchdown (4 thrown), −2 an interception, tackles, sacks ×2 */
+const VAL: { group: RegExp; stat: RegExp; w: number }[] = [
+  { group: /^passing$/i, stat: /^(yards|yds)$/i, w: 1 / 25 }, { group: /^passing$/i, stat: /^(passing touch downs|touchdowns|td|tds|passing touchdowns)$/i, w: 4 },
+  { group: /^passing$/i, stat: /^(interceptions|int)$/i, w: -2 },
+  { group: /^rushing$/i, stat: /^(yards|yds)$/i, w: 0.1 }, { group: /^rushing$/i, stat: /^(rushing touch downs|touchdowns|td|tds|rushing touchdowns)$/i, w: 6 },
+  { group: /^receiving$/i, stat: /^(yards|yds)$/i, w: 0.1 }, { group: /^receiving$/i, stat: /^(receiving touch downs|touchdowns|td|tds|receiving touchdowns)$/i, w: 6 },
+  { group: /defens/i, stat: /^(total tackles|tackles|tot)$/i, w: 0.5 }, { group: /defens/i, stat: /^sacks?$/i, w: 2 }
+];
+export interface NflKey { id: number; name: string; position: string | null; image: string | null; perGame: number; games: number; line: string | null; status: string | null; out: boolean; without: number | null }
+/**
+ * The key players of a team: the starting QB first, then the top players by games × value a game (no snap counts in
+ * our data), with the injury report status. without = what the model takes off without him (QB only: the other
+ * positions are not priced by nfl-v1).
+ */
+export function nflKeyPlayers(teamId: number, season: number, qb: { id: number; points: number } | null): NflKey[] {
+  const acc = new Map<number, { id: number; name: string; image: string | null; v: number; games: Set<number>; pass: number }>();
+  for (const r of db.prepare(`SELECT p.game_id, p.json FROM nfl_player_stats p JOIN nfl_games g ON g.game_id = p.game_id WHERE p.team_id = ? AND g.season = ? AND (g.stage IS NULL OR g.stage NOT LIKE 'Pre%')`).all(teamId, season) as any[]) {
+    for (const [gname, list] of Object.entries(playerGroups(r.json))) {
+      const rules = VAL.filter(v => v.group.test(gname));
+      if (!rules.length) continue;
+      for (const pl of list) {
+        const cur = acc.get(pl.id) || { id: pl.id, name: pl.name, image: pl.image, v: 0, games: new Set<number>(), pass: 0 };
+        for (const v of rules) { const k = Object.keys(pl.stats).find(x => v.stat.test(x)); const n = k ? num(pl.stats[k]) : null; if (n !== null) { cur.v += n * v.w; if (/^passing$/i.test(gname) && /^(yards|yds)$/i.test(k!)) cur.pass += n; } }
+        cur.games.add(r.game_id);
+        acc.set(pl.id, cur);
+      }
+    }
+  }
+  const pos = new Map((db.prepare(`SELECT player_id, position, name, image FROM nfl_players WHERE team_id = ?`).all(teamId) as any[]).map(p => [p.player_id, p]));
+  const inj = new Map((db.prepare(`SELECT player_id, status FROM nfl_injuries WHERE team_id = ?`).all(teamId) as any[]).map(r => [r.player_id, r.status as string]));
+  const all = [...acc.values()].filter(x => x.v > 0 && x.games.size);
+  const starter = qb ? all.find(x => x.id === qb.id) : [...all].sort((a, b) => b.pass - a.pass)[0];
+  const rest = all.filter(x => x !== starter).sort((a, b) => b.v - a.v);
+  return [...(starter ? [starter] : []), ...rest].slice(0, 5).map(x => {
+    const st = inj.get(x.id) || null;
+    const isQb = !!starter && x.id === starter.id;
+    return {
+      id: x.id, name: x.name || pos.get(x.id)?.name || String(x.id), position: isQb ? 'QB' : pos.get(x.id)?.position || null, image: x.image || pos.get(x.id)?.image || null,
+      perGame: Math.round((x.v / x.games.size) * 10) / 10, games: x.games.size, line: null, status: st, out: !!st && OUT.test(st),
+      without: isQb && qb && qb.id === x.id ? qb.points : null
+    };
+  });
+}
+
 /* ---------- before vs after (injury news, quarterback change) ---------- */
 
 const outsOf = (teamId: number) => (db.prepare(`SELECT player_id, status FROM nfl_injuries WHERE team_id = ?`).all(teamId) as any[]).filter(r => OUT.test(String(r.status || ''))).map(r => r.player_id as number);

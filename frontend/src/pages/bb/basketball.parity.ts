@@ -26,6 +26,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.scorers', // fix209: each team's top scorer under the score (basketballScorers), live and final; the row arrow
     'game.savedBadge',
     'game.morePredictions', 'record.morePredictions', // fix204
+    'game.keyPlayers', // fix224: KeyPlayers (top 5 by impact × minutes, status, team without him) + the reasons line
     'game.howItWorks', // fix206: "How does this work?" in ModelName + the sport's how-it-works page (components/sport/HowItWorks)
     'game.modelName', // fix191: ModelName in the shared WinnerPrediction
     'team.analysis',

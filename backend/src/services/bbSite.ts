@@ -21,6 +21,7 @@ import { bbProbableLineup, bbBeforeAfter } from './bbLineups';
 import { groupStandings, standingsIssues, type StandGroup } from '../utils/bbStandingsGroups';
 import { photoUrl } from './playerPhotos';
 import { bbStrongLine } from './sportCalibration';
+import { keyPlayersFor } from './keyPlayers';
 
 export const bbPublic = () => process.env.BASKETBALL_PUBLIC === '1';
 
@@ -414,6 +415,9 @@ export async function bbGame(id: number, full: boolean) {
   const lineups = game.state === 'done' ? null : { home: bbProbableLineup(g.home_id, g.home_name, g.code, g.kickoff), away: bbProbableLineup(g.away_id, g.away_name, g.code, g.kickoff) };
   const beforeAfter = open && game.state === 'upcoming' ? bbBeforeAfter(g, gp.pHome) : null;
   await mark('lineups');
+  // fix224: each team's key players (impact, status, team without him); reasons only with the full prediction
+  const keyPlayers = game.state === 'done' ? null : keyPlayersFor(g, open);
+  await mark('key players');
   const syncMs = parts.reduce((x, [, ms]) => x + ms, 0);
   if (syncMs > 300) logger.warn(`bb game page ${id}: ${Math.round(syncMs)} ms (${parts.filter(([, ms]) => ms >= 30).sort((a, b) => b[1] - a[1]).map(([n, ms]) => `${n} ${Math.round(ms)} ms`).join(', ')}; total with waits ${Math.round(performance.now() - t0)} ms)`);
   return {
@@ -434,6 +438,7 @@ export async function bbGame(id: number, full: boolean) {
     // fix178: the swing chart (live and finished games; numbers unlocked)
     liveCurve: open && game.state !== 'upcoming' ? bbLiveCurve(id) : [],
     beforeAfter,
+    keyPlayers,
     // fix219: bb-v4 "1,000 points split" (football's grid table) for whoever sees the full prediction of a game to come
     grid: open && pr?.grid ? pr.grid : null,
     model: info ? { version: info.version, avgPoints: Math.round(info.avgPoints * 10) / 10, homeEdge: Math.round(((pr as any)?.hca ?? info.homeEdge) * 10) / 10, b2b: info.b2b, gamesRated: info.gamesRated } : null,

@@ -72,6 +72,7 @@ Every block was checked against the code on 18 Oct 2026 (fix175 audit).
 ## Known gaps to build ('todo') — from the fix175 audit
 These are real gaps (the data exists or could exist). Each one stays red on the admin card until it is built and its
 key is added to the sport's `*.parity.ts` file.
+- `game.keyPlayers` (Key players card, fix224) · Football: basketball and the NFL got it first (Yarin's fix224 brief); football needs a per-player value (API-Football ratings × starts) and "team without him" from v3's #13 missing-players row
 - `home.introStats` (First-visit stat tiles) · Basketball: the adapter passes no stat tiles (the record bands exist)
 - `home.introStats` (First-visit stat tiles) · NFL: the adapter passes no stat tiles (record not public yet)
 - `games.leaguePanel` (League panel) · Basketball: no league panel in the games adapter (standings exist)

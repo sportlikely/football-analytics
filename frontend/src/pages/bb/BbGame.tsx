@@ -30,6 +30,7 @@ import GameMeaning from '../../components/sport/forecast/GameMeaning'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { basketballScorers } from '../../lib/scorers'
 import PlayerPhoto from '../../components/sport/PlayerPhoto'
+import KeyPlayers, { type KeyPlayerRow, type KeyTone } from '../../components/sport/game/KeyPlayers'
 
 export interface Avg {
   games: number; won: number; lost: number; pointsFor: number; pointsAgainst: number
@@ -67,7 +68,13 @@ interface Detail {
   beforeAfter?: { before: { pHome: number; pAway: number }; after: { pHome: number; pAway: number }; players: { id: number; name: string; status: string; points: number; side: 'H' | 'A' }[] } | null
   /** fix219: bb-v4's 1,000 points split (games to come, full prediction only) */
   grid?: GridView | null
+  /** fix224: each team's key players; reasons = missing players who move the margin 1.5+ points (full prediction only) */
+  keyPlayers?: { home: KeySide | null; away: KeySide | null; reasons: KeyReason[] } | null
 }
+type KeyStatus = 'playing' | 'questionable' | 'doubtful' | 'out' | 'reported-out' | 'may-rest' | 'rested' | 'missed'
+interface KeyCard { id: number; name: string; photo: string | null; perGame: number; minutes: number; status: KeyStatus; note: string | null; noteKind: 'injury' | 'b2b' | '3in4' | 'el-double' | 'games' | null; link: string | null; without: number; cost: number }
+interface KeySide { teamId: number; team: string; players: KeyCard[] }
+interface KeyReason { side: 'H' | 'A'; team: string; id: number; name: string; status: KeyStatus; note: string | null; points: number }
 interface LineupSide { from: string; starters: CourtPlayer[]; bench: CourtPlayer[]; out: CourtPlayer[] }
 export interface H2H { id: number; kickoff: string; home: string; away: string; homeId: number; score: [number, number]; league: string }
 interface Profile { games: number; fgPct: number | null; threePct: number | null; threeAttempts: number | null; ftPct: number | null; rebounds: number | null; assists: number | null; turnovers: number | null; steals: number | null; blocks: number | null }
@@ -155,6 +162,7 @@ export default function BbGame() {
           {/* fix204: more predictions from the same model (locked like the prediction) */}
           <MorePredictions sport="basketball" id={g.id} rid={rid(g)} status={rstatus(g)} home={g.home.name} away={g.away.name} />
           <GameMeaning sport="basketball" id={g.id} />
+          {d.keyPlayers && <KeyPlayers home={bbKeySide(d.keyPlayers.home)} away={bbKeySide(d.keyPlayers.away)} />}
           {d.beforeAfter && (
             <NewsChange home={g.home.name} away={g.away.name} before={d.beforeAfter.before} after={d.beforeAfter.after}
               players={d.beforeAfter.players.map(p => ({ id: p.id, name: p.name, side: p.side, href: href.bbPlayer(p.id), detail: `${p.status} · −${p.points.toFixed(1)} ${t('pts')}` }))} />
@@ -270,7 +278,15 @@ function bbWhy(d: Detail): WhyRow[] {
   const pr = g.prediction
   const fresh: WhyRow[] = ([[pr?.newHome, g.home.name], [pr?.newAway, g.away.name]] as const).filter(([b]) => !!b)
     .map(([, name]) => ({ tone: 'N' as const, text: t("New to this league: {0} have no games in it yet, so they start from their rating in another of our leagues, moved to this league's level.", { 0: name }) }))
-  return [...fresh, ...d.why.map(w => {
+  // fix224: a missing key player who moves the margin 1.5+ points gets his own line
+  const keyed: WhyRow[] = (d.keyPlayers?.reasons || []).map(r => {
+    const who = r.status === 'out' ? t('{0} is out', { 0: r.name }) : r.status === 'doubtful' ? t('{0} is doubtful', { 0: r.name })
+      : r.status === 'questionable' ? t('{0} is questionable', { 0: r.name }) : r.status === 'reported-out' ? t('{0} is reported out', { 0: r.name })
+      : r.status === 'may-rest' ? t('{0} may rest (he often sits games like this)', { 0: r.name }) : t('{0} has missed the last games', { 0: r.name })
+    const pts = Math.abs(r.points).toFixed(1)
+    return { tone: r.side === 'H' ? 'A' as const : 'H' as const, text: t('{0}: {1} −{2} points', { 0: r.note ? `${who} (${r.note})` : who, 1: r.team, 2: pts }), points: `+${pts} ${t('pts')}` }
+  })
+  return [...fresh, ...keyed, ...d.why.map(w => {
     const team = w.side === 'H' ? g.home : g.away
     const other = w.side === 'H' ? g.away : g.home
     const pv = d.preview
@@ -309,6 +325,32 @@ function bbWhy(d: Detail): WhyRow[] {
   })]
 }
 
+
+/** fix224: a basketball key-players side for the shared card (status words, the rest pattern behind "May rest") */
+function bbKeySide(s: KeySide | null): { name: string; players: KeyPlayerRow[] } | null {
+  if (!s) return null
+  const tone: Record<KeyStatus, KeyTone> = { playing: 'ok', questionable: 'warn', doubtful: 'warn', out: 'bad', 'reported-out': 'bad', 'may-rest': 'warn', rested: 'muted', missed: 'bad' }
+  const label = (p: KeyCard) => p.status === 'playing' ? t('Playing') : p.status === 'questionable' ? t('Questionable') : p.status === 'doubtful' ? t('Doubtful')
+    : p.status === 'out' ? t('Out') : p.status === 'reported-out' ? t('Reported out') : p.status === 'may-rest' ? t('May rest')
+    : p.status === 'rested' ? t('Missed last game') : t('Missed last {0}', { 0: p.note || '2' })
+  const why = (p: KeyCard) => {
+    const [sat, of] = String(p.note || '').split('/')
+    if (p.noteKind === 'b2b') return t('Sat {0} of {1} second nights of back-to-backs (this and last season)', { 0: sat, 1: of })
+    if (p.noteKind === '3in4') return t('Sat {0} of {1} third games in 4 nights (this and last season)', { 0: sat, 1: of })
+    if (p.noteKind === 'el-double') return t('Sat {0} of {1} league games in EuroLeague double weeks', { 0: sat, 1: of })
+    if (p.status === 'reported-out') return t('Reported in the news: open the story')
+    return null
+  }
+  return {
+    name: s.team,
+    players: s.players.map(p => ({
+      id: p.id, name: p.name, href: href.bbPlayer(p.id), photo: p.photo,
+      detail: [t('{0} pts a game', { 0: `${p.perGame > 0 ? '+' : ''}${p.perGame.toFixed(1)}` }), t('{0} min', { 0: Math.round(p.minutes) }), p.noteKind === 'injury' ? p.note : null].filter(Boolean).join(' · '),
+      status: { tone: tone[p.status], label: label(p), title: why(p), link: p.link },
+      without: p.without
+    }))
+  }
+}
 
 /** Written preview: form, home/away record, ratings, rest, shooting, meetings and our verdict — in plain sentences. */
 function AnalysisCard({ d }: { d: Detail }) {

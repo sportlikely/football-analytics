@@ -75,6 +75,7 @@ import { bbPlayer as bbPlayerB, nbaLeaders, bbSearch, bbLeagueLeaders } from './
 import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
+import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
 import { runTune, tunedInfo } from './services/bbTuner';
 import { buildBbCalibration, calibReport } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
@@ -119,11 +120,11 @@ import { hiddenModels, v3MixBacktest, featureModelStatus, setConfig as setModelC
 import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, dailyRunning } from './services/modelDaily';
 import { nflProbe, nflCurrentSeason, asLeague, asLeagues, LEAGUES } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
-import { withNflPrediction, nflRatings, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
+import { withNflPrediction, nflQbWithout, nflRatings, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
 import { leagueForecast, leagueView, visibleIds, teamForecastCodes, teamHistory, gameMeaning, seasonForecastAdmin, allLeagues, runSeasonForecast, runSeasonAccuracy, type FcSport, extremesFor } from './services/seasonForecast';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame as nflGameB, nflStandings, nflTeam as nflTeamB, nflPlayer as nflPlayerB, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury, nflTeamRow } from './services/nflSite';
 import { nflLiveNow, nflLiveCurve } from './services/nflLive';
-import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents } from './services/nflGameExtras';
+import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents, nflKeyPlayers } from './services/nflGameExtras';
 import { askAssistant, assistantConfigured, messagesToday, assistantStats } from './services/assistant';
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
@@ -3134,6 +3135,8 @@ app.get('/api/nfl/game/:id(\\d+)', (req, res) => {
       schedule: { home: nflSchedule(g.home.id, g), away: nflSchedule(g.away.id, g) },
       standings: nflGameStandings(g),
       starters: g.state === 'done' ? null : { home: nflStarters(g.home.id, g.season), away: nflStarters(g.away.id, g.season) },
+      // fix224: the key players card (QB first; "team without him" for the QB, the only position nfl-v1 prices)
+      keyPlayers: g.state === 'done' ? null : { home: nflKeyPlayers(g.home.id, g.season, nflQbWithout(g.home.id)), away: nflKeyPlayers(g.away.id, g.season, nflQbWithout(g.away.id)) },
       beforeAfter: open ? nflBeforeAfter(g, p) : null,
       writeup: nflPreview(g.id, qbNames),
       events: g.state !== 'upcoming' ? nflEvents(g.id) : null // fix209: live too (the header's scoring plays)
@@ -3552,6 +3555,16 @@ app.get('/api/bb/backtest', (_req, res) => res.json({ data: bbBacktest(), timest
 app.get('/api/admin/nba-model-check', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: nbaV4Check(Math.min(90, Number(req.query.days) || 14)) }); } catch (e) { sendError(res, e, 'NBA model check failed'); }
+});
+// fix224 (admin): basketball injuries read from news ("reported out"): the review list, dismiss (never applied again) / ok
+app.get('/api/admin/bb/news-injuries', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: newsInjuryList() }); } catch (e) { sendError(res, e, 'News injuries failed'); }
+});
+app.post('/api/admin/bb/news-injuries/:id(\d+)/:action(dismiss|ok)', jsonOnly, (req, res) => {
+  const ok = reviewNewsInjury(Number(req.params.id), req.params.action as 'dismiss' | 'ok');
+  if (ok) logger.info(`bb news injuries: ${req.params.action} ${req.params.id} by ${req.user?.email || 'admin'}`);
+  res.json({ data: { ok } });
 });
 // fix219 (admin): bb-v4 grid tuner — ?train=2022,2023,2024&test=2025 (the live period 2026+ is refused), &apply=1 stores
 // and publishes the settings (no redeploy). Runs in the job thread, one heavy job at a time.

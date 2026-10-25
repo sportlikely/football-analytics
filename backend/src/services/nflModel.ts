@@ -1029,6 +1029,25 @@ export function nflTeamModel(teamId: number) {
   };
 }
 
+/**
+ * fix224: what the model takes off a team without its starting QB (key players card): the usual starter's value against
+ * the next QB by attempts this season (or the replacement level), × the QB weight, in points (Elo gap / 25). null = no
+ * replay yet / no starter.
+ */
+export function nflQbWithout(teamId: number): { id: number; points: number } | null {
+  const league = leagueOfTeam(teamId);
+  if (!lives.has(league)) return null;
+  const L = current(league);
+  const t = L?.engine.teams.get(teamId);
+  if (!L || !t?.starter) return null;
+  const E = L.engine;
+  const vS = E.qbValue(t.starter);
+  if (vS === null) return null;
+  const backup = [...t.seasonAtt.entries()].filter(([id]) => id !== t.starter).sort((a, b) => b[1] - a[1])[0];
+  const vB = (backup ? E.qbValue(backup[0]) : null) ?? E.qbMean - QB_REPLACEMENT;
+  return { id: t.starter, points: Math.round(((E.p.qbW * (vB - vS)) / 25) * 10) / 10 };
+}
+
 /** fix188: every active team's model rating (Elo) and its rank in the league this season, for the home's featured games.
  *  Empty while the first replay hasn't run (it is started, never awaited, like the team tiles). */
 export function nflRatings(league: LeagueId): Map<number, { elo: number; rank: number }> {

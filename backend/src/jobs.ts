@@ -53,6 +53,7 @@ import { photosTick, photosBbPass } from './services/playerPhotos';
 import { autoTuneDue, runTune } from './services/bbTuner';
 import { threadJobsOn, inThread } from './services/threadJob';
 import { buildBbCalibration } from './services/sportCalibration';
+import { startKeyPlayersScheduler } from './services/keyPlayers';
 import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
 import { pushAlertsTick } from './services/pushAlerts';
 
@@ -108,6 +109,8 @@ export function startJobs() {
   // ~25 min after the start, then daily (each kept only when it beats the raw chances on its test season)
   afterHeavy('bb calibration', () => buildBbCalibration('start'), 25 * 60 * 1000).unref();
   everyHeavy('bb calibration', () => buildBbCalibration('daily'), 24 * 3600 * 1000).unref();
+  // fix224: basketball star-rest patterns (daily), injuries from news + what was applied to each game (every 30 min)
+  startKeyPlayersScheduler();
   // fix216: the daily picks email and the weekly digest, at each person's own send hour (checked every 5 min)
   migrateMarketingOptIn(); // fix218: the old "Email updates" switch → weekly digest, once
   every('picks emails', () => picksEmailTick().catch(e => logger.warn(`picks emails: ${e?.message || e}`)), 5 * 60 * 1000).unref();
