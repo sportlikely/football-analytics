@@ -36,7 +36,7 @@ import { exitReason, saveWorkerExit, startPerfHistory } from './services/perfHis
 // its server over (this app answers from now on). Started alone (node dist/index.js, tests) it listens itself.
 const early = (globalThis as any).__slBootServer as http.Server | undefined;
 const server = early ?? http.createServer(app);
-if (early) { early.removeAllListeners('request'); early.on('request', app); }
+if (early) { early.removeAllListeners('request'); early.on('request', app); (globalThis as any).__slApp = app; } // fix238: boot.ts hands its held API calls over
 const io = new Server(server, {
   cors: {
     origin: corsOrigin,

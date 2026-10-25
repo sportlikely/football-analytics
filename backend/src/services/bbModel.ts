@@ -35,7 +35,7 @@ type Game = {
 };
 type Params = { k: number; r: number; b2b: number };
 type Team = { o: number; d: number; season: string; games: number; last: number; sg: number; ha: number };
-type Pred = { pHome: number; margin: number; neutral?: number; netH?: number; netA?: number; haH?: number; haA?: number; sig?: number; grid?: GridView; model?: string; pV3?: number; pRaw?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis };
+type Pred = { pHome: number; margin: number; neutral?: number; netH?: number; netA?: number; haH?: number; haA?: number; sig?: number; grid?: GridView; model?: string; pV3?: number; pRaw?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis; gridOff?: string[] };
 /** fix192: how a team with no games in the league was rated ('other-league' = its rating there, moved to this league's level) */
 export type NewBasis = 'other-league' | 'bottom3';
 
@@ -843,8 +843,10 @@ function predictRaw(g: Game, phIn?: number, paIn?: number): Pred | null {
     const sd = g.code === 'NBA' ? nbaSameDay(g) : null;
     // fix225: + each side's top-3 part (the star factor)
     const gv = gridPredict(g, { p: x.pHome, hca: pr.hca, haH: pr.haH, haA: pr.haA, b2bHome: pr.b2bHome, b2bAway: pr.b2bAway }, sigma, sd ? { home: sd.home.sameDay, away: sd.away.sameDay, homeTop: sd.home.sameDayTop || 0, awayTop: sd.away.sameDayTop || 0 } : undefined);
+    // fix238: a row out of its usual range (or a rotation that doesn't fill the game) → bb-v3, listed in data health
+    if (gv?.off) return { ...cur, gridOff: gv.off };
     if (gv) {
-      const pts = (s: { sameDay: number; sameDayTop?: number }) => Math.round(Math.max(0, -row4Points(g.code, s.sameDay, s.sameDayTop || 0)) * 10) / 10;
+      const pts =(s: { sameDay: number; sameDayTop?: number }) => Math.round(Math.max(0, -row4Points(g.code, s.sameDay, s.sameDayTop || 0)) * 10) / 10;
       if (sd) {
         v4Detail.set(g.game_id, { model: 'bb-v4', mode: 'grid', pHome: gv.pHome, margin: gv.margin, impact: 0, sameDay: sd.home.sameDay - sd.away.sameDay, home: sd.home, away: sd.away, points: { home: pts(sd.home), away: pts(sd.away) }, row4: Math.round(gv.parts[3] * 100) / 100 });
         if (v4Detail.size > 2000) v4Detail.delete(v4Detail.keys().next().value as number);

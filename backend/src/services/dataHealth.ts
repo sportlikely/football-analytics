@@ -417,12 +417,18 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try {
     const up = db.prepare(`SELECT game_id, code, season, kickoff, status, home_id, away_id, hs, as_, stage AS week, home_name, away_name FROM bb_games
       WHERE (status IS NULL OR status = 'NS') AND kickoff > ? AND kickoff < ? ORDER BY kickoff LIMIT 400`).all(new Date(now).toISOString(), new Date(now + 48 * 3600 * 1000).toISOString()) as any[];
-    const views = up.map(g => ({ g, p: predictGameCached(g) })).filter(x => x.p?.grid).map(x => ({ label: `${x.g.code} ${x.g.home_name} – ${x.g.away_name}`, view: x.p!.grid! }));
+    const preds = up.map(g => ({ g, p: predictGameCached(g), label: `${g.code} ${g.home_name} – ${g.away_name}` }));
+    const views = preds.filter(x => x.p?.grid).map(x => ({ label: x.label, view: x.p!.grid! }));
+    // fix238: a game with a row out of range (or a short rotation) is shown with bb-v3 — handled, listed; still warn
+    // when bb-v4 is shown with an out-of-range row (its group's test season said bb-v4 is better there)
+    const off = preds.filter(x => x.p?.gridOff?.length);
     const r = rowSanityViews(views);
     checks.push({
       id: 'bb-grid-rows', label: 'Basketball model rows (bb-v4) within their usual range', level: r.bad.length ? 'warn' : 'ok',
-      detail: views.length ? `${r.checked} upcoming game(s) · ${r.bad.length ? `${r.bad.length} row value(s) more than 3 sd from training` : 'every row inside 3 sd of training'}` : 'no upcoming bb-v4 game in 48 h',
-      items: r.bad.slice(0, 30)
+      detail: views.length || off.length
+        ? `${r.checked + off.length} upcoming game(s) · ${r.bad.length ? `${r.bad.length} row value(s) more than 3 sd from training shown with bb-v4` : 'every row shown with bb-v4 inside 3 sd of training'}${off.length ? ` · ${off.length} game(s) shown with bb-v3 (a row out of range or a short rotation)` : ''}`
+        : 'no upcoming bb-v4 game in 48 h',
+      items: [...off.map(x => `${x.label}: shown with bb-v3 — ${x.p!.gridOff!.join('; ')}`), ...r.bad].slice(0, 30)
     });
   } catch (e: any) { logger.warn(`bb grid rows: ${e?.message || e}`); }
   // fix220: calibration, every sport — said vs happened per band of the last 30 days' picks (error: a band of 50+

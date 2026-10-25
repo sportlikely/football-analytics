@@ -358,3 +358,15 @@ Jokić ~+10. Bulls–Wizards: the on/off model had the Bulls by 6 (Trae Young �
   The game page's grid shows whenever the group's engine is bb-v4 (`gridLive`).
 - Tests: `npm run test:fix236` (5). Real numbers: on the server after deploy (no basketball rows in the local copy);
   if Rest of the world still fails, the card's checks say whether the league settings or #4's proxy is the cause.
+
+## fix238 — rows out of their usual range (26 Oct)
+
+- Thunder – Clippers #1 19.38 (train 0.06 ± 5.40) is a real mismatch, not a broken row: NBA training rows reach −20.25 / +19.40,
+  the 2025-26 test season had 8 games past 3 sd (10 Oct database).
+- Test season (never tuned on), NBA, games with any row past 3 sd (#6 / #11 not judged): 219 games, bb-v3 0.4860 vs bb-v4 0.4951
+  log loss (hit 77.2% vs 76.7%); per row bb-v3 better on #1 (8), #2 (16), #3 (7), #4 (64), #7 (21), #8 (81), #10 (7), #13 (27);
+  bb-v4 better on #9 (10) and #12 (4). Whole season bb-v4 0.5945 vs bb-v3 0.5952.
+- Rule: such a game is shown with bb-v3 where its group's test season agrees (`fallbackCheck` in utils/bbGridMath.ts, per group in
+  the published grid state; under 20 games: on). A rotation that doesn't fill the game → bb-v3. Live player ratings held in the
+  established players' range (`LeagueSnap.cap`); the stored training rows are unchanged.
+- Not tried: a softer rule (shrink instead of switch, a per-row threshold) — would be fitted on the test season; needs its own gate.

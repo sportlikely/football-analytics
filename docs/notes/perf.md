@@ -419,3 +419,8 @@ first "bb model" build (every game's impact recomputed) held the heavy queue —
   no length(json) scan; index `idx_page_cache_meta`); `?shared=1` the shared states. A stall while only /api/perf or
   /api/admin/* ran is kept apart (`diagStalls`), never in the hour's count or data health "Web stalls".
 - Test: `npm run test:fix232` (restart with a 60-s fake model rebuild, `SL_TEST_MODEL_MS`).
+
+## fix238 — the last freezes (26 Oct)
+- Old crawler links → the id index on the web (no 3 s worker ask, no page build first). `/api/matches/upcoming` only the 14 / 30-day
+  stored copies. Start-up: boot.ts holds API calls for the app; before the state, a kept route copy (X-SL-Copy: startup) or a wait
+  (`STARTUP_WAIT_MS`, 30 s) — no 503 "Starting up" for the API (/health keeps it).

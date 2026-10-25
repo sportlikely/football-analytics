@@ -31,7 +31,7 @@ import { db } from '../db';
 import { yieldLoop } from './perf';
 import { onState, publishState } from './shared';
 import { ridgeFit, rotation, strength, projMinutes, choleskySolve, probit, type FitGame, type ImpactFit, type RotPlayer } from '../utils/nbaImpact';
-import { GRID_ROWS, N_ROWS, VOL, startYear, ALT, type GridBase, type GridItem } from '../utils/bbGridMath';
+import { GRID_ROWS, N_ROWS, VOL, startYear, ALT, GRID_TRAIN, capTo, rotationOk, type GridBase, type GridItem } from '../utils/bbGridMath';
 import {
   BOX_DEFAULT, BOX_TRAIN, assertBoxTrain, emptyTot, addTot, ratesOf, leagueRates, stintValues, carry, fullMinutes, draftPrior, NO_PRIOR,
   shrinkLambda, topIds, blendRating, fitBoxCoef, type BoxCoef, type BoxTot, type Stint, type BoxFitGame
@@ -83,11 +83,18 @@ export type TeamSnap = {
   pl?: PlRow[];
   /** fix225: #1, #4, #4's top-3 part and #8 (not faded) under the A ratings, then the same under the B values */
   nv?: number[];
+  /** fix238 (live snapshot only): the projected rotation — players, minutes (must be 5 × game length ± 1) */
+  rot?: [number, number];
 };
 export type PlRow = [number, number, number, number, number?, number?, number?];
 export type LeagueSnap = {
   code: string; gameMin: number; teams: Map<number, TeamSnap>; lg: number[]; pace: number; seasonLen: number;
   h2h: Map<string, [number, number, number][]>; builtAt: string;
+  /**
+   * fix238: each rating set held inside the range of the league's established players (800+ minutes, 667 in 40-minute
+   * leagues): C / A = the latest fits, B = the box values at the end of the train seasons; n = players held live
+   */
+  cap?: { C: [number, number] | null; A: [number, number] | null; B: [number, number] | null; n: number; ids: number[] };
 };
 
 /** the row values of one game from the two teams' snapshots and the game's own facts */
@@ -213,9 +220,16 @@ export async function replayLeague(code: string, base: Map<number, GridBase>, fo
     for (const [id, c] of cur) out.set(id, carry(c, prevVal.get(id) ?? priorOf(id, season), FULL));
     return out;
   };
-  const rC = (id: number) => (fit ? (fit.ratings.get(id) ?? -1) : 0);
-  const rA = (id: number, season: string) => (fitA ? (fitA.ratings.get(id) ?? priorOf(id, season)) : 0);
-  const rB = (id: number, season: string) => (boxNow ? (boxNow.get(id) ?? priorOf(id, season)) : 0);
+  // fix238: the live snapshot holds every rating inside its set's range (`cap`, set after the replay; the stored rows don't)
+  let cap: { C: [number, number] | null; A: [number, number] | null; B: [number, number] | null } | null = null;
+  const capped = new Set<number>();
+  const held = (id: number, v: number, r: [number, number] | null) => { if (!r) return v; const c = capTo(v, r); if (c !== v) capped.add(id); return c; };
+  const rC = (id: number) => { const v = fit ? (fit.ratings.get(id) ?? -1) : 0; return cap ? held(id, v, cap.C) : v; };
+  const rA = (id: number, season: string) => { const v = fitA ? (fitA.ratings.get(id) ?? priorOf(id, season)) : 0; return cap ? held(id, v, cap.A) : v; };
+  const rB = (id: number, season: string) => { const v = boxNow ? (boxNow.get(id) ?? priorOf(id, season)) : 0; return cap ? held(id, v, cap.B) : v; };
+  // fix238: box values of established players at the end of each train season (the range B is held in)
+  const rangeB: [number, number] = [Infinity, -Infinity];
+  const widen = (r: [number, number], v: number | undefined) => { if (v !== undefined && Number.isFinite(v)) { if (v < r[0]) r[0] = v; if (v > r[1]) r[1] = v; } };
 
   const side = (team: number, only?: Set<number>) => {
     const ids = only || new Set<number>();
@@ -262,7 +276,15 @@ export async function replayLeague(code: string, base: Map<number, GridBase>, fo
     if (++i % 300 === 0) await yieldLoop();
     if (!seasonsSeen.includes(g.season)) {
       // fix225: the season that ended → every player's value carried into the next one (traded players keep theirs)
-      if (seasonsSeen.length) { const last = seasonsSeen[seasonsSeen.length - 1]; for (const [id, v] of boxValues(last)) prevVal.set(id, v); }
+      if (seasonsSeen.length) {
+        const last = seasonsSeen[seasonsSeen.length - 1], vals = boxValues(last);
+        for (const [id, v] of vals) prevVal.set(id, v);
+        if (GRID_TRAIN.includes(startYear(last))) {
+          const min = new Map<number, number>();
+          for (const st of tots.get(last)?.values() || []) min.set(st.id, (min.get(st.id) || 0) + st.tot.min);
+          for (const [id, m] of min) if (m >= FULL) widen(rangeB, vals.get(id));
+        }
+      }
       seasonsSeen.push(g.season);
     }
     if (!g.pre && g.finished && (fitSeason !== g.season || g.ms >= nextFit)) {
@@ -386,6 +408,19 @@ export async function replayLeague(code: string, base: Map<number, GridBase>, fo
     if (use.length >= 50) { fit = ridgeFit(use, 30, L); await yieldLoop(); fitA = ridgeFit(use, 30, L, shrinkLambda); }
     boxNow = boxValues(seasonsSeen[seasonsSeen.length - 1] || lastSeason);
   }
+  // fix238: the ranges of the established players (minutes in the fits' window), then every live rating inside them
+  {
+    const cur0 = lastSeason ? startYear(lastSeason) : 0;
+    const min = new Map<number, number>();
+    for (const r of fitRows) if (r.s >= cur0 - 2) for (const [id, m] of [...r.home, ...r.away]) min.set(id, (min.get(id) || 0) + m);
+    const rangeOf = (f: ImpactFit | null): [number, number] | null => {
+      if (!f) return null;
+      const r: [number, number] = [Infinity, -Infinity];
+      for (const [id, v] of f.ratings) if ((min.get(id) || 0) >= FULL) widen(r, v);
+      return r[0] <= r[1] ? [r3(r[0]), r3(r[1])] : null;
+    };
+    cap = { C: rangeOf(fit), A: rangeOf(fitA), B: rangeB[0] <= rangeB[1] ? [r3(rangeB[0]), r3(rangeB[1])] : null };
+  }
   // the latest values of every team that played in the last 400 days (the live predictions)
   const teams = new Map<number, TeamSnap>();
   const recent = games.filter(g => g.finished && lastFinishedMs - g.ms < 400 * DAY);
@@ -400,11 +435,14 @@ export async function replayLeague(code: string, base: Map<number, GridBase>, fo
   };
   for (const g of recent) for (const t of [g.home, g.away]) if (!teams.has(t)) {
     const top = topIds(side(t).map(p => ({ id: p.id, box: rB(p.id, cur), min: p.min })));
-    teams.set(t, { ...snapOf(t, cur), pl: plOf(t, top) });
+    const rot = rotation(side(t), undefined, L);
+    teams.set(t, { ...snapOf(t, cur), pl: plOf(t, top), rot: [rot.length, r3(rot.reduce((x, p) => x + p.proj, 0))] });
   }
   // seasonLen for the live tank rule: the last finished season
   const seasonLen = seasonGames.get(prevSeasonOf(cur)) || seasonGames.get(cur) || 0;
-  return { items, snap: { code, gameMin: L, teams, lg, pace, seasonLen, h2h, builtAt: new Date().toISOString() } };
+  const short = [...teams.values()].filter(t => t.rot && t.rot[0] > 0 && !rotationOk(t.rot[1], L)).length;
+  if (short || capped.size) logger.info(`bb-v4 grid ${code}: ${capped.size} player rating(s) held inside the established range, ${short} team(s) without a full rotation`);
+  return { items, snap: { code, gameMin: L, teams, lg, pace, seasonLen, h2h, builtAt: new Date().toISOString(), cap: { C: cap.C, A: cap.A, B: cap.B, n: capped.size, ids: [...capped].slice(0, 50) } } };
 }
 
 const totOf = (r: any): BoxTot => ({ min: Number(r.minutes) || 0, pts: Number(r.pts) || 0, fga: Number(r.fga) || 0, fta: Number(r.fta) || 0, tpm: Number(r.tpm) || 0, reb: Number(r.reb) || 0, ast: Number(r.ast) || 0 });
@@ -607,7 +645,11 @@ export function liveRows(g: { code: string; game_id?: number; home_id: number; a
     base, home: g.home_id, away: g.away_id, ms: Date.parse(g.kickoff), rs: isRegular(g.week || null) && !isPre(g.code, g.kickoff), neutral: isNeutral(g.code, g.week || null),
     three: [threeInFour(g.home_id, g.kickoff), threeInFour(g.away_id, g.kickoff)], gpH: hh.gp, gpA: aa.gp, missH: miss?.home, missA: miss?.away
   });
-  return { ...r, t4: r3(tH - tA) };
+  // fix238: a side whose projected rotation doesn't fill the game (5 × game length ± 1 minutes): row #1 can't be trusted
+  // (no players at all = a league without player box scores: #1 is 0 there in training too)
+  const rot = ([['home', h0], ['away', a0]] as [string, TeamSnap][]).filter(([, t]) => t.rot && t.rot[0] > 0 && !rotationOk(t.rot[1], s.gameMin))
+    .map(([side, t]) => `${side} rotation ${t.rot![0]} players, ${t.rot![1]} minutes (not ${5 * s.gameMin})`);
+  return { ...r, t4: r3(tH - tA), rot };
 }
 
 export const GRID_ROW_NAMES = GRID_ROWS.map(r => r.name);

@@ -224,7 +224,7 @@ function copyKey(req: express.Request): string {
 
 // one fetch per key at a time: the other visitors asking for it wait for the same answer
 const inflight = new Map<string, Promise<Copy | WorkerAnswer>>();
-const stats = { forwarded: 0, served: 0, stale: 0, refreshed: 0, failed: 0 };
+const stats = { forwarded: 0, served: 0, stale: 0, refreshed: 0, failed: 0, startup: 0 };
 
 function fetchCopy(k: string, req: express.Request, keep: boolean): Promise<Copy | WorkerAnswer> {
   let p = inflight.get(k);
@@ -262,6 +262,23 @@ export function workerRoutes(req: express.Request, res: express.Response, next: 
     stats.failed++;
     if (!res.headersSent) res.status(503).set('Retry-After', '10').json({ error: 'Loading, please try again in a moment' });
   });
+}
+
+/**
+ * fix238: while the web process loads its state (the first seconds after a deploy) a signed-out GET of a worker route
+ * gets its last kept copy at once (X-SL-Copy: startup) instead of 503 "Starting up". The crawler / data-centre flags
+ * are not known yet: only the plain signed-out copy is sent. false = no copy (the caller waits for the state).
+ */
+export function sendStartupCopy(req: express.Request, res: express.Response, signedIn: boolean): boolean {
+  if (!isWeb || req.method !== 'GET' || signedIn || !workerRouteOf(req.path)) return false;
+  const [path, qs = ''] = req.originalUrl.split('?');
+  const q = new URLSearchParams(qs);
+  q.sort();
+  const c = readCopy(`${path}?${q.toString()}|`);
+  if (!c || c.status !== 200) return false;
+  stats.startup++;
+  sendCopy(res, c, 'startup');
+  return true;
 }
 
 /** /api/perf: how the worker routes were answered since start, and the copies kept */

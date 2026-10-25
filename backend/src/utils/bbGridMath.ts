@@ -229,6 +229,46 @@ export function rowStats(items: GridItem[]): { mean: number[]; sd: number[] } {
   return { mean: mean.map(x => Math.round(x * 1e4) / 1e4), sd: sd.map(x => Math.round(Math.sqrt(x) * 1e4) / 1e4) };
 }
 
+/*
+ * fix238 — rows out of their usual range. Research (10 Oct database, NBA 2025-26 test season, never tuned on): on the
+ * 219 games with a row more than 3 sd from training bb-v3 had log loss 0.4860 against bb-v4's 0.4951 (bb-v4 too sure on
+ * mismatches; row #1's 8 games 0.0458 vs 0.0670), on the whole season bb-v4 0.5945 vs 0.5952. So such a game is shown
+ * with bb-v3 where its group's test season agrees (fallbackCheck). #6 rest and #11 motivation are flags, never judged.
+ */
+export const RANGE_SD = 3;
+export function rowsOutOfRange(it: { hv: number[]; av: number[] }, stats: { mean: number[]; sd: number[] }): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < N_ROWS; i++) {
+    if (!(stats.sd[i] > 1e-6) || i === 5 || i === 10) continue;
+    const d = i === VOL ? volOf(it) : diff(it, i);
+    if (Math.abs(d - stats.mean[i]) > RANGE_SD * stats.sd[i]) out.push(i);
+  }
+  return out;
+}
+/** "#1 Player impact … 19.38 (train 0.06 ± 5.4)" for each out-of-range row */
+export const rangeLabels = (it: { hv: number[]; av: number[] }, stats: { mean: number[]; sd: number[] }, rows = rowsOutOfRange(it, stats)) =>
+  rows.map(i => `${GRID_ROWS[i].id} ${GRID_ROWS[i].name} ${Math.round((i === VOL ? volOf(it) : diff(it, i)) * 100) / 100} (train ${stats.mean[i]} ± ${stats.sd[i]})`);
+/**
+ * A group's test-season games with a row out of range: bb-v4's and bb-v3's log loss there. on = bb-v3 shown for such
+ * games (bb-v3 at least as good; under 20 games: on, the safe side).
+ */
+export type FallbackCheck = { games: number; v4: number | null; v3: number | null; on: boolean };
+export function fallbackCheck(items: GridItem[], stats: { mean: number[]; sd: number[] }, paramsOf: (code: string) => GridParams): FallbackCheck {
+  const l = items.filter(x => rowsOutOfRange(x, stats).length);
+  if (!l.length) return { games: 0, v4: null, v3: null, on: true };
+  let a = 0, b = 0;
+  for (const x of l) {
+    const q = clampP(gridEval(paramsOf(x.code), x.code, x).pHome), r = clampP(x.v3);
+    a -= x.y ? Math.log(q) : Math.log(1 - q); b -= x.y ? Math.log(r) : Math.log(1 - r);
+  }
+  const v4 = Math.round((a / l.length) * 1e4) / 1e4, v3 = Math.round((b / l.length) * 1e4) / 1e4;
+  return { games: l.length, v4, v3, on: l.length < 20 || v3 <= v4 };
+}
+/** a player's rating held inside the range of the league's established players (null = no range yet) */
+export const capTo = (v: number, r: [number, number] | null | undefined) => (r && r[0] <= r[1] ? Math.min(r[1], Math.max(r[0], v)) : v);
+/** the projected rotation must fill the game: 5 × game length minutes, ±1 */
+export const rotationOk = (min: number, gameMin: number) => Math.abs(min - 5 * gameMin) <= 1;
+
 export const logLoss = (p: GridParams, items: GridItem[]) => {
   let s = 0;
   for (const it of items) { const q = gridEval(p, it.code, it).pHome; s += -(it.y ? Math.log(q) : Math.log(1 - q)); }

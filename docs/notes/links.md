@@ -77,3 +77,7 @@ The crawler pages are still built from the old addresses inside (`internalPage`)
 Resubmit `https://sportlikely.com/sitemap.xml` in Google Search Console (and Bing Webmaster Tools) once the first "slugs" run
 has finished (log "slugs football: … lookups", ~5–10 min after the start; Admin API `/api/admin/slugs` shows each sport's
 state). The old addresses keep answering 301 forever.
+
+fix238: the web process answers old match / player ids of every season from a prebuilt index (`slugs-ids:<sport>`, built with
+the sport's slug state; `/api/admin/slugs` → idIndex). Once it is loaded the web never asks the worker for an old address; one
+without a slug gets the plain app page at once (no page build before answering).

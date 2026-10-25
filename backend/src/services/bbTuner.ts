@@ -18,7 +18,7 @@ import {
   GRID_ROWS, GRID_DEFAULT, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, N_ROWS, VOL, assertTrainYears, fitGrid, compare, rowStats, fittedSplit,
   gridEval, split1000, groupOf, diff, volOf, weightsFor, logLoss, spreadOf, fitLeagueSet, regionGroup, LS_ROWS,
   MISS, missInputs, missSplit, fitMiss, fitProxy, missGate, missFrom, usesOracle, starOf, impactInputs, impactGate, altShare,
-  type GridItem, type GridParams, type GridView, type LeagueSet, type MissSet, type MissGate, type ImpactSet, type ImpactGate
+  rowsOutOfRange, rangeLabels, fallbackCheck, type FallbackCheck, type GridItem, type GridParams, type GridView, type LeagueSet, type MissSet, type MissGate, type ImpactSet, type ImpactGate
 } from '../utils/bbGridMath';
 import { WB_START, topLoss, BOX_FEATS, type BoxCoef } from '../utils/boxValue';
 import { rotation, strength } from '../utils/nbaImpact';
@@ -35,7 +35,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS bb_tuned (id TEXT PRIMARY KEY, params TEXT N
  */
 export type GateCheck = { name: string; pass: boolean; whole: number; first25: number; live: boolean };
 export type GroupGate = { group: string; pass: boolean; reason: string; whole: any; first25: any; oracle: any; leagues: string[]; variant?: 'full' | 'shared'; basis?: string; checks?: GateCheck[] };
-export type GridState = { params: GridParams; gate: Record<string, GroupGate>; stats: { mean: number[]; sd: number[] }; at: string; perLeague: Record<string, any>; live: any };
+export type GridState = {
+  params: GridParams; gate: Record<string, GroupGate>; stats: { mean: number[]; sd: number[] }; at: string; perLeague: Record<string, any>; live: any;
+  /** fix238: per group, bb-v4 vs bb-v3 on the test season's games with a row out of range (on = such games shown with bb-v3) */
+  fallback?: Record<string, FallbackCheck>;
+};
 let gs: GridState | null = null;
 let ver = 0;
 onState('bb:grid:p', (_k, v: any) => { gs = v as GridState; ver++; });
@@ -155,6 +159,12 @@ export function publishGridState(items = loadRows(), p = storedParams()): GridSt
     params: p, gate: gridGate(live, p, { proxyBefore: proxyBefore() }), stats: rowStats(train), at: new Date().toISOString(),
     perLeague: perLeague(live, p, y => y === GRID_TEST), live: perLeague(live, p, y => y >= GRID_LIVE_FROM)
   };
+  // fix238: games with a row out of range — bb-v3 shown where it was at least as good on that group's test season
+  s.fallback = {};
+  for (const g of Object.keys(s.gate)) {
+    const test = live.filter(x => x.year === GRID_TEST && groupOf(x.code) === g);
+    s.fallback[g] = fallbackCheck(test, s.stats, code => groupParams(p, s.gate, code));
+  }
   gs = s; ver++;
   try { noteEngines(s.gate); } catch (e: any) { logger.warn(`bb engine log: ${e?.message || e}`); }
   publishState('bb:grid:p', s);
@@ -531,14 +541,22 @@ export function gridLive(code: string): boolean {
 /**
  * bb-v4 for an upcoming game from bb-v3's prediction (x.p: its chance before the injury points; home edges, rest; sigma) and, for the NBA, the injury report's lost impact (#4). null = not live for the league / no team values.
  */
-export function gridPredict(g: { code: string; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null }, x: { p: number; hca: number; haH?: number; haA?: number; b2bHome: boolean; b2bAway: boolean }, sigma: number, miss?: { home: number; away: number; homeTop?: number; awayTop?: number }): { pHome: number; margin: number; parts: number[]; view: GridView } | null {
+export function gridPredict(g: { code: string; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null }, x: { p: number; hca: number; haH?: number; haA?: number; b2bHome: boolean; b2bAway: boolean }, sigma: number, miss?: { home: number; away: number; homeTop?: number; awayTop?: number }): { pHome: number; margin: number; parts: number[]; view: GridView; off?: string[] } | null {
   if (!gridLive(g.code) || !gs) return null;
   const r = liveRows(g, { p: x.p, sig: sigma, hca: x.hca, haH: x.haH || 0, haA: x.haA || 0, b2bH: x.b2bHome, b2bA: x.b2bAway }, miss, gs.params.impact);
   if (!r) return null;
   const it = { hv: r.hv, av: r.av, sig: sigma, t4: r.t4 };
   const p = liveParams(g.code)!;
   const e = gridEval(p, g.code, it);
-  return { pHome: e.pHome, margin: e.margin, parts: e.parts, view: split1000(p, g.code, it, gs.stats.sd) };
+  // fix238: a short rotation, or a row out of range where the group's test season says bb-v3 does better → `off`
+  const out = rangeLabels(it, gs.stats);
+  const off = [...r.rot, ...(out.length && fallbackOn(g.code) ? out : [])];
+  return { pHome: e.pHome, margin: e.margin, parts: e.parts, view: split1000(p, g.code, it, gs.stats.sd), ...(off.length ? { off } : {}) };
+}
+/** fix238: bb-v3 shown for this league's out-of-range games (no check stored yet: yes, the safe side) */
+export function fallbackOn(code: string): boolean {
+  if (String(process.env.BB_RANGE_FALLBACK || '').toLowerCase() === 'off') return false;
+  return gs?.fallback?.[groupOf(code)]?.on ?? true;
 }
 
 /** Row sanity from the game-page views (the rows a live prediction used): see rowSanity. */
@@ -576,11 +594,7 @@ export function rowSanity(rows: { label: string; hv: number[]; av: number[] }[])
   const { mean, sd } = gs.stats;
   const bad: string[] = [];
   // (#6 rest and #11 motivation are flags: a back-to-back or a tanking team is a normal value, not a drift)
-  for (const r of rows) for (let i = 0; i < N_ROWS; i++) {
-    if (!(sd[i] > 1e-6) || i === 5 || i === 10) continue;
-    const d = i === VOL ? volOf(r) : diff(r, i);
-    if (Math.abs(d - mean[i]) > 3 * sd[i]) bad.push(`${r.label}: ${GRID_ROWS[i].id} ${GRID_ROWS[i].name} ${Math.round(d * 100) / 100} (train ${mean[i]} ± ${sd[i]})`);
-  }
+  for (const r of rows) if (rowsOutOfRange(r, { mean, sd }).length) for (const l of rangeLabels(r, { mean, sd })) bad.push(`${r.label}: ${l}`);
   return { checked: rows.length, bad };
 }
 

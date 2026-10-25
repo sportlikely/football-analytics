@@ -99,12 +99,55 @@ function canonicalId(sport: LinkSport, kind: LinkKind, id: string): string {
   if (isWeb || !runsJobs) return id;
   try { return (qOldId().get(sport, kind, id) as any)?.id ?? id; } catch { return id; }
 }
+/*
+ * fix238: every match and player id of a sport (all seasons, old / twin ids too) → its primary slug, prebuilt by the
+ * worker beside the state above (`slugs-ids:<sport>`). Old crawler links (/basketball/game/318721, /de/…) were asked of
+ * the worker (3–4.7 s web stalls, 25 Oct); now the web answers them from memory. Chunks of sorted ids (binary search,
+ * microseconds): ids = Float64Array (sorted), off = Uint32Array (slug i = text.slice(off[i], off[i + 1])).
+ */
+export type IdChunk = { kind: LinkKind; ids: Float64Array; off: Uint32Array; text: string };
+export interface IdIndex { sport: LinkSport; builtAt: number; entries: number; chunks: IdChunk[] }
+const idIndexes = new Map<LinkSport, IdIndex>();
+onState('slugs-ids:', (_key, v: IdIndex) => { if (v?.sport) idIndexes.set(v.sport, v); });
+const ID_CHUNK = 4096;
+/** sorted (id, slug) pairs of one kind → chunks */
+export function idChunks(kind: LinkKind, pairs: [number, string][]): IdChunk[] {
+  pairs.sort((a, b) => a[0] - b[0]);
+  const out: IdChunk[] = [];
+  for (let i = 0; i < pairs.length; i += ID_CHUNK) {
+    const part = pairs.slice(i, i + ID_CHUNK);
+    const ids = new Float64Array(part.length), off = new Uint32Array(part.length + 1);
+    let text = '';
+    part.forEach(([id, s], k) => { ids[k] = id; off[k] = text.length; text += s; });
+    off[part.length] = text.length;
+    out.push({ kind, ids, off, text });
+  }
+  return out;
+}
+/** an id's slug in the index (null = not there) */
+export function indexedSlug(ix: IdIndex | null | undefined, kind: LinkKind, id: string): string | null {
+  if (!ix || !/^-?\d+$/.test(id)) return null;
+  const n = Number(id);
+  for (const c of ix.chunks) {
+    if (c.kind !== kind || !c.ids.length || n < c.ids[0] || n > c.ids[c.ids.length - 1]) continue;
+    let lo = 0, hi = c.ids.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1, v = c.ids[mid];
+      if (v === n) return c.text.slice(c.off[mid], c.off[mid + 1]);
+      if (v < n) lo = mid + 1; else hi = mid - 1;
+    }
+    return null;
+  }
+  return null;
+}
+export const idIndexOf = (sport: LinkSport) => idIndexes.get(sport) || null;
+
 /** id → the item's slug (null = no slug yet). The web process reads its state only. */
 export function slugOf(sport: LinkSport, kind: LinkKind, id: string | number | null | undefined): string | null {
   if (id == null || id === '') return null;
   const key = String(id);
   const st = states.get(sport);
-  const hit = st?.map.get(`i:${kind}/${key}`);
+  const hit = st?.map.get(`i:${kind}/${key}`) ?? ((kind === 'match' || kind === 'player') ? indexedSlug(idIndexes.get(sport), kind, key) : null);
   if (hit) return hit;
   if (isWeb) return null;
   try {
@@ -210,7 +253,15 @@ export function linkAnswer(path: string, query = ''): LinkAnswer {
   let s = slugOf(old.sport, old.kind, id);
   if (!s && !isWeb && old.sport === 'football' && old.kind === 'team') s = fdTeamSlug(Number(id), new URLSearchParams(query.replace(/^\?/, '')));
   if (s) return { to: `${lang}/${old.sport}/${old.kind}/${s}${kept}` };
+  // fix238: the web holds every id once the sport's state + id index are loaded: an id not there has no slug (yet) —
+  // no worker round trip (old football team links with a Football-Data.org id still ask: the worker matches the name)
+  if (isWeb && states.has(old.sport) && (old.kind === 'team' || old.kind === 'league' || idIndexes.has(old.sport)) && !(old.sport === 'football' && old.kind === 'team')) return null;
   return isWeb ? { ask: true } : null;
+}
+/** fix238: an old (id) address of any sport, any language — the page route never builds one before answering */
+export function isOldAddress(path: string): boolean {
+  const lm = new RegExp(`^${LANG_RE}(\\/.*)$`).exec(path);
+  return !!parseOld((lm?.[2] || path).replace(/\/+$/, '') || '/');
 }
 /** Football-Data.org codes that live under another code (fix176) */
 const MERGED_FB_LEAGUES: Record<string, string> = { BSA: 'AF71' };
@@ -584,6 +635,24 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   const st: SlugState = { sport, builtAt: Date.now(), map, client: JSON.stringify({ v: 1, ...client }), clientPlayers: JSON.stringify({ v: 1, p: clientP }) };
   states.set(sport, st);
   applyState(`slugs:${sport}`, st);
+  await step();
+  // fix238: every match and player (all seasons) + their old / twin ids → the id index the web answers old links from
+  const chunks: IdChunk[] = [];
+  let entries = 0;
+  for (const kind of ['match', 'player'] as const) {
+    const prim = new Map<string, string>();
+    for (const r of all(`SELECT id, slug FROM slugs WHERE sport = ? AND kind = ? AND is_primary = 1`, sport, kind)) prim.set(String(r.id), r.slug);
+    await step();
+    for (const r of all(`SELECT old_id, id FROM slug_ids WHERE sport = ? AND kind = ?`, sport, kind)) { const s = prim.get(String(r.id)); if (s && !prim.has(String(r.old_id))) prim.set(String(r.old_id), s); }
+    const pairs: [number, string][] = [];
+    for (const [id, s] of prim) if (/^-?\d+$/.test(id)) pairs.push([Number(id), s]);
+    entries += pairs.length;
+    chunks.push(...idChunks(kind, pairs));
+    await step();
+  }
+  const ix: IdIndex = { sport, builtAt: Date.now(), entries, chunks };
+  idIndexes.set(sport, ix);
+  applyState(`slugs-ids:${sport}`, ix);
 }
 function recentPlayers(sport: LinkSport): Set<string> | null {
   if (sport === 'football') { const s = all(`SELECT MAX(season) AS s FROM af_player_season`)[0]?.s; return s ? new Set(all(`SELECT DISTINCT player_id AS id FROM af_player_season WHERE season >= ?`, s - 1).map(r => String(r.id))) : new Set(); }
@@ -641,7 +710,8 @@ function nameRows(sport: LinkSport) {
 let running = false, lastFull = 0;
 export const slugStatus = () => Object.fromEntries(LINK_SPORTS.map(s => {
   const st = states.get(s);
-  return [s, st ? { builtAt: new Date(st.builtAt).toISOString(), entries: st.map.size, clientKb: Math.round(st.client.length / 1024), playersKb: Math.round(st.clientPlayers.length / 1024) } : null];
+  const ix = idIndexes.get(s);
+  return [s, st ? { builtAt: new Date(st.builtAt).toISOString(), entries: st.map.size, clientKb: Math.round(st.client.length / 1024), playersKb: Math.round(st.clientPlayers.length / 1024), idIndex: ix ? { entries: ix.entries, chunks: ix.chunks.length, kb: Math.round(ix.chunks.reduce((a, c) => a + c.ids.byteLength + c.off.byteLength + c.text.length, 0) / 1024) } : null } : null];
 }));
 /** worker job "slugs": new items every run; renames (every item's name checked again) every 6 hours */
 export async function buildSlugs(opts: { full?: boolean; sports?: LinkSport[] } = {}): Promise<void> {

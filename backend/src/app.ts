@@ -90,7 +90,7 @@ import { isReady, readiness } from './services/readiness';
 import { serveEarly, needsState, currentMainScript } from './services/earlyStatic';
 import { deployErrorsMiddleware, noteLoading } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
-import { workerRoutes, workerRoutesStatus } from './services/workerRoutes';
+import { workerRoutes, workerRoutesStatus, sendStartupCopy } from './services/workerRoutes';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
 import { deferredStatus } from './services/deferredWrites';
 import { builder, webBuilds } from './services/builders';
@@ -98,7 +98,7 @@ import { workerHealth, memorySizing } from './services/workerHealth';
 import { perfHours } from './services/perfHistory';
 import { sharedStatus } from './services/shared';
 import { forwardToWorker, fetchFromWorker } from './services/forward';
-import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, type LinkAnswer } from './services/slugs';
+import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, type LinkAnswer } from './services/slugs';
 import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
 import { definePage, getPage, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
@@ -261,9 +261,25 @@ app.use(express.urlencoded({ extended: true }));
 // 503 on the app file left visitors on the crawler text; the 503 stays for /health and the API only. Behind the beta
 // gate (SITE_PASSWORD) only the public files go early. Every 5xx in the first 5 minutes is counted (deployErrors.ts).
 if (isWeb) app.use(deployErrorsMiddleware);
+// fix238: the API during the load (9 × 503 "Starting up" on 25 Oct): a signed-out worker page gets its last kept copy at
+// once, every other API request waits for the state (at most STARTUP_WAIT_MS) and is answered then — no 5xx. /health
+// and the socket keep the 503 (Railway's health check must see "not ready").
+const STARTUP_WAIT_MS = Number(process.env.STARTUP_WAIT_MS) || 30000;
 if (isWeb) app.use((req, res, next) => {
   if (isReady()) return next();
   if (!needsState(req.path) && (!SITE_PASSWORD || req.path.startsWith('/assets/') || PUBLIC_FILES.has(req.path)) && serveEarly(req, res)) return;
+  if (req.path.startsWith('/api/') && req.path !== '/api/health' && !SITE_PASSWORD) {
+    const signedIn = !!req.get('authorization') || String(req.get('cookie') || '').includes(`${SESSION_COOKIE}=`);
+    if (sendStartupCopy(req, res, signedIn)) return;
+    const t0 = Date.now();
+    const tick = () => {
+      if (isReady()) return next();
+      if (res.writableEnded || req.destroyed) return;
+      if (Date.now() - t0 > STARTUP_WAIT_MS) return res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
+      setTimeout(tick, 100);
+    };
+    return tick();
+  }
   res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
 });
 // API responses are data, not pages: keep them out of search results (robots.txt stays open so tools can read them)
@@ -1912,7 +1928,9 @@ async function buildUpcoming(days: number): Promise<any> {
 definePage({ name: 'upcoming', freshMs: 30 * 1000, build: q => buildUpcoming(Number(q.days) || 30), rows: b => listRows(b), warm: [{ days: 14 }, { days: 30 }] });
 app.get('/api/matches/upcoming', async (req, res) => {
   try {
-    const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
+    // fix238: only the two stored copies (14 / 30 days, warm): any other number was a key never built — the web waited
+    // for the worker ("stored upcoming: read 1,579 ms"); a shorter ask gets the 14-day copy (a few more games)
+    const days = (parseInt(String(req.query.days || '30'), 10) || 30) <= 14 ? 14 : 30;
     const access = req.access || 'anon';
     // signed-in Free / Premium: their unlocked games in full (finished games are in full for everyone)
     if (req.user && !canSeeFull(access)) return await sendStored(req, res, 'upcoming', { days }, 'anon', unlockedIds(req.user.id));
@@ -4301,6 +4319,9 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     // fix195: an old tennis fixture id merged into its match → the match's page (any language prefix kept)
     const tnOld = /^(\/[a-z]{2})?\/tennis\/match\/(\d+)\/?$/.exec(req.path);
     if (tnOld) { const to = tennisMovedId(Number(tnOld[2])); if (to) return res.redirect(301, `${tnOld[1] || ''}/tennis/match/${to}`); }
+    // fix238: an old (id) address without a slug: its stored crawler copy if there is one, never a wait for a build
+    // (the 3–4.7 s stalls of 25 Oct) — the worker builds it in the background, the plain app page meanwhile
+    const pageWait = isOldAddress(req.path) ? 0 : SEO_WAIT_MS;
     // fix199: a page read from a data-centre / proxy address counts towards its limits (sign-in / sign-up pages never)
     const nw = req.access !== 'admin' && !req.user?.emailVerified && req.ip ? networkOf(req.ip) : null;
     if (nw && !/^(\/[a-z]{2})?\/(login|signup|join|forgot|verify|account|reset|privacy|terms|contact)(\/|$)/.test(req.path)) {
@@ -4316,13 +4337,13 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       const lang0 = (/^\/(es|pt|de|fr|it|tr)(\/|$)/.exec(req.path)?.[1] || 'en') as any;
       const bbg = !bbPublic() ? null : la && 'page' in la && la.page.sport === 'basketball' && la.page.kind === 'match' ? { id: Number(la.page.id), lang: lang0 } : bbGamePath(req.path);
       if (bbg) {
-        const f = (await getPage('bb-game-facts', { id: bbg.id }, { waitMs: SEO_WAIT_MS }))?.body;
+        const f = (await getPage('bb-game-facts', { id: bbg.id }, { waitMs: pageWait }))?.body;
         if (f) return res.type('html').send(renderIndex(indexHtml, bbGameSeo(f, bbg.lang, la && 'page' in la ? la.page.slug : undefined)));
       }
       const home = seoHome(req.path);
       // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page
       // (the app renders it in the browser; the next request gets the stored copy)
-      const s = home ? await getPage('seo', { path: home }) : await getPage('seo-page', { path: seoPathOf(req.path).slice(0, 300) }, { waitMs: SEO_WAIT_MS });
+      const s = home ? await getPage('seo', { path: home }) : await getPage('seo-page', { path: seoPathOf(req.path).slice(0, 300) }, { waitMs: pageWait });
       const html = s?.view('html');
       // fix227: a copy stored before a deploy names the old build's app file (gone: a 404, no app, the crawler text
       // left on screen) — the plain app page until the worker has made the new copy
