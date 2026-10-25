@@ -102,6 +102,8 @@ export default function Admin() {
       {tab === 'overview' && (
         <>
           <VisitorsCard />
+          {/* fix221: near the top — the photo matches waiting for Approve / Wrong person */}
+          <PlayerPhotosCard />
           <ModelDailyCard />
           <SeasonForecastAdminCard />
           <SiteErrorsCard />
@@ -113,7 +115,6 @@ export default function Admin() {
           <LeaguesCard />
           <LeaguesCard sport="basketball" />
           <SportParityCard />
-          <PlayerPhotosCard />
           <EmailsAdminCard />
           <AfUsageCard />
           <NflCard />

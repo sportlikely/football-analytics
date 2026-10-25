@@ -78,6 +78,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   one heavy job at a time (heavy()); every cache has a size cap. Exits / memory / stalls: services/perfHistory.ts.
   fix210b: the web process writes nothing but sign-in / account actions — anything else goes through
   `deferred(sql)` (services/deferredWrites.ts: written by the worker); it loads the stored state before it listens.
+  fix221: the web process only sends stored strings — never JSON.parse / stringify a page there. Every stored view has
+  an ETag + gzip copy (made by the worker); a big list is stored row by row (`rows` in definePage: members' copies are
+  joined from the strings); anything that needs the page itself goes to the worker (`byWorker` in app.ts).
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
   `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a

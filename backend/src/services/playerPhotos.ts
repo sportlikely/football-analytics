@@ -87,15 +87,25 @@ export function plainAuthor(html: string | null | undefined): string {
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
-export interface Ours { sport: PhotoSport; name: string; dob?: string | null; age?: number | null; country?: string | null; teams?: string[]; atpId?: string | null; wtaId?: string | null }
+export interface Ours {
+  sport: PhotoSport; name: string; dob?: string | null; age?: number | null; country?: string | null; teams?: string[]; atpId?: string | null; wtaId?: string | null
+  /** fix221: our league codes of the player's current teams (NBA, EL …) */
+  leagues?: string[]
+  /** fix221: NBA — his college, from balldontlie ("Kentucky") */
+  college?: string | null
+}
 export interface Candidate {
   qid: string; names: string[]; human: boolean; sports: string[]
   /** YYYY-MM-DD (day precision) or YYYY (year precision) */
   dob: string | null
   /** every code and name of each citizenship (IOC, ISO 2 / 3, English name), lower case */
   countries: string[]
-  /** labels of the teams he played for (P54) */
+  /** labels of the teams he played for (P54) or was drafted by (P647) */
   teams: string[]
+  /** fix221: labels of his leagues (P118) and of those teams' leagues */
+  leagues?: string[]
+  /** fix221: labels of the schools he went to (P69) */
+  schools?: string[]
   atp: string | null; wta: string | null; image: string | null
 }
 export interface Decision { qid: string | null; confidence: 'high' | 'low' | null; reason: string; image: string | null }
@@ -117,41 +127,65 @@ const ageAt = (dob: string, now: number) => {
  * fix214: API-Basketball's roster age is the age when the player was first stored, 2–4 years behind (Dončić "25" at
  * 27, Reaves "25" at 28): the old ±1.6 window dropped the right item for nearly every player (basketball 1 of 4,899).
  * The real age may be up to AGE_STALE years above ours, never more than 1.6 below.
+ * fix221: the age is never a reason to drop an item any more (it still says "age" when it fits): only a birth date
+ * contradicts one (±1 day). Neither API-Basketball nor balldontlie sends a birth date, so for basketball the team /
+ * league signals below decide.
  */
 export const AGE_STALE = 5;
 export const ageFits = (real: number, ours: number) => real - ours >= -1.6 && real - ours <= AGE_STALE;
+/** fix221: our birth date and Wikidata's (day, or year when that is all Wikidata has): the same within a day */
+export function dobFits(ours: string, wd: string): boolean {
+  if (wd.length === 4) return wd === ours.slice(0, 4);
+  const a = Date.parse(ours.slice(0, 10)), b = Date.parse(wd);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= DAY;
+}
+/** fix221: Wikidata league labels of our league codes (the targets: NBA, EuroLeague) */
+const LEAGUE_LABEL: Record<string, RegExp> = { NBA: /^(national basketball association|nba)$/, EL: /^(turkish airlines )?euroleague( basketball)?$/ };
+export const inLeague = (ours: Ours, c: Candidate) => (ours.leagues || []).some(code => LEAGUE_LABEL[code] && (c.leagues || []).some(l => LEAGUE_LABEL[code].test(l.toLowerCase().trim())));
+const onOurTeam = (ours: Ours, c: Candidate) => (ours.teams || []).some(t => c.teams.some(x => sameTeam(t, x)));
+const SCHOOL_WORDS = new Set(['university', 'of', 'the', 'college', 'at', 'men', 's', 'mens', 'basketball', 'team']);
+const schoolWords = (s: string) => nameKey(s).split(' ').filter(w => w && !SCHOOL_WORDS.has(w));
+/** fix221: balldontlie's college ("Kentucky", "Texas A&M") in a school (P69 "University of Kentucky") or a college team (P54 "Kentucky Wildcats men's basketball") */
+export function collegeFits(college: string, label: string): boolean {
+  const a = schoolWords(college), b = schoolWords(label);
+  return a.length > 0 && a.every(w => b.includes(w));
+}
+const fromCollege = (ours: Ours, c: Candidate) => !!ours.college && [...(c.schools || []), ...c.teams].some(s => collegeFits(ours.college!, s));
 
 /** pick one Wikidata item for our player — or none, with the reason */
 export function decide(ours: Ours, cands: Candidate[], now = Date.now()): Decision {
   const key = nameKey(ours.name);
   if (abbreviated(ours.name) || !key.includes(' ')) return { qid: null, confidence: null, reason: 'name too short or abbreviated', image: null };
   const named = cands.filter(c => c.human && c.sports.includes(SPORT_Q[ours.sport]) && c.names.some(n => nameKey(n) === key));
-  // contradictions drop a candidate (a different person with the same name)
+  // contradictions drop a candidate (a different person with the same name): a birth date that is not ours (fix221)
   const dobOurs = ours.dob ? String(ours.dob).slice(0, 10) : null;
-  const alive = named.filter(c => {
-    if (dobOurs && c.dob && (c.dob.length === 4 ? c.dob !== dobOurs.slice(0, 4) : c.dob !== dobOurs)) return false;
-    if (ours.age != null && c.dob) { const a = ageAt(c.dob, now); if (a != null && !ageFits(a, ours.age)) return false; }
-    return true;
-  });
-  if (!alive.length) return { qid: null, confidence: null, reason: named.length ? `${named.length} same-name item(s), birth date / age disagrees` : 'no Wikidata match', image: null };
+  const alive = named.filter(c => !(dobOurs && c.dob && !dobFits(dobOurs, c.dob)));
+  if (!alive.length) return { qid: null, confidence: null, reason: named.length ? `${named.length} same-name item(s), birth date disagrees` : 'no Wikidata match', image: null };
   // fix214: several same-name items (a stub without a birth date, a namesake in another league): the one who played for
-  // one of our teams is him; none or two of them → no photo
-  const onTeam = alive.length > 1 ? alive.filter(c => (ours.teams || []).some(t => c.teams.some(x => sameTeam(t, x)))) : [];
-  if (alive.length > 1 && onTeam.length !== 1) return { qid: null, confidence: null, reason: `same name: ${alive.length} candidates (${alive.map(c => c.qid).join(', ')})`, image: null };
-  const c = onTeam.length === 1 ? onTeam[0] : alive[0];
+  // one of our teams is him; fix221: else the one from his college, the one in our league (P54 team's league, P118),
+  // the one whose age fits (father and son: "Jabari Smith Jr.", "LeBron James Jr." on the same team); none or two → no photo
+  const ageOk = (x: Candidate) => { const y = ours.age != null && x.dob ? ageAt(x.dob, now) : null; return y != null && ageFits(y, ours.age!); };
+  const pickOne = (f: (c: Candidate) => boolean) => { const x = alive.filter(f); return x.length === 1 ? x[0] : null; };
+  const c = alive.length === 1 ? alive[0]
+    : pickOne(x => onOurTeam(ours, x)) || pickOne(x => onOurTeam(ours, x) && ageOk(x)) || pickOne(x => fromCollege(ours, x)) || pickOne(x => inLeague(ours, x))
+      || pickOne(x => inLeague(ours, x) && ageOk(x)) || pickOne(ageOk);
+  if (!c) return { qid: null, confidence: null, reason: `same name: ${alive.length} candidates (${alive.map(x => x.qid).join(', ')})`, image: null };
   const country = ours.country ? String(ours.country).trim().toLowerCase() : null;
   const sig = {
-    dob: !!(dobOurs && c.dob && c.dob.length === 10 && c.dob === dobOurs),
+    dob: !!(dobOurs && c.dob && c.dob.length === 10 && dobFits(dobOurs, c.dob)),
     atp: !!(ours.atpId && c.atp && ours.atpId.toLowerCase() === c.atp.toLowerCase()),
     wta: !!(ours.wtaId && c.wta && ours.wtaId === c.wta),
     country: !!(country && c.countries.includes(country)),
-    team: (ours.teams || []).some(t => c.teams.some(x => sameTeam(t, x))),
-    age: ours.age != null && !!c.dob
+    team: onOurTeam(ours, c),
+    league: inLeague(ours, c),
+    college: fromCollege(ours, c),
+    age: ageOk(c)
   };
-  const said = [sig.dob && `birth date ${dobOurs}`, sig.atp && 'ATP id', sig.wta && 'WTA id', sig.team && 'team', sig.age && 'age', sig.country && `country ${country!.toUpperCase()}`].filter(Boolean).join(' + ');
+  const said = [sig.dob && `birth date ${dobOurs}`, sig.atp && 'ATP id', sig.wta && 'WTA id', sig.team && 'team', sig.league && `league ${ours.leagues!.join('/')}`, sig.college && `college ${ours.college}`, sig.age && 'age', sig.country && `country ${country!.toUpperCase()}`].filter(Boolean).join(' + ');
   let confidence: Decision['confidence'] = null;
   if (ours.sport === 'tennis') confidence = sig.dob || sig.atp || sig.wta ? 'high' : sig.country ? 'low' : null;
-  else confidence = sig.team || sig.dob || (sig.age && sig.country) ? 'high' : sig.age || sig.country ? 'low' : null;
+  // fix221: a team of his league or his college is enough (a rookie's item often lists only his college)
+  else confidence = sig.team || sig.league || sig.college || sig.dob || (sig.age && sig.country) ? 'high' : sig.age || sig.country ? 'low' : null;
   if (!confidence) return { qid: c.qid, confidence: null, reason: 'name only (nothing else agrees)', image: null };
   return { qid: c.qid, confidence, reason: `name + ${said}`, image: c.image };
 }
@@ -188,23 +222,28 @@ const namesOf = (e: any): string[] => [
   ...Object.values(e?.aliases || {}).flat().map((l: any) => l?.value)
 ].filter(Boolean);
 
-/** labels (+ country codes) of a few items, cached in photo_wd_cache for 30 days */
-async function refInfo(ids: string[]): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>(), miss: string[] = [];
+/**
+ * labels (+ country codes) of a few items, cached in photo_wd_cache for 30 days. fix221: with the item's leagues (P118:
+ * a team's league) — stored as { vals, leagues }; a row of the old shape (a plain list) is fetched again.
+ */
+type Ref = { vals: string[]; leagues: string[] };
+async function refInfo(ids: string[]): Promise<Map<string, Ref>> {
+  const out = new Map<string, Ref>(), miss: string[] = [];
   const fresh = new Date(Date.now() - 30 * DAY).toISOString();
   for (const id of [...new Set(ids)]) {
     const row = db.prepare(`SELECT data FROM photo_wd_cache WHERE qid = ? AND at >= ?`).get(id, fresh) as any;
-    if (row) out.set(id, JSON.parse(row.data)); else miss.push(id);
+    const d = row ? JSON.parse(row.data) : null;
+    if (d && !Array.isArray(d) && Array.isArray(d.vals)) out.set(id, d); else miss.push(id);
   }
   for (let i = 0; i < miss.length; i += 40) {
     const part = miss.slice(i, i + 40);
     const j = await (await get(`${WD}action=wbgetentities&props=labels|claims&languages=en&ids=${part.join('|')}`)).json();
     for (const id of part) {
       const e = j?.entities?.[id];
-      // a country: English name, ISO 3166 alpha-2 / alpha-3, IOC code; a team: its English name
-      const vals = [e?.labels?.en?.value, claimStr(e, 'P297'), claimStr(e, 'P298'), claimStr(e, 'P984')].filter(Boolean).map((x: string) => x.toLowerCase());
-      out.set(id, vals);
-      db.prepare(`INSERT OR REPLACE INTO photo_wd_cache (qid, data, at) VALUES (?, ?, ?)`).run(id, JSON.stringify(vals), new Date().toISOString());
+      // a country: English name, ISO 3166 alpha-2 / alpha-3, IOC code; a team: its English name (+ its leagues)
+      const r: Ref = { vals: [e?.labels?.en?.value, claimStr(e, 'P297'), claimStr(e, 'P298'), claimStr(e, 'P984')].filter(Boolean).map((x: string) => x.toLowerCase()), leagues: claimIds(e, 'P118') };
+      out.set(id, r);
+      db.prepare(`INSERT OR REPLACE INTO photo_wd_cache (qid, data, at) VALUES (?, ?, ?)`).run(id, JSON.stringify(r), new Date().toISOString());
     }
   }
   return out;
@@ -222,12 +261,19 @@ async function candidatesFor(sport: PhotoSport, name: string): Promise<Candidate
   // only items whose name matches go on to the team / country look-ups
   const key = nameKey(name);
   const named = ents.filter(e => namesOf(e).some(n => nameKey(n) === key));
-  const refs = await refInfo(named.flatMap(e => [...claimIds(e, 'P27'), ...(sport === 'basketball' ? claimIds(e, 'P54') : [])]));
+  // fix221: basketball also the team that drafted him (P647) and his leagues (P118, and his teams' leagues)
+  const teamIds = (e: any) => (sport === 'basketball' ? [...claimIds(e, 'P54'), ...claimIds(e, 'P647')] : []);
+  const schoolIds = (e: any) => (sport === 'basketball' ? claimIds(e, 'P69') : []);
+  const refs = await refInfo(named.flatMap(e => [...claimIds(e, 'P27'), ...teamIds(e), ...schoolIds(e)]));
+  const leagueIds = (e: any) => (sport === 'basketball' ? [...new Set([...claimIds(e, 'P118'), ...teamIds(e).flatMap(id => refs.get(id)?.leagues || [])])] : []);
+  const leagueRefs = await refInfo(named.flatMap(leagueIds));
   return ents.map(e => ({
     qid: e.id, names: namesOf(e), human: claimIds(e, 'P31').includes('Q5'),
     sports: [...claimIds(e, 'P641'), ...(claimIds(e, 'P106').includes(OCCUPATION_Q[sport]) ? [SPORT_Q[sport]] : [])], dob: claimDate(e),
-    countries: claimIds(e, 'P27').flatMap(id => refs.get(id) || []),
-    teams: claimIds(e, 'P54').map(id => (refs.get(id) || [])[0]).filter(Boolean),
+    countries: claimIds(e, 'P27').flatMap(id => refs.get(id)?.vals || []),
+    teams: teamIds(e).map(id => refs.get(id)?.vals[0]).filter((x): x is string => !!x),
+    leagues: leagueIds(e).map(id => leagueRefs.get(id)?.vals[0]).filter((x): x is string => !!x),
+    schools: schoolIds(e).map(id => refs.get(id)?.vals[0]).filter((x): x is string => !!x),
     atp: claimStr(e, 'P536'), wta: claimStr(e, 'P597'), image: claimStr(e, 'P18')
   }));
 }
@@ -383,7 +429,8 @@ function basketballQueue(): (Ours & { id: number; prio: number })[] {
       rosterTeams.set(r.id, [...(rosterTeams.get(r.id) || []), r.team_id]);
     for (const x of by.values()) {
       const codes = (rosterTeams.get(x.id) || []).map(t => leagueOf.get(t));
-      if (codes.includes('NBA')) { x.prio -= 2e6; nbaFullName(x); } else if (codes.includes('EL')) x.prio -= 1e6;
+      x.leagues = [...new Set(codes.filter((c): c is string => !!c))]; // fix221: "a team of his league" signal
+      if (codes.includes('NBA')) { x.prio -= 2e6; nbaFullName(x); x.college = nbaCollege(x); } else if (codes.includes('EL')) x.prio -= 1e6;
     }
   } catch (e: any) { logger.warn(`player photos: basketball list: ${e?.message || e}`); }
   return [...by.values()];
@@ -408,6 +455,25 @@ function nbaFullName(x: Ours & { id: number }) {
   } catch { /* no balldontlie tables */ }
 }
 
+/** fix221: an NBA player's college from balldontlie (same full name; the one on his team when there are two) */
+let bdlByName: { at: number; map: Map<string, { college: string | null; team: string | null }[]> } | null = null;
+function nbaCollege(x: Ours & { id: number }): string | null {
+  if (abbreviated(x.name)) return null;
+  if (!bdlByName || Date.now() - bdlByName.at > 3600 * 1000) {
+    const map = new Map<string, { college: string | null; team: string | null }[]>();
+    try {
+      for (const r of db.prepare(`SELECT p.first, p.last, p.college, t.full_name AS team FROM bdl_players p LEFT JOIN bdl_teams t ON t.id = p.team_id WHERE p.active = 1`).all() as any[]) {
+        const k = nameKey(`${r.first} ${r.last}`);
+        map.set(k, [...(map.get(k) || []), { college: r.college || null, team: r.team || null }]);
+      }
+    } catch { /* no balldontlie tables */ }
+    bdlByName = { at: Date.now(), map };
+  }
+  const rows = bdlByName.map.get(nameKey(x.name)) || [];
+  const one = rows.length === 1 ? rows[0] : rows.filter(r => r.team && (x.teams || []).some(t => sameTeam(t, r.team!)))[0];
+  return one?.college && !/^(none|n\/a)$/i.test(one.college) ? one.college : null;
+}
+
 /** players to look at now: never looked at first (best first), then the oldest look over 7 days ago (no review / block) */
 function queue(limit: number) {
   const seen = new Map((db.prepare(`SELECT sport, player_id, status, checked_at, path FROM player_photos`).all() as any[]).map(r => [pkey(r.sport, r.player_id), r]));
@@ -419,8 +485,9 @@ function queue(limit: number) {
       if (!r) return false;
       // an approved photo whose file vanished (a restored database) is fetched again at once
       if (r.status === 'ok' && r.path && !fs.existsSync(fileOf(x.sport, r.path)!)) return true;
-      return (r.status === 'ok' || r.status === 'none') && r.checked_at < stale;
-    }).sort((a, b) => String(seen.get(pkey(a.sport, a.id))!.checked_at).localeCompare(String(seen.get(pkey(b.sport, b.id))!.checked_at)));
+      // fix221: a match waiting for review is looked at again once when the rules change (requeueOnce)
+      return ((r.status === 'ok' || r.status === 'none') && r.checked_at < stale) || (r.status === 'review' && r.checked_at < '2001');
+    }).sort((a, b) => String(seen.get(pkey(a.sport, a.id))!.checked_at).localeCompare(String(seen.get(pkey(b.sport, b.id))!.checked_at)) || a.prio - b.prio);
     return [...fresh, ...again];
   };
   const t = pick(tennisQueue()), b = pick(basketballQueue());
@@ -442,11 +509,11 @@ const run = { at: null as string | null, done: 0, ok: 0, review: 0, none: 0, err
  */
 export const PHOTO_SLICE = 20;
 /** fix214: basketball players turned down by the old rules (stale age) are looked at again now, not in 7 days */
-const MATCHER = 'fix214';
+const MATCHER = 'fix221'; // fix214: stale ages; fix221: league signal, no age veto (review rows too)
 function requeueOnce() {
   const done = db.prepare(`SELECT data FROM photo_wd_cache WHERE qid = '_matcher'`).get() as any;
   if (done?.data === JSON.stringify(MATCHER)) return;
-  const n = db.prepare(`UPDATE player_photos SET checked_at = '2000-01-01T00:00:00.000Z' WHERE sport = 'basketball' AND status = 'none'`).run().changes;
+  const n = db.prepare(`UPDATE player_photos SET checked_at = '2000-01-01T00:00:00.000Z' WHERE sport = 'basketball' AND status IN ('none', 'review')`).run().changes;
   db.prepare(`INSERT OR REPLACE INTO photo_wd_cache (qid, data, at) VALUES ('_matcher', ?, ?)`).run(JSON.stringify(MATCHER), new Date().toISOString());
   logger.info(`player photos: ${n} basketball players queued again (${MATCHER} matcher)`);
 }
@@ -584,22 +651,16 @@ export function unblockPhoto(key: string) {
 
 /* ---------------- data health ---------------- */
 
-export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items: string[] } {
+/** fix212b: basketball coverage per league (current squads; fix221: NBA ≥ 85 %, EuroLeague ≥ 60 % are the targets) */
+export function bbCoverage(): { n: number; has: number; leagues: { code: string; n: number; has: number }[] } {
   load();
   const has = (sport: PhotoSport, id: number) => shown.has(pkey(sport, id));
-  const pct = (a: number, b: number) => (b ? `${Math.round((1000 * a) / b) / 10}%` : '–');
-  let top100 = 0, n100 = 0, top500 = 0, n500 = 0;
-  try {
-    const rows = db.prepare(`SELECT r.player_id AS id, r.rank FROM tennis_rankings r JOIN (SELECT tour, MAX(date) AS d FROM tennis_rankings WHERE tour IN ('atp','wta') GROUP BY tour) l
-      ON l.tour = r.tour AND l.d = r.date WHERE r.rank <= 500 AND r.player_id IS NOT NULL`).all() as any[];
-    for (const r of rows) { n500++; if (has('tennis', r.id)) top500++; if (r.rank <= 100) { n100++; if (has('tennis', r.id)) top100++; } }
-  } catch { /* no tennis tables */ }
   let bbN = 0, bbHas = 0;
-  // fix212b: coverage per league (NBA ≥ 85 % and EuroLeague ≥ 50 % are the targets), and why the rest have none
   const leagues: { code: string; n: number; has: number }[] = [];
   try {
     const since = new Date(Date.now() - 180 * DAY).toISOString();
-    const rows = db.prepare(`SELECT DISTINCT r.player_id AS id, g.code FROM bb_roster r JOIN (SELECT home_id AS team_id, code FROM bb_games WHERE kickoff >= ? UNION SELECT away_id, code FROM bb_games WHERE kickoff >= ?) g ON g.team_id = r.team_id WHERE r.updated_at >= ?`).all(since, since, since) as any[];
+    const rows = db.prepare(`SELECT DISTINCT r.player_id AS id, g.code FROM bb_roster r JOIN (SELECT home_id AS team_id, code FROM bb_games WHERE kickoff >= ? UNION SELECT away_id, code FROM bb_games WHERE kickoff >= ?) g ON g.team_id = r.team_id
+      WHERE r.updated_at >= ? AND r.season = (SELECT MAX(season) FROM bb_roster r2 WHERE r2.team_id = r.team_id)`).all(since, since, since) as any[]; // fix221: current squads only
     const ids = new Set<number>();
     const by = new Map<string, { code: string; n: number; has: number }>();
     for (const r of rows) {
@@ -611,6 +672,20 @@ export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn'
     bbN = ids.size; bbHas = [...ids].filter(id => has('basketball', id)).length;
     leagues.push(...[...by.values()].sort((a, b) => b.n - a.n));
   } catch { /* no basketball tables */ }
+  return { n: bbN, has: bbHas, leagues };
+}
+
+export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items: string[] } {
+  load();
+  const has = (sport: PhotoSport, id: number) => shown.has(pkey(sport, id));
+  const pct = (a: number, b: number) => (b ? `${Math.round((1000 * a) / b) / 10}%` : '–');
+  let top100 = 0, n100 = 0, top500 = 0, n500 = 0;
+  try {
+    const rows = db.prepare(`SELECT r.player_id AS id, r.rank FROM tennis_rankings r JOIN (SELECT tour, MAX(date) AS d FROM tennis_rankings WHERE tour IN ('atp','wta') GROUP BY tour) l
+      ON l.tour = r.tour AND l.d = r.date WHERE r.rank <= 500 AND r.player_id IS NOT NULL`).all() as any[];
+    for (const r of rows) { n500++; if (has('tennis', r.id)) top500++; if (r.rank <= 100) { n100++; if (has('tennis', r.id)) top100++; } }
+  } catch { /* no tennis tables */ }
+  const { n: bbN, has: bbHas, leagues } = bbCoverage();
   const reasons = (sport: PhotoSport) => { try { return db.prepare(`SELECT COALESCE(reason, status) AS reason, COUNT(*) AS n FROM player_photos WHERE sport = ? AND status <> 'ok' GROUP BY 1 ORDER BY n DESC LIMIT 6`).all(sport) as { reason: string; n: number }[]; } catch { return []; } };
   // a shown photo must have its author and licence stored (credit), and a file
   const bad = db.prepare(`SELECT sport, player_id, name FROM player_photos WHERE status = 'ok' AND (author IS NULL OR author = '' OR licence IS NULL OR licence = '' OR source_url IS NULL)`).all() as any[];
@@ -627,11 +702,11 @@ export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn'
   ];
   const stale = process.env.PLAYER_PHOTOS !== '0' && (!lastRun || Date.parse(lastRun) < Date.now() - 2 * DAY);
   return {
-    id: 'player-photos', label: 'Player photos', level: bad.length ? 'fail' : stale || missing.length || (nba && nba.n >= 50 && nba.has / nba.n < 0.85) || (el && el.n >= 50 && el.has / el.n < 0.5) ? 'warn' : 'ok',
+    id: 'player-photos', label: 'Player photos', level: bad.length ? 'fail' : stale || missing.length || (nba && nba.n >= 50 && nba.has / nba.n < 0.85) || (el && el.n >= 50 && el.has / el.n < 0.6) ? 'warn' : 'ok',
     detail: `tennis top 100 ${pct(top100, n100)} · top 500 ${pct(top500, n500)} · basketball ${pct(bbHas, bbN)} (${bbHas} of ${bbN}) · ${review} to review · last run ${lastRun ? lastRun.slice(0, 16).replace('T', ' ') : 'never'}`,
     items
   };
 }
 
 /** for tests: swap the network */
-export const __test = { setFetcher: (f: Fetcher) => { fetcher = f; lastCall = 0; }, candidatesFor, commonsInfo, queue };
+export const __test = { setFetcher: (f: Fetcher) => { fetcher = f; lastCall = 0; }, candidatesFor, commonsInfo, queue, basketballQueue };

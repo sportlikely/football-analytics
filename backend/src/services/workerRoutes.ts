@@ -129,7 +129,7 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   { path: '/api/basketball/record', sport: 'basketball', by: 'stored', sample: '/api/basketball/record' },
   { path: '/api/basketball/upset-watch', sport: 'basketball', by: 'worker', sample: '/api/basketball/upset-watch' },
   // American football
-  { path: '/api/nfl/config', sport: 'nfl', by: 'web', sample: '/api/nfl/config' },
+  { path: '/api/nfl/config', sport: 'nfl', by: 'stored', sample: '/api/nfl/config' }, // fix221
   { path: '/api/nfl/home', sport: 'nfl', by: 'stored', sample: '/api/nfl/home' },
   { path: '/api/nfl/games', sport: 'nfl', by: 'worker', sample: '/api/nfl/games' },
   { path: '/api/nfl/game/:id(\\d+)', sport: 'nfl', by: 'worker', sample: '/api/nfl/game/1', kind: 'game' },

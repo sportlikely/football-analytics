@@ -40,11 +40,13 @@ test('recorded Wikidata: 20 known NBA players, ≥ 17 matched high (the right it
 
 const b = (o = {}) => ({ qid: 'Q19844712', names: ['Luka Dončić'], human: true, sports: ['Q5372'], dob: '1999-02-28', countries: ['slovenia', 'si', 'svn', 'slo'], teams: ['Los Angeles Lakers', 'Dallas Mavericks', 'Real Madrid Baloncesto'], atp: null, wta: null, image: 'Luka.jpg', ...o });
 
-test('stale roster age: up to 5 years under the real age fits, more than 1.6 over does not', () => {
+// fix221: an age that does not fit no longer drops the item (only a birth date does, ±1 day); it just is not evidence
+test('stale roster age: up to 5 years under the real age fits; an age that does not fit is no evidence, never a veto', () => {
   assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', age: 25, country: 'Slovenia' }, [b()], NOW).confidence, 'high', '"25" at 27');
   assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', age: 23, country: 'Slovenia' }, [b()], NOW).confidence, 'high', '"23" at 27');
-  assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', age: 21, country: 'Slovenia' }, [b()], NOW).qid, null, '6+ years off');
-  assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', age: 30, country: 'Slovenia' }, [b()], NOW).qid, null, 'older than he is');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', age: 21, country: 'Slovenia' }, [b()], NOW).confidence, 'low', '6+ years off: country only → review');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', age: 30, country: 'Slovenia' }, [b()], NOW).confidence, 'low', 'older than he is: country only → review');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', age: 30, teams: ['Los Angeles Lakers'] }, [b()], NOW).confidence, 'high', 'his team agrees');
 });
 
 test('same name: the one who played for our team is him; a namesake elsewhere or two on our team → none', () => {
@@ -61,4 +63,54 @@ test('names: HTML-escaped and suffixes in the middle', () => {
   assert.equal(ph.searchName('Pippen Jr Scotty'), 'Pippen Scotty');
   assert.equal(ph.searchName('Jaquez Jr. Jaime'), 'Jaquez Jaime');
   assert.equal(ph.searchName('Melton De&apos;Anthony'), "Melton De'Anthony");
+});
+
+// fix221: birth dates (±1 day), the league and college signals, and the coverage on 200 real players
+test('birth date: the same within a day (Wikidata midnight UTC vs our local date), else the item is dropped', () => {
+  assert.equal(ph.dobFits('1999-02-28', '1999-02-28'), true);
+  assert.equal(ph.dobFits('1999-02-27', '1999-02-28'), true);
+  assert.equal(ph.dobFits('1999-02-26', '1999-02-28'), false);
+  assert.equal(ph.dobFits('1999-06-01', '1999'), true, 'year precision');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', dob: '1999-02-27', teams: [] }, [b()], NOW).confidence, 'high');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Doncic Luka', dob: '1990-02-28', teams: ['Los Angeles Lakers'] }, [b()], NOW).qid, null, 'another birth date: another person');
+});
+
+test('league and college: a rookie whose item lists only his college; namesakes split by college / league / age', () => {
+  const rookie = b({ qid: 'Q9', names: ['Bub Carrington'], teams: ['Pittsburgh Panthers men\'s basketball'], schools: ['University of Pittsburgh'], leagues: ['NCAA Division I'], countries: ['usa', 'united states'], dob: '2005-07-21' });
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Bub Carrington', country: 'USA', teams: ['Washington Wizards'], leagues: ['NBA'] }, [rookie], NOW).confidence, 'low', 'country only');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Bub Carrington', country: 'USA', teams: ['Washington Wizards'], leagues: ['NBA'], college: 'Pittsburgh' }, [rookie], NOW).confidence, 'high');
+  const vet = b({ qid: 'Q8', names: ['Deandre Ayton'], teams: ['Phoenix Suns', 'Portland Trail Blazers'], leagues: ['National Basketball Association'], countries: ['bahamas'] });
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Ayton Deandre', teams: ['Washington Wizards'], leagues: ['NBA'] }, [vet], NOW).confidence, 'high', 'a team of his league');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Ayton Deandre', teams: ['Real Madrid'], leagues: ['EL'] }, [vet], NOW).confidence, null, 'not our league: name only');
+  // father and son, both NBA: the age picks the son
+  const sr = b({ qid: 'Q1', names: ['Jabari Smith'], leagues: ['National Basketball Association'], teams: ['Sacramento Kings'], dob: '1977-11-30', schools: ['University of California, Berkeley'] });
+  const jr = b({ qid: 'Q2', names: ['Jabari Smith Jr.'], leagues: ['National Basketball Association'], teams: ['Auburn Tigers men\'s basketball'], dob: '2003-05-13', schools: ['Auburn University'] });
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Smith Jr. Jabari', age: 20, teams: ['Houston Rockets'], leagues: ['NBA'] }, [sr, jr], NOW).qid, 'Q2');
+  assert.equal(ph.decide({ sport: 'basketball', name: 'Smith Jr. Jabari', teams: ['Houston Rockets'], leagues: ['NBA'], college: 'Auburn' }, [sr, jr], NOW).qid, 'Q2');
+  assert.equal(ph.collegeFits('Texas A&M', 'Texas A&M Aggies men\'s basketball'), true);
+  assert.equal(ph.collegeFits('Ohio State', 'Ohio University'), false);
+});
+
+test('recorded coverage: 100 NBA + 100 EuroLeague players of the 10 Oct copy — NBA ≥ 85 %, EuroLeague ≥ 60 % matched high', async () => {
+  require('../dist/db/index.js').db.exec('DELETE FROM photo_wd_cache'); // the recording was made with an empty cache
+  const cov = JSON.parse(fs.readFileSync(new URL('./fixtures/wikidata-bb-coverage.json', import.meta.url), 'utf8'));
+  let missing = 0;
+  ph.__test.setFetcher(async url => {
+    const j = cov.responses[url];
+    if (!j) missing++;
+    return { ok: !!j, status: j ? 200 : 404, json: async () => structuredClone(j), arrayBuffer: async () => new ArrayBuffer(0) };
+  });
+  const pct = {};
+  for (const [lg, list] of Object.entries(cov.players)) {
+    let high = 0;
+    for (const p of list) {
+      const c = await ph.__test.candidatesFor('basketball', p.name).catch(() => []);
+      if (ph.decide({ sport: 'basketball', ...p }, c, cov.now).confidence === 'high') high++;
+    }
+    pct[lg] = (100 * high) / list.length;
+  }
+  console.log(`recorded coverage: NBA ${pct.NBA}% · EuroLeague ${pct.EL}% high (missing answers ${missing})`);
+  assert.ok(missing <= 5, `${missing} calls not in the recording`);
+  assert.ok(pct.NBA >= 85, `NBA ${pct.NBA}%`);
+  assert.ok(pct.EL >= 60, `EuroLeague ${pct.EL}%`);
 });

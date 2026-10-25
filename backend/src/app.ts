@@ -91,7 +91,7 @@ import { workerHealth, memorySizing } from './services/workerHealth';
 import { perfHours } from './services/perfHistory';
 import { sharedStatus } from './services/shared';
 import { forwardToWorker } from './services/forward';
-import { definePage, getPage, pageCacheStatus, pageMemStatus, type Query } from './services/pageCache';
+import { definePage, getPage, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions } from './services/proxyGuard';
@@ -434,10 +434,36 @@ app.use('/api', (req, res, next) => {
  * match predictions trimmed to the pick), 'full' (what every other non-admin sees: bookmaker data stripped), or a
  * page's own ('public' …). Admins, members with unlocked games (per-member trims) and data-centre visitors get the
  * stored page through res.json, so the per-request trims above and below apply as before.
+ * fix221: the web process only sends strings. Every view has its ETag (304 when unchanged) and a gzip copy, both made by
+ * the worker. The big lists (football upcoming, basketball games) are also stored row by row: a member with unlocked
+ * games and a data-centre visitor get their copy joined from those strings. Anything else that would need the page
+ * itself (admins, a view not stored) is passed to the worker — the web process never parses or serialises a page.
  */
 const jsonText = (x: unknown) => JSON.stringify(x, app.get('json replacer'));
 const VIEWS_PLAIN = { full: (b: any) => jsonText(stripMarket(b)) };
 const VIEWS_MATCHES = { anon: (b: any) => jsonText(stripMarket(teaseDeep(b))), full: (b: any) => jsonText(stripMarket(b)) };
+const ROWS_MARK = '\u0003rows';
+/**
+ * fix221: a list page ({ ..., [key]: rows }) as row strings: full (bookmaker data stripped), teased (`tease`, default the
+ * football trim) and locked for data-centre visitors (lockAllPredictions: finished games too)
+ */
+async function listRows(body: any, opts: { key?: string; id?: (row: any) => number; full?: (row: any) => any; tease?: (row: any) => any } = {}): Promise<Rows> {
+  const key = opts.key || 'data';
+  const list: any[] = Array.isArray(body?.[key]) ? body[key] : [];
+  const shell = jsonText(stripMarket({ ...body, [key]: ROWS_MARK }));
+  const at = shell.indexOf(JSON.stringify(ROWS_MARK));
+  const rows: Rows['rows'] = [];
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i];
+    const full = jsonText(stripMarket(opts.full ? opts.full(r) : r));
+    const teasedRow = opts.tease ? opts.tease(r) : teaseDeep(r);
+    const tease = jsonText(stripMarket(teasedRow));
+    const locked = jsonText(stripMarket(lockAllPredictions(teasedRow)));
+    rows.push({ id: opts.id ? opts.id(r) : Number(r?.id), full, tease: tease === full ? undefined : tease, locked: locked === tease ? undefined : locked });
+    if (i % 100 === 99) await yieldLoop();
+  }
+  return { head: `${shell.slice(0, at)}[`, tail: `]${shell.slice(at + JSON.stringify(ROWS_MARK).length)}`, rows };
+}
 /** the stored view for a match list (/api/matches/*): null = send the page through res.json */
 const matchView = (req: express.Request) => {
   const access = req.access || 'anon';
@@ -445,14 +471,40 @@ const matchView = (req: express.Request) => {
 };
 /** the stored view for any other page: everyone but admins gets the same copy */
 const plainView = (req: express.Request) => (req.access === 'admin' ? null : 'full');
-async function sendStored(req: express.Request, res: express.Response, name: string, q: Query, view: string | null) {
+/** fix221: one stored string as it is: ETag (304 when the browser has it), gzip copy when the browser takes gzip */
+function sendView(req: express.Request, res: express.Response, v: View) {
+  res.set('ETag', v.etag).vary('Accept-Encoding').type('application/json');
+  if (req.fresh) return res.status(304).end();
+  if (v.gz && req.acceptsEncodings('gzip') === 'gzip') return res.set('Content-Encoding', 'gzip').send(v.gz);
+  res.send(v.text);
+}
+/** fix221: the web process never builds a page itself: what needs the page (not a stored string) is answered by the worker */
+const byWorker = (req: express.Request, res: express.Response, here: () => unknown) => (isWeb ? forwardToWorker(req, res) : here());
+/**
+ * A stored page. `view`: the stored string to send (null = the page through res.json: admins). `keep` (fix221): a
+ * member's unlocked ids (row ids) — the list joined from its rows, those games in full, the rest teased.
+ */
+async function sendStored(req: express.Request, res: express.Response, name: string, q: Query, view: string | null, keep?: Set<number>) {
   const s = await getPage(name, q);
   if (!s) return res.status(503).set('Retry-After', '5').json({ error: 'Loading, please try again in a moment' });
-  const text = view ? s.variant(view) : undefined;
-  if (text === undefined) return res.json(s.body);
-  // fix199: a signed-out visitor from a data-centre network gets no prediction at all (the res.json trim)
-  if ((req as any).proxyAnon) return res.json(JSON.parse(text));
-  res.type('application/json').send(text);
+  // fix199: a signed-out visitor from a data-centre network gets no prediction at all (finished games too)
+  if ((req as any).proxyAnon) {
+    const r = s.rows();
+    if (r) return res.type('application/json').send(joinRows(r, () => 'locked'));
+    const text = view ? s.variant(view) : undefined;
+    return text !== undefined && text.length < 256 * 1024 ? res.json(JSON.parse(text)) : byWorker(req, res, () => res.json(s.body));
+  }
+  if (keep?.size) {
+    const r = s.rows();
+    if (!r) return byWorker(req, res, () => res.json(s.body));
+    const base = s.view('full')?.etag || String(s.builtAt);
+    res.set('ETag', `${base.slice(0, -1)}-${etagOf([...keep].sort((a, b) => a - b).join(',')).slice(1, 9)}"`).vary('Accept-Encoding');
+    if (req.fresh) return res.status(304).end();
+    return res.type('application/json').send(joinRows(r, id => (keep.has(id) ? 'full' : 'tease')));
+  }
+  const v = view ? s.view(view) : undefined;
+  if (!v) return byWorker(req, res, () => res.json(s.body));
+  sendView(req, res, v);
 }
 
 // Cross-site guard: another website may not make a signed-in browser change anything here (POST / PUT / DELETE, or a
@@ -1278,7 +1330,7 @@ definePage({ name: 'more-record', freshMs: 10 * 60 * 1000, variants: VIEWS_PLAIN
 app.get('/api/more/:sport(football|basketball|nfl|tennis)/record', async (req, res) => {
   try {
     if (req.access !== 'admin') return await sendStored(req, res, 'more-record', { sport: req.params.sport }, 'full');
-    res.json({ data: moreRecord(req.params.sport as any, true) });
+    byWorker(req, res, () => res.json({ data: moreRecord(req.params.sport as any, true) }));
   } catch (e) { sendError(res, e, 'Failed to load the record'); }
 });
 app.get('/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', async (req, res) => {
@@ -1769,10 +1821,14 @@ async function buildUpcoming(days: number): Promise<any> {
   await yieldLoop();
   return { data, count: matches.length, days, cacheAgeMs: footballDataAPI.windowAge, timestamp: new Date().toISOString() };
 }
-definePage({ name: 'upcoming', freshMs: 30 * 1000, build: q => buildUpcoming(Number(q.days) || 30), variants: VIEWS_MATCHES, warm: [{ days: 14 }, { days: 30 }] });
+// fix221: stored row by row ('anon' / 'full' made from the rows; a member's unlocked games joined in by the web process)
+definePage({ name: 'upcoming', freshMs: 30 * 1000, build: q => buildUpcoming(Number(q.days) || 30), rows: b => listRows(b), warm: [{ days: 14 }, { days: 30 }] });
 app.get('/api/matches/upcoming', async (req, res) => {
   try {
     const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
+    const access = req.access || 'anon';
+    // signed-in Free / Premium: their unlocked games in full (finished games are in full for everyone)
+    if (req.user && !canSeeFull(access)) return await sendStored(req, res, 'upcoming', { days }, 'anon', unlockedIds(req.user.id));
     await sendStored(req, res, 'upcoming', { days }, matchView(req));
   } catch (error: any) {
     sendError(res, error, 'Failed to fetch upcoming matches');
@@ -2917,10 +2973,15 @@ const nflWithF = <T extends { id: number; state: string }>(f: boolean | ((id: nu
     return x;
   });
 };
-app.get('/api/nfl/config', (req, res) => {
-  const league = nflLg(req);
-  res.json({ data: { public: nflPublic(), open: nflPublic() || nflAdmin(req), league, season: nflCurrentSeason(league), seasons: nflSeasonsHeld(nflAdmin(req), league),
-    leagues: LEAGUES.map(l => ({ id: l, season: nflCurrentSeason(l) })) } });
+const nflConfigBody = (league: ReturnType<typeof asLeague>, admin: boolean) => ({ data: { public: nflPublic(), open: nflPublic() || admin, league, season: nflCurrentSeason(league),
+  seasons: nflSeasonsHeld(admin, league), leagues: LEAGUES.map(l => ({ id: l, season: nflCurrentSeason(l) })) } });
+// fix221: a stored page (the season list was a database scan on the web process on every page open); admins: the worker
+definePage({ name: 'nfl-config', freshMs: 60 * 1000, variants: VIEWS_PLAIN, warm: LEAGUES.map(l => ({ league: l })), build: q => nflConfigBody(asLeague(q.league), false) });
+app.get('/api/nfl/config', async (req, res) => {
+  try {
+    if (nflAdmin(req)) return byWorker(req, res, () => res.json(nflConfigBody(nflLg(req), true)));
+    await sendStored(req, res, 'nfl-config', { league: nflLg(req) }, 'full');
+  } catch (e) { sendError(res, e, 'Failed to load the NFL settings'); }
 });
 /** ?league= as one stored key: '' both leagues, '1' NFL, '2' college */
 const nflLgKey = (req: express.Request) => { const l = nflLgs(req); return l.length === 1 ? String(l[0]) : ''; };
@@ -2930,7 +2991,7 @@ app.get('/api/nfl/home', async (req, res) => {
   try {
     const f = fullFor(req, nflRid);
     if (typeof f === 'boolean') return await sendStored(req, res, 'nfl-home', { league: nflLgKey(req), full: f ? 1 : 0 }, plainView(req));
-    res.json(nflHomeBody(nflLgs(req), f));
+    byWorker(req, res, () => res.json(nflHomeBody(nflLgs(req), f))); // fix221: a member with unlocks / an admin
   } catch (e) { sendError(res, e, 'Failed to load the NFL home'); }
 });
 function nflHomeBody(asked: ReturnType<typeof asLeagues>, f: boolean | ((id: number) => boolean)) {
@@ -3146,7 +3207,7 @@ app.get('/api/tennis/home', async (req, res) => {
   try {
     const f = fullFor(req, tennisRid), admin = tnAdmin(req);
     if (typeof f === 'boolean' && !admin) return await sendStored(req, res, 'tennis-home', { tour: tnTour(req), full: f ? 1 : 0 }, plainView(req));
-    res.json(tennisHomeBody(tnTour(req), f, admin));
+    byWorker(req, res, () => res.json(tennisHomeBody(tnTour(req), f, admin)));
   } catch (e) { sendError(res, e, 'Failed to load the tennis home'); }
 });
 function tennisHomeBody(tour: string, f: boolean | ((id: number) => boolean), admin: boolean) {
@@ -3270,10 +3331,17 @@ function bbGamesBody(code: string | undefined, results: boolean, days: number, r
   return { data: bbGames({ from: from.toISOString(), to: to.toISOString(), code, results, limit: 400 }, full), timestamp: new Date().toISOString() };
 }
 const bbKnown = (code: string | undefined) => !code || bbLeagues().some(l => l.code === code);
+// fix221: the locked copy (full=0) is stored row by row with each game's full row beside it, so a Free member's unlocked
+// games are joined in by the web process; the frontend's four lists are kept warm
 definePage({
-  name: 'bb-games', freshMs: 30 * 1000, variants: VIEWS_PLAIN,
-  warm: [{ days: 7, full: 0 }, { days: 7, full: 1 }, { days: 30, results: 1, full: 0 }, { days: 30, results: 1, full: 1 }],
-  build: q => bbGamesBody(q.league || undefined, q.results === '1', Number(q.days) || 3, null, q.full === '1')
+  name: 'bb-games', freshMs: 30 * 1000,
+  warm: [{ days: 7, full: 0 }, { days: 7, full: 1 }, { days: 30, full: 0 }, { days: 30, full: 1 }, { days: 7, results: 1, full: 0 }, { days: 7, results: 1, full: 1 },
+    { days: 30, results: 1, full: 0 }, { days: 30, results: 1, full: 1 }],
+  build: q => bbGamesBody(q.league || undefined, q.results === '1', Number(q.days) || 3, null, q.full === '1'),
+  rows: (b, q) => {
+    const open = q.full === '1' ? null : new Map(bbGamesBody(q.league || undefined, q.results === '1', Number(q.days) || 3, null, true).data.map((g: any) => [g.id, g]));
+    return listRows(b, { id: g => -g.id, full: g => open?.get(g.id) || g, tease: g => g });
+  }
 });
 app.get('/api/basketball/games', async (req, res) => {
   try {
@@ -3288,8 +3356,13 @@ app.get('/api/basketball/games', async (req, res) => {
       if (!isNaN(f.getTime()) && !isNaN(t.getTime()) && t > f && t.getTime() - f.getTime() <= 14 * day) range = { from: f, to: t };
     }
     const full = fullFor(req, id => -id);
-    if (!range && typeof full === 'boolean' && bbKnown(code)) return await sendStored(req, res, 'bb-games', { league: code, results, days, full: full ? 1 : 0 }, plainView(req));
-    res.json(bbGamesBody(code, results, days, range, full));
+    // fix221: the locked copy is sent as 'anon' (its 'full' view has every game open: a member's unlocks are joined from it)
+    const asked = { league: code, results, days, full: full === true ? 1 : 0 };
+    if (!range && bbKnown(code)) {
+      if (typeof full === 'function') return await sendStored(req, res, 'bb-games', asked, 'anon', new Set([...unlockedIds(req.user!.id)].filter(id => id < 0 && id > -2e9)));
+      return await sendStored(req, res, 'bb-games', asked, req.access === 'admin' ? null : full ? 'full' : 'anon');
+    }
+    byWorker(req, res, () => res.json(bbGamesBody(code, results, days, range, full)));
   } catch (error: any) {
     sendError(res, error, 'Failed to load games');
   }
@@ -3355,7 +3428,7 @@ app.get('/api/basketball/standings/:code([A-Za-z0-9]{2,8})', async (req, res) =>
   try {
     const code = req.params.code.toUpperCase();
     if (bbKnown(code)) return await sendStored(req, res, 'bb-standings', { code }, plainView(req));
-    res.json({ data: await bbStandings(code), timestamp: new Date().toISOString() });
+    await byWorker(req, res, async () => res.json({ data: await bbStandings(code), timestamp: new Date().toISOString() }));
   } catch (error: any) {
     sendError(res, error, 'Failed to load standings');
   }
@@ -3396,7 +3469,7 @@ app.get('/api/basketball/record', async (req, res) => {
     const code = typeof req.query.league === 'string' && /^[A-Za-z0-9]{2,8}$/.test(req.query.league) ? req.query.league.toUpperCase() : undefined;
     const days = Math.min(3650, parseInt(String(req.query.days || '3650'), 10) || 3650);
     if (bbKnown(code)) return await sendStored(req, res, 'bb-record', { days, league: code }, plainView(req));
-    res.json({ data: bbRecord(days, code), timestamp: new Date().toISOString() });
+    byWorker(req, res, () => res.json({ data: bbRecord(days, code), timestamp: new Date().toISOString() }));
   } catch (error: any) {
     sendError(res, error, 'Failed to load record');
   }
@@ -3930,14 +4003,16 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   const indexHtml = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
   // fix202: the sport home pages (every language) as search engines get them: stored pages built in the worker
   const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr'].map(l => `/${l}`)].flatMap(l => ['', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
-  definePage({ name: 'seo', freshMs: 10 * 60 * 1000, warm: SEO_HOMES.map(p => ({ path: p })), build: q => seoPage(q.path) });
+  // fix221: the finished HTML is stored beside each (made by the worker): the web process only sends it
+  const VIEWS_HTML = { html: (b: any) => (b ? renderIndex(indexHtml, b) : '') };
+  definePage({ name: 'seo', freshMs: 10 * 60 * 1000, warm: SEO_HOMES.map(p => ({ path: p })), variants: VIEWS_HTML, build: q => seoPage(q.path) });
   // fix210: every other page's head tags + content (every language: /fr/* was 4 s on the web process) — built by the
   // worker when first asked for, then served stored (10 min fresh; kept 2 days); the web process never builds one
   const SEO_WAIT_MS = Number(process.env.SEO_WAIT_MS) || 3000;
   // fix210b: a basketball game's data, one build for every language (finished games built ahead by the worker:
   // jobs.ts "bb game pages"); the web process writes the page's text from it (bbGameSeo: no database, no build)
   definePage({ name: 'bb-game-facts', freshMs: 10 * 60 * 1000, freshOf: bbFactsFreshMs, refresh: false, keepMs: 8 * 86400000, build: q => bbGameFacts(Number(q.id)) });
-  definePage({ name: 'seo-page', freshMs: 10 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, build: q => seoPage(q.path) });
+  definePage({ name: 'seo-page', freshMs: 10 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, variants: VIEWS_HTML, build: q => seoPage(q.path) });
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
     // old hub URLs (fix134): /predictions/PL → /predictions/premier-league, permanently
@@ -3969,7 +4044,14 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       const home = seoHome(req.path);
       // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page
       // (the app renders it in the browser; the next request gets the stored copy)
-      const info = home ? (await getPage('seo', { path: home }))?.body : (await getPage('seo-page', { path: req.path.slice(0, 300) }, { waitMs: SEO_WAIT_MS }))?.body;
+      const s = home ? await getPage('seo', { path: home }) : await getPage('seo-page', { path: req.path.slice(0, 300) }, { waitMs: SEO_WAIT_MS });
+      const html = s?.view('html');
+      if (html?.text) {
+        res.set('ETag', html.etag).vary('Accept-Encoding').type('html');
+        if (req.fresh) return res.status(304).end();
+        return html.gz && req.acceptsEncodings('gzip') === 'gzip' ? res.set('Content-Encoding', 'gzip').send(html.gz) : res.send(html.text);
+      }
+      const info = s?.body; // a copy stored before fix221 (no HTML beside it)
       if (!info) return res.sendFile(path.join(STATIC_DIR, 'index.html'));
       res.type('html').send(renderIndex(indexHtml, info));
     } catch (e: any) {

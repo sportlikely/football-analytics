@@ -11,6 +11,8 @@ interface PRow { sport: 'tennis' | 'basketball'; id: number; name: string; statu
 interface Data {
   run: { at: string | null; done: number; ok: number; review: number; none: number; errors: number; lastError: string | null; running: boolean; calls: number }
   counts: { sport: string; status: string; n: number }[]
+  /** fix221: basketball photos shown per league (current squads) */
+  coverage?: { code: string; n: number; has: number; pct: number }[]
   review: PRow[]; recent: PRow[]; notMatched: PRow[]; blocked: { key: string; reason: string; at: string }[]
 }
 const href = (r: PRow) => (r.sport === 'tennis' ? `/tennis/player/${r.id}` : `/basketball/player/${r.id}`)
@@ -43,6 +45,13 @@ export default function PlayerPhotosCard() {
           <button type="button" disabled={d.run.running} onClick={() => axios.post(`${API_URL}/admin/player-photos/run`, {}).then(() => setTimeout(load, 5000))} className="ml-3 font-semibold text-accent hover:underline disabled:opacity-50">Run now</button>
         </span>
       </div>
+      {!!d.coverage?.length && (
+        <p className="text-xs text-muted mb-2">
+          Basketball shown: {d.coverage.map((l, i) => (
+            <span key={l.code}>{i ? ' · ' : ''}<span className={(l.code === 'NBA' && l.pct < 85) || (l.code === 'EL' && l.pct < 60) ? 'text-draw font-semibold' : l.code === 'NBA' || l.code === 'EL' ? 'text-win font-semibold' : ''}>{l.code} {l.pct}%</span> ({l.has}/{l.n})</span>
+          ))} · targets NBA 85%, EuroLeague 60%
+        </p>
+      )}
       {d.run.lastError && <p className="text-xs text-loss mb-2 break-all">Last error: {d.run.lastError}</p>}
       <div className="flex flex-wrap gap-2 mb-3">
         {chip('review', 'To review', d.review.length)}{chip('recent', 'Shown (latest)', d.recent.length)}{chip('notMatched', 'Not matched', d.notMatched.length)}{chip('blocked', 'Blocked', d.blocked.length)}

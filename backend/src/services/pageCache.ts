@@ -15,8 +15,14 @@ import { isWeb, isWorker, runsJobs } from './role';
 import { onIpc, sendIpc } from './ipc';
 import { timed, yieldLoop, heavyQueued } from './perf';
 import { stringifyAsync } from '../utils/jsonAsync';
+import crypto from 'node:crypto';
+import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 
 db.exec(`CREATE TABLE IF NOT EXISTS page_cache (key TEXT PRIMARY KEY, json TEXT NOT NULL, built_at INTEGER NOT NULL, ms INTEGER NOT NULL DEFAULT 0)`);
+// fix221: each stored view carries its ETag and a gzip copy made by the worker (the web process only sends them)
+for (const col of ['etag TEXT', 'gz BLOB']) { try { db.exec(`ALTER TABLE page_cache ADD COLUMN ${col}`); } catch { /* there already */ } }
+const gzip = promisify(zlib.gzip);
 
 export type Query = Record<string, string | number | boolean | null | undefined>;
 export interface PageDef {
@@ -25,7 +31,13 @@ export interface PageDef {
   freshMs: number;
   build: (q: Record<string, string>) => Promise<unknown> | unknown;
   /** ready-made strings stored beside the page (e.g. the signed-out copy), so a request only sends them */
-  variants?: Record<string, (body: any) => string>;
+  variants?: Record<string, (body: any, q: Record<string, string>) => string | Promise<string>>;
+  /**
+   * fix221: a list page as one string per row (full / teased / locked), made by the worker. The web process puts a
+   * member's own copy together from them (their unlocked games in full) without parsing or serialising anything; the
+   * 'anon' (every row teased) and 'full' views are made from the same rows.
+   */
+  rows?: (body: any, q: Record<string, string>) => Rows | Promise<Rows>;
   /** queries built on start and kept fresh by the worker */
   warm?: Query[];
   /** fix210: how fresh this copy should be, from the copy itself (a finished game keeps longer than a live one); default freshMs */
@@ -35,7 +47,40 @@ export interface PageDef {
   /** fix210: false = built only when a visitor asks for it (player / match / news pages …), never kept fresh by the warmer */
   refresh?: boolean;
 }
-export interface Stored { body: any; builtAt: number; variant: (v: string) => string | undefined }
+/** fix221: a list as text: `head` + rows joined by ',' + `tail`; a row's tease / locked text (missing = same as the one before) */
+export interface Rows { head: string; tail: string; rows: { id: number; full: string; tease?: string; locked?: string }[] }
+/** one stored view as sent: the text, its ETag and (over 2 KB) the gzip copy */
+export interface View { text: string; etag: string; gz: Buffer | null }
+export interface Stored {
+  /** the page itself — read and parsed on first use (fix221: the web process sends views and never needs it) */
+  readonly body: any;
+  builtAt: number;
+  variant: (v: string) => string | undefined;
+  view: (v: string) => View | undefined;
+  /** fix221: the page's rows (null = a page without rows) */
+  rows: () => Rows | null;
+}
+
+const SEP_ROW = '\x01', SEP_COL = '\x02'; // never inside JSON text (JSON.stringify escapes control characters)
+export function rowsText(r: Rows): string {
+  return [r.head, r.tail, ...r.rows.map(x => `${x.id}${SEP_COL}${x.full}${SEP_COL}${x.tease ?? ''}${SEP_COL}${x.locked ?? ''}`)].join(SEP_ROW);
+}
+export function parseRows(text: string): Rows {
+  const parts = text.split(SEP_ROW);
+  return {
+    head: parts[0], tail: parts[1],
+    rows: parts.slice(2).map(p => { const [id, full, tease, locked] = p.split(SEP_COL); return { id: Number(id), full, tease: tease || undefined, locked: locked || undefined }; })
+  };
+}
+export type RowAs = 'full' | 'tease' | 'locked';
+const rowAs = (x: Rows['rows'][number], as: RowAs) => (as === 'full' ? x.full : as === 'tease' ? x.tease || x.full : x.locked || x.tease || x.full);
+/** fix221: the list for one reader from the stored rows — string joins only */
+export function joinRows(r: Rows, as: (id: number) => RowAs): string {
+  const parts = new Array<string>(r.rows.length);
+  for (let i = 0; i < r.rows.length; i++) parts[i] = rowAs(r.rows[i], as(r.rows[i].id));
+  return r.head + parts.join(',') + r.tail;
+}
+export const etagOf = (text: string | Buffer) => `"${crypto.createHash('sha1').update(text).digest('base64url').slice(0, 22)}"`;
 
 const defs = new Map<string, PageDef>();
 export function definePage(def: PageDef) { defs.set(def.name, def); }
@@ -54,7 +99,8 @@ const parseKey = (key: string) => {
 // this process's copy of each page (parsed once per build)
 // fix210: capped, least recently used out first: at most MEM_MAX copies and MEM_MAX_MB in memory (the rest stays in
 // page_cache and is read again when asked for). The worker keeps none: it held every page it ever built.
-type Mem = { builtAt: number; checkedAt: number; body: any; variants: Map<string, string | null>; bytes: number };
+// fix221: the web process keeps the views it sent (text + gzip), not the page: the body is read and parsed only if asked for
+type Mem = { builtAt: number; checkedAt: number; body?: any; variants: Map<string, View | null>; rows?: Rows | null; bytes: number };
 const mem = new Map<string, Mem>();
 const MEM_MAX = Number(process.env.PAGE_MEM_MAX) || 400;
 const MEM_MAX_BYTES = (Number(process.env.PAGE_MEM_MAX_MB) || 48) * 1048576;
@@ -78,24 +124,53 @@ const statOf = (key: string) => {
   return st;
 };
 
-function readRow(key: string): Mem | null {
+const builtAtOf = (key: string): number => (db.prepare(`SELECT built_at FROM page_cache WHERE key = ?`).get(key) as any)?.built_at || 0;
+/** fix221: the web process reads only the row's time here; the page's text is read when its body is asked for */
+function readRow(key: string, withBody = !isWeb): Mem | null {
+  if (!withBody) {
+    const at = builtAtOf(key);
+    return at ? { builtAt: at, checkedAt: Date.now(), variants: new Map(), bytes: 0 } : null;
+  }
   const row: any = db.prepare(`SELECT json, built_at FROM page_cache WHERE key = ?`).get(key);
   if (!row) return null;
   try { return { builtAt: row.built_at, checkedAt: Date.now(), body: JSON.parse(row.json), variants: new Map(), bytes: row.json.length * 2 }; } catch { return null; }
 }
-const builtAtOf = (key: string): number => (db.prepare(`SELECT built_at FROM page_cache WHERE key = ?`).get(key) as any)?.built_at || 0;
+const grow = (key: string, m: Mem, b: number) => { if (b && mem.get(key) === m) { m.bytes += b; memBytes += b; } };
+function bodyOf(key: string, m: Mem) {
+  if (m.body === undefined) {
+    const row: any = db.prepare(`SELECT json FROM page_cache WHERE key = ?`).get(key);
+    m.body = row ? JSON.parse(row.json) : null;
+    grow(key, m, row ? row.json.length * 2 : 0);
+  }
+  return m.body;
+}
+function readView(key: string, v: string, builtAt: number): View | null {
+  const r: any = db.prepare(`SELECT json, etag, gz FROM page_cache WHERE key = ? AND built_at = ?`).get(`${key}#${v}`, builtAt);
+  if (!r) return null;
+  return { text: r.json, etag: r.etag || `"${builtAt.toString(36)}-${v}"`, gz: r.gz ? Buffer.from(r.gz) : null };
+}
 
 function stored(key: string, m: Mem): Stored {
+  const view = (v: string) => {
+    if (!m.variants.has(v)) {
+      const x = readView(key, v, m.builtAt);
+      m.variants.set(v, x);
+      grow(key, m, x ? x.text.length * 2 + (x.gz?.length || 0) : 0);
+    }
+    return m.variants.get(v) ?? undefined;
+  };
   return {
-    body: m.body,
+    get body() { return bodyOf(key, m); },
     builtAt: m.builtAt,
-    variant: v => {
-      if (!m.variants.has(v)) {
-        const s: string | null = (db.prepare(`SELECT json FROM page_cache WHERE key = ? AND built_at = ?`).get(`${key}#${v}`, m.builtAt) as any)?.json ?? null;
-        m.variants.set(v, s);
-        if (s && mem.get(key) === m) { m.bytes += s.length * 2; memBytes += s.length * 2; }
+    view,
+    variant: v => view(v)?.text,
+    rows: () => {
+      if (m.rows === undefined) {
+        const t = readView(key, 'rows', m.builtAt)?.text;
+        m.rows = t ? parseRows(t) : null;
+        grow(key, m, t ? t.length * 2 : 0);
       }
-      return m.variants.get(v) ?? undefined;
+      return m.rows;
     }
   };
 }
@@ -110,7 +185,7 @@ const noteRequested = (key: string, def: PageDef) => {
   requestedAt.delete(key); requestedAt.set(key, Date.now());
   if (requestedAt.size > 2000) requestedAt.delete(requestedAt.keys().next().value as string);
 };
-const freshOf = (def: PageDef, body: any) => { try { return def.freshOf ? def.freshOf(body) : def.freshMs; } catch { return def.freshMs; } };
+const freshOf = (def: PageDef, body: () => any) => { try { return def.freshOf ? def.freshOf(body()) : def.freshMs; } catch { return def.freshMs; } };
 // worker: when each key was last built (the copy itself is in page_cache, not in memory)
 const builtAtMem = new Map<string, number>();
 /**
@@ -135,18 +210,31 @@ function buildNow(key: string): Promise<void> {
     await yieldLoop();
     // fix210: a long list becomes JSON in slices (the upcoming list is several MB)
     const json = await stringifyAsync(body);
+    const texts: [string, string][] = [];
+    for (const [v, fn] of Object.entries(def.variants || {})) { texts.push([v, await fn(body, q)]); await yieldLoop(); }
+    // fix221: a list page's rows, and its 'anon' / 'full' views made from them
+    if (def.rows) {
+      const r = await def.rows(body, q);
+      await yieldLoop();
+      texts.push(['rows', rowsText(r)], ['anon', joinRows(r, () => 'tease')], ['full', joinRows(r, () => 'full')]);
+      await yieldLoop();
+    }
+    // fix221: ETag + gzip of every view made here (gzip runs off the thread), so the web process only sends them
+    const variants: [string, View][] = [];
+    for (const [v, text] of texts) {
+      variants.push([v, { text, etag: etagOf(text), gz: v !== 'rows' && text.length > 2048 ? await gzip(text, { level: 6 }) : null }]);
+      await yieldLoop();
+    }
     const at = Date.now();
-    const variants: [string, string][] = [];
-    for (const [v, fn] of Object.entries(def.variants || {})) { variants.push([`${key}#${v}`, fn(body)]); await yieldLoop(); }
-    const ins = db.prepare(`INSERT INTO page_cache (key, json, built_at, ms) VALUES (?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET json = excluded.json, built_at = excluded.built_at, ms = excluded.ms`);
+    const ins = db.prepare(`INSERT INTO page_cache (key, json, built_at, ms, etag, gz) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET json = excluded.json, built_at = excluded.built_at, ms = excluded.ms, etag = excluded.etag, gz = excluded.gz`);
     db.exec('BEGIN');
     try {
-      ins.run(key, json, at, at - t0);
-      for (const [k, s] of variants) ins.run(k, s, at, 0);
+      ins.run(key, json, at, at - t0, null, null);
+      for (const [v, x] of variants) ins.run(`${key}#${v}`, x.text, at, 0, x.etag, x.gz);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
-    if (!isWorker) memSet(key, { builtAt: at, checkedAt: at, body, variants: new Map(variants.map(([k, s]) => [k.slice(key.length + 1), s])), bytes: (json.length + variants.reduce((n, [, s]) => n + s.length, 0)) * 2 });
+    if (!isWorker) memSet(key, { builtAt: at, checkedAt: at, body, variants: new Map(variants.filter(([v]) => v !== 'rows')), bytes: (json.length + variants.reduce((n, [, x]) => n + x.text.length, 0)) * 2 });
     else { builtAtMem.delete(key); builtAtMem.set(key, at); if (builtAtMem.size > 5000) builtAtMem.delete(builtAtMem.keys().next().value as string); }
     const st = statOf(key);
     st.builtAt = at; st.ms = at - t0; st.kb = Math.round(json.length / 1024); st.builds++;
@@ -205,7 +293,8 @@ export async function getPage(name: string, q: Query = {}, opts: { waitMs?: numb
     if (row) { m = row; if (!isWorker) memSet(key, row); }
   }
   if (m) {
-    if (Date.now() - m.builtAt > freshOf(def, m.body)) {
+    const mm = m;
+    if (Date.now() - m.builtAt > freshOf(def, () => bodyOf(key, mm))) {
       if (runsJobs) { noteRequested(key, def); void buildQueued(key); } else askWorker(key);
     }
     return stored(key, m);
@@ -291,5 +380,7 @@ export function pageCacheStatus() {
 
 /** tests: forget this process's copies (the next read comes from the table) */
 export const _forgetPageMemory = () => { mem.clear(); memBytes = 0; };
+/** tests: a page's definition (fix221: the big-list test swaps the builder for real-size data, keeping the views) */
+export const _pageDef = (name: string) => defs.get(name);
 /** /api/perf: this process's in-memory copies (fix210: capped) */
 export const pageMemStatus = () => ({ copies: mem.size, mb: Math.round(memBytes / 1048576), maxCopies: MEM_MAX, maxMb: Math.round(MEM_MAX_BYTES / 1048576) });

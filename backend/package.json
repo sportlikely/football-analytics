@@ -30,7 +30,8 @@
     "test:fix216": "tsc && node --no-warnings --test --test-force-exit scripts/pick-emails.test.mjs",
     "test:fix217": "tsc && node --no-warnings --test --test-force-exit scripts/nba-v4.test.mjs",
     "test:fix219": "tsc && node --no-warnings --test --test-force-exit scripts/bb-grid.test.mjs",
-    "test:fix220": "tsc && node --no-warnings --test --test-force-exit scripts/af-calib.test.mjs"
+    "test:fix220": "tsc && node --no-warnings --test --test-force-exit scripts/af-calib.test.mjs",
+    "test:fix221": "tsc && node --no-warnings --test --test-force-exit scripts/big-lists.test.mjs scripts/photo-matcher.test.mjs"
   },
   "keywords": [
     "football",

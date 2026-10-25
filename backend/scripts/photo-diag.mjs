@@ -8,7 +8,7 @@ const ph = require('../dist/services/playerPhotos.js');
 const UA = 'SportLikelyBot/1.0 (https://sportlikely.com; support@sportlikely.com) photo diagnostic';
 const rec = {};
 // keep only what the matcher reads (labels, aliases, the claims below), so the recording stays small
-const KEEP = ['P31', 'P641', 'P106', 'P569', 'P27', 'P54', 'P18', 'P536', 'P597', 'P297', 'P298', 'P984'];
+const KEEP = ['P31', 'P641', 'P106', 'P569', 'P27', 'P54', 'P18', 'P536', 'P597', 'P297', 'P298', 'P984', 'P118', 'P69', 'P647'];
 const LANGS = ['en', 'mul', 'es', 'fr', 'de', 'it', 'pt', 'hr', 'sr', 'cs', 'pl', 'ru'];
 const pick = (o, ks) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => ks.includes(k)));
 function trim(j) {

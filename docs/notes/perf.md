@@ -345,3 +345,14 @@ backtest, sitemap: ok), `worker.topStalls` without "null". After the first "bb g
 `pages` has `bb-game-facts?id=…` rows and the crawler requests for old basketball games stop showing in topStalls.
 
 Result: _to fill in after the check._
+
+## fix221: the list APIs as strings only (25 Oct)
+
+The stalls left after fix218 were the list APIs themselves (/api/basketball/games 2.9 s, /api/matches/upcoming 2.2 s,
+/api/nfl/config 1.0 s, /<lang>/* 1.2 s). What the web process still did: JSON.parse of a stored page every time it read
+it from page_cache (the ~5 MB upcoming list after every 30-s rebuild); for signed-in Free / Premium members the whole
+list trimmed and serialised per request (basketball: built on the web for members with unlocks); res.json for admins
+and data-centre visitors; a table scan per /api/nfl/config. Now: views with ETag + gzip made by the worker, the body
+never read on the web, big lists as one string per row (members' copies joined), the rest passed to the worker
+(`byWorker`), nfl-config and the crawler HTML stored. `npm run test:fix221`: 4.7 MB list in 6 ms (gzip 63 KB), member
+copy 6.5 ms, 304 in 1 ms, web JSON.parse 0 KB, event loop max 6 ms.
