@@ -663,6 +663,11 @@ export function exportUserData(userId: number) {
     favorites: tableExists('user_favorites') ? safeAll('SELECT kind, ref, data, created_at AS addedAt FROM user_favorites WHERE user_id = ?', userId).map((f: any) => {
       try { return { ...f, data: JSON.parse(f.data) }; } catch { return f; }
     }) : [],
+    picksEmails: tableExists('email_prefs') ? {
+      settings: safeAll('SELECT daily, daily_at AS dailyChosenAt, daily_source AS dailySource, weekly, weekly_at AS weeklyChosenAt, weekly_source AS weeklySource, sports, send_hour AS sendHour, tz AS timeZone, lang FROM email_prefs WHERE user_id = ?', userId)[0] || null,
+      consentHistory: tableExists('email_consent_log') ? safeAll('SELECT at, kind, on_ AS turnedOn, source FROM email_consent_log WHERE user_id = ? ORDER BY id', userId) : [],
+      sent: tableExists('email_sends') ? safeAll('SELECT kind, day, at, status FROM email_sends WHERE user_id = ? ORDER BY id DESC LIMIT 400', userId) : []
+    } : null,
     unlockedMatches: tableExists('match_unlocks') ? safeAll('SELECT match_id AS matchId, at FROM match_unlocks WHERE user_id = ? ORDER BY at', userId) : [],
     waitlists: tableExists('sport_waitlist') ? safeAll('SELECT sport, lang, created_at AS joinedAt FROM sport_waitlist WHERE user_id = ? OR email = ?', userId, u.email) : [],
     securityLog: tableExists('security_log') ? safeAll('SELECT at, event, ip, ua AS device FROM security_log WHERE user_id = ? ORDER BY id DESC LIMIT 500', userId) : [],
@@ -732,6 +737,8 @@ export function deleteAccount(userId: number, password: unknown, reason?: unknow
     if (tableExists('user_favorites')) db.prepare('DELETE FROM user_favorites WHERE user_id = ?').run(userId);
     // fix205: the private calendar link stops working with the account
     if (tableExists('calendar_tokens')) db.prepare('DELETE FROM calendar_tokens WHERE user_id = ?').run(userId);
+    // fix216: picks email settings, consent history and send log
+    for (const t of ['email_prefs', 'email_consent_log', 'email_sends']) if (tableExists(t)) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
     if (tableExists('match_unlocks')) db.prepare('DELETE FROM match_unlocks WHERE user_id = ?').run(userId);
     // fix147: pick packs go with the account
     if (tableExists('user_credits')) db.prepare('DELETE FROM user_credits WHERE user_id = ?').run(userId);

@@ -1030,7 +1030,7 @@ function scoreOff(rows: { margin: number | null; total: number | null; hs: numbe
 }
 
 /** The public record: every saved prediction of a finished game in every league (fix203: no "in testing" exclusion; pre-season left out). */
-export function bbRecord(days = 3650, code?: string) {
+export function bbRecord(days = 3650, code?: string, recentLimit = 50) {
   const rows = db.prepare(`
     SELECT p.*, g.hs, g.as_, g.home_name, g.away_name, g.home_logo, g.away_logo, g.status
     FROM bb_predictions p JOIN bb_games g ON g.game_id = p.game_id
@@ -1083,7 +1083,7 @@ export function bbRecord(days = 3650, code?: string) {
       brier: winnerBrier(list.filter(r => r.code === c).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))) })),
     // fix174: how far the expected margin and the total were off
     scores: scoreOff(list),
-    recent: list.slice(0, 50).map(r => ({
+    recent: list.slice(0, recentLimit).map(r => ({
       gameId: r.game_id, code: r.code, kickoff: r.kickoff, home: r.home_name, away: r.away_name, homeLogo: r.home_logo, awayLogo: r.away_logo,
       score: [r.hs, r.as_], pick: r.p_home >= 0.5 ? 'H' : 'A', pHome: r.p_home, hit: (r.p_home >= 0.5) === (r.hs > r.as_)
     }))

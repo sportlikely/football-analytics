@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { errorText, useAuth } from '../lib/auth'
 import { safeNext } from '../lib/nav'
-import { t } from '../lib/i18n'
+import { t, lang } from '../lib/i18n'
+import { browserTz } from '../components/EmailsCard'
 import { TwoFactorStep } from '../components/TwoFactor'
 import Turnstile, { useTurnstileKey } from '../components/Turnstile'
 import axios from 'axios'
@@ -19,6 +20,7 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [optIn, setOptIn] = useState(false)
+  const [picksOptIn, setPicksOptIn] = useState(false) // fix216: daily picks + weekly digest, off unless ticked
   const [adult, setAdult] = useState(false)
   const [showPw, setShowPw] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -56,7 +58,7 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
       if (mode === 'login') {
         const step = await login(email, password, guard)
         if (step.ticket) { setTicket(step.ticket); setPassword('') }
-      } else await signup(email, password, name, optIn, adult, guard)
+      } else await signup(email, password, name, optIn, adult, guard, { picksOptIn, tz: browserTz(), lang })
     } catch (err: any) {
       if (err?.response?.data?.captcha) setNeedCheck(true)
       setCfToken(''); setCfKey(k => k + 1)
@@ -139,6 +141,13 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
             <label className="flex items-start gap-2.5 text-sm text-muted cursor-pointer select-none">
               <input type="checkbox" checked={optIn} onChange={e => setOptIn(e.target.checked)} className="mt-0.5 w-4 h-4 shrink-0 accent-[rgb(var(--accent))]" />
               <span>{t("Email me about new features, Premium and weekly picks. You can turn this off anytime.")}</span>
+            </label>
+          )}
+
+          {mode === 'signup' && (
+            <label className="flex items-start gap-2.5 text-sm text-muted cursor-pointer select-none">
+              <input type="checkbox" checked={picksOptIn} onChange={e => setPicksOptIn(e.target.checked)} className="mt-0.5 w-4 h-4 shrink-0 accent-[rgb(var(--accent))]" />
+              <span>{t("Send me today's strongest picks each morning and a weekly digest. You can turn this off anytime.")}</span>
             </label>
           )}
 

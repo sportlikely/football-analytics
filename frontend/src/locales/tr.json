@@ -2413,5 +2413,20 @@
  "No player photos yet.": "Henüz oyuncu fotoğrafı yok.",
  "Wikimedia Commons": "Wikimedia Commons",
  "so far": "şimdilik",
- "Show all {0} live →": "Canlı {0} maçın tümü →"
+ "Show all {0} live →": "Canlı {0} maçın tümü →",
+ "Send me today's strongest picks each morning and a weekly digest. You can turn this off anytime.": "Her sabah günün en güçlü tahminlerini ve haftalık bir özet gönder. İstediğin zaman kapatabilirsin.",
+ "Emails": "E-postalar",
+ "Daily picks": "Günlük tahminler",
+ "Each morning: today's strongest picks and your teams' games, with how we did yesterday.": "Her sabah: günün en güçlü tahminleri ve takımlarının maçları, dünkü sonuçlarımızla birlikte.",
+ "Weekly digest": "Haftalık özet",
+ "Every Monday: last week's record, the best call and this week's big games.": "Her pazartesi: geçen haftanın sonuçları, haftanın en iyi tahmini ve bu haftanın büyük maçları.",
+ "Sports": "Sporlar",
+ "Send time": "Gönderim saati",
+ "Time zone": "Saat dilimi",
+ "Language: {0} (the language you use on the site).": "Dil: {0} (sitede kullandığın dil).",
+ "Confirm your email first: we only send these emails to a confirmed address.": "Önce e-postanı onayla: bu e-postaları yalnızca onaylı adreslere gönderiyoruz.",
+ "Emails to this address stopped because they could not be delivered. Change your email or write to support@sportlikely.com.": "Bu adrese e-postalar teslim edilemediği için durduruldu. E-postanı değiştir veya support@sportlikely.com adresine yaz.",
+ "Emails are not switched on on this server yet.": "E-postalar bu sunucuda henüz açık değil.",
+ "No spam: you can unsubscribe with one click from any email. Probabilities, not promises. 18+.": "Spam yok: her e-postadan tek tıkla abonelikten çıkabilirsin. Olasılıklar, söz değil. 18+.",
+ "Saved": "Kaydedildi"
 }

@@ -918,7 +918,7 @@ export function scoreOff(rows: { margin: number | null; total: number | null; hs
   };
 }
 
-export function nflAccuracy(days = 3650) {
+export function nflAccuracy(days = 3650, recentLimit = 50) {
   const rows = db.prepare(`SELECT p.game_id, p.kickoff, p.p_home, p.margin, p.total, g.league, g.home_name, g.away_name, g.home_logo, g.away_logo, g.home_pts AS hs, g.away_pts AS as_
     FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
     WHERE p.kickoff >= ? AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.home_pts != g.away_pts ORDER BY p.kickoff DESC`)
@@ -954,7 +954,7 @@ export function nflAccuracy(days = 3650) {
       brier: winnerBrier(rows.filter(r => code(r.league) === c).map(r => ({ pHome: r.p_home, homeWon: r.hs > r.as_ }))) })),
     // fix174: how far the expected margin and the total were off (football's goals numbers, for a points sport)
     scores: scoreOff(rows),
-    recent: rows.slice(0, 50).map(r => ({
+    recent: rows.slice(0, recentLimit).map(r => ({
       gameId: r.game_id, code: code(r.league), kickoff: r.kickoff, home: r.home_name || 'TBD', away: r.away_name || 'TBD', homeLogo: r.home_logo, awayLogo: r.away_logo,
       score: [r.hs, r.as_], pick: r.p_home >= 0.5 ? 'H' : 'A', pHome: r.p_home, hit: hit(r)
     }))

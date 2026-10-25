@@ -38,6 +38,7 @@ import { photoHealth } from './playerPhotos';
 import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdTwinless } from './fdReconcile';
 import { bestLive } from './liveScores';
 import { afIdOfFd } from './afMatches';
+import { emailHealth } from './pickEmails';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -387,6 +388,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   } catch { /* no report yet */ }
 
   // fix211: player photos — coverage (tennis top 100 / 500, basketball squads); fail when one is shown without its credit
+  // fix216: picks emails — every person due today got one (or a skip reason), bounces, record lines = the public record
+  try { checks.push(...emailHealth(now)); } catch (e: any) { logger.warn(`email health: ${e?.message || e}`); }
   try { checks.push(photoHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts

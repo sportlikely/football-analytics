@@ -8,6 +8,7 @@ import { useUnlocks, resetDay } from '../lib/unlocks'
 import { t, LOCALE } from '../lib/i18n'
 import { TwoFactorCard } from '../components/TwoFactor'
 import CalendarCard from '../components/CalendarCard'
+import EmailsCard from '../components/EmailsCard'
 
 function fmtDay(iso: string | null) {
   return iso ? new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' }) : ''
@@ -110,6 +111,8 @@ export default function Account() {
           />
         </label>
       </div>
+
+      <EmailsCard />
 
       <CalendarCard />
 

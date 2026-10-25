@@ -123,6 +123,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth } from './services/dataHealth';
+import { emailSettings, saveEmailPrefs, initEmailPrefs, EmailPrefsError, checkUnsub, unsubscribePicks, verifyWebhook, handleWebhookEvent, emailAdminStats, sendTestEmail, previewEmail, crestPath } from './services/pickEmails';
 import { moreForGame as moreForGameB, moreRecord, moreHealth, gateList, backtestReports, backtestMarkdown, calcStatus, moreBacktestNow, MORE_SPORTS, gameIdOf, hasExtras, saveOne as saveOneB } from './services/morePredictions';
 /*
  * fix210: the page builders — the web process never runs one (its routes pass these requests to the worker:
@@ -217,7 +218,8 @@ if (isWeb) app.use('/api', (req, res, next) => {
 // referrerPolicy: helmet's default "no-referrer" breaks embedded YouTube players (error 153 — YouTube needs the site's origin)
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, referrerPolicy: { policy: 'strict-origin-when-cross-origin' } }));
 app.use(cors({ origin: corsOrigin, credentials: true }));
-app.use(express.json());
+// fix216: the Resend webhook is checked against its exact bytes (svix signature)
+app.use(express.json({ verify: (req, _res, buf) => { if ((req as any).url?.startsWith('/api/webhooks/')) (req as any).rawBody = buf; } }));
 // fix158: every API request in flight is a named job in /api/perf (a freeze inside a handler names its route).
 // fix167: every request, not only /api (search-engine pages and sitemaps are built on this thread too)
 app.use((req, res, next) => {
@@ -473,7 +475,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|changelog$|hub(\/|$)|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -581,6 +583,9 @@ app.post('/api/auth/signup', jsonOnly, async (req, res) => {
     if (!(await turnstileOk(req.body?.turnstile, req.ip || ''))) return res.status(400).json({ error: 'Please try again', captcha: true });
     const user = signup(req.body?.email, req.body?.password, req.body?.name, req.ip || '', req.body?.optIn === true, req.body?.adult === true);
     securityLog(req, 'signup', user); // the network, for the CRM trust grade (security log, 90 days)
+    // fix216: the picks emails' time zone and language from the browser; the switches follow the (unchecked) opt-in box
+    try { initEmailPrefs(user.id, { optIn: req.body?.picksOptIn === true, tz: req.body?.tz, lang: req.body?.lang }); }
+    catch (e: any) { logger.warn('Email settings not saved at sign-up', { message: e?.message }); }
     void checkSignupSurge(sendMailFix168);
     const s = createSession(user.id, req.headers['user-agent']);
     setSessionCookie(res, s.token, s.expires, req.secure);
@@ -1014,6 +1019,69 @@ app.post('/api/crm/team/roles/:key', need('team'), needSudo, jsonOnly, (req, res
     res.json({ data: r });
   } catch (e) { crmFail(res, e); }
 });
+/*
+ * fix216: the daily picks email and the weekly digest (services/pickEmails.ts). Settings: the signed-in person's own
+ * (an account action, written here). Unsubscribe: the footer link opens a page with one button; mail apps post to
+ * the same URL (List-Unsubscribe-Post, one click). Webhook: Resend events (bounces, complaints, opens, clicks), the
+ * writes go to the worker. Admin: numbers per day, a test to the admin's own address, a preview for any user id.
+ */
+app.get('/api/email/settings', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+  res.json({ data: emailSettings(req.user) });
+});
+app.put('/api/email/settings', jsonOnly, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+  try {
+    const b = req.body || {};
+    saveEmailPrefs(req.user.id, { daily: b.daily, weekly: b.weekly, sports: b.sports, sendHour: b.sendHour, tz: b.tz, lang: b.lang }, 'account');
+    res.json({ data: emailSettings(req.user) });
+  } catch (e: any) {
+    if (e instanceof EmailPrefsError) return res.status(e.status).json({ error: e.message });
+    sendError(res, e, 'Saving email settings failed');
+  }
+});
+const picksUnsubPage = (state: 'ask' | 'done' | 'bad', action = '') => `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>SportLikely</title>
+<body style="font-family:Segoe UI,Arial,sans-serif;background:#0b0e13;color:#e8eaee;display:grid;place-items:center;min-height:100vh;margin:0">
+<div style="max-width:420px;padding:24px;text-align:center"><div style="font-weight:800;font-size:20px">Sport<span style="color:#c6f432">Likely</span></div>
+${state === 'ask' ? `<h1 style="font-size:20px">Stop the picks emails?</h1><p style="color:#9aa1ad">You will not get the daily picks email or the weekly digest any more, until you turn them back on in your account.</p>
+<form method="post" action="${action}"><button type="submit" style="background:#c6f432;color:#0b0e13;border:0;border-radius:10px;padding:12px 20px;font-weight:800;font-size:15px;cursor:pointer">Unsubscribe</button></form>`
+  : state === 'done' ? `<h1 style="font-size:20px">You are unsubscribed</h1><p style="color:#9aa1ad">No more daily picks or weekly digest emails. Account emails (codes, security) still arrive. You can turn them back on in your account.</p>`
+  : `<h1 style="font-size:20px">This link is not valid</h1><p style="color:#9aa1ad">Turn the emails off in your account settings instead.</p>`}
+<p><a href="/account#emails" style="color:#c6f432">Manage emails</a> · <a href="/" style="color:#c6f432">SportLikely</a></p></div></body>`;
+app.get('/api/email/unsubscribe', (req, res) => {
+  const ok = !!checkUnsub(req.query.u, req.query.t);
+  const action = ok ? `/api/email/unsubscribe?u=${encodeURIComponent(String(req.query.u))}&t=${encodeURIComponent(String(req.query.t))}` : '';
+  res.type('html').set('Cache-Control', 'no-store').send(picksUnsubPage(ok ? 'ask' : 'bad', action));
+});
+app.post('/api/email/unsubscribe', (req, res) => {
+  // List-Unsubscribe-Post (form body "List-Unsubscribe=One-Click") or the page's button
+  const oneClick = !!req.get('content-type')?.includes('form') && !req.get('sec-fetch-mode');
+  const ok = unsubscribePicks(req.query.u, req.query.t, oneClick ? 'one-click' : 'unsubscribe-link');
+  if (req.accepts(['html', 'json']) === 'html') return res.status(ok ? 200 : 400).type('html').set('Cache-Control', 'no-store').send(picksUnsubPage(ok ? 'done' : 'bad'));
+  res.status(ok ? 200 : 400).json({ ok });
+});
+app.post('/api/webhooks/resend', (req, res) => {
+  const raw: Buffer | undefined = (req as any).rawBody;
+  if (!raw || !verifyWebhook(raw, { id: req.get('svix-id'), timestamp: req.get('svix-timestamp'), signature: req.get('svix-signature') })) return res.status(401).json({ error: 'Bad signature' });
+  try { res.json({ ok: true, did: handleWebhookEvent(req.body) }); } catch (e) { sendError(res, e, 'Webhook failed'); }
+});
+app.get('/api/admin/emails', (req, res) => {
+  try { res.json({ data: emailAdminStats(Math.min(60, parseInt(String(req.query.days || '14'), 10) || 14)) }); } catch (e) { sendError(res, e, 'Email stats failed'); }
+});
+app.post('/api/admin/emails/test', async (req, res) => {
+  try { res.json({ data: await sendTestEmail(req.user!, req.body?.kind === 'weekly' ? 'weekly' : 'daily') }); }
+  catch (e: any) { if (e instanceof EmailPrefsError) return res.status(e.status).json({ error: e.message }); sendError(res, e, 'Test email failed'); }
+});
+app.get('/api/admin/emails/preview', (req, res) => {
+  try {
+    const p = previewEmail(parseInt(String(req.query.user || req.user!.id), 10), req.query.kind === 'weekly' ? 'weekly' : 'daily');
+    res.set('Cache-Control', 'no-store');
+    if ('skip' in p) return res.type('html').send(`<!doctype html><meta charset="utf-8"><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px"><h2>Nothing to send</h2><p>${p.skip.replace(/[<>&]/g, '')}</p></body>`);
+    res.type('html').send(p.html);
+  } catch (e) { sendError(res, e, 'Preview failed'); }
+});
+
 app.delete('/api/crm/team/roles/:key', need('team'), needSudo, (req, res) => {
   try {
     if (!isAdminReq(req) && req.user!.role === String(req.params.key)) return res.status(403).json({ error: 'You cannot delete your own role.' });
@@ -2469,6 +2537,12 @@ app.get('/api/public/results', async (req, res) => {
 app.get('/api/public/geo-source', (_req, res) => res.json({ data: geoCredit() }));
 // fix211: player photos (Wikidata / Commons, free licences) — the files from our own storage (a year's cache: the file
 // name changes with the photo), the credits list for /credits; a removed photo is deleted at once (404 → initials)
+// fix216: team crests / logos used in the picks emails, stored by the worker (images in emails come from our domain)
+app.get('/media/crests/:file', (req, res) => {
+  const f = crestPath(req.params.file);
+  if (!f) return res.status(404).set('Cache-Control', 'no-store').end();
+  res.set('Cache-Control', 'public, max-age=2592000').type(path.extname(f)).sendFile(f);
+});
 app.get('/media/players/:sport(tennis|basketball)/:file', (req, res) => {
   const f = photoFile(req.params.sport, req.params.file);
   if (!f) return res.status(404).set('Cache-Control', 'no-store').end();

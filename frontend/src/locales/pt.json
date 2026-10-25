@@ -2413,5 +2413,20 @@
  "No player photos yet.": "Ainda não há fotos de jogadores.",
  "Wikimedia Commons": "Wikimedia Commons",
  "so far": "até agora",
- "Show all {0} live →": "Ver os {0} ao vivo →"
+ "Show all {0} live →": "Ver os {0} ao vivo →",
+ "Send me today's strongest picks each morning and a weekly digest. You can turn this off anytime.": "Envie-me toda manhã os palpites mais fortes do dia e um resumo semanal. Você pode desativar quando quiser.",
+ "Emails": "E-mails",
+ "Daily picks": "Palpites do dia",
+ "Each morning: today's strongest picks and your teams' games, with how we did yesterday.": "Toda manhã: os palpites mais fortes do dia e os jogos dos seus times, com como fomos ontem.",
+ "Weekly digest": "Resumo semanal",
+ "Every Monday: last week's record, the best call and this week's big games.": "Toda segunda: o balanço da semana passada, o melhor palpite e os grandes jogos da semana.",
+ "Sports": "Esportes",
+ "Send time": "Horário de envio",
+ "Time zone": "Fuso horário",
+ "Language: {0} (the language you use on the site).": "Idioma: {0} (o idioma que você usa no site).",
+ "Confirm your email first: we only send these emails to a confirmed address.": "Confirme seu e-mail primeiro: só enviamos estes e-mails para endereços confirmados.",
+ "Emails to this address stopped because they could not be delivered. Change your email or write to support@sportlikely.com.": "Os e-mails para este endereço foram interrompidos porque não puderam ser entregues. Altere seu e-mail ou escreva para support@sportlikely.com.",
+ "Emails are not switched on on this server yet.": "Os e-mails ainda não estão ativados neste servidor.",
+ "No spam: you can unsubscribe with one click from any email. Probabilities, not promises. 18+.": "Sem spam: você pode cancelar com um clique em qualquer e-mail. Probabilidades, não promessas. +18.",
+ "Saved": "Salvo"
 }

@@ -44,6 +44,9 @@ interface SessionPayload {
   verificationRequired?: boolean
 }
 
+/** fix216: the picks emails opt-in (unchecked by default) and the browser's time zone and language */
+export interface SignupExtra { picksOptIn: boolean; tz: string; lang: string }
+
 interface AuthState {
   user: User | null
   access: Access
@@ -63,7 +66,7 @@ interface AuthState {
   login: (email: string, password: string, guard?: AuthGuard) => Promise<SignInStep>
   /** two-step login: the ticket from login / reset + a 6-digit code or a recovery code */
   loginCode: (ticket: string, code: string) => Promise<void>
-  signup: (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean, guard?: AuthGuard) => Promise<void>
+  signup: (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean, guard?: AuthGuard, extra?: SignupExtra) => Promise<void>
   verify: (code: string) => Promise<void>
   resendCode: () => Promise<void>
   resetPassword: (email: string, code: string, password: string) => Promise<SignInStep>
@@ -150,8 +153,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apply(r.data)
   }
 
-  const signup = async (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean, guard?: AuthGuard) => {
-    const r = await axios.post(`${API_URL}/auth/signup`, { email, password, name, optIn: !!optIn, adult: !!adult, ...(guard || {}) })
+  const signup = async (email: string, password: string, name?: string, optIn?: boolean, adult?: boolean, guard?: AuthGuard, extra?: SignupExtra) => {
+    const r = await axios.post(`${API_URL}/auth/signup`, { email, password, name, optIn: !!optIn, adult: !!adult, ...(guard || {}), ...(extra || {}) })
     apply(r.data)
   }
 

@@ -49,6 +49,7 @@ import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
 import { photosTick } from './services/playerPhotos';
+import { picksEmailTick } from './services/pickEmails';
 
 let started = false;
 
@@ -82,6 +83,8 @@ export function startJobs() {
   // fix211: player photos (tennis + basketball) from Wikidata / Commons, a small batch every 20 min (PLAYER_PHOTOS=0 = off)
   after('player photos', () => photosTick(), 4 * 60 * 1000).unref();
   every('player photos', () => photosTick(), 20 * 60 * 1000).unref();
+  // fix216: the daily picks email and the weekly digest, at each person's own send hour (checked every 5 min)
+  every('picks emails', () => picksEmailTick().catch(e => logger.warn(`picks emails: ${e?.message || e}`)), 5 * 60 * 1000).unref();
 
   startLivePoll();
 

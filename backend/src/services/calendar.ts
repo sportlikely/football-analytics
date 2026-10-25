@@ -217,7 +217,7 @@ function resolveFavIds(userId: number, f: Favorite): number[] | null {
 }
 /** The model a public page shows for a match (lower = preferred, 99 = a shadow model): as tracking.ts MAIN_PRIORITY. */
 const MAIN_PRIORITY = ['grid-v3', 'elo-intl', 'elo-euro', 'dc-history-v2', 'poisson-dc-v1'];
-function mainModelRank(m: string, date?: string) {
+export function mainModelRank(m: string, date?: string) {
   if (m === MIX_MODEL) { const since = mixLive() ? mixLiveSince() : ''; return since && date && date >= since ? -1 : 99; }
   if (m === FEAT_MODEL) return 99;
   const i = MAIN_PRIORITY.indexOf(m); return i < 0 ? 99 : i;

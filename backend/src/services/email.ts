@@ -20,27 +20,35 @@ function parseFrom(from: string): { name: string; email: string } {
 }
 
 export async function sendEmail(to: string, subject: string, html: string, text: string, replyTo?: string): Promise<void> {
-  return sendMail({ to, subject, html, text, replyTo });
+  await sendMail({ to, subject, html, text, replyTo });
 }
 
-/** Full options: a different From (e.g. support@), Reply-To, extra headers (List-Unsubscribe for campaigns). */
-export async function sendMail(o: { to: string; subject: string; html: string; text: string; replyTo?: string; from?: string; headers?: Record<string, string> }): Promise<void> {
+/**
+ * Full options: a different From (e.g. support@), Reply-To, extra headers (List-Unsubscribe for campaigns).
+ * fix216: returns the provider's message id (Resend webhooks report bounces / opens by it); `quiet` = no log line
+ * (the picks emails log one summary per run). A failed call throws the axios error (status on e.response).
+ */
+export async function sendMail(o: { to: string; subject: string; html: string; text: string; replyTo?: string; from?: string; headers?: Record<string, string>; quiet?: boolean }): Promise<string | null> {
   if (!emailProvider) throw new Error('Email is not configured');
   const from = o.from || FROM;
+  let id: string | null = null;
   if (emailProvider === 'resend') {
-    await axios.post(
+    const r = await axios.post(
       'https://api.resend.com/emails',
       { from, to: [o.to], subject: o.subject, html: o.html, text: o.text, ...(o.replyTo ? { reply_to: o.replyTo } : {}), ...(o.headers ? { headers: o.headers } : {}) },
       { headers: { Authorization: `Bearer ${RESEND_KEY}` }, timeout: 15000 }
     );
+    id = r.data?.id ?? null;
   } else {
-    await axios.post(
+    const r = await axios.post(
       'https://api.brevo.com/v3/smtp/email',
       { sender: parseFrom(from), to: [{ email: o.to }], subject: o.subject, htmlContent: o.html, textContent: o.text, ...(o.replyTo ? { replyTo: { email: o.replyTo } } : {}), ...(o.headers ? { headers: o.headers } : {}) },
       { headers: { 'api-key': BREVO_KEY }, timeout: 15000 }
     );
+    id = r.data?.messageId ?? null;
   }
-  logger.info(`Email sent (${emailProvider}): ${o.subject}`);
+  if (!o.quiet) logger.info(`Email sent (${emailProvider}): ${o.subject}`);
+  return id;
 }
 
 /* ---------- shared look for every email we send ---------- */
