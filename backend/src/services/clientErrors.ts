@@ -2,7 +2,7 @@
  * Site crash reports (Oct 2026): when a page breaks in a visitor's browser (the "Something went wrong on this page"
  * screen, or an error the page didn't catch), the browser sends a short report here. Same problems are grouped
  * (same message + same kind of page), with a count, the first / last time and the pages it happened on, so the admin
- * sees which pages break and how often (Admin → Overview → Site errors). The first time a new problem shows up, the
+ * sees which pages break and how often (Admin → Site health → Site errors). The first time a new problem shows up, the
  * admin gets one email (at most one email per problem per day, and at most 10 a day).
  *
  * Privacy: no IP address, no user id, no cookies — only the message, a few lines of code location, the page path,
@@ -83,8 +83,8 @@ async function maybeEmail(sig: string) {
   const pages: string[] = JSON.parse(r.pages || '[]');
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const link = `https://sportlikely.com${pages[0] || '/'}`;
-  const text = `A page broke on sportlikely.com.\n\nPage: ${link}\nError: ${r.message}\nTimes so far: ${r.count}\n\nAll site errors: Admin → Overview → Site errors.`;
-  const html = `<p>A page broke on sportlikely.com.</p><p><b>Page:</b> <a href="${esc(link)}">${esc(link)}</a><br><b>Error:</b> ${esc(r.message)}<br><b>Times so far:</b> ${r.count}</p><p>All site errors: Admin → Overview → Site errors.</p>`;
+  const text = `A page broke on sportlikely.com.\n\nPage: ${link}\nError: ${r.message}\nTimes so far: ${r.count}\n\nAll site errors: Admin → Site health → Site errors.`;
+  const html = `<p>A page broke on sportlikely.com.</p><p><b>Page:</b> <a href="${esc(link)}">${esc(link)}</a><br><b>Error:</b> ${esc(r.message)}<br><b>Times so far:</b> ${r.count}</p><p>All site errors: Admin → Site health → Site errors.</p>`;
   try { await sendMail({ to, subject: `SportLikely: a page broke (${r.page_kind})`, text, html }); }
   catch (e: any) { logger.warn(`client error email: ${e.message}`); }
 }

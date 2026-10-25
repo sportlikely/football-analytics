@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth, type User } from '../lib/auth'
-import DataHealth from '../components/DataHealth'
 import SeasonForecastAdminCard from '../components/SeasonForecastAdminCard'
 import VisitorsCard from '../components/VisitorsCard'
 import LeaguesCard from '../components/LeaguesCard'
@@ -14,27 +13,202 @@ import NbaModelCheckCard from '../components/NbaModelCheckCard'
 import NewsInjuriesCard from '../components/NewsInjuriesCard'
 import GameExtrasAdminCard from '../components/GameExtrasAdminCard'
 import BbGridCard from '../components/BbGridCard'
+import { ChecksCard, Explained, NeedsYouCard, SpeedCard, TabChecks, Tiles, type Ctx, type TileDef } from '../components/admin/AdminParts'
+import { ADMIN_TABS, adminPath, adminTabOf, healthTab, waitingCount, type AdminSummary, type AdminTab, type HealthCheck } from '../lib/adminTabs'
 import { PARITY_REPORT } from '../lib/sportParity.report'
 import { slAdmin } from '../lib/modelNames'
 import { matchHref } from '../lib/links'
 
 type Row = User & { lastLoginAt: string | null }
+type Stats = { total: number; premium: number; verified: number; optIn: number }
 
 function fmt(iso: string | null) {
   return iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '–'
 }
 
-/** Admin panel: an overview (visitors, accounts, data health) and, on its own tab, the users list (the future CRM). */
+/**
+ * Admin panel (fix237): seven tabs on their own sub-paths (/admin/needs-you, /admin/users, /admin/models, /admin/data,
+ * /admin/site, /admin/messages, /admin/security; /admin opens Needs you). Each tab loads only its own cards; the summary
+ * tiles and the stored data-health report are read once for the page. Every card sits in an Explained frame (lib/adminTabs.ts).
+ */
 export default function Admin() {
   const { access, loading } = useAuth()
+  const { tab: tabParam } = useParams()
+  const [params] = useSearchParams()
+  const [summary, setSummary] = useState<AdminSummary | null>(null)
+  const [checks, setChecks] = useState<HealthCheck[] | null>(null)
+  const [checkedAt, setCheckedAt] = useState<string | null>(null)
+
+  const loadSummary = useCallback(() => axios.get(`${API_URL}/admin/summary`).then(r => setSummary(r.data.data)).catch(() => undefined), [])
+  const loadChecks = useCallback(() => axios.get(`${API_URL}/data-health`).then(r => { setChecks(r.data.data?.checks || []); setCheckedAt(r.data.data?.at || null) }).catch(() => setChecks([])), [])
+  const reload = useCallback(() => { loadSummary(); loadChecks() }, [loadSummary, loadChecks])
+  useEffect(() => {
+    if (access !== 'admin') return
+    reload()
+    const t = setInterval(reload, 60 * 1000)
+    return () => clearInterval(t)
+  }, [access, reload])
+
+  if (loading) return null
+  if (access !== 'admin') return <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16 text-sm text-muted">Admins only.</div>
+  // the old ?tab=users address, and an unknown tab → /admin
+  if (!tabParam && params.get('tab') === 'users') return <Navigate to={adminPath('users')} replace />
+  if (tabParam && !adminTabOf(tabParam)) return <Navigate to="/admin" replace />
+  const tab: AdminTab = adminTabOf(tabParam) || 'needs-you'
+
+  const ctx: Ctx = { summary, checks }
+  const red = (checks || []).filter(c => c.level === 'fail')
+  const inTab = (t: AdminTab) => (checks || []).filter(c => healthTab(c.id) === t)
+  const badge = (t: AdminTab) => (t === 'needs-you' ? waitingCount(summary) + red.length : inTab(t).filter(c => c.level === 'fail').length)
+  const checkTiles = (t: AdminTab): TileDef[] => {
+    const l = inTab(t)
+    return [
+      { label: 'Checks with a problem', value: checks ? l.filter(c => c.level === 'fail').length : null, level: l.some(c => c.level === 'fail') ? 'fail' : 'ok' },
+      { label: 'Checks to look at', value: checks ? l.filter(c => c.level === 'warn').length : null, level: l.some(c => c.level === 'warn') ? 'warn' : 'ok' },
+      { label: 'Checks OK', value: checks ? l.filter(c => c.level === 'ok').length : null }
+    ]
+  }
+  const s = summary
+  const waiting = s ? waitingCount(s) + red.length : null
+  const TILES: Record<AdminTab, TileDef[]> = {
+    'needs-you': [
+      { label: 'Waiting for you', value: waiting, level: waiting ? 'warn' : 'ok' },
+      { label: 'Checks with a problem', value: checks ? red.length : null, level: red.length ? 'fail' : 'ok' },
+      { label: 'Site errors today', value: s?.siteErrors24h ?? null, level: s?.siteErrors24h ? 'fail' : 'ok', to: adminPath('site') },
+      { label: 'Visitors today', value: s?.visitorsToday ?? null, to: adminPath('users') }
+    ],
+    users: [
+      { label: 'Visitors today', value: s?.visitorsToday ?? null },
+      { label: 'Sign-ups today', value: s?.signupsToday ?? null },
+      { label: 'Accounts', value: s?.accounts ?? null },
+      { label: 'Premium / Pro', value: s?.paying ?? null }
+    ],
+    models: checkTiles('models'),
+    data: [
+      ...checkTiles('data').slice(0, 2),
+      { label: 'Photos to review', value: s?.photosToReview ?? null, level: s?.photosToReview ? 'warn' : 'ok' },
+      { label: 'Results to check', value: s?.bbResultsToCheck ?? null, level: s?.bbResultsToCheck ? 'warn' : 'ok' }
+    ],
+    site: [
+      { label: 'Site errors today', value: s?.siteErrors24h ?? null, level: s?.siteErrors24h ? 'fail' : 'ok', hint: 'times a page broke' },
+      { label: 'Open site errors', value: s?.siteErrorsOpen ?? null, level: s?.siteErrorsOpen ? 'warn' : 'ok' },
+      { label: 'Backup', value: !s ? null : s.backupOk === null ? '–' : s.backupOk ? 'OK' : 'Late', level: s?.backupOk === false ? 'fail' : 'ok', hint: s?.lastBackupAt ? `last ${fmt(s.lastBackupAt)}` : undefined },
+      checkTiles('site')[0]
+    ],
+    messages: [...checkTiles('messages'), { label: 'Messages to answer', value: s?.contactOpen ?? null, level: s?.contactOpen ? 'warn' : 'ok', to: adminPath('users') }],
+    security: [
+      { label: 'Failed sign-ins (24 h)', value: s?.failedSignIns24h ?? null, level: !s ? undefined : s.failedSignIns24h > 20 ? 'fail' : s.failedSignIns24h > 5 ? 'warn' : 'ok' },
+      { label: 'Accounts', value: s?.accounts ?? null },
+      { label: 'Checks with a problem', value: checks ? red.length : null, level: red.length ? 'fail' : 'ok', to: '/admin' }
+    ]
+  }
+  const runPlayers = () => axios.get(`${API_URL}/data-audit/run`, { params: { bg: 1, email: 0 } }).then(() => window.alert('Player check started: it takes a few minutes.')).catch(e => window.alert(errorText(e)))
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
+      <div className="flex flex-wrap items-baseline justify-between gap-3 mb-4">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Admin</h1>
+        {checkedAt && <span className="text-xs text-faint">Checked {new Date(checkedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · updates every minute</span>}
+      </div>
+      <nav className="-mx-4 px-4 sm:mx-0 sm:px-0 mb-6 overflow-x-auto" aria-label="Admin sections">
+        <div className="flex gap-1 rounded-full border border-line/60 bg-surface p-1 w-max">
+          {ADMIN_TABS.map(t => {
+            const n = badge(t.key)
+            return (
+              <Link key={t.key} to={adminPath(t.key)} aria-current={tab === t.key ? 'page' : undefined}
+                className={`px-3.5 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${tab === t.key ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}>
+                {t.label}{n > 0 && <span className={`ml-1.5 num text-[11px] font-bold px-1.5 rounded-full ${tab === t.key ? 'bg-bg/20' : t.key === 'needs-you' ? 'bg-draw/20 text-draw' : 'bg-loss/15 text-loss'}`}>{n}</span>}
+              </Link>
+            )
+          })}
+        </div>
+      </nav>
+
+      <Tiles tiles={TILES[tab]} />
+
+      {tab === 'needs-you' && <Explained ctx={ctx} id="needs-you"><NeedsYouCard ctx={ctx} reload={reload} /></Explained>}
+
+      {tab === 'users' && (
+        <>
+          <Explained ctx={ctx} id="visitors"><VisitorsCard /></Explained>
+          <UsersSection ctx={ctx} />
+          <Explained ctx={ctx} id="leave"><LeaveCard /></Explained>
+          <Explained ctx={ctx} id="contact"><ContactCard /></Explained>
+        </>
+      )}
+
+      {tab === 'models' && (
+        <>
+          <Explained ctx={ctx} id="model-daily"><ModelDailyCard /></Explained>
+          <Explained ctx={ctx} id="bb-engine"><BbGridCard /></Explained>
+          <Explained ctx={ctx} id="nba-check"><NbaModelCheckCard /></Explained>
+          <Explained ctx={ctx} id="season-forecast"><SeasonForecastAdminCard /></Explained>
+          <Explained ctx={ctx} id="calibration"><ChecksCard id="calibration" ctx={ctx} title="Do our percentages come true? (football, basketball)" /></Explained>
+          <Explained ctx={ctx} id="backtest"><ChecksCard id="backtest" ctx={ctx} title="Leagues vs past seasons (basketball)" /></Explained>
+          <Explained ctx={ctx} id="other-models">
+            <ChecksCard id="other-models" ctx={ctx} title="American football and tennis models">
+              <p className="mt-3 text-xs text-muted">Past seasons and model tests: <Link to="/american-football/past" className="text-accent font-semibold">American football</Link> · <Link to="/tennis/past" className="text-accent font-semibold">Tennis</Link></p>
+            </ChecksCard>
+          </Explained>
+          <TabChecks tab="models" ctx={ctx} reload={reload} />
+        </>
+      )}
+
+      {tab === 'data' && (
+        <>
+          <Explained ctx={ctx} id="af-usage"><AfUsageCard /></Explained>
+          <Explained ctx={ctx} id="nfl-data"><NflCard /></Explained>
+          <Explained ctx={ctx} id="leagues-football"><LeaguesCard /></Explained>
+          <Explained ctx={ctx} id="leagues-basketball"><LeaguesCard sport="basketball" /></Explained>
+          <Explained ctx={ctx} id="game-extras"><GameExtrasAdminCard /></Explained>
+          <Explained ctx={ctx} id="player-photos"><PlayerPhotosCard /></Explained>
+          <Explained ctx={ctx} id="news-injuries"><NewsInjuriesCard /></Explained>
+          <Explained ctx={ctx} id="bb-results"><BbResultsCard /></Explained>
+          <TabChecks tab="data" ctx={ctx} reload={reload} extra={<button type="button" onClick={runPlayers} className="font-bold text-muted hover:text-ink">Run player check</button>} />
+        </>
+      )}
+
+      {tab === 'site' && (
+        <>
+          <Explained ctx={ctx} id="speed"><SpeedCard /></Explained>
+          <Explained ctx={ctx} id="deploy-errors"><ChecksCard id="deploy-errors" ctx={ctx} title="Errors during the last deploy" /></Explained>
+          <Explained ctx={ctx} id="site-errors"><SiteErrorsCard /></Explained>
+          <Explained ctx={ctx} id="link-check"><LinkCheckCard /></Explained>
+          <Explained ctx={ctx} id="backups"><BackupsCard /></Explained>
+          <Explained ctx={ctx} id="parity"><SportParityCard /></Explained>
+          <TabChecks tab="site" ctx={ctx} reload={reload} />
+        </>
+      )}
+
+      {tab === 'messages' && (
+        <>
+          <Explained ctx={ctx} id="emails"><EmailsAdminCard /></Explained>
+          <Explained ctx={ctx} id="push"><PushAdminCard /></Explained>
+          <TabChecks tab="messages" ctx={ctx} reload={reload} />
+        </>
+      )}
+
+      {tab === 'security' && (
+        <>
+          <Explained ctx={ctx} id="security"><SecurityCard /></Explained>
+          <Explained ctx={ctx} id="staff">
+            <section className="card p-5 sm:p-6">
+              <h2 className="font-display text-lg font-bold text-ink mb-1">Staff and roles</h2>
+              <p className="text-sm text-muted">Roles, permissions and the team list are kept in the CRM. <Link to="/crm?tab=team" className="text-accent font-semibold">Open CRM → Team & roles</Link></p>
+            </section>
+          </Explained>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Visitors & users: the Accounts tiles and the users list (plan changes, password reset, CSV) */
+function UsersSection({ ctx }: { ctx: Ctx }) {
   const [rows, setRows] = useState<Row[]>([])
-  const [stats, setStats] = useState<{ total: number; premium: number; verified: number; optIn: number } | null>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
-  const [params, setParams] = useSearchParams()
-  const tab: 'overview' | 'users' = params.get('tab') === 'users' ? 'users' : 'overview'
-  const go = (x: 'overview' | 'users') => setParams(x === 'overview' ? {} : { tab: x }, { replace: true })
-
   const load = () =>
     axios
       .get(`${API_URL}/admin/users`)
@@ -44,13 +218,7 @@ export default function Admin() {
         setError(null)
       })
       .catch(e => setError(errorText(e)))
-
-  useEffect(() => {
-    if (access === 'admin') load()
-  }, [access])
-
-  if (loading) return null
-  if (access !== 'admin') return <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16 text-sm text-muted">Admins only.</div>
+  useEffect(() => { load() }, [])
 
   const setPlan = async (u: Row, plan: 'free' | 'premium' | 'pro') => {
     let until: string | null = null
@@ -81,80 +249,29 @@ export default function Admin() {
   }
 
   const shown = rows.filter(r => !q || r.email.includes(q.toLowerCase()) || (r.name || '').toLowerCase().includes(q.toLowerCase()))
-
-  const tile = (label: string, value: number | undefined, onClick?: () => void) => (
-    <button type="button" onClick={onClick} className="text-left rounded-xl border border-line/60 bg-surface2/50 px-4 py-3 hover:border-accent/40 transition-colors">
+  const tile = (label: string, value: number | undefined) => (
+    <div className="rounded-xl border border-line/60 bg-surface2/50 px-4 py-3">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-faint">{label}</div>
       <div className="num text-2xl font-extrabold text-ink leading-none mt-1.5">{value ?? '–'}</div>
-    </button>
+    </div>
   )
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Admin</h1>
-        <nav className="flex gap-1 rounded-full border border-line/60 bg-surface p-1">
-          {(['overview', 'users'] as const).map(x => (
-            <button key={x} type="button" onClick={() => go(x)} aria-current={tab === x ? 'page' : undefined}
-              className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${tab === x ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}>
-              {x === 'overview' ? 'Overview' : `Users${stats ? ` · ${stats.total}` : ''}`}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {tab === 'overview' && (
-        <>
-          <VisitorsCard />
-          {/* fix221: near the top — the photo matches waiting for Approve / Wrong person */}
-          <PlayerPhotosCard />
-          <ModelDailyCard />
-          <SeasonForecastAdminCard />
-          <SiteErrorsCard />
-          <LinkCheckCard />
-          <BackupsCard />
-          <BbResultsCard />
-          <BbGridCard />
-          <NbaModelCheckCard />
-          <NewsInjuriesCard />
-          <GameExtrasAdminCard />
-          <LeaguesCard />
-          <LeaguesCard sport="basketball" />
-          <SportParityCard />
-          <EmailsAdminCard />
-          <PushAdminCard />
-          <AfUsageCard />
-          <NflCard />
-          <section className="card p-5 sm:p-6 mb-8">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
-              <h2 className="font-display text-lg font-bold text-ink">Accounts</h2>
-              <button type="button" onClick={() => go('users')} className="text-xs font-semibold text-accent">Open users →</button>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {tile('Accounts', stats?.total, () => go('users'))}
-              {tile('Confirmed email', stats?.verified, () => go('users'))}
-              {tile('Premium / Pro', stats?.premium, () => go('users'))}
-              {tile('Want updates', stats?.optIn, () => go('users'))}
-            </div>
-          </section>
-          <ContactCard />
-          <SecurityCard />
-          <LeaveCard />
-          <DataHealth />
-        </>
-      )}
-
-      {tab === 'users' && (<>
-      <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
-        <div>
-          <h2 className="font-display text-2xl font-extrabold tracking-tight text-ink">Users</h2>
-          {stats && (
-            <p className="text-sm text-muted">
-              <span className="num">{stats.total}</span> accounts · <span className="num">{stats.verified}</span> confirmed ·{' '}
-              <span className="num">{stats.premium}</span> premium · <span className="num">{stats.optIn}</span> want updates
-            </p>
-          )}
-        </div>
+    <>
+      <Explained id="accounts" ctx={ctx}>
+        <section className="card p-5 sm:p-6">
+          <h2 className="font-display text-lg font-bold text-ink mb-4">Accounts</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {tile('Accounts', stats?.total)}
+            {tile('Confirmed email', stats?.verified)}
+            {tile('Premium / Pro', stats?.premium)}
+            {tile('Want updates', stats?.optIn)}
+          </div>
+        </section>
+      </Explained>
+      <Explained id="users" ctx={ctx}>
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
+        <h2 className="font-display text-lg font-bold text-ink">Users</h2>
         <div className="flex items-center gap-2">
         <a href={`${API_URL}/admin/users.csv`} className="rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:border-faint whitespace-nowrap">
           Export CSV
@@ -239,8 +356,8 @@ export default function Admin() {
           </tbody>
         </table>
       </div>
-      </>)}
-    </div>
+      </Explained>
+    </>
   )
 }
 

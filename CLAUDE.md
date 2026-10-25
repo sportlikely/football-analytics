@@ -209,7 +209,9 @@ Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colour
 - `App.tsx` routes (lazy pages). Football pages in `pages/`, basketball in `pages/bb/`. `components/` shared cards.
 - `lib/i18n.ts` (t, LOCALE), `lib/bb.ts` (basketball types, `BB_COUNTRY`), `lib/fame.ts` (how big a club is: used for
   Spotlight and the featured carousel), `lib/reveal.ts` (free users reveal 2 picks a week).
-- Admin pages: `pages/Admin.tsx` (overview cards incl. Site errors, Football leagues, Basketball leagues, Backups),
+- Admin pages: `pages/Admin.tsx` (fix237: 7 tabs on sub-paths /admin/<tab>, Needs you first; every card and data-health check is placed
+  and explained in `lib/adminTabs.ts` — a new card or check needs its entry there, `npm run parity` (scripts/admin-check.ts) fails otherwise;
+  parts in `components/admin/AdminParts.tsx`, tiles from `/api/admin/summary`),
   `pages/Crm.tsx`.
 
 ## Model facts you should know (details in docs/notes)

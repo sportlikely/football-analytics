@@ -790,6 +790,7 @@ function Shell() {
             <Route path="/premium" element={<Premium />} />
             <Route path="/premium/packs" element={<Premium />} />
             <Route path="/admin" element={<AdminOnly><ConsoleGate><Admin /></ConsoleGate></AdminOnly>} />
+            <Route path="/admin/:tab" element={<AdminOnly><ConsoleGate><Admin /></ConsoleGate></AdminOnly>} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/accessibility" element={<Accessibility />} />
