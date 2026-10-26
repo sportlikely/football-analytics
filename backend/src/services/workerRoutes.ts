@@ -21,8 +21,11 @@ import { fetchFromWorker, forwardToWorker, waiting, type WorkerAnswer } from './
 import { isWorker } from './role';
 import { deferred } from './deferredWrites';
 import { readSql, asBuffer, pageReaderOn } from './pageReader';
+import { keepsOwnCopies } from './deadline';
+import { partsOf } from './gameBundle';
 
-type RouteDef = { re: RegExp; freshMs: number };
+/** shared: the same answer for everyone (fix250: a signed-in visitor gets the signed-out copy too) */
+type RouteDef = { re: RegExp; freshMs: number; shared?: boolean };
 const S = 1000, MIN = 60 * S;
 /**
  * The public routes the worker answers (GET). Every sport: football match / team / player pages, leagues, today, news,
@@ -52,7 +55,8 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/season-forecast\/(football|basketball|nfl)\/(league\/[A-Za-z0-9]+|team\/\d+|game\/\d+)$/, freshMs: 2 * MIN }, // fix215
   { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN },
   { re: /^\/api\/slug-route$/, freshMs: 1 * MIN }, // fix229: an address outside the web process's slug state
-  { re: /^\/api\/extras\/(football|basketball|nfl|tennis)\/(game\/-?\d+|team\/\d+)$/, freshMs: 5 * MIN } // fix231
+  { re: /^\/api\/extras\/(football|basketball|nfl|tennis)\/(game\/-?\d+|team\/\d+)$/, freshMs: 5 * MIN, shared: true }, // fix231 (the same for everyone)
+  { re: /^\/api\/game-bundle\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 20 * S } // fix250: a game page's parts in one answer
 ];
 
 /**
@@ -114,6 +118,8 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   // fix231: game-page extras (weather, referee, fixture difficulty, trends) and a team's next 5 games
   { path: '/api/extras/:sport(football|basketball|nfl|tennis)/game/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/extras/football/game/1' },
   { path: '/api/extras/:sport(football|basketball|nfl|tennis)/team/:id(\\d+)', sport: 'all', by: 'worker', sample: '/api/extras/tennis/team/1' },
+  // fix250: a game page in one request (the prediction, extras, season forecast, more predictions: services/gameBundle.ts)
+  { path: '/api/game-bundle/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/game-bundle/football/1' },
   // football
   { path: '/api/matches/upcoming', sport: 'football', by: 'stored', sample: '/api/matches/upcoming' },
   { path: '/api/matches/live', sport: 'football', by: 'stored', sample: '/api/matches/live' },
@@ -218,13 +224,27 @@ function saveCopy(k: string, a: WorkerAnswer): Copy {
   const c: Copy = { at: Date.now(), status: a.status, type: String(a.headers['content-type'] || 'application/json; charset=utf-8'), cache: a.headers['cache-control'] ? String(a.headers['cache-control']) : null, body: a.body };
   memSet(k, c);
   try { saveRow.run(k, c.at, c.status, c.type, c.cache, c.body); } catch (e: any) { logger.warn(`route cache: ${e?.message || e}`); }
+  // fix250: a game bundle's parts become the parts' own copies (byte ranges from the worker: nothing parsed here)
+  if (a.status === 200 && a.headers['x-sl-parts']) {
+    const flags = k.slice(k.lastIndexOf('|') + 1);
+    for (const p of partsOf(String(a.headers['x-sl-parts']))) {
+      const pk = `${p.path}?|${flags}`, body = a.body.subarray(p.start, p.end);
+      const pc: Copy = { at: c.at, status: 200, type: 'application/json; charset=utf-8', cache: 'no-store', body };
+      memSet(pk, pc);
+      try { saveRow.run(pk, pc.at, 200, pc.type, pc.cache, body); } catch { /* the next bundle */ }
+    }
+  }
   return c;
 }
-const sendCopy = (res: express.Response, c: Copy, state: string) => {
+const sendCopy = (res: express.Response, c: Copy, state: string, staleS = 0) => {
   res.status(c.status).set('Content-Type', c.type).set('X-SL-Copy', state);
+  if (staleS) res.set('X-SL-Stale', String(staleS)); // fix250: the copy is older than the route's freshness
   if (c.cache) res.set('Cache-Control', c.cache);
   res.end(c.body);
 };
+const pending = (res: express.Response) => res.status(202).set({ 'Cache-Control': 'no-store', 'X-SL-Pending': '1' }).type('application/json').end('{"pending":true,"data":null}');
+// fix250: a visitor waits this long for the worker's first answer, then gets { pending: true } (the copy is made anyway)
+const FIRST_WAIT_MS = Number(process.env.ROUTE_WAIT_MS) || 700;
 
 /** a signed-out request's copy key: the URL (query sorted) + what changes the page for a signed-out visitor */
 function copyKey(req: express.Request): string {
@@ -237,7 +257,7 @@ function copyKey(req: express.Request): string {
 
 // one fetch per key at a time: the other visitors asking for it wait for the same answer
 const inflight = new Map<string, Promise<Copy | WorkerAnswer>>();
-const stats = { forwarded: 0, served: 0, stale: 0, refreshed: 0, failed: 0, startup: 0 };
+const stats = { forwarded: 0, served: 0, stale: 0, refreshed: 0, failed: 0, startup: 0, pending: 0 };
 
 function fetchCopy(k: string, req: express.Request, keep: boolean): Promise<Copy | WorkerAnswer> {
   let p = inflight.get(k);
@@ -257,19 +277,26 @@ export async function workerRoutes(req: express.Request, res: express.Response, 
   if (!isWeb || req.method !== 'GET') return next();
   const route = workerRouteOf(req.path);
   if (!route) return next();
-  // signed in: the plan and the unlocks change the page — always the worker's fresh answer, streamed
-  if (req.user || req.access === 'admin') { stats.forwarded++; return forwardToWorker(req, res); }
+  // signed in: the plan and the unlocks change the page — the worker's fresh answer, streamed (fix250: cut at 900 ms by
+  // services/deadline.ts, the answer kept for the person's next request); a route that is the same for everyone: the copy
+  const signedIn = !!(req.user || req.access === 'admin');
+  if (signedIn && !route.shared) { stats.forwarded++; return forwardToWorker(req, res); }
   const k = copyKey(req);
   const have = await readCopy(k);
   if (have) {
-    const stale = Date.now() - have.at > route.freshMs;
-    sendCopy(res, have, stale ? 'stale' : 'fresh');
+    const age = Date.now() - have.at, stale = age > route.freshMs;
+    sendCopy(res, have, stale ? 'stale' : 'fresh', stale ? Math.round(age / 1000) : 0);
     if (stale) { stats.stale++; fetchCopy(k, req, true).then(() => { stats.refreshed++; }, () => { stats.failed++; }); } else stats.served++;
     return;
   }
+  if (signedIn) { stats.forwarded++; return forwardToWorker(req, res); }
   stats.forwarded++;
   waiting(res);
-  fetchCopy(k, req, true).then(x => {
+  keepsOwnCopies(res);
+  // fix250: never a wait for a first build — 700 ms at most, then { pending: true }; the copy is kept when it comes
+  const late = setTimeout(() => { if (!res.headersSent) { stats.pending++; pending(res); } }, (req as any).verifiedCrawler ? 20_000 : FIRST_WAIT_MS);
+  fetchCopy(k, req, true).finally(() => clearTimeout(late)).then(x => {
+    if (res.headersSent) return;
     if (isCopy(x)) return sendCopy(res, x, 'new');
     res.status(x.status);
     for (const h of ['content-type', 'cache-control', 'retry-after']) if (x.headers[h]) res.set(h, String(x.headers[h]));

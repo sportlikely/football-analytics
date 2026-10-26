@@ -18,7 +18,7 @@ import { stringifyAsync } from '../utils/jsonAsync';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import { readStored, readSql, pageReaderOn } from './pageReader';
+import { readStored, readSql, pageReaderOn, SPLIT_CHARS, partKey, partsMarker, partsCount } from './pageReader';
 
 db.exec(`CREATE TABLE IF NOT EXISTS page_cache (key TEXT PRIMARY KEY, json TEXT NOT NULL, built_at INTEGER NOT NULL, ms INTEGER NOT NULL DEFAULT 0)`);
 // fix221: each stored view carries its ETag and a gzip copy made by the worker (the web process only sends them)
@@ -57,6 +57,8 @@ export interface Stored {
   /** the page itself — read and parsed on first use (fix221: the web process sends views and never needs it) */
   readonly body: any;
   builtAt: number;
+  /** fix250: seconds past the page's freshness (0 = fresh; a new copy is being built) */
+  staleS: number;
   variant: (v: string) => string | undefined;
   view: (v: string) => View | undefined;
   /** fix221: the page's rows (null = a page without rows) */
@@ -192,10 +194,13 @@ function bodyOf(key: string, m: Mem) {
 function readView(key: string, v: string, builtAt: number): View | null {
   const r: any = db.prepare(`SELECT json, etag, gz FROM page_cache WHERE key = ? AND built_at = ?`).get(`${key}#${v}`, builtAt);
   if (!r) return null;
-  return { text: r.json, etag: r.etag || `"${builtAt.toString(36)}-${v}"`, gz: r.gz ? Buffer.from(r.gz) : null };
+  // fix250: a view over 2 MB is kept in parts
+  const n = partsCount(r.json);
+  const text = n ? Array.from({ length: n }, (_, i) => (db.prepare(`SELECT json FROM page_cache WHERE key = ? AND built_at = ?`).get(partKey(`${key}#${v}`, i), builtAt) as any)?.json ?? '').join('') : r.json;
+  return { text, etag: r.etag || `"${builtAt.toString(36)}-${v}"`, gz: r.gz ? Buffer.from(r.gz) : null };
 }
 
-function stored(key: string, m: Mem): Stored {
+function stored(key: string, m: Mem, staleS = 0): Stored {
   const view = (v: string) => {
     if (!m.variants.has(v)) {
       const x = readView(key, v, m.builtAt);
@@ -207,6 +212,7 @@ function stored(key: string, m: Mem): Stored {
   return {
     get body() { return bodyOf(key, m); },
     builtAt: m.builtAt,
+    staleS,
     view,
     variant: v => view(v)?.text,
     etagOf: v => {
@@ -281,10 +287,20 @@ function buildNow(key: string): Promise<void> {
     const at = Date.now();
     const ins = db.prepare(`INSERT INTO page_cache (key, json, built_at, ms, etag, gz, kb) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET json = excluded.json, built_at = excluded.built_at, ms = excluded.ms, etag = excluded.etag, gz = excluded.gz, kb = excluded.kb`);
+    const dropParts = db.prepare(`DELETE FROM page_cache WHERE key > ? AND key < ?`);
     db.exec('BEGIN');
     try {
       ins.run(key, json, at, at - t0, null, null, Math.round(json.length / 1024));
-      for (const [v, x] of variants) ins.run(`${key}#${v}`, x.text, at, 0, x.etag, x.gz, Math.round(x.text.length / 1024));
+      for (const [v, x] of variants) {
+        const vk = `${key}#${v}`;
+        // fix250: a view over 2 MB is stored as a marker row + 2 MB parts (the web reads the parts in parallel: no single
+        // read is slow); the previous build's parts go
+        dropParts.run(`${vk}~`, `${vk}~￿`);
+        if (x.text.length <= SPLIT_CHARS) { ins.run(vk, x.text, at, 0, x.etag, x.gz, Math.round(x.text.length / 1024)); continue; }
+        const n = Math.ceil(x.text.length / SPLIT_CHARS);
+        ins.run(vk, partsMarker(n), at, 0, x.etag, x.gz, Math.round(x.text.length / 1024));
+        for (let i = 0; i < n; i++) ins.run(partKey(vk, i), x.text.slice(i * SPLIT_CHARS, (i + 1) * SPLIT_CHARS), at, 0, null, null, 0);
+      }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     if (!isWorker) memSet(key, { builtAt: at, checkedAt: at, body, variants: new Map(variants.filter(([v]) => v !== 'rows')), bytes: (json.length + variants.reduce((n, [, x]) => n + x.text.length, 0)) * 2 });
@@ -369,11 +385,12 @@ export async function getPage(name: string, q: Query = {}, opts: { waitMs?: numb
   }
   if (m) {
     const mm = m;
-    if (Date.now() - m.builtAt > freshOf(def, () => bodyOf(key, mm))) {
+    const over = Date.now() - m.builtAt - freshOf(def, () => bodyOf(key, mm));
+    if (over > 0) {
       if (runsJobs) { noteRequested(key, def); void buildQueued(key); } else askWorker(key);
     }
     await prefetch(key, m, opts.views, opts.etags);
-    return stored(key, m);
+    return stored(key, m, over > 0 ? Math.max(1, Math.round(over / 1000)) : 0);
   }
   // never built: one process builds it now; the web process asks the worker and waits (at most 10 s)
   if (runsJobs) {

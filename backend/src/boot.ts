@@ -15,12 +15,19 @@ const gated = !!process.env.SITE_PASSWORD; // the private beta gate: only the ap
 
 // fix238: an API call (not /health) waits for the app instead of a 503: handed to it once index.ts has taken the
 // server over (its own start-up gate then answers or waits for the state); 30 s at most
+// fix250: a visitor waits 900 ms at most, then { pending: true } (the app asks again); a search engine's user-agent 30 s
 const WAIT_MS = Number(process.env.STARTUP_WAIT_MS) || 30000;
+const VISITOR_WAIT_MS = Number(process.env.DEADLINE_MS) || 900;
+const CRAWLER_UA = /googlebot|google-inspectiontool|bingbot|applebot/i;
 const holdForApp = (req: http.IncomingMessage, res: http.ServerResponse, t0 = Date.now()) => {
   const app = (globalThis as any).__slApp;
   if (app) return app(req, res);
   if (res.writableEnded || req.destroyed) return;
   if (Date.now() - t0 > WAIT_MS) return starting(res);
+  if (Date.now() - t0 > VISITOR_WAIT_MS && !CRAWLER_UA.test(String(req.headers['user-agent'] || ''))) {
+    res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-SL-Pending': '1' });
+    return res.end('{"pending":true,"data":null}');
+  }
   setTimeout(() => holdForApp(req, res, t0), 100);
 };
 const starting = (res: http.ServerResponse) => {

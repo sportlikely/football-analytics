@@ -46,6 +46,7 @@ import { startApiFootballScheduler, rebuildAfFeaturesAsync, afGet, afRemaining }
 import { prepareModelV3Async } from './services/gridModel';
 import { writeLive, clearLive } from './services/liveState';
 import { startPageWarmer, refreshPages, storePage, storedAt } from './services/pageCache';
+import { startBundleKeeper } from './services/gameBundle';
 import { db } from './db';
 import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
@@ -255,6 +256,8 @@ export function startJobs() {
   // fix202: the stored pages (match list, records, basketball / NFL / tennis home …): built once the windows and models
   // had a moment to load, then kept fresh
   after('stored pages', () => startPageWarmer(), 20 * 1000);
+  // fix250: the game bundles visitors opened in the last hour, kept fresh (services/gameBundle.ts)
+  startBundleKeeper();
 
   // Settle finished matches every 10 minutes (first run after 1 minute)
   // fix200: games past kick-off + 48 h without a final are looked up (by id, then by the two teams) once an hour and

@@ -550,3 +550,34 @@ thread's maxMs 1,755, /api/basketball/game/:id avg 2.3 s / max 11.6 s, ~900 /bas
   here; this machine's own address is not either (tests).
 - The cluster (step 6) is not built: nothing blocks the web thread any more (Yarin, 27 Oct).
 - **Profiler off by default** (CPU_PROFILE=1 turns it on): its 5-min swap was the remaining block (321 ms in the load test; the live short blocks of 160–220 ms every ~5 min, mostly (program)). **Load test** (27 Oct, 10 Oct copy, 1,000 visitors × 5 min): 296,628 requests, 980 req/s, p50 2 ms · p95 8 ms · p99 15 ms, 0 × 5xx, 0 network errors, longest web block 97 ms → PASS. Once in the run every route's max reached ~4 s at the same moment while the web thread was free (97 ms): suspected this PC (load client, web and the worker's model builds on one machine) — the live route max tells.
+
+## fix250 — nothing ever waits (27 Oct)
+
+Live 27 Oct 00:40 (acaabb2): 0 stalls, reader queue 0, yet game routes 5–12 s and a blank page under the header. The
+web thread was free: requests waited for the worker (busy with its jobs), a first build or a provider call — and
+signed-in visitors (Yarin) always waited for the worker's fresh answer.
+
+- **The one-second rule** (services/deadline.ts): every public GET not answered after 900 ms (DEADLINE_MS) gets
+  `{ pending: true, data: null }` (202, X-SL-Pending), a page the plain app page; the handler keeps running and its
+  answer is kept (memory, per visitor: anon / u<id>, proxy flag, gzip; 32 MB) and sent at once next time (X-SL-Copy:
+  late; over 15 s old: X-SL-Stale + refreshed in the background, one run at a time). A signed-in person's copies go
+  when they POST anything. Verified search engines are never cut (they wait on purpose). boot.ts: the same 900 ms while
+  the modules load. Stored pages wait 600 ms for a first build (then pending), worker routes 700 ms (copy kept anyway);
+  a copy past its freshness carries X-SL-Stale. Extras are `shared` (signed-in visitors get the signed-out copy).
+- **Counted**: every public GET over 1 s by route → /api/perf slowRequests, table slow_requests (per minute, through the
+  worker, 7 days) → data health **Slow requests**: fail on any in the last hour (search engines counted apart).
+- **App** (frontend lib/apiCache.ts, an axios adapter): the last good answer per address (memory + localStorage under
+  300 KB, 150 entries, reset when the person / plan changes); 4 s time-out; no answer in 500 ms + a kept one → the kept
+  one at once, the fresh one when it lands (sl:api-fresh, useApiFresh on the game pages); pending / time-out / 5xx →
+  the kept one, else asked again 0.8 → 10 s apart (~25 s) with the "Updating…" pill (components/UpdatingPill.tsx);
+  PageSkeleton instead of the spinner / "Loading match…".
+- **Game bundle** (services/gameBundle.ts, frontend lib/gameBundle.ts): /api/game-bundle/<sport>/<id> = the game route +
+  extras + season forecast + more predictions, built by the worker from its own routes with the visitor's headers
+  (X-SL-Parts = byte ranges); the web stores each part as that route's copy. The page asks for the bundle while it
+  renders; the sections get their part without a call. The worker keeps the bundles opened in the last hour fresh
+  (every 3 min, signed-out copies in route_cache).
+- **Reader**: READER_THREADS (default 2; PAGE_READERS still read); reads over 500 ms logged once a minute per statement
+  with the SQL, the time in the thread and the KB (/api/perf pageReader.slowLog); a stored view over 2 MB is kept as a
+  marker row + 2 MB parts read in parallel (pageCache.ts / pageReader.readStored).
+- Test: npm run test:fix250. Load: `LOAD_COLD=1 npm run test:load` = the server started, 200 visitors in its first
+  minute, pass = every request < 1 s and no 5xx.

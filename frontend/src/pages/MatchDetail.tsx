@@ -4,6 +4,9 @@ import UnlockPrompt from '../components/UnlockPrompt'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import axios from 'axios'
+import { primeGame } from '../lib/gameBundle'
+import { useApiFresh } from '../lib/apiCache'
+import PageSkeleton from '../components/PageSkeleton'
 import { API_URL, socket } from '../lib/socket'
 import { modelInfo, isV3, score10, CONFIDENCE_LABEL, MATCH_TYPE_LABEL, pickOfPrediction, doubleChance, dcLabel, shortTeam, type DC, type Prediction } from '../lib/predict'
 import OurPick from '../components/DcPick'
@@ -395,6 +398,7 @@ function MatchDetail() {
     if (wantReveal && hidden && !autoRevealed.current) { autoRevealed.current = true; setUnlockAnim(true) }
   }, [wantReveal, hidden])
 
+  primeGame('football', matchId) // fix250: the page's parts in one request
   const load = (initial = false) => {
     if (initial && !seedFromList(location.state, matchId)) setLoading(true)
     return axios
@@ -415,6 +419,8 @@ function MatchDetail() {
     setDetails(cur => (cur && cur.match.id === matchId ? cur : seed))
     load(true)
   }, [matchId])
+  // fix250: shown from the kept copy while the server was slow: the fresh one when it lands
+  useApiFresh(matchId ? `${API_URL}/matches/${matchId}/details` : null, () => load())
 
   // browser tab: "Arsenal vs Chelsea · SportLikely"
   const tabTitle = details ? `${details.match.homeTeam.shortName || details.match.homeTeam.name} vs ${details.match.awayTeam.shortName || details.match.awayTeam.name}` : ''
@@ -603,7 +609,7 @@ function MatchDetail() {
     }
   }, [tab, matchId, !!details])
 
-  if (loading) return <div className="max-w-5xl mx-auto px-4 py-16 text-center text-muted">{tt("Loading match…")}</div>
+  if (loading) return <PageSkeleton />
   if (!details || (error && !details.partial))
     return (
       <div className="max-w-5xl mx-auto px-4 py-10">

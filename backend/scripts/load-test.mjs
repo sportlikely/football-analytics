@@ -10,6 +10,9 @@
 //   LOAD_URL=https://… LOAD_TOKEN=…        an already running server (the block measure needs its API_READ_TOKEN)
 //   LOAD_USERS (1000) · LOAD_SECONDS (300) · LOAD_THINK_MS (1000: each visitor waits this long between requests)
 //   LOAD_STRICT=0                          report only, exit 0
+//   LOAD_COLD=1                            fix250 cold start: the server is started and the visitors (LOAD_USERS 200) come
+//                                          in its first minute (LOAD_SECONDS 60) — no wait for the stored pages, no warm-up;
+//                                          passes when every request is under 1 s and none is 5xx
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,8 +22,9 @@ import { createRequire } from 'node:module';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url); // node:sqlite for the slug sample (a database copy, read-only)
-const USERS = Number(process.env.LOAD_USERS) || 1000;
-const SECONDS = Number(process.env.LOAD_SECONDS) || 300;
+const COLD = process.env.LOAD_COLD === '1';
+const USERS = Number(process.env.LOAD_USERS) || (COLD ? 200 : 1000);
+const SECONDS = Number(process.env.LOAD_SECONDS) || (COLD ? 60 : 300);
 const THINK_MS = process.env.LOAD_THINK_MS != null ? Number(process.env.LOAD_THINK_MS) : 1000;
 const STRICT = process.env.LOAD_STRICT !== '0';
 const TOKEN = process.env.LOAD_TOKEN || (process.env.LOAD_URL ? '' : `load-${Date.now().toString(36)}`);
@@ -51,6 +55,8 @@ async function startServer() {
   base = `http://127.0.0.1:${port}`;
   const t0 = Date.now();
   while (Date.now() - t0 < 240_000) {
+    // fix250 cold: the visitors come as soon as the port answers anything (the app may still be loading)
+    if (COLD) { try { await fetch(`${base}/favicon.ico`, { signal: AbortSignal.timeout(500) }); log(`port answering after ${Date.now() - t0} ms`); return; } catch { await sleep(50); continue; } }
     try { const r = await fetch(`${base}/api/health`); if (r.status === 200) { log(`server ready in ${Math.round((Date.now() - t0) / 1000)} s (log: ${out.path})`); return; } } catch { /* not listening yet */ }
     await sleep(500);
   }
@@ -155,15 +161,15 @@ async function perf() {
     const t = targets();
     // steady state: the worker has stored every list once (perf.pageLane firstRoundDone), as on a live server
     const WARM_MAX_S = Number(process.env.LOAD_WARM_MAX_S) || 900;
-    for (const t0 = Date.now(); TOKEN && Date.now() - t0 < WARM_MAX_S * 1000;) {
+    for (const t0 = Date.now(); !COLD && TOKEN && Date.now() - t0 < WARM_MAX_S * 1000;) {
       const p = await perf();
       if (p?.worker?.heavy?.pages?.firstRoundDone) { log(`worker: first round of stored pages done (${Math.round((Date.now() - t0) / 1000)} s)`); break; }
       await sleep(5000);
     }
     // warm-up: every address once (the first copies are built by the worker), not counted
-    log('warm-up: every page and route once');
-    await Promise.all([...t.html, ...t.apis].map(p => fetch(base + p, { headers: { 'user-agent': UA, 'x-forwarded-for': '10.255.255.1' }, redirect: 'manual', signal: AbortSignal.timeout(60_000) }).then(r => r.arrayBuffer(), () => null)));
-    await sleep(5000);
+    if (!COLD) log('warm-up: every page and route once');
+    if (!COLD) await Promise.all([...t.html, ...t.apis].map(p => fetch(base + p, { headers: { 'user-agent': UA, 'x-forwarded-for': '10.255.255.1' }, redirect: 'manual', signal: AbortSignal.timeout(60_000) }).then(r => r.arrayBuffer(), () => null)));
+    if (!COLD) await sleep(5000);
     log(`${USERS} visitors for ${SECONDS} s (think time ${THINK_MS} ms)`);
     const r = await run(t);
     // the block measure is per minute: wait for the minute the run ended in
@@ -188,11 +194,16 @@ async function perf() {
     fs.writeFileSync(file, JSON.stringify(report, null, 1));
     console.log(`\nLOAD REPORT ${JSON.stringify({ ...report, slowestRoutes: report.slowestRoutes.slice(0, 8), blockByMinute: undefined })}\n(full report: ${file})`);
     const why = [];
-    if (report.p95 >= 1000) why.push(`p95 ${report.p95} ms ≥ 1000`);
+    report.mode = COLD ? 'cold start' : 'steady';
+    report.over1s = r.times.filter(t => t >= 1000).length;
+    report.pending = r.byStatus.get(202) || 0;
+    if (COLD) { if (report.max >= 1000) why.push(`${report.over1s} request(s) ≥ 1 s (max ${report.max} ms)`); }
+    else if (report.p95 >= 1000) why.push(`p95 ${report.p95} ms ≥ 1000`);
     if (s5) why.push(`${s5} answers 5xx / no answer`);
-    if (block === null) why.push('longest web block not measured');
-    else if (block >= 200) why.push(`longest web block ${block} ms ≥ 200`);
-    console.log(why.length ? `FAIL: ${why.join(' · ')}` : 'PASS: p95 < 1 s, no 5xx, longest web block < 200 ms');
+    if (!COLD && block === null) why.push('longest web block not measured');
+    else if (!COLD && block >= 200) why.push(`longest web block ${block} ms ≥ 200`);
+    if (r.errors) why.push(`${r.errors} request(s) without an answer`);
+    console.log(why.length ? `FAIL: ${why.join(' · ')}` : COLD ? 'PASS (cold start): every request < 1 s, no 5xx' : 'PASS: p95 < 1 s, no 5xx, longest web block < 200 ms');
     failed = why.length > 0;
   } catch (e) {
     console.error(`load test: ${e?.stack || e}`);

@@ -3,6 +3,8 @@ import { useEntityId } from '../../components/SlugRoute'
 import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
+import { primeGame } from '../../lib/gameBundle'
+import { useApiFresh } from '../../lib/apiCache'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
@@ -78,6 +80,8 @@ export default function NflGame() {
   const [missing, setMissing] = useState(false)
   const [tab, pickTab] = useGameTab(TABS, { overview: 'h2h', injuries: 'players', standings: 'table', video: 'highlights' })
   const reload = useRef<() => void>(() => undefined)
+  primeGame('nfl', Number(id)) // fix250: the page's parts in one request
+  useApiFresh(id ? `${API_URL}/nfl/game/${id}` : null, () => reload.current())
   useEffect(() => {
     setD(null); setMissing(false)
     const load = () => axios.get(`${API_URL}/nfl/game/${id}`)

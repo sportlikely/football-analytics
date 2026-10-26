@@ -7,6 +7,7 @@ import { watchChunkErrors, isChunkError, reloadForNewVersion } from './lib/chunk
 import { watchSeen } from './lib/seen'
 import { watchStartupRetry } from './lib/startupRetry'
 import { watchProxyCheck } from './lib/proxyCheck'
+import { installApiCache } from './lib/apiCache'
 
 // fix227: the loader in index.html retries the app file and shows the 'Updating SportLikely…' card if it never starts
 type Boot = { started: () => void; mounted: () => void; fail: (why: string) => void }
@@ -32,6 +33,7 @@ watchChunkErrors()
 watchSeen()
 watchStartupRetry()
 watchProxyCheck()
+installApiCache() // fix250: last known data, 4 s time-out, { pending: true } asked again — never a blank page
 
 // The language comes from the address (/es/...). First visit without one: follow the browser's language.
 // The dictionary is loaded before the app's modules run, so labels built at module level are translated too.

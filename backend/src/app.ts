@@ -93,6 +93,8 @@ import { serveEarly, needsState, currentMainScript } from './services/earlyStati
 import { deployErrorsMiddleware, noteLoading } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
 import { workerRoutes, workerRoutesStatus, sendStartupCopy } from './services/workerRoutes';
+import { deadlineStart, lateCopy, slowRequests } from './services/deadline';
+import { buildBundle, noteBundleAsked, isBundleCall, type BundleSport } from './services/gameBundle';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
 import { deferredStatus } from './services/deferredWrites';
 import { builder, webBuilds } from './services/builders';
@@ -265,6 +267,22 @@ app.use((req, res, next) => {
   res.on('close', done);
   next();
 });
+/*
+ * fix250: the one-second rule (services/deadline.ts) — a public GET not answered after 900 ms gets { pending: true }
+ * (a page: the plain app page) while the work goes on and its answer is kept for the next request; every public GET
+ * over 1 s is counted (data health "Slow requests"). Here, before the start-up wait, so that wait is cut too.
+ */
+let appPageBuf: Buffer | null = null;
+app.use(deadlineStart({
+  isApi: p => p.startsWith('/api/') && OPEN_API.test(p) && !/^\/api\/(health$|client-error$|webhooks\/|assistant\/)/.test(p),
+  sendAppPage: SITE_PASSWORD ? null : res => {
+    try { appPageBuf ||= fs.readFileSync(path.join(STATIC_DIR, 'index.html')); } catch { return false; }
+    res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-SL-Pending': '1' }).end(appPageBuf);
+    return true;
+  },
+  label: req => routeLabel(req.method, req.path),
+  crawler: req => isVerifiedCrawler(req)
+}));
 // Shadow models (featureModel.ts): feat-v1 always, and v3-mix until it is live (then grid-v3) never reach visitors —
 // they are stored and compared in the admin views only
 // fix182: displayed names (team / league / competition) never carry a betting sponsor ("Partizan Mozzart Bet" → "Partizan")
@@ -603,6 +621,7 @@ const byWorker = (req: express.Request, res: express.Response, here: () => unkno
  * A stored page. `view`: the stored string to send (null = the page through res.json: admins). `keep` (fix221): a
  * member's unlocked ids (row ids) — the list joined from its rows, those games in full, the rest teased.
  */
+const STORED_WAIT_MS = Number(process.env.STORED_WAIT_MS) || Math.min(600, Number(process.env.PAGE_WAIT_MS) || 600);
 async function sendStored(req: express.Request, res: express.Response, name: string, q: Query, view: string | null, keep?: Set<number>) {
   // fix222: each phase is its own perf entry ("stored bb-games: read / pick / send"), so a stall names the phase
   const read = track(`stored ${name}: read`);
@@ -610,13 +629,15 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   // fix243: the views this request sends are read in the reader thread, never on the web thread (pageCache prefetch)
   const views = (req as any).proxyAnon ? ['rows', ...(view ? [view] : [])] : keep?.size ? ['rows'] : view ? [view] : [];
   // fix248: the 'full' ETag (304 check of a member's copy) is read there too
-  try { s = await getPage(name, q, { views, etags: !(req as any).proxyAnon && keep?.size ? ['full'] : undefined }); } finally { read(); }
+  // fix250: a visitor waits at most 600 ms for a first build (then { pending: true }; the worker stores it meanwhile)
+  try { s = await getPage(name, q, { views, etags: !(req as any).proxyAnon && keep?.size ? ['full'] : undefined, waitMs: isVerifiedCrawler(req) ? undefined : STORED_WAIT_MS }); } finally { read(); }
   // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
   // fix245: a verified search engine never gets this 503: the worker builds the page now and answers
   if (!s && isWeb && isVerifiedCrawler(req)) return forwardToWorker(req, res);
-  if (!s) { noteLoading(req.path); return res.status(503).set('Retry-After', '5').json({ error: 'Loading, please try again in a moment' }); }
+  if (!s) { noteLoading(req.path); return res.status(202).set({ 'Cache-Control': 'no-store', 'X-SL-Pending': '1' }).json({ pending: true, data: null }); }
   // fix232: when this copy was built (after a restart: the last copy stored before it, until the worker has a new one)
   res.set('X-SL-Built-At', new Date(s.builtAt).toISOString());
+  if (s.staleS) res.set('X-SL-Stale', String(s.staleS)); // fix250: older than the page's freshness (a new one is being built)
   const pick = track(`stored ${name}: pick`);
   try { return sendStoredPick(req, res, s, view, keep, name); } finally { pick(); }
 }
@@ -661,7 +682,8 @@ every('rate-limit cleanup', () => {
 function rateLimit(name: string, max: number | ((req: express.Request) => number), windowMs: number, key: (req: express.Request) => string = ipKey) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     // fix245: a verified search engine is never counted (its renderer's /api reads: ~48k in 15 days)
-    if (req.access === 'admin' || isVerifiedCrawler(req)) return next();
+    // fix250: a game bundle's own reads (services/gameBundle.ts) were counted when the visitor asked for the bundle
+    if (req.access === 'admin' || isVerifiedCrawler(req) || isBundleCall(req.headers)) return next();
     const k = `${name}:${key(req)}`;
     const now = Date.now();
     const b = buckets.get(k);
@@ -681,10 +703,10 @@ app.use(['/api/team-page', '/api/player-page', '/api/search'], rateLimit('page-m
 // fix173: pages a scraper walks (team / player / search / match details): 400 a day per address, 2,000 for paid
 // members; search engines that passed the DNS check are not counted (they make no provider calls)
 const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.access === 'pro' ? 2000 : 400), 24 * 3600000);
-app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/], (req, res, next) => ((req as any).verifiedCrawler ? next() : dayPages(req, res, next)));
+app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/, /^\/api\/game-bundle\/football\//], (req, res, next) => ((req as any).verifiedCrawler || isBundleCall(req.headers) ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|extras\/|changelog$|hub(\/|$)|slugs\/|slug\/|slug-of\/|slug-route$|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|extras\/|game-bundle\/|changelog$|hub(\/|$)|slugs\/|slug\/|slug-of\/|slug-route$|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -725,6 +747,8 @@ app.use('/api', (req, res, next) => {
 
 // fix210: the public routes that build a page (match / team / player / game pages, news, today, more predictions … of
 // every sport) are answered by the worker; signed-out copies are kept here (services/workerRoutes.ts)
+// fix250: a public answer kept after the 900 ms cut (services/deadline.ts) is sent at once, refreshed in the background
+app.use(lateCopy);
 app.use(workerRoutes);
 
 // Staff console login (services/staffConsole.ts): the CRM and the Users/admin area need a second, separate sign-in once
@@ -2779,6 +2803,16 @@ app.get('/api/extras/:sport(football|basketball|nfl|tennis)/game/:id(-?\\d+)', (
   if (!extrasOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
   try { res.set('Cache-Control', 'public, max-age=300').json({ data: gameExtras(sport, Number(req.params.id)) }); } catch (e: any) { sendError(res, e, 'Game extras failed'); }
 });
+// fix250: a game page in one request (services/gameBundle.ts) — built by the worker from the routes above, as the visitor
+app.get('/api/game-bundle/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', async (req, res) => {
+  if (isWeb) return forwardToWorker(req, res); // (workerRoutes answers it before this)
+  try {
+    const sport = req.params.sport as BundleSport, id = parseInt(req.params.id, 10);
+    if (!req.user && req.access !== 'admin') noteBundleAsked(sport, id);
+    const b = await buildBundle(sport, id, req.headers, req.ip || '');
+    res.set({ 'Cache-Control': 'no-store', 'X-SL-Parts': b.parts }).type('application/json').send(b.body);
+  } catch (e: any) { sendError(res, e, 'Game failed'); }
+});
 app.get('/api/extras/:sport(football|basketball|nfl|tennis)/team/:id(\\d+)', (req, res) => {
   const sport = req.params.sport as 'football' | 'basketball' | 'nfl' | 'tennis';
   if (!extrasOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
@@ -3989,7 +4023,7 @@ function perfSummaryText(): string {
     topStalls: (w.topStalls || []).slice(0, 20).map((s: any) => ({ at: s.at, ms: s.ms, job: s.job ? String(s.job).slice(0, 300) : null })),
     jobs: topJobs(w.jobs, 30), memByJob: (w.memByJob || []).slice(0, 10)
   };
-  const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), seoMisses: seoMissStatus(), htmlBy: htmlByStatus(), hours };
+  const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), slowRequests: slowRequests(), seoMisses: seoMissStatus(), htmlBy: htmlByStatus(), hours };
   let text = JSON.stringify({ data: body, timestamp: new Date().toISOString() });
   if (text.length > PERF_MAX) { body.hours = hours.slice(-6); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
   if (text.length > PERF_MAX) { body.hours = []; body.web.jobs = body.web.jobs.slice(0, 10); if (body.worker?.jobs) body.worker.jobs = body.worker.jobs.slice(0, 10); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }

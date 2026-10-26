@@ -9,6 +9,8 @@ import Assistant from './components/Assistant'
 import AccessibilityMenu, { initA11y } from './components/Accessibility'
 import FeedbackButton from './components/FeedbackButton'
 import ConsoleGate from './components/ConsoleGate'
+import PageSkeleton from './components/PageSkeleton'
+import UpdatingPill from './components/UpdatingPill'
 import SportSwitch from './components/SportSwitch'
 import { useBbConfig } from './lib/bb'
 import { useNflConfig, useNflLeague } from './lib/nfl'
@@ -146,9 +148,8 @@ function PageGuard({ children }: { children: ReactNode }) {
   return <PageBoundary key={loc.pathname}>{children}</PageBoundary>
 }
 
-function PageLoading() {
-  return <div className="min-h-[70vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={tt('Loading…')} /></div>
-}
+// fix250: the shape of a page while its code loads (never an empty screen under the header)
+const PageLoading = PageSkeleton
 
 export function LogoMark({ size = 36 }: { size?: number }) {
   return <img src="/logo-mark.png" width={size} height={size} alt="" aria-hidden className="flex-shrink-0 rounded-[10px]" />
@@ -740,6 +741,7 @@ function Shell() {
         <PageTitle />
         <VerifyBanner />
         <UnlocksBanner />
+        <UpdatingPill />
         <main id="main" tabIndex={-1}>
           <PageGuard>
           <Suspense fallback={<PageLoading />}>

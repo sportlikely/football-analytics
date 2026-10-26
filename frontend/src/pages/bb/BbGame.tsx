@@ -3,6 +3,9 @@ import { useEntityId } from '../../components/SlugRoute'
 import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
+import { primeGame } from '../../lib/gameBundle'
+import { useApiFresh } from '../../lib/apiCache'
+import PageSkeleton from '../../components/PageSkeleton'
 import { API_URL } from '../../lib/socket'
 import { t, lang } from '../../lib/i18n'
 import { useAuth } from '../../lib/auth'
@@ -109,6 +112,8 @@ export default function BbGame() {
   const [error, setError] = useState<string | null>(null)
   const [tab, pickTab] = useGameTab(TABS, { injuries: 'players' })
   const reload = useRef<() => void>(() => undefined)
+  primeGame('basketball', Number(id)) // fix250: the page's parts in one request
+  useApiFresh(id ? `${API_URL}/basketball/game/${id}` : null, () => reload.current())
 
   useEffect(() => {
     let cancelled = false
@@ -130,7 +135,7 @@ export default function BbGame() {
   }, [d?.game.id])
 
   if (error) return <div className="max-w-5xl mx-auto px-4 py-10"><Link to="/basketball/matches" className="text-sm text-muted hover:text-ink">{t('← All games')}</Link><div className="mt-4 card border-loss/40 text-loss rounded-lg p-4">{error}</div></div>
-  if (!d) return <div className="max-w-5xl mx-auto px-4 py-16 text-center text-muted">{t('Loading game…')}</div>
+  if (!d) return <PageSkeleton />
 
   const g = d.game
   const p = g.prediction

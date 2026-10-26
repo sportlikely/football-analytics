@@ -3,6 +3,7 @@ import axios from 'axios'
 import { API_URL, socket } from './socket'
 import { t } from './i18n'
 import { setLinkAdmin } from './links'
+import { resetApiCache } from './apiCache'
 
 // Same-origin cookies are sent by default; this also covers a separate API host
 axios.defaults.withCredentials = true
@@ -99,6 +100,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [verificationRequired, setVerificationRequired] = useState(false)
 
   const apply = (d: SessionPayload) => {
+    // fix250: the kept API answers (lib/apiCache.ts) belong to one person and plan
+    const who = `${(d.user as { id?: number } | null)?.id ?? 'anon'}:${d.access}`
+    try { if (localStorage.getItem('sl-api-who') !== who) { resetApiCache(); localStorage.setItem('sl-api-who', who) } } catch { resetApiCache() }
     setUser(d.user)
     setAccess(d.access)
     setStaff(d.staff ?? null)

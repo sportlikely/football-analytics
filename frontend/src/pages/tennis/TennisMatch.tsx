@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useEntityId } from '../../components/SlugRoute'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { primeGame } from '../../lib/gameBundle'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
@@ -51,6 +52,7 @@ export default function TennisMatch() {
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
   const [tab, pickTab] = useGameTab(TABS, { standings: 'draw', table: 'draw', players: 'stats' })
+  primeGame('tennis', Number(id)) // fix250: the page's parts in one request
   useEffect(() => {
     setD(null); setMissing(false)
     // fix195: an old fixture id merged into its match → that match's page

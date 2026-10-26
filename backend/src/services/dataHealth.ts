@@ -50,6 +50,7 @@ import { pushHealth } from './pushAlerts';
 import { keyPlayersHealth } from './keyPlayers';
 import { gameExtrasHealth } from './gameExtras';
 import { deployErrorsHealth } from './deployErrors';
+import { slowRequestsHealth } from './deadline';
 import { upsetTextHealth } from './upsetHealth';
 import { crawlerHealth } from './crawlerIps';
 
@@ -474,6 +475,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...perfChecks(now)); } catch (e: any) { logger.warn(`perf checks: ${e?.message || e}`); }
   // fix227: 5xx answered in the 5 minutes after the last start (files and pages: target 0)
   try { checks.push(...deployErrorsHealth()); } catch (e: any) { logger.warn(`deploy errors health: ${e?.message || e}`); }
+  // fix250: public requests over 1 s in the last hour (services/deadline.ts)
+  try { checks.push(slowRequestsHealth()); } catch (e: any) { logger.warn(`slow requests health: ${e?.message || e}`); }
 
   const level: Level = checks.some(c => c.level === 'fail') ? 'fail' : checks.some(c => c.level === 'warn') ? 'warn' : 'ok';
   return { level, at: new Date(now).toISOString(), checks };
