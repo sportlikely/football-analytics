@@ -20,7 +20,9 @@ const busy = (res: express.Response) => {
   else res.end();
 };
 
-export function forwardToWorker(req: express.Request, res: express.Response) {
+export function forwardToWorker(req: express.Request, res: express.Response, waitedMs = 0): void {
+  // fix245: a verified search engine waits up to 20 s for a restarting worker instead of the 503
+  if (!workerConnected() && (req as any).verifiedCrawler && waitedMs < 20_000 && !req.destroyed) { setTimeout(() => forwardToWorker(req, res, waitedMs + 500), 500); return; }
   if (!workerConnected()) return busy(res);
   waiting(res);
   const headers: http.OutgoingHttpHeaders = { ...req.headers };

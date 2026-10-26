@@ -153,6 +153,7 @@ export const HEALTH_RULES: HealthRule[] = [
   { match: 'perf:worker-stalls', tab: 'site', title: 'Background job freezes', what: 'Moments when a background job held up the others.', todo: 'Nothing if once. Tell Claude if it stays red.' },
   { match: 'perf:worker-memory', tab: 'site', title: 'Background memory', what: 'How much memory the background jobs use.', todo: 'Nothing — it restarts by itself if needed. Tell Claude if it stays yellow.' },
   { match: 'perf:worker-restarts', tab: 'site', title: 'Background restarts', what: 'How often the background jobs restarted in 24 hours.', todo: 'Tell Claude if it happens three times a day.' },
+  { match: 'crawlers-verified', tab: 'site', title: 'Search engines verified', what: 'Google, Bing and Apple crawlers today: how many were checked against the engines’ own address lists (or DNS), and whether any request from Google’s addresses was refused (429 / 503). Refusing Google hurts the site in search.', todo: 'Red: tell Claude straight away, with the lines listed. Yellow (few verified): tell Claude with the DNS sample line.' },
   { match: 'deploy-errors', tab: 'site', what: 'Pages or files that failed for visitors right after the last restart.', todo: 'Tell Claude, with the time of the deploy.' },
 
   // ---------- Emails & alerts ----------

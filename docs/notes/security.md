@@ -68,3 +68,7 @@ marked verified search engine / SEO tool / data-centre / unknown script (or brow
 
 **Known limits:** the counts live in memory; after a restart the day's line continues from what was written (addresses may
 be counted twice). The limiter is per server (fine for one Railway service).
+
+## Search engines verified by their address lists (fix245, 26 Oct 2026)
+
+Search Console (7–21 Oct): 15 % 4XX, 5 % 5XX, 22 % failed on 210k Google requests; Admin → Visitors: 369 Googlebot requests, verified 0. Google (AS15169) is on the data-centre list, so an unverified Googlebot got the proxy rules (60 page views an hour, 429, locked predictions) and the bot gate's 503. Now (services/crawlerIps.ts, utils/crawlerRanges.ts): a Google / Bing / Apple user-agent from an address in that engine's published list (downloaded daily by the worker; Google's googlebot, special-crawlers, user-triggered-fetchers(-google), Bing's bingbot, Apple's applebot; seed ranges until the first download) is verified at once, DNS or not; otherwise fix173's DNS check (system resolver, then 8.8.8.8 / 1.1.1.1). A verified search engine: no proxy limit, no rate limit, waits for a bot-gate slot (CRAWLER_WAIT_MS 15 s, then goes on), the worker builds a page instead of the 503 "Loading", 120 s startup wait. A crawler user-agent from any other address (Datacamp…) is refused as before. Data health "Search engines verified" fails on any 429 / 503 to Google's ranges.

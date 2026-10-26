@@ -267,6 +267,8 @@ export function workerRoutes(req: express.Request, res: express.Response, next: 
     res.end(x.body);
   }, () => {
     stats.failed++;
+    // fix245: a verified search engine gets a second try straight from the worker (streamed) instead of the 503
+    if (!res.headersSent && (req as any).verifiedCrawler) return void setTimeout(() => (res.headersSent || req.destroyed ? undefined : forwardToWorker(req, res)), 1500);
     if (!res.headersSent) res.status(503).set('Retry-After', '10').json({ error: 'Loading, please try again in a moment' });
   });
 }

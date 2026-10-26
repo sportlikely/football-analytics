@@ -54,6 +54,7 @@
     "test:fix242": "tsc && node --no-warnings --test --test-force-exit scripts/fix242.test.mjs",
     "test:fix243": "tsc && node --no-warnings --test --test-force-exit scripts/fix243.test.mjs",
     "test:fix244": "node --no-warnings --test scripts/fix244.test.ts scripts/proxy-guard.test.ts",
+    "test:fix245": "tsc && node --no-warnings --test --test-force-exit scripts/fix245.test.mjs",
     "test:fix246": "tsc && node --no-warnings --test --test-force-exit scripts/fix246.test.mjs"
   },
   "keywords": [

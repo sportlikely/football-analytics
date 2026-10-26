@@ -12,19 +12,33 @@ export const isBotUa = (ua: string | undefined | null) => !ua || BOT_UA.test(ua)
 export class BotGate {
   private running = 0;
   private queue: { go: () => void; timer: NodeJS.Timeout }[] = [];
-  readonly stats = { served: 0, queued: 0, refused: 0, timedOut: 0, maxRunning: 0, maxQueue: 0 };
-  constructor(readonly max = Number(process.env.BOT_PAGES) || 4, readonly queueMax = Number(process.env.BOT_QUEUE) || 16, readonly waitMs = Number(process.env.BOT_WAIT_MS) || 4000) {}
-  /** a slot (call the returned release when the page is sent), or null = over the limit (503) */
-  async enter(): Promise<(() => void) | null> {
+  readonly stats = { served: 0, queued: 0, refused: 0, timedOut: 0, maxRunning: 0, maxQueue: 0, crawlerWaited: 0, crawlerUnslotted: 0 };
+  constructor(readonly max = Number(process.env.BOT_PAGES) || 4, readonly queueMax = Number(process.env.BOT_QUEUE) || 16, readonly waitMs = Number(process.env.BOT_WAIT_MS) || 4000,
+    readonly crawlerWaitMs = Number(process.env.CRAWLER_WAIT_MS) || 15000) {}
+  /**
+   * a slot (call the returned release when the page is sent), or null = over the limit (503).
+   * fix245: `patient` (a verified search engine) never gets null: it queues past BOT_QUEUE, waits up to CRAWLER_WAIT_MS,
+   * then goes on without a slot (the page route sends stored pages only) — a 503 to Googlebot hurts the site's crawl health.
+   */
+  async enter(patient = false): Promise<(() => void) | null> {
     if (this.running < this.max) return this.take();
+    if (patient) {
+      this.stats.crawlerWaited++;
+      if (await this.wait(this.crawlerWaitMs)) return this.slot();
+      this.stats.crawlerUnslotted++;
+      return () => {};
+    }
     if (this.queue.length >= this.queueMax) { this.stats.refused++; return null; }
+    const ok = await this.wait(this.waitMs);
+    return ok ? this.slot() : null; // the slot was handed over by the request that left (running unchanged)
+  }
+  private wait(ms: number): Promise<boolean> {
     this.stats.queued++;
-    const ok = await new Promise<boolean>(resolve => {
-      const item = { go: () => { clearTimeout(item.timer); resolve(true); }, timer: setTimeout(() => { this.queue = this.queue.filter(x => x !== item); this.stats.timedOut++; resolve(false); }, this.waitMs) };
+    return new Promise<boolean>(resolve => {
+      const item = { go: () => { clearTimeout(item.timer); resolve(true); }, timer: setTimeout(() => { this.queue = this.queue.filter(x => x !== item); this.stats.timedOut++; resolve(false); }, ms) };
       this.queue.push(item);
       this.stats.maxQueue = Math.max(this.stats.maxQueue, this.queue.length);
     });
-    return ok ? this.slot() : null; // the slot was handed over by the request that left (running unchanged)
   }
   private take(): () => void {
     this.running++;

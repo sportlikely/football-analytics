@@ -47,11 +47,11 @@ import { oddsTick, oddsStatus, fetchCompetitionOdds, SPORT_KEYS } from './servic
 import { syncSquadValues, squadValuesStatus, squadCompetitions } from './services/squadValues';
 import { syncClubValueHistory, clubValueHistoryStatus, findClub } from './services/squadHistory';
 import { compareModels } from './services/compareModels';
-import { diffViewReport } from './services/diffView';
 import { gapReport } from './services/gapReport';
 import { pastSeasons, pastPredictions, dataInventory, leaguePatterns } from './services/pastView';
 import { marketTest, drawTest, anchoredDrawTest } from './services/marketTest';
 import { clvTick, clvReport, clvProbe } from './services/clv';
+import { diffViewReport } from './services/diffView';
 import {
   isAfMatchId, isAfCode, afUpcoming, afLive, afWithPredictions, getAfMatchDetails, getAfStandings, getAfScorers, getAfRecent,
   afCompetitions, pollAfLive, syncFdLiveFromAf, afWindowStatus, refreshAfWindow, onAfWindow, isKnownAfFixture, afExtrasForFd, afLiveOverlay, withAfOdds, backfillAfOdds,
@@ -168,7 +168,8 @@ const moreForGame = builder('more predictions (game)', moreForGameB);
 const saveOne = builder('more predictions (save)', saveOneB);
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders, openSettleReviews, decideSettle, SettleError } from './services/unsettled';
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
-import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
+import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, crawlerCheck, costCapped } from './services/afUsage';
+import { noteCrawlerResponse, inGoogleRanges, crawlerReport } from './services/crawlerIps';
 import { botGate, isBotUa } from './services/botGate';
 import { pageReaderStatus } from './services/pageReader';
 import { createHash, randomBytes } from 'node:crypto';
@@ -225,6 +226,21 @@ app.use((req, res, next) => {
   noteBlocked(uaKey(ua));
   res.status(403).type('text/plain').send('Forbidden');
 });
+// fix245: a search engine is verified once per request, first by its published address list (services/crawlerIps.ts:
+// works even when DNS fails and before the state loads), then by DNS; every request with a Google / Bing / Apple
+// user-agent (and every one from Google's ranges) is counted with its answer — a 429 / 503 to Google = data health fail
+if (!isWorker) app.use((req, res, next) => {
+  const ua = req.get('user-agent') || '';
+  if (claimsCrawler(ua)) {
+    const c = crawlerCheck(req.ip, ua);
+    (req as any).slCrawler = c;
+    if (c.ok) (req as any).verifiedCrawler = true;
+  }
+  if (claimsCrawler(ua) || inGoogleRanges(req.ip)) res.once('finish', () => noteCrawlerResponse(uaKey(ua), req.ip, (req as any).slCrawler?.ok ? (req as any).slCrawler.how : null, res.statusCode, req.path));
+  next();
+});
+/** fix245: this request is a search engine verified by its list or DNS (set by the middleware above) */
+const isVerifiedCrawler = (req: express.Request) => !!(req as any).verifiedCrawler;
 // fix202: with the worker on, admin / staff / maintenance requests (outside the public API) go to the worker, which
 // holds the job state and runs the rebuilds; the web process keeps the public API, the pages and /api/perf
 const WEB_ONLY_API = /^\/api\/(perf|draw-alerts|admin\/visitors)$/;
@@ -269,6 +285,7 @@ if (isWeb) app.use(deployErrorsMiddleware);
 // once, every other API request waits for the state (at most STARTUP_WAIT_MS) and is answered then — no 5xx. /health
 // and the socket keep the 503 (Railway's health check must see "not ready").
 const STARTUP_WAIT_MS = Number(process.env.STARTUP_WAIT_MS) || 30000;
+const CRAWLER_STARTUP_WAIT_MS = Number(process.env.CRAWLER_STARTUP_WAIT_MS) || 120000;
 if (isWeb) app.use((req, res, next) => {
   if (isReady()) return next();
   if (!needsState(req.path) && (!SITE_PASSWORD || req.path.startsWith('/assets/') || PUBLIC_FILES.has(req.path)) && serveEarly(req, res)) return;
@@ -279,7 +296,8 @@ if (isWeb) app.use((req, res, next) => {
     const tick = () => {
       if (isReady()) return next();
       if (res.writableEnded || req.destroyed) return;
-      if (Date.now() - t0 > STARTUP_WAIT_MS) return res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
+      // fix245: a verified search engine waits longer (a 503 to Googlebot counts against the site's crawl health)
+      if (Date.now() - t0 > (isVerifiedCrawler(req) ? CRAWLER_STARTUP_WAIT_MS : STARTUP_WAIT_MS)) return res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
       setTimeout(tick, 100);
     };
     return tick();
@@ -424,7 +442,7 @@ app.use('/api', (req, _res, next) => {
   if (req.access === 'admin') return afSource.run({ kind: 'admin', ua }, next);
   const ipH = ipKey(req);
   const claims = claimsCrawler(ua);
-  const verdict = claims ? crawlerVerdict(ipH, req.ip) : false;
+  const verdict = claims ? ((req as any).slCrawler?.ok ?? crawlerVerdict(req.ip, ua)) : false; // fix245: list, then DNS
   const crawler = verdict === true;
   (req as any).verifiedCrawler = crawler;
   (req as any).crawlerClaim = claims ? verdict === true : null; // fix183: the visitor counter's crawler check
@@ -560,6 +578,8 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   const views = (req as any).proxyAnon ? ['rows', ...(view ? [view] : [])] : keep?.size ? ['rows'] : view ? [view] : [];
   try { s = await getPage(name, q, { views }); } finally { read(); }
   // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
+  // fix245: a verified search engine never gets this 503: the worker builds the page now and answers
+  if (!s && isWeb && isVerifiedCrawler(req)) return forwardToWorker(req, res);
   if (!s) { noteLoading(req.path); return res.status(503).set('Retry-After', '5').json({ error: 'Loading, please try again in a moment' }); }
   // fix232: when this copy was built (after a restart: the last copy stored before it, until the worker has a new one)
   res.set('X-SL-Built-At', new Date(s.builtAt).toISOString());
@@ -606,7 +626,8 @@ every('rate-limit cleanup', () => {
 }, 60000).unref();
 function rateLimit(name: string, max: number | ((req: express.Request) => number), windowMs: number, key: (req: express.Request) => string = ipKey) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (req.access === 'admin') return next();
+    // fix245: a verified search engine is never counted (its renderer's /api reads: ~48k in 15 days)
+    if (req.access === 'admin' || isVerifiedCrawler(req)) return next();
     const k = `${name}:${key(req)}`;
     const now = Date.now();
     const b = buckets.get(k);
@@ -1608,7 +1629,7 @@ app.get('/api/admin/backups/download/:name', needSudo, (req, res) => {
   res.download(file, req.params.name);
 });
 app.get('/api/admin/waitlist', (_req, res) => res.json({ data: waitlistStats() }));
-app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...visitorStats(), who: whoToday() } }); }); // fix199: + who is calling today
+app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...visitorStats(), who: whoToday(), crawlers: crawlerReport() } }); }); // fix245: + search engines // fix199: + who is calling today
 app.get('/api/admin/news', (_req, res) => res.json({ data: newsStatus() }));
 
 app.post('/api/auth/login', jsonOnly, async (req, res) => {
@@ -4378,7 +4399,8 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
     // fix243: a bot's page takes a slot (services/botGate.ts): over the limit 503 + Retry-After; browsers never wait here
     if (req.access !== 'admin' && !req.user && isBotUa(req.get('user-agent'))) {
-      const release = await botGate.enter();
+      // fix245: a verified search engine waits for a slot instead (never this 503); after a long wait it goes on without one
+      const release = await botGate.enter(isVerifiedCrawler(req));
       if (!release) return res.status(503).set({ 'Retry-After': '30', 'Cache-Control': 'no-store' }).type('text/plain').send('Busy, please retry later');
       res.once('finish', release); res.once('close', release);
     }
@@ -4411,7 +4433,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     const nw = req.access !== 'admin' && !req.user?.emailVerified && req.ip ? networkOf(req.ip) : null;
     if (nw && !/^(\/[a-z]{2})?\/(login|signup|join|forgot|verify|account|reset|privacy|terms|contact)(\/|$)/.test(req.path)) {
       const ua = uaKey(req.get('user-agent')), ipH = ipKey(req);
-      const verified = claimsCrawler(ua) && crawlerVerdict(ipH, req.ip) === true;
+      const verified = isVerifiedCrawler(req) || (claimsCrawler(ua) && crawlerVerdict(req.ip, ua) === true);
       // fix244: a page load counts once (the app's first view after it is free); over a limit: the Quick check
       const pass = verified ? null : passOf(req, ua);
       const refused = verified ? null : proxyLimiter.hit(ipH, nw.asn, { page: true, pass: pass?.ok ? pass.id : null });

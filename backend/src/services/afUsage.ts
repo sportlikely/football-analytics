@@ -28,6 +28,10 @@ import { db } from '../db';
 import { isWeb } from './role';
 import { deferred } from './deferredWrites';
 import { every } from './perf';
+import { createHash, randomBytes } from 'node:crypto';
+import logger from '../utils/logger';
+import { crawlerByList, wantsDnsSample, noteDnsSample } from './crawlerIps';
+import { plainIp, engineOfUa } from '../utils/crawlerRanges';
 
 /** fix173: keys = the visitor's salted hashes (IP, user-agent) and, for a paid member, the account (provider-cost caps). */
 export type VisitorKeys = { ip: string; ua: string; user?: string | null };
@@ -44,39 +48,75 @@ export const isCrawlerUa = (ua: string | undefined) => CRAWLERS.test(String(ua |
 const VERIFIABLE = /Googlebot|GoogleOther|Google-InspectionTool|bingbot|BingPreview|Applebot|YandexBot|Nexus 5X Build\/MMB29P/i;
 /** The hosts each crawler's addresses resolve to (published by Google, Microsoft, Apple, Yandex). */
 const CRAWLER_HOSTS = /\.(googlebot\.com|google\.com|search\.msn\.com|applebot\.apple\.com|yandex\.(ru|net|com))$/i;
-export const claimsCrawler = (ua: string | undefined) => VERIFIABLE.test(String(ua || '')) || isCrawlerUa(ua);
+// fix245: + every Google / Bing / Apple crawler or fetcher name in the engines' published lists (utils/crawlerRanges.ts)
+export const claimsCrawler = (ua: string | undefined) => VERIFIABLE.test(String(ua || '')) || isCrawlerUa(ua) || !!engineOfUa(ua);
 /** key = salted IP hash → verdict (kept 24 h, at most 5,000) */
 const verified = new Map<string, { ok: boolean; at: number }>();
 const verifying = new Set<string>();
 let fakeToday = 0;
+const VERIFY_SALT = randomBytes(16).toString('hex');
+const ipHashOf = (ip: string) => createHash('sha256').update(VERIFY_SALT + ip).digest('hex').slice(0, 20);
 const withTimeout = <T>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error('dns timeout')), ms).unref())]);
-async function verifyCrawler(ipHash: string, ip: string): Promise<void> {
-  let ok = false;
+// fix245: when the host's resolver gives no answer (Railway: 0 verified of 369 Googlebot requests on 21 Oct), a public one
+const publicDns = new dns.Resolver({ timeout: 3000, tries: 1 });
+try { publicDns.setServers((process.env.CRAWLER_DNS_SERVERS || '8.8.8.8,1.1.1.1').split(',')); } catch { /* no network */ }
+type Step = { names: string[]; error?: string };
+async function ptr(ip: string, viaPublic: boolean): Promise<Step> {
+  try { return { names: (await withTimeout(viaPublic ? publicDns.reverse(ip) : dns.reverse(ip), 5000)).map(n => n.replace(/\.$/, '')) }; }
+  catch (e: any) { return { names: [], error: String(e?.code || e?.message || e) }; }
+}
+async function forwardHas(name: string, ip: string, viaPublic: boolean): Promise<boolean> {
   try {
-    const names = await withTimeout(dns.reverse(ip), 5000);
-    for (const name of names.filter(n => CRAWLER_HOSTS.test(n.replace(/\.$/, '')))) {
-      const back = await withTimeout(dns.lookup(name, { all: true }), 5000);
-      if (back.some(a => a.address === ip)) { ok = true; break; }
+    if (!viaPublic) return (await withTimeout(dns.lookup(name, { all: true }), 5000)).some(a => plainIp(a.address) === ip);
+    const addrs = await withTimeout(ip.includes(':') ? publicDns.resolve6(name) : publicDns.resolve4(name), 5000);
+    return addrs.some(a => plainIp(a) === ip);
+  } catch { return false; }
+}
+/** fix173 + fix245: reverse DNS to a crawler host, forward back to the address (system resolver, then a public one) */
+async function verifyByDns(ip: string): Promise<boolean> {
+  const sample = wantsDnsSample(ip);
+  const sys = await ptr(ip, false);
+  // the public resolver when the host's gave no crawler name, and always for the day's sample
+  const pub = sample || !sys.names.some(n => CRAWLER_HOSTS.test(n)) ? await ptr(ip, true) : null;
+  let ok = false, fwd = 'no crawler host name';
+  for (const [step, viaPublic] of [[sys, false], [pub, true]] as const) {
+    if (ok || !step) continue;
+    for (const name of step.names.filter(n => CRAWLER_HOSTS.test(n))) {
+      if (await forwardHas(name, ip, viaPublic)) { ok = true; fwd = `${name} points back (${viaPublic ? 'public' : 'system'} resolver)`; break; }
+      fwd = `${name} does not point back`;
     }
-  } catch { ok = false; }
-  if (verified.size >= 5000) verified.delete(verified.keys().next().value as string);
-  verified.set(ipHash, { ok, at: Date.now() });
-  if (!ok) fakeToday++;
+  }
+  if (sample) {
+    const fmt = (s: Step | null) => (!s ? 'not asked' : s.names.length ? s.names.join(', ') : `error ${s.error || 'no names'}`);
+    noteDnsSample({ at: new Date().toISOString(), ip, system: fmt(sys), publicDns: fmt(pub), forward: fwd, ok });
+    logger.info(`crawler DNS sample ${ip}: system ${fmt(sys)} · public ${fmt(pub)} · ${fwd} → ${ok ? 'verified' : 'not verified'}`);
+  }
+  return ok;
 }
 /**
  * fix173: is this crawler-looking request really the search engine? true / false once checked (24 h), null while the
  * check runs (it is started here; the caller treats null like false: no provider call, visitor limits).
+ * fix245: an address in the engine's published list (services/crawlerIps.ts) is verified at once, even when DNS fails
+ * (how = 'list'); else the DNS check above (how = 'dns').
  */
-export function crawlerVerdict(ipHash: string, ip: string | undefined): boolean | null {
-  const v = verified.get(ipHash);
-  if (v && Date.now() - v.at < 86400000) return v.ok;
-  if (!ip) return false;
-  if (!verifying.has(ipHash)) {
-    verifying.add(ipHash);
-    void verifyCrawler(ipHash, ip).finally(() => verifying.delete(ipHash));
+export function crawlerCheck(ipIn: string | undefined, ua: string | undefined): { ok: boolean | null; how: 'list' | 'dns' | null } {
+  const ip = plainIp(ipIn);
+  if (!ip) return { ok: false, how: null };
+  if (crawlerByList(ua, ip)) return { ok: true, how: 'list' };
+  const key = ipHashOf(ip);
+  const v = verified.get(key);
+  if (v && Date.now() - v.at < 86400000) return { ok: v.ok, how: v.ok ? 'dns' : null };
+  if (!verifying.has(key)) {
+    verifying.add(key);
+    void verifyByDns(ip).catch(() => false).then(ok => {
+      if (verified.size >= 5000) verified.delete(verified.keys().next().value as string);
+      verified.set(key, { ok, at: Date.now() });
+      if (!ok) fakeToday++;
+    }).finally(() => verifying.delete(key));
   }
-  return null;
+  return { ok: null, how: null };
 }
+export const crawlerVerdict = (ip: string | undefined, ua: string | undefined): boolean | null => crawlerCheck(ip, ua).ok;
 /** This request comes from a search-engine crawler. */
 export const isCrawlerRequest = () => !!afSource.getStore()?.crawler;
 

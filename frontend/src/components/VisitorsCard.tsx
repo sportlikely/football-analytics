@@ -12,7 +12,15 @@ interface Visitors {
   countingSince: string | null
   countries?: { last7: CountryRow[]; last30: CountryRow[]; since: string | null; geo: { loaded: boolean; status: string; source: string } }
   who?: Who
+  crawlers?: Crawlers
 }
+// fix245: search engines today — verified by their published address lists or DNS, refused (429 / 503), the day's DNS sample
+type EngineDay = { requests: number; verified: number; byList: number; byDns: number; refused: number; s429: number; s503: number; api: number }
+interface CrawlerDay {
+  day: string; engines: Record<'google' | 'bing' | 'apple', EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number }
+  refusedRecent: string[]; sample: { at: string; ip: string; system: string; publicDns: string; forward: string; ok: boolean } | null
+}
+interface Crawlers { today: CrawlerDay | null; yesterday: CrawlerDay | null; lists: { status: string; ranges: number; at: string | null } }
 // fix199: who is calling today — the top user-agents and data-centre / proxy networks
 type Mark = 'search-engine' | 'seo-tool' | 'data-centre' | 'script' | 'browser'
 interface Who {
@@ -75,6 +83,37 @@ const MARK: Record<Mark, [string, string]> = {
   script: ['unknown script', 'text-loss'], browser: ['browser', 'text-faint']
 }
 const n0 = (x: number) => x.toLocaleString('en-US')
+
+/** fix245: Google / Bing / Apple today and yesterday — verified, refused, how; the DNS sample of a Google address. */
+function CrawlersCard({ c }: { c: Crawlers }) {
+  const ENGINES = [['google', 'Google'], ['bing', 'Bing'], ['apple', 'Apple']] as const
+  const day = (d: CrawlerDay | null, label: string) => !d ? null : (
+    <div className="mb-3">
+      <p className="text-xs font-semibold text-ink mb-1">{label}</p>
+      <ul className="space-y-1 text-sm">
+        {ENGINES.map(([k, name]) => { const e = d.engines[k]; return (
+          <li key={k} className="flex flex-wrap items-baseline gap-x-3">
+            <span className="min-w-0 flex-1 text-ink">{name}</span>
+            <span className={`num text-[11px] ${e.refused ? 'text-loss font-semibold' : 'text-faint'}`}>{n0(e.requests)} req · {n0(e.verified)} verified ({n0(e.byList)} list, {n0(e.byDns)} DNS) · {n0(e.refused)} refused</span>
+          </li>) })}
+        <li className="flex flex-wrap items-baseline gap-x-3">
+          <span className="min-w-0 flex-1 text-ink">From Google’s addresses</span>
+          <span className={`num text-[11px] ${d.googleRanges.refused ? 'text-loss font-semibold' : 'text-faint'}`}>{n0(d.googleRanges.requests)} req · {n0(d.googleRanges.s429)} × 429 · {n0(d.googleRanges.s503)} × 503</span>
+        </li>
+      </ul>
+      {d.refusedRecent.length > 0 && <ul className="mt-1 text-[11px] text-loss space-y-0.5">{d.refusedRecent.slice(-5).map((x, i) => <li key={i} className="truncate" title={x}>{x}</li>)}</ul>}
+      {d.sample && <p className="mt-1 text-[11px] text-faint break-words">DNS sample {d.sample.at.slice(11, 16)} UTC, {d.sample.ip}: system resolver {d.sample.system} · public resolver {d.sample.publicDns} · {d.sample.forward} → {d.sample.ok ? 'verified' : 'not verified'}</p>}
+    </div>
+  )
+  return (
+    <div className="mt-6 pt-5 border-t border-line/60">
+      <h3 className="font-display font-bold text-ink mb-3">Search engines</h3>
+      {day(c.today, 'Today (UTC)')}
+      {day(c.yesterday, 'Yesterday')}
+      <p className="text-[10px] text-faint">Verified = the address is in the engine’s published list, or reverse + forward DNS points back to it. A verified search engine is never limited or refused. Lists: {c.lists.status}</p>
+    </div>
+  )
+}
 
 /** fix199: today's top 20 user-agents and networks, each marked (search engines are verified by DNS). */
 function WhoCard({ w }: { w: Who }) {
@@ -193,6 +232,7 @@ export default function VisitorsCard() {
         </div>
       </div>
       {v?.countries && <Countries c={v.countries} />}
+      {v?.crawlers && <CrawlersCard c={v.crawlers} />}
       {v?.who && <WhoCard w={v.who} />}
     </section>
   )
