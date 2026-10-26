@@ -145,7 +145,8 @@ const indexedQ = (indexed: string, plain: string) => {
   };
 };
 const qBuiltAt = indexedQ(`SELECT built_at FROM page_cache INDEXED BY idx_page_cache_meta WHERE key = ?`, `SELECT built_at FROM page_cache WHERE key = ?`);
-const qEtag = indexedQ(`SELECT etag FROM page_cache INDEXED BY idx_page_cache_etag WHERE key = ? AND built_at = ?`, `SELECT etag FROM page_cache WHERE key = ? AND built_at = ?`);
+// fix243b: the ETag with the plain query (no index built for it at start-up: see dbIndexes.ts)
+const qEtag = indexedQ(`SELECT etag FROM page_cache WHERE key = ? AND built_at = ?`, `SELECT etag FROM page_cache WHERE key = ? AND built_at = ?`);
 const builtAtOf = (key: string): number => (qBuiltAt().get(key) as any)?.built_at || 0;
 /** fix221: the web process reads only the row's time here; the page's text is read when its body is asked for */
 function readRow(key: string, withBody = !isWeb): Mem | null {

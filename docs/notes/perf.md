@@ -442,7 +442,7 @@ past-season basketball games; "stored upcoming: read" alone 1–2 s several time
   could be read without its text, but for `WHERE key = ?` SQLite picks the primary key's unique index and reads the row;
   `built_at` / `etag` come after the `json` column, so every freshness check walked the page's overflow chain (the
   upcoming list: several MB, cold on the volume after each 30 s rebuild). That was the whole "read" phase on the web.
-  Now `INDEXED BY idx_page_cache_meta` (time) and the new `idx_page_cache_etag(key, built_at, etag)` (a member copy's
+  Now `INDEXED BY idx_page_cache_meta` (time; fix243b: the planned `idx_page_cache_etag` is not built — building it on the live table was the suspected cause of the failed deploy — so a member copy's ETag uses the plain query) (a member copy's
   ETag), with the plain query until the index exists (pageCache.ts `indexedQ`). Test: EXPLAIN shows COVERING INDEX.
 - **View text read on the web thread.** The view a request sends (upcoming 'anon' several MB, a crawler page's HTML +
   gzip) was read with the main connection. Now `getPage(…, { views })` reads them in the web process's reader thread

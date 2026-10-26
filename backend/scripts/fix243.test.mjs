@@ -202,8 +202,7 @@ test('stored pages on the web: time and ETag from the covering index, views read
       }
       clearInterval(tick);
       console.log('RESULT ' + JSON.stringify({ text, etag, reader: pageReaderStatus(), maxLag,
-        planAt: plan('SELECT built_at FROM page_cache INDEXED BY idx_page_cache_meta WHERE key = ? AND ? > 0'),
-        planEtag: plan('SELECT etag FROM page_cache INDEXED BY idx_page_cache_etag WHERE key = ? AND built_at = ?') }));
+        planAt: plan('SELECT built_at FROM page_cache INDEXED BY idx_page_cache_meta WHERE key = ? AND ? > 0') }));
       process.exit(0);
     })();
   `, { ...env, SL_ROLE: 'web' });
@@ -212,6 +211,5 @@ test('stored pages on the web: time and ETag from the covering index, views read
   assert.equal(r.reader.on, true, 'the reader thread runs in the web process');
   assert.ok(r.reader.reads >= 10, `every view read in the thread (${r.reader.reads})`);
   assert.match(r.planAt, /COVERING INDEX idx_page_cache_meta/);
-  assert.match(r.planEtag, /COVERING INDEX idx_page_cache_etag/);
   console.log(`  web thread: longest block while reading 10 × 8 MB views ${r.maxLag} ms (reader max ${r.reader.maxMs} ms)`);
 });
