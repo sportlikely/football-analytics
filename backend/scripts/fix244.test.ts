@@ -126,3 +126,10 @@ test('the app: no "status code 429", the Quick check on a proxy 429, strings in 
       assert.ok(j[k] && j[k] !== k, `${l}: ${k}`);
   }
 });
+
+// fix247: Turnstile threw "Unknown appearance value: managed" and drew no widget (Quick check and sign-up)
+test('Turnstile options: appearance only always / execute / interaction-only', () => {
+  const ok = new Set(['always', 'execute', 'interaction-only']);
+  const sources = [quickCheckPage('en', '0x4AAAA-test'), fs.readFileSync(path.join(import.meta.dirname, '../../frontend/src/components/Turnstile.tsx'), 'utf8')];
+  for (const s of sources) for (const m of s.matchAll(/appearance:\s*['"]([^'"]+)['"]/g)) assert.ok(ok.has(m[1]), `appearance: ${m[1]}`);
+});

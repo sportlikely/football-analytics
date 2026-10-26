@@ -3,7 +3,7 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 
 /**
- * fix168: Cloudflare Turnstile (managed mode, the site's light / dark theme). The site key comes from
+ * fix168: Cloudflare Turnstile (the mode, e.g. managed, is set in Cloudflare's dashboard; fix247: never as `appearance`, which only takes always / execute / interaction-only), the site's light / dark theme. The site key comes from
  * /api/auth/config at run time (never baked into the build); with no key configured nothing renders and the server
  * skips the check. Cloudflare's script loads only when a widget is shown.
  */
@@ -49,7 +49,6 @@ export default function Turnstile({ siteKey, onToken }: { siteKey: string | null
       id = window.turnstile.render(box.current, {
         sitekey: siteKey,
         theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
-        appearance: 'managed',
         callback: (t: string) => cb.current(t),
         'expired-callback': () => cb.current(''),
         'error-callback': () => cb.current('')

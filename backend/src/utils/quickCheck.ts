@@ -94,7 +94,7 @@ export function quickCheckPage(lang: QcLang, siteKey: string | null): string {
   }
   window.slQc = function () {
     window.turnstile.render('#ts', {
-      sitekey: ${js(siteKey)}, appearance: 'managed',
+      sitekey: ${js(siteKey)},
       theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
       callback: function (token) {
         st.textContent = W.checking;
