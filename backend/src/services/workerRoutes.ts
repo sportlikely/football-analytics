@@ -37,6 +37,7 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/player-page\/(\d+|find)$/, freshMs: 30 * MIN },
   { re: /^\/api\/(today|news|search)$/, freshMs: 2 * MIN },
   { re: /^\/api\/how-it-works\/[a-z-]+$/, freshMs: 10 * MIN },
+  { re: /^\/api\/upset-watch$/, freshMs: 5 * MIN }, // fix242: football's upset watch (Pro) is built by the worker like the other sports'
   { re: /^\/api\/more\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 1 * MIN },
   { re: /^\/api\/basketball\/game\/\d+(\/(scorers|highlights))?$/, freshMs: 20 * S },
   { re: /^\/api\/basketball\/(team|player)\/\d+$/, freshMs: 10 * MIN },

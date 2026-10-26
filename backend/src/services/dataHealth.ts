@@ -50,6 +50,7 @@ import { pushHealth } from './pushAlerts';
 import { keyPlayersHealth } from './keyPlayers';
 import { gameExtrasHealth } from './gameExtras';
 import { deployErrorsHealth } from './deployErrors';
+import { upsetTextHealth } from './upsetHealth';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -462,6 +463,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...engineHealth()); } catch (e: any) { logger.warn(`bb engine health: ${e?.message || e}`); }
   // fix231: weather / referee / trends / difficulty on the next 48 h's games (warn under 80% with their weather card)
   try { checks.push(...gameExtrasHealth(now)); } catch (e: any) { logger.warn(`game extras health: ${e?.message || e}`); }
+  // fix242: upset watch — the favourite named in the text is the side with the higher win %, a reason on every game, max 10 a week
+  try { checks.push(...upsetTextHealth(now)); } catch (e: any) { logger.warn(`upset watch health: ${e?.message || e}`); }
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts

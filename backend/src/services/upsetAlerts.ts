@@ -14,6 +14,7 @@
  */
 import { db } from '../db';
 import { doubleChance } from '../utils/doubleChance';
+import { footballSignals, footballStature, footballTier, historySignals, historyStature, watchReport, type Candidate, type Past, type Side } from '../utils/upsetWatch';
 
 export interface UpsetRule { K: number; cut: number; minGap: number; minEdge: number; maxEdge: number }
 export const UPSET_RULE: UpsetRule = { K: 0.75, cut: 0.33, minGap: 0.04, minEdge: 0.03, maxEdge: 0.3 };
@@ -147,59 +148,49 @@ export function dcPick(h: number, d: number, a: number) {
   return x ? { k: x.k, p: r1(x.p) } : null;
 }
 
-export function upsetWatchReport() {
-  const now = new Date().toISOString();
-  const soon = new Date(Date.now() + 7 * 86400000).toISOString();
+/**
+ * fix242: the upset watch (Pro, model only): this week's games where the favourite is 50%+ and the underdog 25%+ with a
+ * clear reason (utils/upsetWatch.ts), and the last 30 days' record of the same rule. Reasons: the grid-v3 rows saved
+ * with the prediction; UEFA cups / national teams (Elo models, no rows) from the teams' own results.
+ */
+export function upsetWatchReport(now = Date.now()) {
+  const nowIso = new Date(now).toISOString(), soon = new Date(now + 7 * 86400000).toISOString();
+  const since = new Date(now - 31 * 86400000).toISOString();
   const up = bestPerMatch(db.prepare(`
-    SELECT match_id, model, competition_name, competition_code, utc_date, home_team, away_team, home_team_id, away_team_id, p_home, p_draw, p_away
-    FROM predictions WHERE settled = 0 AND locked = 0 AND utc_date > ? AND utc_date < ? AND model IN ('grid-v3', 'elo-euro', 'elo-intl')
-  `).all(now, soon) as any[]);
-  const upcoming = up.map(r => {
-    const w = watchOf(r.p_home, r.p_draw, r.p_away);
-    if (!w) return null;
-    return {
-      matchId: r.match_id, league: r.competition_name || r.competition_code, date: r.utc_date,
-      home: r.home_team, away: r.away_team, homeCrest: crestOf(r.home_team_id), awayCrest: crestOf(r.away_team_id),
-      home_p: r1(r.p_home), draw_p: r1(r.p_draw), away_p: r1(r.p_away), ...w,
-      dc: dcPick(r.p_home, r.p_draw, r.p_away)
-    };
-  }).filter(Boolean).sort((a: any, b: any) => b.upsetChance - a.upsetChance || a.date.localeCompare(b.date));
-
-  // Record: every settled prediction (saved before kick-off) that made the cut
+    SELECT match_id, model, competition_name, competition_code, utc_date, home_team, away_team, home_team_id, away_team_id, p_home, p_draw, p_away, payload
+    FROM predictions WHERE settled = 0 AND utc_date > ? AND utc_date < ? AND model IN ('grid-v3', 'elo-euro', 'elo-intl')
+  `).all(nowIso, soon) as any[]);
+  // the record: settled games of the last 30 days (the saved prediction from before kick-off)
   const done = bestPerMatch(db.prepare(`
-    SELECT p.match_id, p.model, p.competition_name, p.competition_code, p.utc_date, p.home_team, p.away_team, p.p_home, p.p_draw, p.p_away,
-           r.home_goals, r.away_goals, r.outcome
+    SELECT p.match_id, p.model, p.competition_name, p.competition_code, p.utc_date, p.home_team, p.away_team, p.home_team_id, p.away_team_id,
+           p.p_home, p.p_draw, p.p_away, p.payload, r.home_goals, r.away_goals, r.outcome
     FROM predictions p JOIN results r ON r.match_id = p.match_id
-    WHERE p.settled = 1 AND r.outcome IN ('H','D','A') AND p.model IN ('grid-v3', 'elo-euro', 'elo-intl')
-  `).all() as any[]);
-  let n = 0, upsets = 0, draws = 0, said = 0, saidDraw = 0;
-  const bands = watchBands();
-  const recent: any[] = [];
-  for (const r of done) {
-    const w = watchOf(r.p_home, r.p_draw, r.p_away);
-    if (!w) continue;
-    n++; said += w.upsetChance; saidDraw += w.draw;
-    const upset = r.outcome === w.underdog;
-    if (upset) upsets++;
-    if (r.outcome === 'D') draws++;
-    const b = bandOf(bands, w.upsetChance);
-    b.n++; b.said += w.upsetChance; if (upset) b.upsets++;
-    recent.push({ matchId: r.match_id, league: r.competition_name || r.competition_code, date: r.utc_date, home: r.home_team, away: r.away_team,
-      score: `${r.home_goals}-${r.away_goals}`, underdog: w.underdog, upsetChance: r1(w.upsetChance), result: upset ? 'upset' : r.outcome === 'D' ? 'draw' : 'favourite' });
-  }
-  recent.sort((a, b) => b.date.localeCompare(a.date));
-  return {
-    rule: WATCH,
-    upcoming,
-    record: {
-      n, upsets, draws,
-      upsetRate: n ? r1((100 * upsets) / n) : null, said: n ? r1(said / n) : null,
-      drawRate: n ? r1((100 * draws) / n) : null, saidDraw: n ? r1(saidDraw / n) : null,
-      bands: bands.map(b => ({ range: b.range, n: b.n, said: b.n ? r1(b.said / b.n) : null, happened: b.n ? r1((100 * b.upsets) / b.n) : null })),
-      since: recent.length ? recent[recent.length - 1].date : null,
-      recent: recent.slice(0, 12)
-    }
+    WHERE p.settled = 1 AND r.outcome IN ('H','D','A') AND p.utc_date > ? AND p.utc_date <= ? AND p.model IN ('grid-v3', 'elo-euro', 'elo-intl')
+  `).all(since, nowIso) as any[]);
+  // a team's finished games (every competition we cover), for the games without grid rows
+  const histQ = db.prepare(`SELECT p.match_id, p.utc_date, p.home_team_id h, p.away_team_id a, r.outcome FROM predictions p JOIN results r ON r.match_id = p.match_id
+    WHERE (p.home_team_id = ? OR p.away_team_id = ?) AND p.utc_date > ? AND r.outcome IN ('H','D','A') GROUP BY p.match_id`);
+  const hist = new Map<number, Past[]>();
+  const historyOf = (id: number | null) => {
+    if (!id) return [];
+    if (!hist.has(id)) hist.set(id, (histQ.all(id, id, new Date(now - 3 * 365 * 86400000).toISOString()) as any[]).map(g => ({
+      date: g.utc_date, home: g.h === id, won: g.outcome === (g.h === id ? 'H' : 'A'), opp: g.h === id ? g.a : g.h
+    })));
+    return hist.get(id)!;
   };
+  const rowsOf = (r: any) => { try { return JSON.parse(r.payload || 'null')?.grid?.rows || null; } catch { return null; } };
+  const cand = (r: any): Candidate => {
+    const rows = r.model === 'grid-v3' ? rowsOf(r) : null;
+    const hx = (fav: Side) => ({ kickoff: r.utc_date, fav, games: { H: historyOf(r.home_team_id), A: historyOf(r.away_team_id) }, ids: { H: r.home_team_id, A: r.away_team_id } });
+    return {
+      matchId: r.match_id, league: r.competition_name || r.competition_code, tier: footballTier(r.competition_code), date: r.utc_date,
+      home: r.home_team, away: r.away_team, homeCrest: crestOf(r.home_team_id), awayCrest: crestOf(r.away_team_id),
+      pHome: Number(r.p_home), pDraw: Number(r.p_draw), pAway: Number(r.p_away),
+      signals: fav => (rows ? footballSignals(rows, fav) : historySignals(hx(fav))),
+      stature: fav => (rows ? footballStature(rows, fav) : historyStature(hx(fav)))
+    };
+  };
+  return { sport: 'football' as const, ...watchReport(up.map(cand), done.map(r => ({ ...cand(r), outcome: r.outcome, score: `${r.home_goals}-${r.away_goals}` })), now) };
 }
 
 /** Admin: the same cut on the walk-forward backtests (calibration only; v3 league games). */

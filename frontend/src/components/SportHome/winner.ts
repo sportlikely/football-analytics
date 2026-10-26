@@ -30,8 +30,8 @@ export function winnerRecordRows(bands: { min: number; n: number; pct: number | 
   }))
 }
 
-/** Upset watch: the coming games where our model gives the underdog 20–45% (fix188, the same rule as the server's in every
- *  sport; 45–55% is a coin flip, not an upset), the underdog's best chance first. */
+/** Upset watch: the coming games where the favourite is 50%+ and the underdog 25%+ (fix242: the numbers part of the
+ *  server's rule in every sport; the full page also needs a reason), the underdog's best chance first. */
 export function upsetItems<G>(games: G[], get: (g: G) => { id: number; href: string; league: string; date: string; home: string; away: string; pHome?: number | null; pAway?: number | null; locked?: boolean } | null, n = 2): HSpecialItem[] {
   return games.map(get).filter((x): x is NonNullable<typeof x> => !!x && !x.locked && typeof x.pHome === 'number')
     .map(x => {
@@ -39,7 +39,7 @@ export function upsetItems<G>(games: G[], get: (g: G) => { id: number; href: str
       const homeDog = x.pHome! < pAway
       return { x, dog: homeDog ? x.home : x.away, fav: homeDog ? x.away : x.home, dogPct: Math.min(x.pHome!, pAway), favPct: Math.max(x.pHome!, pAway) }
     })
-    .filter(u => u.dogPct >= 20 && u.dogPct <= 45)
+    .filter(u => u.favPct >= 50 && u.dogPct >= 25)
     .sort((a, b) => b.dogPct - a.dogPct || a.x.date.localeCompare(b.x.date))
     .slice(0, n)
     .map(u => ({

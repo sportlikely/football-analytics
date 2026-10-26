@@ -143,6 +143,7 @@ export const HEALTH_RULES: HealthRule[] = [
   { match: 'bb-key-players', tab: 'models', title: 'Key players shown (basketball)', what: 'Each basketball game page shows the players who matter most.', todo: FIXES },
   { match: 'bb-star-rest', tab: 'models', title: 'Star rest (basketball)', what: 'Rest nights of star players are taken into account.', todo: FIXES },
   { match: 'calibration-', tab: 'models', title: 'Do our percentages come true?', what: 'When we said 70%, it happened about 70% of the time (last 30 days).', todo: 'Nothing for a few days. Tell Claude if it stays red for a week.' },
+  { match: 'upset-text', tab: 'models', title: 'Upset watch text matches the numbers', what: 'On every sport’s upset watch the team called the favourite is the one with the higher win %, each game has a reason, and at most 10 are shown a week.', todo: 'Tell Claude straight away, with the games listed.' },
   { match: 'league-settings-', tab: 'models', title: 'League settings fresh', what: 'Each league’s own model settings were refreshed in the last 35 days.', todo: 'Nothing — the monthly refit does it. Tell Claude if it stays red.' },
   { match: 'season-forecast-', tab: 'models', title: 'Season forecast', what: 'The finishing-place chances are fresh, follow each league’s rules and add up.', todo: 'Run it from the Season forecast card; tell Claude if it stays red.' },
 

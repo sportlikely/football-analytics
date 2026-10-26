@@ -4096,7 +4096,8 @@ app.get('/api/backtest/draw-factors', (req, res) => {
   }
 });
 
-// Upset watch (Pro): games where our model gives the underdog 30%+ (no bookmakers), and how those calls went
+// Upset watch (Pro, model only): fix242 — favourite 50%+, underdog 25%+ with a clear reason, 10 a week shown, the last
+// 30 days' record (utils/upsetWatch.ts); answered by the worker (WORKER_ROUTES)
 app.get('/api/upset-watch', (_req, res) => {
   try {
     res.json({ data: upsetWatchReport(), timestamp: new Date().toISOString() });
