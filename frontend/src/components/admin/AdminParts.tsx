@@ -153,32 +153,6 @@ function Group({ title, n, to, children }: { title: string; n: number; to?: Admi
   )
 }
 
-function PhotosToReview({ done }: { done: () => void }) {
-  const [rows, setRows] = useState<any[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const load = () => axios.get(`${API_URL}/admin/player-photos`).then(r => setRows(r.data.data.review)).catch(() => setRows([]))
-  useEffect(() => { load() }, [])
-  const act = (r: any, action: 'approve' | 'reject') => { setBusy(true); axios.post(`${API_URL}/admin/player-photos/${r.sport}/${r.id}/${action}`, { reason: '' }).then(() => { load(); done() }).finally(() => setBusy(false)) }
-  if (!rows) return <p className="text-sm text-faint">Loading…</p>
-  return (
-    <ul className="divide-y divide-line/50 text-sm">
-      {rows.slice(0, 10).map(r => (
-        <li key={`${r.sport}${r.id}`} className="py-2 flex items-center gap-3">
-          {r.url ? <img src={r.url} alt={r.name} width={48} height={48} className="w-12 h-12 rounded-xl object-cover bg-surface2 shrink-0" /> : <span className="w-12 h-12 rounded-xl bg-surface2 shrink-0" />}
-          <div className="min-w-0 flex-1">
-            <a href={playerHref(r.sport === 'tennis' ? 'tennis' : 'basketball', r.id, r.name)!} target="_blank" rel="noreferrer" className="font-semibold text-ink hover:text-accent">{r.name}</a>
-            <div className="text-xs text-muted">{r.sport} · {r.reason}</div>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-1 shrink-0">
-            <button type="button" disabled={busy} onClick={() => act(r, 'approve')} className="h-8 px-3 rounded-lg text-xs font-semibold bg-win/15 text-win hover:bg-win/25">Approve</button>
-            <button type="button" disabled={busy} onClick={() => act(r, 'reject')} className="h-8 px-3 rounded-lg text-xs font-semibold bg-loss/15 text-loss hover:bg-loss/25">Wrong person</button>
-          </div>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 function InjuriesToReview({ done }: { done: () => void }) {
   const [rows, setRows] = useState<any[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -280,14 +254,13 @@ export function NeedsYouCard({ ctx, reload }: { ctx: Ctx; reload: () => void }) 
   const s = ctx.summary
   const red = (ctx.checks || []).filter(c => c.level === 'fail')
   if (!s || !ctx.checks) return <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Loading…</section>
-  const none = !s.photosToReview && !s.injuriesToReview && !s.bbResultsToCheck && !s.contactOpen && !red.length
+  const none = !s.injuriesToReview && !s.bbResultsToCheck && !s.contactOpen && !red.length
   return (
     <section className="card p-5 sm:p-6 mb-8">
       {none ? (
         <p className="text-base font-semibold text-win py-4 text-center">Nothing needs you right now ✓</p>
       ) : (
         <div className="divide-y divide-line/50">
-          {s.photosToReview > 0 && <Group title="Player photos to review" n={s.photosToReview} to="data"><PhotosToReview done={reload} /></Group>}
           {s.injuriesToReview > 0 && <Group title="Injury news to review (basketball)" n={s.injuriesToReview} to="data"><InjuriesToReview done={reload} /></Group>}
           {s.bbResultsToCheck > 0 && <Group title="Results to check" n={s.bbResultsToCheck} to="data"><p className="text-xs text-muted mb-1">The data may have these scores wrong and our checks disagree (clear cases are fixed automatically). Compare with the league’s own site, then swap or keep.</p><ResultsToCheck done={reload} /></Group>}
           {s.contactOpen > 0 && <Group title="Contact messages to answer" n={s.contactOpen} to="users"><ContactOpen done={reload} /></Group>}

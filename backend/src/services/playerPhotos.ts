@@ -16,12 +16,18 @@
  * in DATA_DIR/player-photos/<sport>/, served from our domain (/media/players/…, a year's cache, the file name changes
  * with the photo). Author, licence and the Commons file are kept per photo (credit under the photo, /credits page).
  * Removal: Admin "remove photo" deletes the file and blocks the player and that file for good (never fetched again).
+ *
+ * fix241 (Yarin, 26 Oct 2026: "I prefer no pictures if it's not official"): this source is OFF. Wikimedia is not on the
+ * official list (utils/photoSources.ts), so photosOn() is false: no job, no matching, nothing shown or served, and
+ * purgeUnofficialPhotos() (worker start) deletes the stored files and rows. The code stays as the slot a licensed
+ * headshot provider plugs into: PHOTO_SOURCE = that provider's id (on the official list) + PLAYER_PHOTOS=1.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, DB_READ_ONLY } from '../db';
 import logger from '../utils/logger';
+import { OFFICIAL_PHOTO_SOURCES, officialPhoto } from '../utils/photoSources';
 import { yieldLoop, yieldEvery } from './perf';
 import { threadJobsOn, inThread } from './threadJob';
 
@@ -37,6 +43,9 @@ const UA = 'SportLikelyBot/1.0 (https://sportlikely.com; support@sportlikely.com
 const DAY = 86400000;
 const RECHECK_MS = 7 * DAY;
 const SIZE = 256;
+/** fix241: where this matcher's photos come from — not an official source, so everything below stays off */
+export const PHOTO_SOURCE: string = 'wikimedia';
+export const photosOn = () => OFFICIAL_PHOTO_SOURCES.some(x => x.id === PHOTO_SOURCE) && process.env.PLAYER_PHOTOS === '1';
 
 if (!DB_READ_ONLY) db.exec(`
   CREATE TABLE IF NOT EXISTS player_photos (
@@ -518,7 +527,7 @@ function requeueOnce() {
   logger.info(`player photos: ${n} basketball players queued again (${MATCHER} matcher)`);
 }
 export async function photosTick(limit = Number(process.env.PHOTO_BATCH) || 60) {
-  if (run.running || process.env.PLAYER_PHOTOS === '0') return;
+  if (run.running || !photosOn()) return;
   run.running = true;
   try {
     requeueOnce();
@@ -552,7 +561,7 @@ export async function photosTick(limit = Number(process.env.PHOTO_BATCH) || 60) 
  */
 const BB_PASS = `${MATCHER}-pass`;
 export async function photosBbPass(): Promise<void> {
-  if (process.env.PLAYER_PHOTOS === '0') return;
+  if (!photosOn()) return;
   const state = (db.prepare(`SELECT data FROM photo_wd_cache WHERE qid = '_bbPass'`).get() as any)?.data;
   let p: { v: string; total: number; done: number; ok: number; at: string; end: string | null } | null = null;
   try { p = state ? JSON.parse(state) : null; } catch { p = null; }
@@ -613,7 +622,7 @@ function load() {
   if (Date.now() - loadedAt < 5 * 60 * 1000) return;
   loadedAt = Date.now();
   const m = new Map<string, Shown>();
-  try {
+  if (photosOn()) try {
     for (const r of db.prepare(`SELECT sport, player_id, path, author, licence, licence_url, source_url FROM player_photos WHERE status = 'ok' AND path IS NOT NULL AND author IS NOT NULL AND licence IS NOT NULL`).all() as any[])
       m.set(pkey(r.sport, r.player_id), { url: `/media/players/${r.sport}/${r.path}`, author: r.author, licence: r.licence, licenceUrl: r.licence_url || null, source: r.source_url });
   } catch { /* table not ready */ }
@@ -623,18 +632,18 @@ function load() {
 export function photoUrl(sport: PhotoSport, id: number | null | undefined): string | null {
   if (id == null) return null;
   load();
-  return shown.get(pkey(sport, id))?.url ?? null;
+  return officialPhoto(shown.get(pkey(sport, id))?.url); // fix241: a relative /media/players/… file is never official
 }
 /** author, licence and the Commons file of a shown photo (the credit under it) */
 export function photoCredit(sport: PhotoSport, id: number | null | undefined): Omit<Shown, 'url'> | null {
   if (id == null) return null;
   load();
   const s = shown.get(pkey(sport, id));
-  return s ? { author: s.author, licence: s.licence, licenceUrl: s.licenceUrl, source: s.source } : null;
+  return s && officialPhoto(s.url) ? { author: s.author, licence: s.licence, licenceUrl: s.licenceUrl, source: s.source } : null;
 }
 /** a stored file (served by app.ts) — null when it isn't a shown photo */
 export function photoFile(sport: string, file: string): string | null {
-  if (!PHOTO_SPORTS.includes(sport as PhotoSport) || !/^\d+-[0-9a-f]{10}\.(webp|jpg|png)$/.test(file)) return null;
+  if (!photosOn() || !PHOTO_SPORTS.includes(sport as PhotoSport) || !/^\d+-[0-9a-f]{10}\.(webp|jpg|png)$/.test(file)) return null;
   const f = path.join(PHOTO_DIR, sport, file);
   return fs.existsSync(f) ? f : null;
 }
@@ -642,6 +651,7 @@ export function photoFile(sport: string, file: string): string | null {
 let creditsCache: { at: number; rows: any[] } | null = null;
 /** every shown photo with its credit (the /credits page) */
 export function photoCredits() {
+  if (!photosOn()) return [];
   if (creditsCache && Date.now() - creditsCache.at < 10 * 60 * 1000) return creditsCache.rows;
   const rows = (db.prepare(`SELECT sport, player_id, name, author, licence, licence_url, source_url, file FROM player_photos
       WHERE status = 'ok' AND path IS NOT NULL AND author IS NOT NULL AND licence IS NOT NULL ORDER BY sport, name LIMIT 20000`).all() as any[])
@@ -735,36 +745,50 @@ export function bbCoverage(): { n: number; has: number; leagues: { code: string;
   return { n: bbN, has: bbHas, leagues };
 }
 
-export function photoHealth(): { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items: string[] } {
-  load();
-  const has = (sport: PhotoSport, id: number) => shown.has(pkey(sport, id));
-  const pct = (a: number, b: number) => (b ? `${Math.round((1000 * a) / b) / 10}%` : '–');
-  let top100 = 0, n100 = 0, top500 = 0, n500 = 0;
+/**
+ * fix241: delete every photo from a source that is not official — the stored files (DATA_DIR/player-photos), their
+ * rows (author / licence / source), blocks and the Wikidata cache, and a non-official player picture saved in a
+ * favourite. Runs at every worker start (a no-op once clean).
+ */
+export function purgeUnofficialPhotos(): { rows: number; files: number; favorites: number } {
+  if (DB_READ_ONLY || photosOn()) return { rows: 0, files: 0, favorites: 0 };
+  let favorites = 0;
+  const files = countFiles();
+  try { fs.rmSync(PHOTO_DIR, { recursive: true, force: true }); } catch (e: any) { logger.warn(`player photos: could not remove ${PHOTO_DIR}: ${e?.message || e}`); }
+  const rows = Number(db.prepare(`DELETE FROM player_photos`).run().changes);
+  db.prepare(`DELETE FROM player_photo_blocks`).run();
+  db.prepare(`DELETE FROM photo_wd_cache`).run();
   try {
-    const rows = db.prepare(`SELECT r.player_id AS id, r.rank FROM tennis_rankings r JOIN (SELECT tour, MAX(date) AS d FROM tennis_rankings WHERE tour IN ('atp','wta') GROUP BY tour) l
-      ON l.tour = r.tour AND l.d = r.date WHERE r.rank <= 500 AND r.player_id IS NOT NULL`).all() as any[];
-    for (const r of rows) { n500++; if (has('tennis', r.id)) top500++; if (r.rank <= 100) { n100++; if (has('tennis', r.id)) top100++; } }
-  } catch { /* no tennis tables */ }
-  const { n: bbN, has: bbHas, leagues } = bbCoverage();
-  const reasons = (sport: PhotoSport) => { try { return db.prepare(`SELECT COALESCE(reason, status) AS reason, COUNT(*) AS n FROM player_photos WHERE sport = ? AND status <> 'ok' GROUP BY 1 ORDER BY n DESC LIMIT 6`).all(sport) as { reason: string; n: number }[]; } catch { return []; } };
-  // a shown photo must have its author and licence stored (credit), and a file
-  const bad = db.prepare(`SELECT sport, player_id, name FROM player_photos WHERE status = 'ok' AND (author IS NULL OR author = '' OR licence IS NULL OR licence = '' OR source_url IS NULL)`).all() as any[];
-  const missing = (db.prepare(`SELECT sport, player_id, name, path FROM player_photos WHERE status = 'ok'`).all() as any[]).filter(r => !r.path || !fs.existsSync(fileOf(r.sport, r.path)!));
-  const review = (db.prepare(`SELECT COUNT(*) AS n FROM player_photos WHERE status = 'review'`).get() as any).n;
-  const lastRun = (db.prepare(`SELECT at FROM photo_wd_cache WHERE qid = '_lastRun'`).get() as any)?.at || null;
-  const pass = (() => { try { return JSON.parse((db.prepare(`SELECT data FROM photo_wd_cache WHERE qid = '_bbPass'`).get() as any)?.data || 'null'); } catch { return null; } })();
-  const nba = leagues.find(l => l.code === 'NBA'), el = leagues.find(l => l.code === 'EL');
-  const items = [
-    ...leagues.slice(0, 12).map(l => `basketball ${l.code}: ${pct(l.has, l.n)} (${l.has} of ${l.n})`),
-    ...reasons('basketball').map(r => `basketball, no photo — ${r.reason}: ${r.n}`),
-    ...reasons('tennis').map(r => `tennis, no photo — ${r.reason}: ${r.n}`),
-    ...bad.map(r => `${r.sport} ${r.player_id} ${r.name || ''}: shown without author / licence`),
-    ...missing.slice(0, 10).map(r => `${r.sport} ${r.player_id} ${r.name || ''}: file missing (fetched again on the next run)`)
-  ];
-  const stale = process.env.PLAYER_PHOTOS !== '0' && (!lastRun || Date.parse(lastRun) < Date.now() - 2 * DAY);
+    const upd = db.prepare(`UPDATE user_favorites SET data = ? WHERE user_id = ? AND kind = ? AND ref = ?`);
+    for (const r of db.prepare(`SELECT user_id, kind, ref, data FROM user_favorites WHERE kind LIKE '%player%'`).all() as any[]) {
+      let f: any; try { f = JSON.parse(r.data); } catch { continue; }
+      if (f?.img && !officialPhoto(f.img)) { f.img = null; upd.run(JSON.stringify(f), r.user_id, r.kind, r.ref); favorites++; }
+    }
+  } catch { /* no favourites table */ }
+  loadedAt = 0; shown = new Map(); creditsCache = null;
+  if (rows || files || favorites) logger.info(`player photos (fix241): removed ${rows} non-official photo rows, ${files} stored files, ${favorites} favourite pictures — official photos only`);
+  return { rows, files, favorites };
+}
+function countFiles(): number {
+  try { return (fs.readdirSync(PHOTO_DIR, { recursive: true }) as string[]).filter(d => fs.statSync(path.join(PHOTO_DIR, d)).isFile()).length; } catch { return 0; }
+}
+
+/** fix241 data health "Photo sources: official only": ok when no player photo anywhere comes from a non-official source */
+export function photoSourceHealth(): { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items: string[] } {
+  const items: string[] = [];
+  let stored = 0, favs = 0;
+  const off = !photosOn();
+  try { stored = (db.prepare(`SELECT COUNT(*) AS n FROM player_photos WHERE path IS NOT NULL OR author IS NOT NULL`).get() as any).n; } catch { /* no table */ }
+  const files = off ? countFiles() : 0;
+  try { favs = (db.prepare(`SELECT data FROM user_favorites WHERE kind LIKE '%player%'`).all() as any[]).filter(r => { try { const img = JSON.parse(r.data)?.img; return !!img && !officialPhoto(img); } catch { return false; } }).length; } catch { /* no table */ }
+  if (off && stored) items.push(`${stored} stored photo rows from ${PHOTO_SOURCE} (removed at the next worker start)`);
+  if (files) items.push(`${files} photo files in ${PHOTO_DIR} (removed at the next worker start)`);
+  if (favs) items.push(`${favs} favourites with a non-official player picture (cleared at the next worker start)`);
+  const asked = process.env.PLAYER_PHOTOS === '1' && off;
+  if (asked) items.push(`PLAYER_PHOTOS=1 but ${PHOTO_SOURCE} is not an official source — the matcher stays off`);
   return {
-    id: 'player-photos', label: 'Player photos', level: bad.length ? 'fail' : stale || missing.length || (nba && nba.n >= 50 && nba.has / nba.n < 0.85) || (el && el.n >= 50 && el.has / el.n < 0.6) ? 'warn' : 'ok',
-    detail: `tennis top 100 ${pct(top100, n100)} · top 500 ${pct(top500, n500)} · basketball ${pct(bbHas, bbN)} (${bbHas} of ${bbN}) · ${review} to review · last run ${lastRun ? lastRun.slice(0, 16).replace('T', ' ') : 'never'}${pass ? ` · basketball pass (${pass.v}): ${pass.end ? `done ${String(pass.end).slice(0, 10)}` : `${pass.done} of ${pass.total} looked at`}, ${pass.ok} photos` : ''}`,
+    id: 'photo-sources', label: 'Photo sources: official only', level: (off && stored) || files || favs ? 'fail' : asked ? 'warn' : 'ok',
+    detail: `allowed: ${OFFICIAL_PHOTO_SOURCES.map(x => x.label).join(', ')} · ${PHOTO_SOURCE} matcher ${off ? 'off' : 'on'} · non-official photos stored ${off ? stored : 0}, files ${files}, in favourites ${favs}`,
     items
   };
 }

@@ -4,6 +4,7 @@
  * so favorites follow them to every device.
  */
 import { db } from '../db';
+import { officialPhoto } from '../utils/photoSources';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS user_favorites (
@@ -50,7 +51,7 @@ export function cleanFavorite(x: any): Favorite | null {
     kind: x.kind,
     ref,
     name,
-    img: url(x.img),
+    img: /player/.test(x.kind) ? officialPhoto(url(x.img)) : url(x.img), // fix241: a player's picture only from an official source
     code: str(x.code, 20) || null,
     ids: ids(x.ids),
     teamName: str(x.teamName, 120) || null,

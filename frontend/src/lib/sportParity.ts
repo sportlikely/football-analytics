@@ -78,7 +78,7 @@ export const PARITY = [
   /* ---------- player page ---------- */
   { key: 'player.stats', label: 'Player stats', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'player.career', label: 'Career', football: true, basketball: true, nfl: true, tennis: true },
-  { key: 'player.photo', label: 'Player photo in the header, initials / number when there is none (football + NFL: the data provider; basketball + tennis: Wikimedia Commons, free licences, credited under the photo and on /credits, fix211)', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'player.photo', label: 'Player photo in the header, initials + flag when there is none (fix241: official photos only — football + NFL from the data provider, API-Football; basketball + tennis: initials + flag until a licensed source)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'player.injuries', label: 'Injury history', football: true, basketball: true, nfl: true, tennis: true },
   /* ---------- league page ---------- */
   { key: 'league.seasonForecast', label: 'Season forecast tab: zones, average place, every position (fix215)', football: true, basketball: true, nfl: true, tennis: 'na: tennis has no league season table (tournaments and rankings), nothing to simulate' },

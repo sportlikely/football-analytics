@@ -17,7 +17,7 @@ import { tournamentPlace, countryName } from '../utils/tennisPlaces';
 import { ROUND_ORDER, normRound, roundEn } from '../utils/tennisRounds';
 export { ROUND_ORDER, normRound, roundEn };
 
-import { photoUrl, photoCredit } from './playerPhotos';
+import { photoUrl } from './playerPhotos';
 
 export const tennisPublic = () => process.env.TENNIS_PUBLIC === '1';
 /** Reveal / unlock ids of tennis matches (their own negative range: football > 0, basketball -id, NFL -(2e9 + id)) */
@@ -660,7 +660,7 @@ export function tennisPlayer(pid: number, full: boolean | ((rid: number) => bool
   return {
     player: { id: p.id, name: fullName(p.name, p.first_name, p.last_name), country: p.country || null, countryName: countryName(p.country), hand: p.hand || null, dob: p.dob || null, age: age && age > 10 && age < 60 ? age : null, height: p.height || null, tour: women ? 'wta' : 'atp', women, rank, points,
       // fix211: the photo (Wikidata / Commons) with its credit, or null (initials + flag)
-      photo: photoUrl('tennis', p.id), photoCredit: photoCredit('tennis', p.id) },
+      photo: photoUrl('tennis', p.id) }, // fix241: official photos only, no credit line
     rankTrend: trend.map(r => ({ date: r.date, rank: r.rank })),
     season: { year, won: thisYear.filter(x => x.won).length, lost: thisYear.filter(x => !x.won).length },
     form: recent.slice(0, 10).reverse().map(x => (x.won ? 'W' : 'L')),

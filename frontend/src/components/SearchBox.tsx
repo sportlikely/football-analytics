@@ -108,7 +108,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
       {hits.players.length > 0 && <div className="label px-3 pt-2 pb-1">{tt("Players")}</div>}
       {hits.players.map(p => (
         <Link key={`bp${p.id}`} to={playerHref(sport, p.id, p.name)!} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
-          {/* fix211: the player's photo (tennis, basketball) — initials when there is none or it fails */}
+          {/* fix241: initials (+ flag) unless the photo is official — PlayerPhoto checks the source */}
           <PlayerPhoto src={p.photo} name={p.name} size={24} />
           <span className="text-sm font-semibold text-ink truncate">{p.name}</span>
           <span className="ml-auto flex items-center gap-1.5 text-[11px] text-faint min-w-0">

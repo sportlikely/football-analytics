@@ -22,7 +22,6 @@
     "test:fix208": "tsc && node --no-warnings --test --test-force-exit scripts/live-box.test.mjs",
     "test:fix209": "tsc && node --no-warnings --test --test-force-exit scripts/scorers.test.mjs",
     "test:fix210": "tsc && node --no-warnings --test --test-force-exit scripts/no-web-compute.test.mjs",
-    "test:fix211": "tsc && node --no-warnings --test --test-force-exit scripts/player-photos.test.mjs",
     "test:fix212": "tsc && node --no-warnings --test --test-force-exit scripts/fd-freeze.test.mjs",
     "test:fix212b": "tsc && node --no-warnings --test --test-force-exit scripts/fd-twins-startup.test.mjs",
     "test:fix215": "tsc && node --no-warnings --test --test-force-exit scripts/season-sim.test.mjs scripts/season-forecast.test.mjs",
@@ -48,6 +47,7 @@
     "test:fix234": "tsc && node --no-warnings --test --test-force-exit scripts/fix234.test.mjs",
     "test:fix236": "tsc && node --no-warnings --test --test-force-exit scripts/fix236.test.mjs",
     "test:fix237": "tsc && node --no-warnings --test --test-force-exit scripts/fix237.test.mjs",
+    "test:fix241": "tsc && node --no-warnings --test --test-force-exit scripts/fix241.test.mjs",
     "test:fix238": "tsc && node --no-warnings --test --test-force-exit scripts/fix238.test.mjs",
     "test:fix239": "tsc && node --no-warnings --test --test-force-exit scripts/fix239.test.mjs"
   },

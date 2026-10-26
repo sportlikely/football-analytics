@@ -49,7 +49,7 @@ import { db } from './db';
 import { yieldEvery } from './services/perf';
 import { warmSearchIndex } from './services/teamPage';
 import { warmBbSearch } from './services/bbPlayers';
-import { photosTick, photosBbPass } from './services/playerPhotos';
+import { photosTick, photosBbPass, photosOn, purgeUnofficialPhotos } from './services/playerPhotos';
 import { autoTuneDue, runTune, leagueTuneDue, runLeagueTune, missFitDue, runMissFit, impactFitDue, impactRowsReady, runImpactFit, impactRegateDue, regateImpact } from './services/bbTuner';
 import { threadJobsOn, inThread } from './services/threadJob';
 import { buildBbCalibration } from './services/sportCalibration';
@@ -104,13 +104,14 @@ export function startJobs() {
   // fix209: "Scorers shown" — every live / finished game of the last 48 h names its scorers (and fetches them again)
   after('scorers check', () => scorersCheckTick(), 3 * 60 * 1000).unref();
   every('scorers check', () => scorersCheckTick(), 5 * 60 * 1000).unref();
-  // fix211: player photos (tennis + basketball) from Wikidata / Commons, a small batch every 20 min (PLAYER_PHOTOS=0 = off)
-  after('player photos', () => photosTick(), 4 * 60 * 1000).unref();
-  every('player photos', () => photosTick(), 20 * 60 * 1000).unref();
-  // fix222: the basketball photo matcher (fix221) once over every basketball player, NBA first, 200 a turn
-  // (a plain timer, not a timed job: the pass takes hours at one Wikimedia call a second and would be named in every
-  // worker stall; each photo's own work is short and yields)
-  setTimeout(() => { photosBbPass().catch(e => logger.warn(`player photos: basketball pass: ${e?.message || e}`)); }, 6 * 60 * 1000).unref();
+  // fix241: official photos only — the Wikidata / Commons matcher (fix211 / fix221) is off (photosOn() false: Wikimedia
+  // is not on utils/photoSources.ts), its stored files and rows are deleted here; the jobs stay for a licensed source
+  after('photo sources', () => { purgeUnofficialPhotos(); }, 60 * 1000).unref();
+  if (photosOn()) {
+    after('player photos', () => photosTick(), 4 * 60 * 1000).unref();
+    every('player photos', () => photosTick(), 20 * 60 * 1000).unref();
+    setTimeout(() => { photosBbPass().catch(e => logger.warn(`player photos: basketball pass: ${e?.message || e}`)); }, 6 * 60 * 1000).unref();
+  }
   // fix222: bb-v4 tuned on this database (first run ~20 min after the start, once the grid rows are stored; then
   // monthly), applied only through the gate (bbTuner.runTune auto); then the basketball calibration layer again
   // fix223: then the per-league settings on top of the stored shared tune (first run, after an applied shared tune, monthly)

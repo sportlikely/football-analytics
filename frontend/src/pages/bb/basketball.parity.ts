@@ -43,7 +43,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'team.fixtures',
     'team.news',
     'player.stats',
-    'player.photo', // fix211: Commons photo + credit (BbPlayer), also in the box score and search
+    'player.photo', // fix241: initials + flag (official photos only; BbPlayer, box score, search, key players)
     'player.career',
     'player.injuries',
     'league.table',

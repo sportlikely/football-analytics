@@ -14,6 +14,8 @@ import NameLink, { href } from '../components/sport/NameLink'
 import TeamForecast from '../components/sport/forecast/TeamForecast'
 import { teamHref, playerHref, matchHref } from '../lib/links'
 import { TeamDifficulty } from '../components/sport/game/GameExtras'
+import PlayerPhoto from '../components/sport/PlayerPhoto'
+import { officialPhoto } from '../lib/photoSources'
 
 interface Side { id: number; name: string; logo: string }
 interface Fixture { matchId: number | null; date: string; status: string; comp: string; compCode?: string | null; home: Side; away: Side; hg: number | null; ag: number | null }
@@ -228,7 +230,7 @@ export default function Team() {
                             <td className="px-2 py-2 font-display text-xs font-bold text-faint">{p.number ?? ''}</td>
                             <td className="px-2 py-2">
                               <span className="flex items-center gap-2.5">
-                                {p.photo ? <span className="photo-duo w-7 h-7 rounded-full overflow-hidden flex-shrink-0"><img src={p.photo} alt="" className="w-full h-full object-cover" loading="lazy" /></span> : <span className="w-7 h-7 rounded-full bg-surface2" />}
+                                {officialPhoto(p.photo) ? <span className="photo-duo w-7 h-7 rounded-full overflow-hidden flex-shrink-0"><img src={p.photo!} alt="" className="w-full h-full object-cover" loading="lazy" /></span> : <PlayerPhoto src={null} name={p.name} size={28} />}
                                 {p.noPage ? <span className="font-semibold text-ink truncate">{p.name}</span> : <Link to={playerHref('football', p.id, p.name)!} className="font-semibold text-ink truncate hover:text-accent">{p.name}</Link>}
                               </span>
                             </td>

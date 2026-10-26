@@ -8,7 +8,6 @@ import { FavStar } from '../../lib/favorites'
 import { tennisPlayerFav, tennisHref, flagOf, surfaceName, countryName, type TMatch } from '../../lib/tennis'
 import { Skeleton, LockIcon } from '../bb/parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
-import type { PhotoCreditT } from '../../components/sport/PlayerPhoto'
 import { TCard as Card } from '../../components/sport/page/TeamPage'
 import GameRow from '../../components/sport/GameRow'
 import RecordLink from '../../components/RecordLink'
@@ -22,7 +21,7 @@ interface Analysis { matches: number; measures: Measure[]; strengths: Measure[];
 interface Model { elo: number; rank: number; of: number; surfaces: { surface: string; elo: number; matches: number }[]; serve: number; ret: number; tourServe: number; form: { won: number; played: number }; matches: number }
 interface Data {
   player: { id: number; name: string; country: string | null; hand: string | null; age: number | null; height: number | null; tour: 'atp' | 'wta'; women: boolean; rank: number | null; points: number | null
-    photo?: string | null; photoCredit?: PhotoCreditT | null }
+    photo?: string | null }
   rankTrend: { date: string; rank: number }[]
   season: { year: number; won: number; lost: number }
   form: ('W' | 'L')[]
@@ -76,7 +75,6 @@ export default function TennisPlayer() {
       <PlayerHeader
         name={p.name}
         photo={p.photo || null}
-        credit={p.photoCredit}
         noPhoto={<span className="font-display text-3xl font-extrabold text-ink">{initials(p.name)}</span>}
         teamBadge={flag ? <span className="text-xl" aria-hidden>{flag}</span> : undefined}
         star={<FavStar label fav={tennisPlayerFav(p)} />}

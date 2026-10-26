@@ -9,7 +9,7 @@ import RecordLink from '../RecordLink'
 import { NewsPic, isPhoto } from '../NewsList'
 import type { HGame, HTeam, HPick, HNews, HRecord, HSpecial, HResults, SportAdapter } from './types'
 import { ScorersToggle, RowScorersLine, scorersSource, useScorersOpen } from '../sport/RowScorers'
-import PlayerPhoto, { isPlayerPhoto } from '../sport/PlayerPhoto'
+import PlayerPhoto from '../sport/PlayerPhoto'
 
 /** Shared pieces of the sport home page (fix141) — the football home's look, for every sport. */
 
@@ -29,10 +29,9 @@ const initials = (raw: string | null | undefined) => {
 
 export function Crest({ team, size = 28 }: { team: { name: string; logo: string | null; tla?: string | null; flag?: string | null }; size?: number }) {
   const [broken, setBroken] = useState(false)
-  // fix211: a player's photo (tennis): round, the flag as a badge; initials + flag when it fails
-  if (isPlayerPhoto(team.logo)) return <PlayerPhoto src={team.logo} name={team.name} flag={team.flag} size={size} />
-  // fix193: an individual sport (tennis) shows the player's flag where a team shows its crest (big cards: initials + flag)
-  if (!team.logo && team.flag && size >= 40) return <PlayerPhoto src={null} name={team.name} flag={team.flag} size={size} />
+  // fix193: an individual sport (tennis) shows the player's flag where a team shows its crest; fix241: no photos (official
+  // only) — initials + flag badge from 28 px (where the old photos were), the flag alone below
+  if (!team.logo && team.flag && size >= 28) return <PlayerPhoto src={null} name={team.name} flag={team.flag} size={size} />
   if (!team.logo && team.flag) return <span className="grid place-items-center flex-shrink-0 leading-none" style={{ width: size, height: size, fontSize: Math.round(size * 0.8) }} aria-hidden>{team.flag}</span>
   return team.logo && !broken ? (
     <img src={team.logo} alt="" width={size} height={size} onError={() => setBroken(true)} className="object-contain flex-shrink-0" style={{ width: size, height: size }} />

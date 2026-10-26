@@ -6,6 +6,7 @@ import SearchBox from '../SearchBox'
 import { t, LOCALE } from '../../lib/i18n'
 import { useRevealState } from '../../lib/reveal'
 import GameRow from './GameRow'
+import PlayerPhoto from './PlayerPhoto'
 import SectionTitle from './SectionTitle'
 import CalendarCard from '../CalendarCard'
 import { dayLabel } from './Games'
@@ -90,7 +91,7 @@ export default function Favorites({ a }: { a: FavoritesAdapter }) {
                       const nx = nextOf(f)
                       return (
                         <li key={f.ref} className="group flex items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-surface2/60">
-                          {f.img ? <img src={f.img} alt="" className={`w-8 h-8 flex-shrink-0 ${/player/.test(f.kind) ? 'rounded-full object-cover' : 'object-contain'}`} /> : <span className="w-8 h-8 rounded-full bg-surface2 flex-shrink-0" />}
+                          {/player/.test(f.kind) ? <PlayerPhoto src={f.img} name={f.name} size={32} /> /* fix241: official photo or initials */ : f.img ? <img src={f.img} alt="" className="w-8 h-8 flex-shrink-0 object-contain" /> : <span className="w-8 h-8 rounded-full bg-surface2 flex-shrink-0" />}
                           <Link to={a.hrefOf(f)} className="min-w-0 flex-1">
                             <span className="block text-sm font-semibold text-ink truncate">{f.name}</span>
                             <span className="block text-[11px] text-faint truncate">

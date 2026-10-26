@@ -14,7 +14,7 @@ import { isCrawlerRequest } from './afUsage';
 import { yieldLoop, yieldEvery } from './perf';
 import { runsJobs } from './role';
 import { onState, publishState } from './shared';
-import { photoUrl, photoCredit } from './playerPhotos';
+import { photoUrl } from './playerPhotos';
 import { playerImpact } from './keyPlayers';
 
 db.exec(`
@@ -139,7 +139,7 @@ function injuryOf(teamName: string, name: string) {
 }
 
 /** fix211: the player's photo (Wikidata / Commons) and its credit, or null (the page shows the jersey number / initials) */
-const photoOf = (id: number) => ({ photo: photoUrl('basketball', id), photoCredit: photoCredit('basketball', id) });
+const photoOf = (id: number) => ({ photo: photoUrl('basketball', id) }); // fix241: official photos only, no credit line
 
 export async function bbPlayer(id: number) {
   const rows = db.prepare(`

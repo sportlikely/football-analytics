@@ -76,7 +76,7 @@ export default function TennisMatch() {
   const hs = surname(m.home), as = surname(m.away)
   const side = (s: TMatch['home']) => ({
     // fix211: the player's photo (flag as a badge); none: the flag as before
-    name: s.name, logo: s.logo ? <PlayerPhoto src={s.logo} name={s.name} flag={flagOf(s.country)} size={72} /> : <span className="text-5xl sm:text-6xl leading-none" aria-hidden>{flagOf(s.country) || '🎾'}</span>, href: tennisHref.player(s.id, s.name) || '/tennis',
+    name: s.name, logo: <PlayerPhoto src={s.logo} name={s.name} flag={flagOf(s.country) || '🎾'} size={72} /> /* fix241: initials + flag unless the photo is official */, href: tennisHref.player(s.id, s.name) || '/tennis',
     title: t('{0}: player page', { 0: s.name }), linkLabel: t('Player page →'), star: s.id ? <FavStar fav={tennisPlayerFav(s)} size="sm" /> : undefined,
     sub: s.rank ? t('World No. {0}', { 0: s.rank }) : null
   })

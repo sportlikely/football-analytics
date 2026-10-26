@@ -6,7 +6,6 @@ import { errorText, useAuth, type User } from '../lib/auth'
 import SeasonForecastAdminCard from '../components/SeasonForecastAdminCard'
 import VisitorsCard from '../components/VisitorsCard'
 import LeaguesCard from '../components/LeaguesCard'
-import PlayerPhotosCard from '../components/PlayerPhotosCard'
 import EmailsAdminCard from '../components/EmailsAdminCard'
 import PushAdminCard from '../components/PushAdminCard'
 import NbaModelCheckCard from '../components/NbaModelCheckCard'
@@ -86,7 +85,6 @@ export default function Admin() {
     models: checkTiles('models'),
     data: [
       ...checkTiles('data').slice(0, 2),
-      { label: 'Photos to review', value: s?.photosToReview ?? null, level: s?.photosToReview ? 'warn' : 'ok' },
       { label: 'Results to check', value: s?.bbResultsToCheck ?? null, level: s?.bbResultsToCheck ? 'warn' : 'ok' }
     ],
     site: [
@@ -161,7 +159,6 @@ export default function Admin() {
           <Explained ctx={ctx} id="leagues-football"><LeaguesCard /></Explained>
           <Explained ctx={ctx} id="leagues-basketball"><LeaguesCard sport="basketball" /></Explained>
           <Explained ctx={ctx} id="game-extras"><GameExtrasAdminCard /></Explained>
-          <Explained ctx={ctx} id="player-photos"><PlayerPhotosCard /></Explained>
           <Explained ctx={ctx} id="news-injuries"><NewsInjuriesCard /></Explained>
           <Explained ctx={ctx} id="bb-results"><BbResultsCard /></Explained>
           <TabChecks tab="data" ctx={ctx} reload={reload} extra={<button type="button" onClick={runPlayers} className="font-bold text-muted hover:text-ink">Run player check</button>} />

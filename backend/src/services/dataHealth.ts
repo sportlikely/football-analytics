@@ -37,7 +37,7 @@ import { bbLiveVsBacktest, predictGameCached } from './bbModel';
 import { rowSanityViews } from './bbTuner';
 import { scorersHealth } from './scorersCheck';
 import { perfChecks } from './perfChecks';
-import { photoHealth } from './playerPhotos';
+import { photoSourceHealth } from './playerPhotos';
 import { fdFreeze, frozenText, israelTime, resultMismatches, afSettledCount, fdTwinless } from './fdReconcile';
 import { bestLive } from './liveScores';
 import { calibrationHealth } from './calibrationHealth';
@@ -398,12 +398,12 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     }
   } catch { /* no report yet */ }
 
-  // fix211: player photos — coverage (tennis top 100 / 500, basketball squads); fail when one is shown without its credit
+  // fix241: "Photo sources: official only" (replaces fix211's "Player photos"): fail when a non-official photo is stored
   // fix216: picks emails — every person due today got one (or a skip reason), bounces, record lines = the public record
   try { checks.push(...emailHealth(now)); } catch (e: any) { logger.warn(`email health: ${e?.message || e}`); }
   // fix226: push alerts — failed device sends (warn > 5%) and no alert sent twice to anyone
   try { checks.push(...pushHealth(now)); } catch (e: any) { logger.warn(`push health: ${e?.message || e}`); }
-  try { checks.push(photoHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
+  try { checks.push(photoSourceHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
   // fix217: basketball leagues (NBA first) — the last 30 days' hit rate against the league's backtest (50+ games)
   try {
     const list = bbLiveVsBacktest(now);

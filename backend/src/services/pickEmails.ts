@@ -574,9 +574,9 @@ function crestFileOf(src: string): string | null {
   for (const e of Object.values(EXT)) if (fs.existsSync(path.join(CREST_DIR, `${base}.${e}`))) { crestKnown.set(src, `${base}.${e}`); return `${base}.${e}`; }
   return null;
 }
-/** The image as a URL on our domain: player photos already are; provider crests once they are stored here. */
+/** The image as a URL on our domain: provider crests once they are stored here (fix241: never a /media/players/ photo). */
 export function imgUrl(src: string | null): string | null {
-  if (!src) return null;
+  if (!src || src.includes('/media/players/')) return null;
   if (src.startsWith(`${SITE}/`)) return src;
   if (!CREST_HOSTS.test(src)) return null;
   const f = crestFileOf(src);

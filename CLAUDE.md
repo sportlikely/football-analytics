@@ -38,8 +38,10 @@ is model work, the matching note, in the same commit.
   own console password. Account deletion must remove the user's picks/favorites.
 - **Privacy:** never store visitor IPs except in the security log (90 days). Visitors are shown by country only.
 - **Images:** don't hotlink NBA headshots (cdn.nba.com) or copy news photos. Crests/logos come from the data providers.
-  Player photos for tennis / basketball (fix211) come only from Wikidata + Wikimedia Commons (CC0, PD, CC BY, CC BY-SA),
-  stored and served by us, always credited (author + licence under the photo, /credits); takedowns removed the same day.
+  **Official player photos only** (Yarin, fix241): a player photo is shown only when its source is on the allow-list
+  (`backend/src/utils/photoSources.ts` = `frontend/src/lib/photoSources.ts`: API-Football today); no Wikimedia / Wikidata
+  / free-licence photos. Everyone else: initials + flag (`components/sport/PlayerPhoto.tsx`). A licensed provider later =
+  one allow-list entry + the playerPhotos.ts slot.
 - **Branding:** the brand is "SportLikely" (sports in general, not "football predictions"). Copy says "sports
   predictions", "probabilities, not promises", "18+". No "bet"/"wager" wording in the product name or nav.
 - **Model principle (Yarin):** a pick must make sense when someone looks at the stats. Keep home advantage, but a team
@@ -185,8 +187,8 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   still decided, not built), `userPicks.ts`
   (users' own picks + personal record), `favorites.ts`, `testers.ts`, `backup.ts`, `clientErrors.ts`, `dataHealth.ts`,
   `dataAudit.ts`, `seo.ts`, `proxyGuard.ts` + `proxyScrapers.ts` (fix199: data-centre / proxy scrapers, rules in docs/notes/security.md).
-- Player photos (fix211): `playerPhotos.ts` (worker job every 20 min, Wikidata match → Commons licence → 256 px WebP in
-  DATA_DIR/player-photos, `/media/players/…`, admin review / remove + block list, data-health "Player photos").
+- Player photos (fix211, OFF since fix241): `playerPhotos.ts` keeps the Wikidata / Commons matcher behind `photosOn()` (false:
+  Wikimedia is not an official source); `purgeUnofficialPhotos()` at worker start, data-health "Photo sources: official only".
 - Push alerts (fix226): `pushAlerts.ts` (settings / devices on the web; detect + send only in the worker, after each live
   tick), rules in `utils/pushRules.ts`, Web Push crypto in `utils/webPush.ts` (no library), words `locales/push/<lang>.json`,
   keys `VAPID_PUBLIC` / `VAPID_PRIVATE` (never change them). Frontend `public/sw.js`, `lib/push.ts`, `components/AlertsCard.tsx`.

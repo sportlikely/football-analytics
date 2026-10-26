@@ -22,7 +22,7 @@ export const adminPath = (t: AdminTab) => `/admin/${t}`
 
 /** what /api/admin/summary answers (backend services/adminSummary.ts) */
 export interface AdminSummary {
-  photosToReview: number; injuriesToReview: number; bbResultsToCheck: number; contactOpen: number
+  injuriesToReview: number; bbResultsToCheck: number; contactOpen: number
   visitorsToday: number; signupsToday: number; accounts: number; paying: number
   siteErrorsOpen: number; siteErrors24h: number; failedSignIns24h: number
   backupOk: boolean | null; lastBackupAt: string | null; at: string
@@ -69,7 +69,6 @@ export const ADMIN_CARDS: AdminCardDef[] = [
   { id: 'leagues-football', tab: 'data', title: 'Football leagues', what: 'The extra football leagues and cups we predict, and the ones you can add.', todo: 'Nothing — add or remove leagues when you want.' },
   { id: 'leagues-basketball', tab: 'data', title: 'Basketball leagues', what: 'The basketball leagues we predict, and the ones you can add.', todo: 'Nothing — add or remove leagues when you want.' },
   { id: 'game-extras', tab: 'data', title: 'Game extras', what: 'Weather, referee, fixture difficulty and trend sentences on the game pages of the next two days.', todo: 'Nothing — it fills in by itself within a few hours. Tell Claude if it stays under 80%.', checks: ['game-extras'] },
-  { id: 'player-photos', tab: 'data', title: 'Player photos', what: 'Free-licence player photos from Wikimedia, with their credit; unsure matches wait for your OK.', todo: 'Approve or press "Wrong person" on the ones waiting.', checks: ['player-photos'], status: s => (s.photosToReview ? 'warn' : 'ok') },
   { id: 'news-injuries', tab: 'data', title: 'Basketball injuries from news', what: 'Players reported out in news stories, for leagues without an official injury report; they lower the player’s minutes in the model.', todo: 'Press OK when the story is right, Dismiss when it is wrong.', checks: ['bb-news-injuries'], status: s => (s.injuriesToReview ? 'warn' : 'ok') },
   { id: 'bb-results', tab: 'data', title: 'Results to check', what: 'Scores the data source may have wrong (home and away swapped, quarters that don’t add up) in basketball, American football and tennis; clear cases are fixed by themselves and listed in the 07:00 summary email, the rest don’t count until checked.', todo: 'Compare with the league’s own site, then press "Swap scores" or "Keep as is" (in Needs you or in the email).', status: s => (s.bbResultsToCheck ? 'warn' : 'ok') },
 
@@ -125,7 +124,7 @@ export const HEALTH_RULES: HealthRule[] = [
   { match: 'bb-standings', tab: 'data', what: 'Each team once in each basketball table.', todo: 'Tell Claude which league.' },
   { match: 'live-box', tab: 'data', title: 'Live box scores', what: 'Player numbers during live games arrive on time.', todo: FIXES },
   { match: 'scorers', tab: 'data', title: 'Scorers shown', what: 'Who scored is shown for finished games in every sport.', todo: FIXES },
-  { match: 'player-photos', tab: 'data', what: 'How many players have a photo, and that each one shows its credit.', todo: 'Review the waiting photos; if one shows without a credit, tell Claude.' },
+  { match: 'photo-sources', tab: 'data', what: 'Player photos come only from an official source (API-Football today); everyone else shows initials + flag. Red = a photo from another source (the old free-licence files) is still stored.', todo: 'Nothing — they are removed a minute after the next start. Tell Claude if it stays red.' },
   { match: 'bb-news-injuries', tab: 'data', title: 'Basketball injuries from news', what: 'Players reported out in news stories that the model uses.', todo: 'Review the waiting stories in Data & feeds.' },
   { match: 'game-extras', tab: 'data', what: 'Weather, referee and trends on the next two days’ game pages.', todo: FIXES },
 
@@ -187,7 +186,7 @@ export const cardsOf = (t: AdminTab) => ADMIN_CARDS.filter(c => c.tab === t)
 export const cardDef = (id: string) => ADMIN_CARDS.find(c => c.id === id)!
 
 /** what waits for Yarin: the Needs you count (red checks are added by the page) */
-export const waitingCount = (s: AdminSummary | null) => (s ? s.photosToReview + s.injuriesToReview + s.bbResultsToCheck + s.contactOpen : 0)
+export const waitingCount = (s: AdminSummary | null) => (s ? s.injuriesToReview + s.bbResultsToCheck + s.contactOpen : 0)
 
 /** words that must not appear in the admin explanations (plain English, Yarin) */
 export const CODE_WORDS = /\b(oracle|LL|proxy|stalls?|sd|bb-v\d|grid-v\d|v3-mix|5xx|heap|worker)\b/i

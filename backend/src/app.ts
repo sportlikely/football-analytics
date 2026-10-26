@@ -112,7 +112,6 @@ import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerMode
 import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch as tennisMatchB, tennisRecord, levelRank, tennisTournament as tennisTournamentB, tennisPlayer as tennisPlayerB, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { geoCredit, countryOf } from './services/geo';
 import { bbGameFacts as bbGameFactsB, bbGameSeo, bbGamePath, bbFactsFreshMs } from './services/seo';
-import { photoFile, photoCredits, photosAdmin, adminPhotoFile, approvePhoto, rejectPhoto, removePhoto, unblockPhoto, photosTick, type PhotoSport } from './services/playerPhotos';
 import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, todayGroups as todayGroupsB, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
 import { listGuides, getGuide } from './services/guides';
 import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
@@ -1380,32 +1379,7 @@ app.get('/api/admin/tennis/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: tennisStatus() }); } catch (e) { sendError(res, e, 'Tennis status failed'); }
 });
-// fix211: player photos — matches to review (low confidence), recent photos, blocks; approve / reject / remove / unblock
-app.get('/api/admin/player-photos', (_req, res) => {
-  res.set('Cache-Control', 'no-store');
-  try { res.json({ data: photosAdmin() }); } catch (e) { sendError(res, e, 'Player photos failed'); }
-});
-app.get('/api/admin/player-photos/file/:sport(tennis|basketball)/:file', (req, res) => {
-  const f = adminPhotoFile(req.params.sport, req.params.file);
-  if (!f) return res.status(404).end();
-  res.set('Cache-Control', 'no-store').type(path.extname(f)).sendFile(f);
-});
-app.post('/api/admin/player-photos/:sport(tennis|basketball)/:id(\d+)/:action(approve|reject|remove)', jsonOnly, (req, res) => {
-  const sport = req.params.sport as PhotoSport, id = Number(req.params.id);
-  const reason = String(req.body?.reason || '').slice(0, 200) || 'removed by admin';
-  const ok = req.params.action === 'approve' ? approvePhoto(sport, id) : req.params.action === 'reject' ? rejectPhoto(sport, id) : removePhoto(sport, id, reason);
-  if (ok) logger.info(`player photos: ${req.params.action} ${sport} ${id} by ${req.user?.email || 'admin'}`);
-  res.json({ data: { ok } });
-});
-app.post('/api/admin/player-photos/unblock', jsonOnly, (req, res) => {
-  const key = String(req.body?.key || '');
-  if (!/^(tennis|basketball):\d+$|^file:.+|^wd:Q\d+$/.test(key)) return res.status(400).json({ error: 'Unknown key' });
-  res.json({ data: { ok: unblockPhoto(key) } });
-});
-app.post('/api/admin/player-photos/run', jsonOnly, (_req, res) => {
-  void photosTick().catch(e => logger.warn(`player photos: ${e.message}`));
-  res.json({ data: { started: true } });
-});
+// fix241: the player-photo review routes (fix211) are gone — official photos only, no Wikimedia matching to review
 // fix195: duplicates, fixture ids, matches without a prediction (48 h), stale matches, names to check — target zero
 // fix200: voided games (reason) and the games waiting for another lookup (rules: utils/voidRules.ts)
 app.get('/api/admin/voided', (req, res) => {
@@ -2851,26 +2825,16 @@ app.get('/api/public/results', async (req, res) => {
 // Home page proof block: our record over 30 days (all games) and the strong-pick record (a stored page, 10 min)
 // Privacy page: which country data is in use (DB-IP, CC BY 4.0 — or iptoasn.com when that one is loaded)
 app.get('/api/public/geo-source', (_req, res) => res.json({ data: geoCredit() }));
-// fix211: player photos (Wikidata / Commons, free licences) — the files from our own storage (a year's cache: the file
-// name changes with the photo), the credits list for /credits; a removed photo is deleted at once (404 → initials)
 // fix216: team crests / logos used in the picks emails, stored by the worker (images in emails come from our domain)
 app.get('/media/crests/:file', (req, res) => {
   const f = crestPath(req.params.file);
   if (!f) return res.status(404).set('Cache-Control', 'no-store').end();
   res.set('Cache-Control', 'public, max-age=2592000').type(path.extname(f)).sendFile(f);
 });
-app.get('/media/players/:sport(tennis|basketball)/:file', (req, res) => {
-  const f = photoFile(req.params.sport, req.params.file);
-  if (!f) return res.status(404).set('Cache-Control', 'no-store').end();
-  res.set('Cache-Control', 'public, max-age=31536000, immutable');
-  res.type(path.extname(f)).sendFile(f);
-});
-app.get('/api/public/photo-credits', (req, res) => {
-  // a sport before its launch (BASKETBALL_PUBLIC / TENNIS_PUBLIC) only for admins, like its pages
-  const admin = req.access === 'admin';
-  try { res.set('Cache-Control', admin ? 'private, no-store' : 'public, max-age=600').json({ data: photoCredits().filter(r => admin || (r.sport === 'tennis' ? tennisPublic() : bbPublic())) }); }
-  catch (e) { sendError(res, e, 'Photo credits failed'); }
-});
+// fix241: the Wikimedia player photos (fix211) are removed — old /media/players/… addresses answer 410 (the page shows
+// initials + flag), /credits had only those photos and goes home, the credits list is empty
+app.get('/media/players/*', (_req, res) => { res.status(410).set('Cache-Control', 'public, max-age=86400').end(); });
+app.get('/api/public/photo-credits', (_req, res) => { res.set('Cache-Control', 'public, max-age=3600').json({ data: [] }); });
 
 definePage({ name: 'summary', freshMs: 10 * 60 * 1000, warm: [{}], variants: VIEWS_PLAIN, build: async () => { await preloadSettled(30); return buildSummary(); } });
 app.get('/api/public/summary', async (req, res) => {

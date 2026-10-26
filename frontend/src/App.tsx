@@ -86,7 +86,6 @@ const Guide = page(() => import('./pages/Guide'))
 const LeagueHub = page(() => import('./pages/LeagueHub'))
 const HowItWorks = page(() => import('./components/sport/HowItWorks'))
 const Changelog = page(() => import('./pages/Changelog'))
-const Credits = page(() => import('./pages/Credits'))
 const GuideIndex = page(() => import('./pages/Guide').then(m => ({ default: m.GuideIndex })))
 const BbHome = page(() => import('./pages/bb/BbHome'))
 const BbGames = page(() => import('./pages/bb/BbGames'))
@@ -645,7 +644,6 @@ const TITLES: [RegExp, string][] = [
   [/^\/(football\/)?match\//, tt('Match')],
   [/^\/football\/accuracy/, tt('Accuracy')],
   [/^\/changelog/, tt('Changelog')],
-  [/^\/credits/, tt('Photo credits')],
   [/^\/football\/draw-alerts/, tt('Draw picks')],
   [/^\/football\/upset-watch/, tt('Upset watch')],
   [/^\/football\/past/, tt('Past seasons')],
@@ -750,7 +748,7 @@ function Shell() {
             {/* fix206: how our models work (every sport) + the changelog */}
             <Route path="/how-it-works" element={<HowItWorks sport="football" />} />
             <Route path="/changelog" element={<Changelog />} />
-            <Route path="/credits" element={<Credits />} />
+            <Route path="/credits" element={<Navigate to="/" replace />} /> {/* fix241: photo credits gone (official photos only) */}
             <Route path="/guides" element={<GuideIndex />} />
             <Route path="/guides/:slug" element={<Guide />} />
             {/* fix229: clean links — /football/<kind>/<slug>; the old id addresses move to them (the server 301s them on load) */}
@@ -820,7 +818,6 @@ function Shell() {
             <Link to="/terms" className="hover:text-ink">{tt("Terms")}</Link>
             <Link to="/privacy" className="hover:text-ink">{tt("Privacy")}</Link>
             <Link to="/accessibility" className="hover:text-ink">{tt("Accessibility")}</Link>
-            <Link to="/credits" className="hover:text-ink">{tt("Photo credits")}</Link>
             <Link to="/premium" className="hover:text-ink">{tt("Premium")}</Link>
             <Link to="/contact" className="hover:text-ink">{tt("Contact us")}</Link>
             <FooterNfl />

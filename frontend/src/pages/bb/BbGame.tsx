@@ -523,7 +523,7 @@ function BoxTab({ d }: { d: Detail }) {
           <tbody>
             {played.map(pl => (
               <tr key={pl.id} className="border-t border-line/40 align-top">
-                <td className="py-1 font-sans text-ink whitespace-nowrap">{pl.photo && <PlayerPhoto src={pl.photo} name={pl.name} size={18} className="mr-1.5 align-middle" />}<Link to={playerHref('basketball', pl.id, pl.name)!} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
+                <td className="py-1 font-sans text-ink whitespace-nowrap"><PlayerPhoto src={pl.photo} name={pl.name} size={18} className="mr-1.5 align-middle" /><Link to={playerHref('basketball', pl.id, pl.name)!} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
                 <td className="text-right px-1 text-muted">{pl.minutes !== null ? Math.round(pl.minutes) : '–'}</td>
                 <td className="text-right px-1 text-ink font-bold">{pl.points ?? '–'}</td>
                 <td className="text-right px-1 text-muted"><Shot m={pl.fgm} a={pl.fga} /></td>

@@ -17,19 +17,17 @@ const { adminSummary } = require('../dist/services/adminSummary.js');
 
 test('fix237: summary on an empty database is all zeros, never throws', () => {
   const s = adminSummary();
-  for (const k of ['photosToReview', 'injuriesToReview', 'bbResultsToCheck', 'contactOpen', 'visitorsToday', 'accounts', 'siteErrorsOpen', 'failedSignIns24h']) assert.equal(s[k], 0, k);
+  for (const k of ['injuriesToReview', 'bbResultsToCheck', 'contactOpen', 'visitorsToday', 'accounts', 'siteErrorsOpen', 'failedSignIns24h']) assert.equal(s[k], 0, k);
   assert.ok(s.at);
 });
 
 test('fix237: Needs you counts what waits', () => {
-  db.exec(`CREATE TABLE IF NOT EXISTS player_photos (sport TEXT, player_id INTEGER, status TEXT);
-    CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY, handled INTEGER);
+  db.exec(`CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY, handled INTEGER);
     CREATE TABLE IF NOT EXISTS client_errors (sig TEXT, count INTEGER, last_at TEXT, resolved_at TEXT);`);
-  db.exec(`INSERT INTO player_photos VALUES ('tennis', 1, 'review'), ('tennis', 2, 'ok'), ('basketball', 3, 'review');
-    INSERT INTO contact_messages (handled) VALUES (0), (1);`);
+  db.exec(`INSERT INTO contact_messages (handled) VALUES (0), (1);`);
   db.prepare(`INSERT INTO client_errors VALUES ('a', 4, ?, NULL), ('b', 2, ?, ?)`).run(new Date().toISOString(), new Date().toISOString(), new Date().toISOString());
   const s = adminSummary();
-  assert.equal(s.photosToReview, 2);
+  assert.equal(s.photosToReview, undefined); // fix241: no photo review queue (official photos only)
   assert.equal(s.contactOpen, 1);
   assert.equal(s.siteErrorsOpen, 1);
   assert.equal(s.siteErrors24h, 4);

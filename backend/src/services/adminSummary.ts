@@ -11,7 +11,7 @@ const count = (sql: string, ...args: any[]): number => {
 
 export interface AdminSummary {
   /** waiting for Yarin (Needs you) */
-  photosToReview: number; injuriesToReview: number; bbResultsToCheck: number; contactOpen: number
+  injuriesToReview: number; bbResultsToCheck: number; contactOpen: number
   /** tiles */
   visitorsToday: number; signupsToday: number; accounts: number; paying: number
   siteErrorsOpen: number; siteErrors24h: number; failedSignIns24h: number
@@ -27,7 +27,6 @@ export function adminSummary(now = Date.now()): AdminSummary {
   let backupTable = true;
   try { db.prepare('SELECT 1 FROM backup_log LIMIT 1').get(); } catch { backupTable = false; }
   return {
-    photosToReview: count(`SELECT COUNT(*) AS n FROM player_photos WHERE status = 'review'`),
     injuriesToReview: count(`SELECT COUNT(*) AS n FROM bb_news_injuries WHERE state = 'active' AND reviewed = 0`),
     // fix239: + the American football / tennis results waiting for a decision (services/resultChecks.ts)
     bbResultsToCheck: count(`SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL`) + count(`SELECT COUNT(*) AS n FROM result_review WHERE resolved_at IS NULL`),

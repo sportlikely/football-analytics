@@ -138,6 +138,7 @@ const FOOTBALL_ROOT = /^\/(matches|favorites|my-picks|upset-watch|draw-alerts|ac
 export function movedPage(path: string): string | null {
   const p = path.replace(/\/+$/, '') || '/'
   if (p === '/predictions/today') return '/football/today'
+  if (p === '/credits') return '/' // fix241: the photo credits page listed only the removed unofficial photos
   let m = /^\/predictions\/([a-z0-9-]+)$/.exec(p)
   if (m) return `/${HUB_SPORT[m[1]] || 'football'}/predictions/${m[1]}`
   m = /^\/(football|basketball|american-football)\/predictions\/([a-z0-9-]+)$/.exec(p)

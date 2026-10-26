@@ -9,7 +9,8 @@ import { Card, Skeleton, TeamLogo } from './parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
 import { FavStar } from '../../lib/favorites'
 import { bbPlayerFav } from '../../lib/bb'
-import type { PhotoCreditT } from '../../components/sport/PlayerPhoto'
+import { PlayerInitials } from '../../components/sport/PlayerPhoto'
+import { flagOf, isoOfCountry } from '../../lib/tennis'
 import { teamHref, leagueHref, matchHref } from '../../lib/links'
 
 interface Side { id: number; name: string; logo: string | null }
@@ -27,7 +28,7 @@ interface NbaLine {
   ranks: Record<string, number | null>
 }
 interface PlayerData {
-  player: { id: number; name: string; team: Side; league: { code: string; name: string }; photo?: string | null; photoCredit?: PhotoCreditT | null }
+  player: { id: number; name: string; team: Side; league: { code: string; name: string }; photo?: string | null }
   bio?: { number: string | null; country: string | null; position: string | null; age: number | null } | null
   current: SeasonRow | null
   seasons: SeasonRow[]
@@ -73,8 +74,7 @@ export default function BbPlayer() {
       <PlayerHeader
         name={d.player.name}
         photo={d.player.photo || null}
-        credit={d.player.photoCredit}
-        noPhoto={jersey ? <span className="font-display text-4xl font-extrabold text-ink num">{jersey}</span> : <TeamLogo team={d.player.team} size={56} />}
+        noPhoto={<PlayerInitials name={d.player.name} flag={flagOf(isoOfCountry(bio?.country || rb?.country))} />}
         teamBadge={<TeamLogo team={d.player.team} size={28} />}
         star={<FavStar label fav={bbPlayerFav(d.player, d.player.team)} />}
         chips={[
