@@ -104,8 +104,9 @@ import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from '
 import { definePage, getPage, refreshPages, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
-import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions } from './services/proxyGuard';
-import { noteNetworkRequest, noteWho, whoToday } from './services/proxyScrapers';
+import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions, viewIdOf, makePass, readPass, PASS_COOKIE, PASS_MS } from './services/proxyGuard';
+import { noteNetworkRequest, noteWho, whoToday, notePassed } from './services/proxyScrapers';
+import { quickCheckPage, qcLangOf } from './utils/quickCheck';
 import { shortName } from './utils/tennisNames';
 import { tennisProbe, tennisStatus, tennisSample, tennisDataCheck, tennisMovedId } from './services/tennis';
 import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
@@ -405,6 +406,18 @@ const logScraperOnce = (key: string, req: express.Request, detail: string) => {
 };
 const proxyLimiter = new ProxyLimiter();
 const uaHash = (ua: string) => createHash('sha256').update(RL_SALT + ua).digest('hex').slice(0, 20);
+// fix244: the Quick-check pass (cookie sl_pass) is signed with a key made from the Turnstile secret (no pass without Turnstile)
+let passKeyOf: { secret: string; key: Buffer } | null = null;
+const passKey = (): Buffer | null => {
+  const secret = turnstileSiteKey() ? process.env.TURNSTILE_SECRET || '' : '';
+  if (!secret) return null;
+  if (passKeyOf?.secret !== secret) passKeyOf = { secret, key: createHash('sha256').update(`sl-pass|${secret}`).digest() };
+  return passKeyOf.key;
+};
+const passOf = (req: express.Request, ua: string) => {
+  const key = passKey(), tok = key ? parseCookies(req.headers.cookie)[PASS_COOKIE] : null;
+  return key && tok ? readPass(key, tok, ua, Date.now()) : null;
+};
 app.use('/api', (req, _res, next) => {
   const ua = uaKey(req.get('user-agent'));
   if (req.access === 'admin') return afSource.run({ kind: 'admin', ua }, next);
@@ -428,11 +441,15 @@ app.use('/api', (req, _res, next) => {
   const cap = costCapped(keys);
   if (cap && !nw) logScraperOnce(`cap:${cap.key}:${cap.key === 'ip' ? ipH : cap.key === 'ua' ? keys.ua : keys.user}`, req,
     `provider-cost cap: ${cap.calls} provider calls today by this ${cap.key === 'ip' ? 'address' : cap.key === 'ua' ? 'user-agent' : 'account'} (cap ${cap.cap}): stored data only until midnight UTC`);
-  const refused = !isWorker && proxy && countedRead(req.method, req.originalUrl.split('?')[0]) ? proxyLimiter.hit(ipH, nw!.asn) : null;
-  if (nw && !isWorker) noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, capped: !!cap, fakeCrawler: fake, verified: crawler, exempt: !proxy && !crawler });
+  // fix244: page views per address (X-SL-View), a browser that passed the Quick check only its own pass limit
+  const pass = proxy && !isWorker ? passOf(req, ua) : null;
+  const refused = !isWorker && proxy && countedRead(req.method, req.originalUrl.split('?')[0])
+    ? proxyLimiter.hit(ipH, nw!.asn, { view: viewIdOf(req.get('x-sl-view')), pass: pass?.ok ? pass.id : null }) : null;
+  if (nw && !isWorker) noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, capped: !!cap, fakeCrawler: fake, verified: crawler, exempt: !proxy && !crawler, passed: !!pass?.ok, passRefused: refused && pass ? pass.id : null });
   if (refused) {
     _res.set('Retry-After', String(refused.retryAfter));
-    return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.' });
+    // check: the app opens the Quick check (a pass that reached its own limit: the plain message)
+    return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.', proxy: true, check: !!passKey() && refused.scope !== 'pass-hour' });
   }
   afSource.run({ kind: 'page', ua, crawler, keys, ...(cap || (claims && !crawler) || proxy ? { offline: true } : {}) }, next);
 });
@@ -700,6 +717,18 @@ app.get('/api/auth/me', (req, res) => {
 app.get('/api/auth/config', (_req, res) => {
   res.set('Cache-Control', 'public, max-age=300');
   res.json({ turnstileSiteKey: turnstileSiteKey() });
+});
+// fix244: the Quick check passed (Cloudflare Turnstile) → the signed pass for this browser (24 h, its user-agent)
+app.post('/api/auth/quick-check', jsonOnly, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const key = passKey();
+  if (!key) return res.status(404).json({ error: 'Not available' });
+  if (!(await turnstileOk(req.body?.token, req.ip || ''))) return res.status(400).json({ error: 'Please try again' });
+  const ua = uaKey(req.get('user-agent'));
+  res.cookie(PASS_COOKIE, makePass(key, ua, Date.now(), randomBytes(12).toString('base64url')), { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: PASS_MS, path: '/' });
+  const nw = req.ip ? networkOf(req.ip) : null;
+  if (nw) notePassed(nw, ipKey(req), req.ip || '', ua);
+  res.json({ ok: true });
 });
 app.get('/api/auth/signup-token', (_req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -4334,6 +4363,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       return a.status === 200 ? (JSON.parse(a.body.toString('utf8'))?.data ?? null) : null;
     } catch { return null; }
   };
+  // fix244: the Quick check on its own address (the app opens it on a 429 from the proxy rules; never counted)
+  app.get(/^(\/(de|es|fr|it|pt|tr))?\/quick-check\/?$/, (req, res) => {
+    res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html').send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey()));
+  });
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
     // fix243: a bot's page takes a slot (services/botGate.ts): over the limit 503 + Retry-After; browsers never wait here
     if (req.access !== 'admin' && !req.user && isBotUa(req.get('user-agent'))) {
@@ -4371,10 +4404,12 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     if (nw && !/^(\/[a-z]{2})?\/(login|signup|join|forgot|verify|account|reset|privacy|terms|contact)(\/|$)/.test(req.path)) {
       const ua = uaKey(req.get('user-agent')), ipH = ipKey(req);
       const verified = claimsCrawler(ua) && crawlerVerdict(ipH, req.ip) === true;
-      const refused = verified ? null : proxyLimiter.hit(ipH, nw.asn);
-      noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, verified });
-      if (refused) return res.status(429).set('Retry-After', String(refused.retryAfter)).type('html')
-        .send('<!doctype html><meta charset="utf-8"><title>SportLikely</title><p>Too many pages opened from this network. Please try again later, or <a href="/login">sign in</a>.</p>');
+      // fix244: a page load counts once (the app's first view after it is free); over a limit: the Quick check
+      const pass = verified ? null : passOf(req, ua);
+      const refused = verified ? null : proxyLimiter.hit(ipH, nw.asn, { page: true, pass: pass?.ok ? pass.id : null });
+      noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, verified, passed: !!pass?.ok, passRefused: refused && pass ? pass.id : null });
+      if (refused) return res.status(429).set({ 'Retry-After': String(refused.retryAfter), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html')
+        .send(quickCheckPage(qcLangOf(req.path), refused.scope === 'pass-hour' ? null : turnstileSiteKey()));
     }
     res.set('Cache-Control', 'no-cache');
     try {

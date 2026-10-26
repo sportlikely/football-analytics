@@ -6,6 +6,7 @@ import { watchErrors } from './lib/report'
 import { watchChunkErrors, isChunkError, reloadForNewVersion } from './lib/chunkReload'
 import { watchSeen } from './lib/seen'
 import { watchStartupRetry } from './lib/startupRetry'
+import { watchProxyCheck } from './lib/proxyCheck'
 
 // fix227: the loader in index.html retries the app file and shows the 'Updating SportLikely…' card if it never starts
 type Boot = { started: () => void; mounted: () => void; fail: (why: string) => void }
@@ -30,6 +31,7 @@ watchErrors()
 watchChunkErrors()
 watchSeen()
 watchStartupRetry()
+watchProxyCheck()
 
 // The language comes from the address (/es/...). First visit without one: follow the browser's language.
 // The dictionary is loaded before the app's modules run, so labels built at module level are translated too.

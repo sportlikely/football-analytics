@@ -5,7 +5,8 @@
  *    crawler, or 300+ requests in the day), updated in place every minute with the counts; its addresses (IP, requests,
  *    refused) go to security_log_ips (90 days, the security log's own rule);
  *  - logger.warn('scraper: …') once per network and day;
- *  - who is calling today (admin Visitors → "Who"): the top user-agents and networks with request counts and a mark.
+ *  - who is calling today (admin Visitors → "Who"): the top user-agents and networks with request counts and a mark;
+ *  - fix244: per network, the browsers that passed the Quick check today and how many of them were refused after it.
  * Memory holds salted address hashes only; the IP is written straight from the request to the security log.
  */
 import { db } from '../db';
@@ -20,6 +21,7 @@ import { networkLine, whoMark, browserUa, PROXY_LIMITS, WhoMark } from './proxyG
 type Net = {
   asn: number; name: string; cc: string | null; addrs: Set<string>; addrBase: number;
   requests: number; refused: number; capped: Set<string>; capBase: number; fakeCrawler: number; browser: number; verified: number; exempt: number;
+  passed: number; passedReq: number; passRefused: Set<string>; passRefusedBase: number;
   uas: Map<string, number>; logged: boolean; dirty: boolean;
 };
 type Addr = { pendingReq: number; pendingRefused: number; lastWrite: number };
@@ -38,6 +40,10 @@ db.exec(`CREATE TABLE IF NOT EXISTS scraper_networks (
   requests INTEGER NOT NULL DEFAULT 0, refused INTEGER NOT NULL DEFAULT 0, capped INTEGER NOT NULL DEFAULT 0,
   fake_crawler INTEGER NOT NULL DEFAULT 0, browser INTEGER NOT NULL DEFAULT 0
 )`);
+// fix244: browsers that passed the Quick check, and how many of them were refused after it (columns added by the worker)
+if (!isWeb) for (const c of ['passed', 'pass_refused']) {
+  try { db.exec(`ALTER TABLE scraper_networks ADD COLUMN ${c} INTEGER NOT NULL DEFAULT 0`); } catch { /* there */ }
+}
 db.exec(`CREATE TABLE IF NOT EXISTS who_day (day TEXT PRIMARY KEY, data TEXT NOT NULL)`);
 
 const grpOf = (asn: number, d = day) => `AS${asn}:${d}`;
@@ -57,7 +63,8 @@ function net(asn: number, name: string, ip: string): Net {
     n = {
       asn, name: r?.name || name, cc: r?.cc || countryOf(ip), addrs: new Set(), addrBase: r?.addresses || 0,
       requests: r?.requests || 0, refused: r?.refused || 0, capped: new Set(), capBase: r?.capped || 0, fakeCrawler: r?.fake_crawler || 0,
-      browser: r?.browser || 0, verified: 0, exempt: 0, uas: new Map(), logged: !!r, dirty: false
+      browser: r?.browser || 0, verified: 0, exempt: 0, passed: r?.passed || 0, passedReq: 0, passRefused: new Set(), passRefusedBase: r?.pass_refused || 0,
+      uas: new Map(), logged: !!r, dirty: false
     };
     nets.set(asn, n);
   }
@@ -74,7 +81,8 @@ function startLine(n: Net, why: string) {
 }
 
 /** verified = a search engine that passed the DNS check; exempt = a signed-in, email-verified account (not counted as a scraper) */
-export type ProxyEvent = { refused?: string | null; capped?: boolean; fakeCrawler?: boolean; verified?: boolean; exempt?: boolean };
+/** passed = served on a valid Quick-check pass; passRefused = the pass id of a pass holder that was refused */
+export type ProxyEvent = { refused?: string | null; capped?: boolean; fakeCrawler?: boolean; verified?: boolean; exempt?: boolean; passed?: boolean; passRefused?: string | null };
 
 /**
  * One request from a data-centre / proxy network. `addrKey` = the salted address hash; `ip` is only passed on to the
@@ -89,6 +97,8 @@ export function noteNetworkRequest(nw: { asn: number; name: string }, addrKey: s
     if (browserUa(ua)) n.browser++;
     if (ev.verified) n.verified++;
     if (ev.exempt) n.exempt++;
+    if (ev.passed) n.passedReq++;
+    if (ev.passRefused && n.passRefused.size < 5000) n.passRefused.add(ev.passRefused);
     if (ev.refused) n.refused++;
     if (ev.capped) n.capped.add(addrKey);
     if (ev.fakeCrawler) n.fakeCrawler++;
@@ -112,6 +122,17 @@ export function noteNetworkRequest(nw: { asn: number; name: string }, addrKey: s
   } catch { /* counting never breaks a request */ }
 }
 
+/** fix244: a browser on this network passed the Quick check (Turnstile). */
+export function notePassed(nw: { asn: number; name: string }, addrKey: string, ip: string, ua: string) {
+  try {
+    roll();
+    const n = net(nw.asn, nw.name, ip);
+    n.addrs.add(addrKey);
+    n.passed++; n.dirty = true;
+    if (n.uas.size < 50 || n.uas.has(ua)) n.uas.set(ua, (n.uas.get(ua) || 0) + 1);
+  } catch { /* counting never breaks a request */ }
+}
+
 /** Every non-admin /api request, for the "Who" card. */
 export function noteWho(ua: string, dc: boolean, verified: boolean) {
   roll();
@@ -129,7 +150,7 @@ export function noteWho(ua: string, dc: boolean, verified: boolean) {
 }
 
 // fix210b: from the web process these go to the worker (services/deferredWrites.ts)
-const upNet = deferred(`INSERT OR REPLACE INTO scraper_networks (grp, day, asn, name, cc, addresses, requests, refused, capped, fake_crawler, browser) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const upNet = deferred(`INSERT OR REPLACE INTO scraper_networks (grp, day, asn, name, cc, addresses, requests, refused, capped, fake_crawler, browser, passed, pass_refused) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const upWho = deferred(`INSERT OR REPLACE INTO who_day (day, data) VALUES (?, ?)`);
 function flush() {
   const up = upNet;
@@ -137,7 +158,7 @@ function flush() {
     for (const n of nets.values()) {
       if (!n.logged || !n.dirty) continue;
       n.dirty = false;
-      up.run(grpOf(n.asn), day, n.asn, n.name, n.cc, n.addrBase + n.addrs.size, n.requests, n.refused, n.capBase + n.capped.size, n.fakeCrawler, n.browser);
+      up.run(grpOf(n.asn), day, n.asn, n.name, n.cc, n.addrBase + n.addrs.size, n.requests, n.refused, n.capBase + n.capped.size, n.fakeCrawler, n.browser, n.passed, n.passRefusedBase + n.passRefused.size);
       securityLogGroup(grpOf(n.asn), 'scraper', lineOf(n), topUa(n));
     }
     upWho.run(day, JSON.stringify(whoToday()));
@@ -172,7 +193,10 @@ export function whoToday() {
     .map(n => {
       // a network on the data-centre list: search engine (verified by DNS), SEO tool, or data-centre
       const mark = whoMark(topUa(n) || '', { requests: n.requests, verified: n.verified, dc: n.requests });
-      return { name: n.name, asn: n.asn, cc: n.cc, requests: n.requests, addresses: n.addrBase + n.addrs.size, refused: n.refused, logged: n.logged, mark };
+      return {
+        name: n.name, asn: n.asn, cc: n.cc, requests: n.requests, addresses: n.addrBase + n.addrs.size, refused: n.refused, logged: n.logged, mark,
+        passed: n.passed, passedRequests: n.passedReq, passRefused: n.passRefusedBase + n.passRefused.size
+      };
     });
   return { day, agents, networks, otherRequests, limits: PROXY_LIMITS };
 }

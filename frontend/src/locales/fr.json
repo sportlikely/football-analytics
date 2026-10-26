@@ -2621,5 +2621,7 @@
  "An upset watch is not a tip: the favourite still wins most of the time. Probabilities, not promises.": "Une alerte surprise n'est pas un conseil : le favori gagne la plupart du temps. Des probabilités, pas des promesses.",
  "This game is from a past season": "Ce match date d'une saison passée",
  "Past seasons are not public.": "Les saisons passées ne sont pas publiques.",
- "See this season's games": "Voir les matchs de cette saison"
+ "See this season's games": "Voir les matchs de cette saison",
+ "Too many requests, try again in a minute": "Trop de requêtes, réessayez dans une minute",
+ "Too many pages opened from this network. Please try again later, or sign in.": "Trop de pages ouvertes depuis ce réseau. Réessayez plus tard ou connectez-vous."
 }

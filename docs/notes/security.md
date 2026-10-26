@@ -19,14 +19,39 @@ Yandex), and signed-in accounts with a confirmed email (they behave like any acc
 | Rule | Number |
 | --- | --- |
 | Provider calls (API-Football etc.) | none, stored data only from the first request |
-| Page / API reads per address | 60 an hour, 300 a day (UTC) |
-| Page / API reads per network (ASN, all its addresses) | 600 an hour |
-| Over a limit | HTTP 429 with `Retry-After` (to the next hour / midnight UTC) |
+| Page views per address (fix244: not API calls) | 60 an hour, 300 a day (UTC) |
+| API reads per network (ASN, all its addresses) | 600 an hour |
+| Over a limit | a browser gets the Quick check (fix244); the API answers 429 with `Retry-After` and `proxy: true` |
+| Passed the Quick check | no address or network limit for 24 h, 300 page views an hour per pass |
 | Signed out | no prediction at all, finished games too: every prediction is `{ model, locked }`, so game pages show the "Create a free account" prompt (UnlockPrompt) |
 
 Not counted, never blocked: sign-in, sign-up, account, billing and unlock routes, the visit beacon, client errors, and the
 login / signup / forgot / verify / join / account pages. People on a VPN can always reach every page and sign in.
 Visitor counting is unchanged (bot reason `datacentre`).
+
+### Quick check (fix244, 26 Oct 2026)
+
+**What happened:** a friend in Israel on a VPN got "Failed to load matches: Request failed with status code 429", then a
+bare white page. A scraper on Datacamp (AS60068: 47,028 requests, 257 addresses, 34,558 refused; AS212238: 17,442 /
+15,735 refused) used up the 600-an-hour network cap, so every person on that VPN network was refused on the first page.
+And the 60 an hour per address counted API calls: one page load makes ~10, so a person got ~6 pages an hour.
+
+- **Page views, not API calls** (per address): the app sends `X-SL-View` (`lib/viewId.ts`, a new id when the address
+  changes, the first view of a page load starts with `L`); a view's first 15 calls count once; the HTML of a page load
+  counts once and the app's first `L` view within 60 s after it is free. Calls without the header count one each, so a
+  script gains nothing. The network cap still counts API calls (600 an hour).
+- **Quick check** (`utils/quickCheck.ts`): when the rules would refuse a browser, the page route answers 429 with a small
+  SportLikely page (no app, 7 languages, "You're on a VPN or proxy network", Sign in) with Cloudflare Turnstile (the fix168
+  keys). The app opens it at `/<lang?>/quick-check` on a 429 with `check: true` and comes back to the page afterwards.
+  Passing it (`POST /api/auth/quick-check`) sets `sl_pass`: httpOnly, SameSite=Lax, 24 h, signed (key made from
+  `TURNSTILE_SECRET`), tied to the user-agent; a copied cookie on another user-agent is not valid. Stored data only and
+  locked predictions for signed-out visitors stay as they are. Without Turnstile keys: the plain "try again later, or
+  sign in" page.
+- The app never shows "Request failed with status code 429" (`lib/proxyCheck.ts`): proxy 429 → Quick check; any other
+  429 → "Too many requests, try again in a minute".
+- Admin → Visitors → Who → Networks: "N passed the check · M refused after it" (pass holders refused by the pass's own
+  limit or using it from another user-agent). Columns `passed`, `pass_refused` in `scraper_networks`.
+- Tests: `npm run test:fix244` (backend).
 
 **Security log:** one `scraper` line per network and day (`grp` = `AS60068:2026-10-21`), e.g. "Datacamp Ltd (AS60068, NL)
 · 25 addresses · 4,100 requests · fake browser UA", updated in place every minute. A network gets its line when an

@@ -16,9 +16,10 @@ interface Visitors {
 // fix199: who is calling today — the top user-agents and data-centre / proxy networks
 type Mark = 'search-engine' | 'seo-tool' | 'data-centre' | 'script' | 'browser'
 interface Who {
-  day: string; otherRequests: number; limits: { addressHour: number; addressDay: number; networkHour: number }
+  day: string; otherRequests: number; limits: { addressHour: number; addressDay: number; networkHour: number; passHour?: number }
   agents: { ua: string; requests: number; mark: Mark }[]
-  networks: { name: string; asn: number; cc: string | null; requests: number; addresses: number; refused: number; logged: boolean; mark: Mark }[]
+  // fix244: passed = browsers that passed the Quick check today; passRefused = how many of them were refused after it
+  networks: { name: string; asn: number; cc: string | null; requests: number; addresses: number; refused: number; logged: boolean; mark: Mark; passed?: number; passedRequests?: number; passRefused?: number }[]
 }
 interface CountryRow { country: string; visitors: number; signedIn: number; bots?: number }
 const REASON: Record<string, string> = { 'no-signs': 'no signs of a person', ua: 'bot user-agent', crawler: 'search-engine crawlers', 'fake-crawler': 'fake crawlers', datacentre: 'data-centre networks', headless: 'headless browsers' }
@@ -95,7 +96,7 @@ function WhoCard({ w }: { w: Who }) {
               <li key={n.asn} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 <span className="min-w-0 flex-1 truncate text-ink">{n.name} <span className="text-faint text-[11px]">AS{n.asn}{n.cc ? `, ${n.cc}` : ''}</span></span>
                 {mark(n.mark)}
-                <span className="text-right num text-[11px] text-faint">{n0(n.addresses)} addr · {n0(n.requests)} req{n.refused ? ` · ${n0(n.refused)} refused` : ''}{n.logged ? ' · in the security log' : ''}</span>
+                <span className="text-right num text-[11px] text-faint">{n0(n.addresses)} addr · {n0(n.requests)} req{n.refused ? ` · ${n0(n.refused)} refused` : ''}{n.passed ? ` · ${n0(n.passed)} passed the check` : ''}{n.passRefused ? ` · ${n0(n.passRefused)} refused after it` : ''}{n.logged ? ' · in the security log' : ''}</span>
               </li>
             ))}
           </ul>
@@ -112,7 +113,7 @@ function WhoCard({ w }: { w: Who }) {
         </ul>
       )}
       <p className="mt-3 text-[10px] text-faint">
-        API requests today (UTC) · other networks (homes, mobiles): {n0(w.otherRequests)} requests · data-centre / proxy addresses get stored data only, {w.limits.addressHour} reads an hour and {w.limits.addressDay} a day per address, {w.limits.networkHour} an hour per network, and no prediction when signed out
+        API requests today (UTC) · other networks (homes, mobiles): {n0(w.otherRequests)} requests · data-centre / proxy addresses get stored data only, {w.limits.addressHour} page views an hour and {w.limits.addressDay} a day per address, {w.limits.networkHour} API reads an hour per network, and no prediction when signed out · over a limit a browser gets the Quick check (Turnstile): passed = no address or network limit for 24 h{w.limits.passHour ? ` (${w.limits.passHour} page views an hour)` : ''}
       </p>
     </div>
   )

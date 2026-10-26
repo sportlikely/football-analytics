@@ -9,6 +9,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import { API_URL } from './socket'
+import { viewHeaders } from './viewId'
 import { teamSlug, playerSlug, leagueSlug, matchSlug, type LinkSport, type LinkKind } from './slugRules'
 
 export type { LinkSport, LinkKind }
@@ -25,7 +26,7 @@ function load(sport: LinkSport, players = false) {
   const k = `${sport}${players ? ':p' : ''}`
   if (asked.has(k) || typeof fetch === 'undefined') return
   asked.add(k)
-  fetch(`${API_URL}/slugs/${sport}${players ? '/players' : ''}`, { credentials: 'same-origin' })
+  fetch(`${API_URL}/slugs/${sport}${players ? '/players' : ''}`, { credentials: 'same-origin', headers: viewHeaders() })
     .then(r => (r.ok ? r.json() : null))
     .then(j => {
       if (!j) { asked.delete(k); return }
@@ -50,7 +51,7 @@ export function setLinkAdmin(admin: boolean) { if (admin !== linkAdmin) { linkAd
 function loadSeasons(sport: LinkSport) {
   if (seasonsAsked.has(sport) || typeof fetch === 'undefined') return
   seasonsAsked.add(sport)
-  fetch(`${API_URL}/slugs/${sport}/seasons`, { credentials: 'same-origin' })
+  fetch(`${API_URL}/slugs/${sport}/seasons`, { credentials: 'same-origin', headers: viewHeaders() })
     .then(r => (r.ok ? r.json() : null))
     .then(j => {
       if (!j) { setTimeout(() => seasonsAsked.delete(sport), 30_000); return }
