@@ -11,6 +11,7 @@ import { isMainThread } from 'node:worker_threads';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import logger from '../utils/logger';
 import { isWorker } from './role';
+import { profileWindow, cpuTop, cpuProfileStatus, type CpuResult } from './cpuProfile';
 
 /*
  * fix167: a fully synchronous job finishes BEFORE the stall it caused is noticed (the timer below only runs once the
@@ -49,7 +50,8 @@ if (isMainThread) for (const s of [process.stdout, process.stderr]) {
 }
 
 const STEP = 500;
-const stalls: { at: string; ms: number; job: string | null; startup?: true; diag?: true }[] = [];
+type Stall = { at: string; ms: number; job: string | null; startup?: true; diag?: true; cpu?: CpuResult };
+const stalls: Stall[] = [];
 /*
  * fix232: a stall while only an admin diagnostic ran (/api/perf, /api/admin/* answered here) is not a stall a visitor
  * waited for: it is kept apart (diagStalls) and not counted in the hour (data health "Web stalls"). On 25 Oct the 5 MB
@@ -66,6 +68,7 @@ const newStat = (): JobStat => ({ runs: 0, lastMs: 0, maxMs: 0, totalMs: 0, last
 const active = new Map<string, number>();
 let manual: string | null = null;
 let last = Date.now();
+let lastNs = process.hrtime.bigint();
 let maxLag = 0;
 
 /** the 30 s / 60 s live jobs: a stall over 500 ms while one runs is logged, and they get the hourly line */
@@ -83,7 +86,9 @@ if (isMainThread) setInterval(() => {
   const now = Date.now();
   const lag = now - last - STEP;
   const since = last;
+  const sinceNs = lastNs;
   last = now;
+  lastNs = process.hrtime.bigint();
   if (lag > maxLag) maxLag = lag;
   const logs = logMs >= 50 ? `log writes ${Math.round(logMs)} ms (${logLines} lines)` : null;
   logMs = 0; logLines = 0;
@@ -100,7 +105,9 @@ if (isMainThread) setInterval(() => {
     const done = ended.slice(0, 4).map(r => `${r.label}${r.detail ? ` [${r.detail}]` : ''} ${Math.round(r.end - r.start)} ms`).join(' + ');
     const job = [logs, running, done].filter(Boolean).join(' + ') || null;
     const diag = !logs && onlyDiag([...active.keys(), ...(manual ? [manual] : []), ...ended.map(r => r.label)]);
-    stalls.push({ at: new Date(now).toISOString(), ms: lag, job, startup: !startupDone || undefined, diag: diag || undefined });
+    const stall: Stall = { at: new Date(now).toISOString(), ms: lag, job, startup: !startupDone || undefined, diag: diag || undefined };
+    stalls.push(stall);
+    profileStall(stall, sinceNs, lastNs);
     // fix222: the hourly count (data health "Web stalls") is what visitors could wait for: start-up stalls are listed apart
     // fix232: so are the stalls of an admin diagnostic (/api/perf)
     if (startupDone && !diag) noteHour(lag, job);
@@ -486,6 +493,19 @@ export function afterHeavy(label: string, fn: () => unknown, ms: number): NodeJS
   return setTimeout(() => { heavy(label, () => timed(label, fn)).catch(e => logger.warn(`${label}: ${e?.message || e}`)); }, ms);
 }
 
+/*
+ * fix248: what code ran during the stall (services/cpuProfile.ts: the web process's rolling CPU profile). The answer
+ * comes a moment later (the profile is read in its own thread) and is kept on the stall; one over 500 ms is logged with
+ * its top 3 functions.
+ */
+function profileStall(stall: Stall, fromNs: bigint, toNs: bigint) {
+  void profileWindow(fromNs, toNs).then(r => {
+    if (!r) return;
+    stall.cpu = r;
+    if (stall.ms > 500 && r.top.length) logger.warn(`Stall ${stall.ms} ms CPU: ${r.top.slice(0, 3).map(f => `${f.fn} ${f.at} ${f.ms} ms`).join(' · ')}${r.covered ? '' : ' (window partly outside the profile)'}`);
+  });
+}
+
 /** fix212b: the start-up load (before the process answers anything) is not a stall anyone waited for: listed apart */
 let startupDone = false;
 /**
@@ -496,7 +516,12 @@ let startupDone = false;
  */
 export function markListening(loadMs: number) {
   last = Date.now();
-  if (loadMs > 300) stalls.push({ at: new Date().toISOString(), ms: Math.round(loadMs), job: 'module load before listen', startup: true });
+  lastNs = process.hrtime.bigint();
+  if (loadMs > 300) {
+    const stall: Stall = { at: new Date().toISOString(), ms: Math.round(loadMs), job: 'module load before listen', startup: true };
+    stalls.push(stall);
+    profileStall(stall, lastNs - BigInt(Math.round(loadMs * 1e6)), lastNs);
+  }
 }
 export const markStartupDone = () => { startupDone = true; };
 export const stallsSinceReady = () => stalls.filter(s => !s.startup && !s.diag && s.ms > 500).length;
@@ -516,8 +541,11 @@ export function perfStatus() {
     recentStalls: stalls.filter(s => !s.startup && !s.diag).slice(-25).reverse(),
     // fix212b: the start-up load's own stalls (before listen; nobody waited)
     startupStalls: startup.slice(-5).map(s => ({ at: s.at, ms: s.ms, job: s.job })),
-    // fix232: stalls while only an admin diagnostic ran (not counted above)
-    diagStalls: stalls.filter(s => s.diag).slice(-5).map(s => ({ at: s.at, ms: s.ms, job: s.job })),
+    // fix232: stalls while only an admin diagnostic ran (not counted above); fix248: renamed from diagStalls
+    adminStalls: stalls.filter(s => s.diag).slice(-5).map(s => ({ at: s.at, ms: s.ms, job: s.job })),
+    // fix248: the stalls with what code ran (top 15 functions by self-time in the window), newest first
+    diagStalls: stalls.filter(s => s.cpu).slice(-25).reverse(),
+    cpuTop: cpuTop(), cpuProfile: cpuProfileStatus(),
     // fix210: the worst stalls of the last hour (what to fix first); fix232: 20
     topStalls: [...recent].sort((a, b) => b.ms - a.ms).slice(0, 20),
     // maxMs = longest run (waits for the data providers included); maxStallMs = worst event-loop freeze while it ran
@@ -542,8 +570,10 @@ export function perfSummary() {
   return {
     uptimeMin: p.uptimeMin, maxLagMs: p.maxLagMs, stallsLastHour: p.stallsLastHour, worstLastHour: p.worstLastHour,
     running: p.running, heavy: { ...p.heavy, waiting: p.heavy.waiting.slice(0, 20) }, memoryMb: p.memoryMb, heapMb: p.heapMb,
-    topStalls: p.topStalls.map(s => ({ at: s.at, ms: s.ms, job: s.job ? s.job.slice(0, 300) : null })),
-    startupStalls: p.startupStalls, diagStalls: p.diagStalls,
+    topStalls: p.topStalls.map(s => ({ at: s.at, ms: s.ms, job: s.job ? s.job.slice(0, 300) : null, cpu: s.cpu?.top.slice(0, 3).map(f => `${f.fn} ${f.at} ${f.ms} ms`) })),
+    startupStalls: p.startupStalls, adminStalls: p.adminStalls,
+    // fix248: the 8 newest profiled stalls (top 15 functions each) and the functions summed over every profiled stall
+    diagStalls: p.diagStalls.slice(0, 8).map(s => ({ ...s, job: s.job ? s.job.slice(0, 200) : null })), cpuTop: p.cpuTop, cpuProfile: p.cpuProfile,
     jobs: jobsTop(30), memByJob: memByJob(10),
     // the last 24 h by the hour, each with its 2 worst stalls
     hours: p.hours.slice(-24).map(h => ({ ...h, top: h.top.slice(0, 2).map(t => ({ ms: t.ms, job: t.job ? t.job.slice(0, 120) : null })) }))

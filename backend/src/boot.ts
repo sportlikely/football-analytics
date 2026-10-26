@@ -8,6 +8,7 @@
  */
 import http from 'http';
 import { serveEarly } from './services/earlyStatic';
+import { startCpuProfile } from './services/cpuProfile';
 
 const PORT = process.env.PORT || 3001;
 const gated = !!process.env.SITE_PASSWORD; // the private beta gate: only the app's files go early
@@ -33,6 +34,8 @@ const server = http.createServer((req, res) => {
   if (!gated && url.startsWith('/api/') && !url.startsWith('/api/health')) return holdForApp(req, res);
   starting(res);
 });
+// fix248: the rolling CPU profile starts before the modules load (the start-up load is profiled too)
+startCpuProfile();
 server.listen(PORT, () => {
   (globalThis as any).__slBootServer = server;
   require('./index');

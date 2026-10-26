@@ -458,3 +458,25 @@ past-season basketball games; "stored upcoming: read" alone 1–2 s several time
   Retry-After 30. Browsers never take a slot. /api/perf → `botPages`.
 - **Past-season match pages answer 410** before any render (links.md, fix243), which removes most of the old
   basketball game pages the crawlers walked (and their worker round trips).
+
+## fix248 — measure first: a CPU profile for every web stall (26 Oct)
+
+Stalls came back after fix135, 166, 169, 202, 221, 222, 232, 238 and 243; every one of those fixes guessed the cause
+from the perf labels (the jobs and requests in flight). Live 26 Oct 20:53 UTC, 3 min after a restart: ~300 page renders
+in 3 min on /<lang>/* and /basketball/* (many at exactly 3.0 / 6.0 s), /api/basketball/games up to 14.3 s, start-up state
+loads 0.7–1.5 s, and nothing recorded what code ran during a stall.
+
+- Step 1 (this commit, deployed on its own): the web process keeps a rolling CPU profile (`workers/cpuProfiler.ts`: an
+  inspector session on the main thread from a worker thread, `Session.connectToMainThread`, 5 ms sampling
+  (`CPU_PROFILE_US`), the profile swapped every 30 s and parsed in that thread, never on the web thread). Started in
+  `boot.ts` before the modules load, so the start-up load is profiled too. `CPU_PROFILE=0` turns it off.
+- Every stall over 300 ms (perf.ts) asks for its window (process.hrtime = the profile's clock): top 15 functions by
+  self-time, file:line mapped back to the .ts source through dist's source maps, the callers (6 frames) of the top 5.
+  `/api/perf` → `web.diagStalls` (8 newest profiled stalls; ?full=1 the last 25), `web.cpuTop` (the functions summed
+  over every profiled stall since the start), `web.cpuProfile` (on, profiled, notCovered, errors), and the top 3
+  functions beside each of `web.topStalls`. A stall over 500 ms logs "Stall N ms CPU: fn file:line ms · …".
+  The old `diagStalls` (stalls while only /api/perf or /api/admin ran) is now `adminStalls`.
+- Not changed yet (steps 2–6 of the request wait for the profile, by Yarin's order): stored HTML for every page, the
+  14 s /api/basketball/games, the start-up state parse, who sends ~100 page renders a minute.
+- Test: `npm run test:fix248` (a 900 ms busy function on top with its line; a dist function mapped to
+  utils/slugRules.ts:25 with its caller).
