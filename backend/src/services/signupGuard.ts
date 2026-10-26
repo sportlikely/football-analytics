@@ -9,6 +9,7 @@
  *  - the trust grade the CRM shows (Real / Unsure / Bot) and an email to the admin when 5+ unverified sign-ups arrive
  *    within an hour.
  */
+import { sendAdminMail, adminUrl } from './adminMail';
 import crypto from 'crypto';
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -115,15 +116,19 @@ export function trustOf(u: { id: number; email: string; created_at: string; last
 /* ---------- alert: 5+ unverified sign-ups in an hour ---------- */
 
 let alertedAt = 0;
-export async function checkSignupSurge(sendMail: (m: { to: string; subject: string; text: string; html: string }) => Promise<unknown>) {
+export async function checkSignupSurge() {
   if (Date.now() - alertedAt < 6 * 3600 * 1000) return;
   const since = new Date(Date.now() - 3600 * 1000).toISOString();
   const n = (db.prepare(`SELECT COUNT(*) AS n FROM users WHERE created_at >= ? AND COALESCE(email_verified, 0) = 0`).get(since) as any)?.n || 0;
   if (n < 5) return;
   alertedAt = Date.now();
   logger.warn(`sign-up alert: ${n} unverified sign-ups in the last hour`);
-  const to = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
-  if (!to) return;
-  const text = `${n} new accounts in the last hour have not verified their email. This can be a bot run. Check CRM → Customers (trust filter: Bot / Unsure).`;
-  try { await sendMail({ to, subject: `SportLikely: ${n} unverified sign-ups in an hour`, text, html: `<p>${text}</p>` }); } catch { /* email off */ }
+  // fix239: needs a decision → its own email in the admin template
+  await sendAdminMail(`Needs you: ${n} unverified sign-ups in an hour`, {
+    label: 'Sign-ups', tone: 'warn',
+    title: `${n} unverified sign-ups in an hour`,
+    what: `${n} new accounts in the last hour have not confirmed their email, which can be a bot run.`,
+    todo: 'Open CRM → Customers with the trust filter "Bot / Unsure" and delete the fake ones.',
+    buttons: [{ text: 'Open users in Admin', href: adminUrl('users') }]
+  });
 }

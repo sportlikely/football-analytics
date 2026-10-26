@@ -205,20 +205,50 @@ function InjuriesToReview({ done }: { done: () => void }) {
   )
 }
 
-function ResultsToCheck() {
-  const [rows, setRows] = useState<any[] | null>(null)
-  useEffect(() => { axios.get(`${API_URL}/admin/bb/result-checks`).then(r => setRows(r.data.data.open)).catch(() => setRows([])) }, [])
-  if (!rows) return <p className="text-sm text-faint">Loading…</p>
+/** fix239: each result with its buttons — Swap scores / Keep as is (basketball, American football; tennis: give the win to the other player) */
+function ResultsToCheck({ done }: { done: () => void }) {
+  const [d, setD] = useState<{ open: any[]; other: any[] } | null>(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const load = () => axios.get(`${API_URL}/admin/bb/result-checks`).then(r => setD({ open: r.data.data.open || [], other: r.data.data.other || [] })).catch(() => setD({ open: [], other: [] }))
+  useEffect(() => { load() }, [])
+  const act = (key: string, url: string, action: string) => {
+    setBusy(key); setErr('')
+    axios.post(url, { action }).then(() => { load(); done() }).catch(e => setErr(errorText(e))).finally(() => setBusy(''))
+  }
+  if (!d) return <p className="text-sm text-faint">Loading…</p>
+  const btn = 'h-8 px-3 rounded-lg text-xs font-semibold disabled:opacity-50'
+  const rows = [
+    ...d.open.map(x => ({
+      key: `bb${x.game_id}`, when: x.kickoff, label: `${x.home_name} ${x.hs}–${x.as_} ${x.away_name}`, meta: `Basketball · ${x.code} · ${x.detail}`,
+      href: matchHref('basketball', x.game_id, { home: x.home_name, away: x.away_name, date: x.kickoff }), url: `${API_URL}/admin/bb/game/${x.game_id}/result`,
+      swap: x.issue === 'swapped?' ? `Swap scores (${x.as_}–${x.hs})` : null
+    })),
+    ...d.other.map(x => ({
+      key: `${x.sport}${x.id}`, when: x.when, label: x.name || `#${x.id}`, meta: `${x.sport === 'tennis' ? 'Tennis' : 'American football'} · ${x.detail}`,
+      href: matchHref(x.sport === 'tennis' ? 'tennis' : 'american-football', x.id, { home: x.home, away: x.away, date: x.when }), url: `${API_URL}/admin/result-review/${x.sport}/${x.id}`,
+      swap: x.sport === 'tennis' ? 'Give the win to the other player' : 'Swap scores'
+    }))
+  ]
   return (
-    <ul className="divide-y divide-line/50 text-sm">
-      {rows.slice(0, 10).map(x => (
-        <li key={x.game_id} className="py-2 flex flex-wrap items-baseline gap-x-3">
-          <span className="w-14 text-[11px] text-faint num">{day(x.kickoff)}</span>
-          <Link to={matchHref('basketball', x.game_id, { home: x.home_name, away: x.away_name, date: x.kickoff })!} className="font-semibold text-draw hover:underline">{x.home_name} {x.hs}–{x.as_} {x.away_name}</Link>
-          <span className="text-[11px] text-muted">{x.code} · {x.detail}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      {err && <p className="text-xs text-loss mb-1">{err}</p>}
+      <ul className="divide-y divide-line/50 text-sm">
+        {rows.slice(0, 12).map(x => (
+          <li key={x.key} className="py-2">
+            <div className="flex flex-wrap items-baseline gap-x-3">
+              <span className="w-14 text-[11px] text-faint num">{x.when ? day(x.when) : ''}</span>
+              {x.href ? <Link to={x.href} className="font-semibold text-draw hover:underline">{x.label}</Link> : <span className="font-semibold text-ink">{x.label}</span>}
+              <span className="text-[11px] text-muted">{x.meta}</span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-2 sm:pl-[68px]">
+              {x.swap && <button type="button" disabled={!!busy} onClick={() => act(x.key, x.url, 'swap')} className={`${btn} bg-accent text-bg`}>{x.swap}</button>}
+              <button type="button" disabled={!!busy} onClick={() => act(x.key, x.url, 'confirm')} className={`${btn} bg-surface2 border border-line text-ink`}>Keep as is</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
 
@@ -259,7 +289,7 @@ export function NeedsYouCard({ ctx, reload }: { ctx: Ctx; reload: () => void }) 
         <div className="divide-y divide-line/50">
           {s.photosToReview > 0 && <Group title="Player photos to review" n={s.photosToReview} to="data"><PhotosToReview done={reload} /></Group>}
           {s.injuriesToReview > 0 && <Group title="Injury news to review (basketball)" n={s.injuriesToReview} to="data"><InjuriesToReview done={reload} /></Group>}
-          {s.bbResultsToCheck > 0 && <Group title="Basketball results to check" n={s.bbResultsToCheck} to="data"><p className="text-xs text-muted mb-1">Open the game, compare with the league’s own site, and correct it on the game page.</p><ResultsToCheck /></Group>}
+          {s.bbResultsToCheck > 0 && <Group title="Results to check" n={s.bbResultsToCheck} to="data"><p className="text-xs text-muted mb-1">The data may have these scores wrong and our checks disagree (clear cases are fixed automatically). Compare with the league’s own site, then swap or keep.</p><ResultsToCheck done={reload} /></Group>}
           {s.contactOpen > 0 && <Group title="Contact messages to answer" n={s.contactOpen} to="users"><ContactOpen done={reload} /></Group>}
           {red.length > 0 && (
             <Group title="Checks with a problem" n={red.length}>

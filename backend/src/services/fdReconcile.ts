@@ -19,7 +19,7 @@ import logger from '../utils/logger';
 import { reportLive, bestLive } from './liveScores';
 import { afTwinOfFd, afLiveReading, afFixturesFull, afIdOfFd } from './afMatches';
 import { afConfigured, afRemaining } from './apiFootball';
-import { emailEnabled, sendEmail } from './email';
+import { noteAutoFix, adminUrl } from './adminMail';
 import { onState, publishState } from './shared';
 import { yieldLoop } from './perf';
 
@@ -76,10 +76,9 @@ export const frozenText = (s: FreezeState = state) => `Football-Data frozen sinc
 
 onState('fd:freeze', (_k, v: FreezeState) => { state = v; });
 
+// fix239: the feed handles itself (statuses from API-Football meanwhile) → a line in the 07:00 summary, no email of its own
 async function tellAdmin(subject: string, text: string) {
-  const to = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!emailEnabled || !to.length) return;
-  for (const a of to) await sendEmail(a, subject, `<p>${text.replace(/\n/g, '<br>')}</p>`, text).catch(() => undefined);
+  noteAutoFix('football data', subject, text, adminUrl('data'));
 }
 /** called after every window refresh with the check's answer; one email when a freeze starts, one when it ends */
 export function applyFreezeCheck(c: FreezeCheck, now = Date.now()) {
@@ -87,12 +86,12 @@ export function applyFreezeCheck(c: FreezeCheck, now = Date.now()) {
   if (c.frozen && !was) {
     state = { frozen: true, since: c.newest, newest: c.newest, checkedAt: now, recoveredAt: null };
     logger.warn(`FD frozen: newest lastUpdated ${new Date(c.newest).toISOString()} (${israelTime(c.newest)} Israel time) while games are on — statuses from API-Football until it moves`);
-    void tellAdmin('SportLikely: Football-Data.org feed frozen', `${frozenText()}. The newest lastUpdated across the fixture window is ${new Date(c.newest).toISOString()} while games should be live or just finished.\nStatuses, minutes and scores of Football-Data.org matches now come from API-Football until the feed moves again. Nothing to do; this email comes once per incident, and once more when it recovers.`);
+    void tellAdmin(`Football-Data.org feed frozen at ${israelTime(c.newest)}`, `${frozenText()}. The newest lastUpdated across the fixture window is ${new Date(c.newest).toISOString()} while games should be live or just finished.\nStatuses, minutes and scores of Football-Data.org matches now come from API-Football until the feed moves again.`);
   } else if (!c.frozen && was) {
     const since = state.since;
     state = { frozen: false, since: null, newest: c.newest, checkedAt: now, recoveredAt: now };
     logger.info(`FD moving again: newest lastUpdated ${new Date(c.newest).toISOString()} (frozen since ${since ? israelTime(since) : '?'} Israel time)`);
-    void tellAdmin('SportLikely: Football-Data.org feed moving again', `Football-Data.org updated its matches again at ${israelTime(c.newest)} (Israel time); it had been frozen since ${since ? israelTime(since) : '?'}. The match statuses come from Football-Data.org as before (API-Football still fills in when it is behind on a game).`);
+    void tellAdmin('Football-Data.org feed moving again', `Football-Data.org updated its matches again at ${israelTime(c.newest)} (Israel time); it had been frozen since ${since ? israelTime(since) : '?'}. The match statuses come from Football-Data.org as before (API-Football still fills in when it is behind on a game).`);
   } else state = { ...state, newest: c.newest, checkedAt: now };
   publishState('fd:freeze', state);
 }

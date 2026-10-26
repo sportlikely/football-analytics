@@ -4,7 +4,8 @@
  * page and the coming CRM. Spam guards: honeypot field, minimum fill time, links limit, per-IP and per-email limits.
  */
 import { db } from '../db';
-import { sendEmail, emailEnabled, layout, esc } from './email';
+import { sendEmail, emailEnabled } from './email';
+import { renderAdminMail, adminUrl, israelTime } from './adminMail';
 import logger from '../utils/logger';
 
 export const SUPPORT_TO = process.env.SUPPORT_EMAIL || 'support@sportlikely.com';
@@ -53,10 +54,14 @@ export async function submitContact(body: any, user: { id: number; email: string
   if (emailEnabled) {
     const label = TOPIC_LABEL[topic] || topic;
     const subject = `[Contact #${id}] ${label} — ${name || email}`;
-    const meta = `${esc(name || '—')} &lt;${esc(email)}&gt;${user ? ` · account #${user.id}` : ' · not signed in'}${page ? ` · from ${esc(page)}` : ''}`;
-    const html = layout({
-      preheader: message.slice(0, 120), label: `Contact form · ${label}`,
-      body: `<tr><td style="padding:16px 28px 24px"><p style="margin:0 0 12px;color:#646c78;font-size:13px">${meta}</p><div style="white-space:pre-wrap;font-size:15px;line-height:1.55">${esc(message)}</div><p style="margin:16px 0 0;color:#969da8;font-size:12px">Reply to this email to answer ${esc(name || 'them')} directly.</p></td></tr>`
+    // fix239: the staff template (the message as its body; replying answers the sender)
+    const { html } = renderAdminMail({
+      label: `Contact form · ${label}`, tone: 'warn',
+      title: `New message from ${name || email}`,
+      what: `${name || 'Someone'} (${email}${user ? `, account #${user.id}` : ', not signed in'}) wrote about “${label}” at ${israelTime(at)}${page ? ` from ${page}` : ''}.`,
+      todo: `Reply to this email to answer ${name || 'them'} directly, then press "Mark answered" in Admin.`,
+      pre: message,
+      buttons: [{ text: 'Open in Admin', href: adminUrl('needs-you') }]
     });
     const text = `${label}\nFrom: ${name || '—'} <${email}>${user ? ` (account #${user.id})` : ''}\n${page ? `Page: ${page}\n` : ''}\n${message}\n`;
     try {

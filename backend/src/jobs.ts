@@ -59,6 +59,8 @@ import { pushAlertsTick } from './services/pushAlerts';
 import { buildSlugs } from './services/slugs';
 import { startGameExtrasScheduler } from './services/gameExtras';
 import { fillFromFinals } from './services/history';
+import { checkOtherResults } from './services/resultChecks';
+import { dailySummaryTick } from './services/adminMail';
 
 let started = false;
 
@@ -74,6 +76,11 @@ export function startJobs() {
   if (testModelMs) after('test model', () => heavy('bb model', async () => { const end = Date.now() + testModelMs; while (Date.now() < end) await new Promise(r => setTimeout(r, 50)); }), 1000).unref();
 
   every('link check', linkCheckTick, 3600 * 1000).unref();
+  // fix239: American football / tennis results the data may have swapped (basketball's check runs in its own scheduler),
+  // and the 07:00 Israel-time email of everything that fixed itself (checked every 5 minutes)
+  after('result checks', () => checkOtherResults().catch(e => logger.warn(`result checks: ${e?.message || e}`)), 8 * 60 * 1000).unref();
+  every('result checks', () => checkOtherResults().catch(e => logger.warn(`result checks: ${e?.message || e}`)), 30 * 60 * 1000).unref();
+  every('admin daily summary', () => dailySummaryTick().catch(e => logger.warn(`admin daily summary: ${e?.message || e}`)), 5 * 60 * 1000).unref();
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the
   // first run waits for the leagues and the team index to load (a league's country decides a shared name's slug)
   after('slugs', () => buildSlugs().then(() => every('slugs', () => buildSlugs(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();

@@ -199,6 +199,10 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
 - Clean links (fix229): `services/slugs.ts` (table slugs + slug_ids, worker job "slugs", state `slugs:<sport>`, the 301s in
   app.ts's page route, `/api/slug*`), rules `utils/slugRules.ts` (= frontend `lib/slugRules.ts`), `utils/slugAssign.ts`;
   frontend `lib/links.ts` (every item link), `components/SlugRoute.tsx` (slug → id for the page, old in-app links move on).
+- Admin emails (fix239): `services/adminMail.ts` — every admin / staff email uses `renderAdminMail` / `sendAdminMail` (title, what
+  happened, what to do, buttons); action buttons are signed one-time links (`actionLink` + `onEmailAction`, page `/admin/act/<token>`);
+  anything that fixed itself is `noteAutoFix` (07:00 summary), never its own email. Swapped results: `utils/resultSwap.ts`,
+  `bbResults.ts` (basketball), `resultChecks.ts` (American football, tennis).
 - `OPEN_API` in `app.ts` lists the public routes; everything else is admin/staff only (answered by the worker).
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):

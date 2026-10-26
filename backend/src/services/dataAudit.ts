@@ -17,7 +17,8 @@ import footballDataAPI from './footballDataAPI';
 import { findPlayer, playerPage, FD_TO_AF } from './playerPage';
 import { afRemaining } from './apiFootball';
 import { getAfScorers } from './afMatches';
-import { emailEnabled, sendEmail, layout, section, esc, C, SITE } from './email';
+import { emailEnabled, sendEmail } from './email';
+import { renderAdminMail, adminUrl, israelTime, siteUrl, type AdminMail } from './adminMail';
 import { every, after } from './perf';
 
 db.exec(`CREATE TABLE IF NOT EXISTS data_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, json TEXT NOT NULL)`);
@@ -158,101 +159,37 @@ const LEAGUE_NAME: Record<string, string> = {
 };
 const leagueName = (c?: string) => (c ? LEAGUE_NAME[c] || c : '');
 
-/** The daily data-check email: a score, a league-by-league line, what needs a look, and the provider quirks folded below. */
+/** The data-check email (fix239: the admin template). Sent only when something needs a look (emailReport). */
 export function auditEmail(report: any) {
   const issues: AuditIssue[] = report.issues || [];
   const action = issues.filter(i => i.kind !== 'sanity');
   const quirks = issues.filter(i => i.kind === 'sanity');
   const pct = report.checked ? Math.round((report.matched / report.checked) * 1000) / 10 : 0;
-  const tone = pct >= 98 ? C.green : pct >= 93 ? C.amber : C.red;
-  const day = new Date(report.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
-  const playerLink = (i: AuditIssue) =>
-    i.playerId ? `<a href="${SITE}${pubPath(`/player/${i.playerId}`)}" style="color:${C.ink};font-weight:700;text-decoration:none">${esc(i.player)}</a>` : `<b>${esc(i.player || leagueName(i.league))}</b>`;
-  const chip = (t: string) => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${C.muted};background:${C.chip};border-radius:6px;padding:2px 7px;margin-left:6px">${esc(t)}</span>`;
-
-  // score
-  const verdict = action.length === 0 ? 'Everything on the site matches' : `${action.length} thing${action.length === 1 ? '' : 's'} to look at`;
-  let body = `<tr><td style="padding:18px 28px 4px">
-    <div style="font-size:13px;color:${C.muted};font-weight:600">Daily data check</div>
-    <div style="font-size:40px;line-height:1.1;font-weight:800;color:${tone};margin-top:6px">${pct}%</div>
-    <div style="font-size:15px;color:${C.ink};margin-top:4px"><b>${report.matched} of ${report.checked}</b> top scorers match the official lists</div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-radius:6px;overflow:hidden"><tr>
-      <td style="height:8px;background:${tone};width:${Math.max(1, pct)}%"></td><td style="height:8px;background:${C.chip}"></td>
-    </tr></table>
-    <div style="font-size:14px;font-weight:700;margin-top:14px;color:${action.length ? C.amber : C.green}">${action.length ? '●' : '✓'} ${esc(verdict)}</div>
-  </td></tr>`;
-
-  // league by league
   const by = report.byLeague || {};
-  const codes = Object.keys(by);
-  if (codes.length) {
-    body += section('League by league');
-    const cells = codes.map(c => {
-      const t = by[c], ok = t.matched === t.checked;
-      return `<td width="50%" style="padding:5px 0;font-size:13px"><span style="color:${ok ? C.green : C.amber}">●</span>&nbsp; ${esc(leagueName(c))} <span style="color:${C.faint}">${t.matched}/${t.checked}</span></td>`;
-    });
-    let rows = '';
-    for (let i = 0; i < cells.length; i += 2) rows += `<tr>${cells[i]}${cells[i + 1] || '<td></td>'}</tr>`;
-    body += `<tr><td style="padding:0 28px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table></td></tr>`;
-  }
-
-  // needs a look
-  if (action.length) {
-    body += section('Needs a look', 'The site shows something different from the official list');
-    body += `<tr><td style="padding:0 28px">${action
-      .map(i => `<div style="border:1px solid ${C.line};border-left:4px solid ${C.amber};border-radius:10px;padding:10px 12px;margin:8px 0">
-        <div style="font-size:14px">${playerLink(i)}${chip(leagueName(i.league))}</div>
-        <div style="font-size:13px;color:${C.muted};margin-top:3px">${esc(i.detail)}</div></div>`)
-      .join('')}</td></tr>`;
-  }
-
-  // provider quirks, one line per player
-  if (quirks.length) {
-    const byPlayer = new Map<string, AuditIssue[]>();
-    for (const q of quirks) {
-      const k = `${q.playerId || q.player}`;
-      if (!byPlayer.has(k)) byPlayer.set(k, []);
-      byPlayer.get(k)!.push(q);
-    }
-    const list = [...byPlayer.values()];
-    const shown = list.slice(0, 8);
-    body += section('Provider quirks', `${quirks.length} small oddities in old seasons from the data provider · no action needed`);
-    body += `<tr><td style="padding:0 28px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${shown
-      .map(g => `<tr><td style="padding:7px 0;border-bottom:1px solid ${C.line};font-size:13px">
-        <div>${playerLink(g[0])}${chip(leagueName(g[0].league))}</div>
-        <div style="color:${C.muted};margin-top:2px">${g.slice(0, 3).map(x => esc(x.detail)).join('<br>')}${g.length > 3 ? `<br><span style="color:${C.faint}">+${g.length - 3} more</span>` : ''}</div>
-      </td></tr>`)
-      .join('')}</table>${list.length > shown.length ? `<div style="font-size:12px;color:${C.faint};margin-top:8px">+ ${list.length - shown.length} more players in Data health</div>` : ''}</td></tr>`;
-  }
-  body += `<tr><td style="height:12px"></td></tr>`;
-
-  const subject = action.length
-    ? `Data check ${day}: ${pct}% match · ${action.length} to look at`
-    : `Data check ${day}: ${pct}% match · all good`;
-  const html = layout({
-    preheader: `${report.matched} of ${report.checked} top scorers match the official lists. ${verdict}.`,
-    label: day,
-    body,
-    cta: { text: 'Open Data health', href: `${SITE}/admin` },
-    footer: 'Runs every morning after the night’s games. Differences between the two data providers usually clear within a few days; a player still wrong after a week is worth a look.'
-  });
-  const text = [
-    `SportLikely · daily data check · ${day}`,
-    `${pct}% · ${report.matched} of ${report.checked} top scorers match the official lists`,
-    verdict,
-    '',
-    ...codes.map(c => `${leagueName(c)}: ${by[c].matched}/${by[c].checked}`),
-    ...(action.length ? ['', 'NEEDS A LOOK', ...action.map(i => `- ${i.player || ''} (${leagueName(i.league)}): ${i.detail}`)] : []),
-    ...(quirks.length ? ['', `PROVIDER QUIRKS (${quirks.length}, no action needed)`, ...quirks.slice(0, 15).map(i => `- ${i.player || ''}: ${i.detail}`)] : []),
-    '',
-    `Data health: ${SITE}/admin`
-  ].join('\n');
-  return { subject, html, text };
+  const leagues = Object.keys(by).map(c => `${leagueName(c)} ${by[c].matched}/${by[c].checked}`).join(' · ');
+  const n = action.length;
+  const mail: AdminMail = {
+    label: 'Data check', tone: n ? 'warn' : 'ok',
+    title: n ? `${n} top scorer${n === 1 ? '' : 's'} to look at` : 'Everything on the site matches',
+    what: `${pct}% of the top scorers (${report.matched} of ${report.checked}) match the official lists in the morning check of ${israelTime(report.at)}.`,
+    todo: n ? 'Open each player below and compare with the league’s own list; a difference that is still there after a week is worth telling Claude.' : null,
+    rows: [
+      ...action.map(i => ({ title: `${i.player || leagueName(i.league)} (${leagueName(i.league)})`, titleHref: i.playerId ? siteUrl(`/player/${i.playerId}`) : null, detail: i.detail, tone: 'warn' as const })),
+      ...(leagues ? [{ title: 'League by league', detail: leagues }] : []),
+      ...(quirks.length ? [{ title: `Provider quirks: ${quirks.length}, no action needed`, detail: quirks.slice(0, 6).map(q => `${q.player || ''}: ${q.detail}`).join(' · ') }] : [])
+    ],
+    buttons: [{ text: 'Open in Admin', href: adminUrl('data') }],
+    footer: 'Runs every morning after the night’s games; differences between the two data providers usually clear within a few days.'
+  };
+  const subject = n ? `Needs you: ${n} top scorer${n === 1 ? '' : 's'} to look at (data check)` : `Data check: ${pct}% match, all good`;
+  return { subject, ...renderAdminMail(mail) };
 }
 
+// fix239: an email only when something needs a look; a clean check is stored (Admin → Data) and sends nothing
 async function emailReport(report: any) {
   const to = (process.env.ADMIN_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
   if (!emailEnabled || !to.length) return;
+  if (!(report.issues || []).some((i: AuditIssue) => i.kind !== 'sanity')) return;
   const { subject, html, text } = auditEmail(report);
   for (const addr of to) await sendEmail(addr, subject, html, text);
 }

@@ -12,7 +12,7 @@ import crypto from 'crypto';
 import { db } from '../db';
 import { isWeb as isWebProc } from './role';
 import logger from '../utils/logger';
-import { sendMail } from './email';
+import { sendAdminMail, adminUrl, siteUrl, israelTime } from './adminMail';
 import { every } from './perf';
 
 db.exec(`
@@ -81,12 +81,16 @@ async function maybeEmail(sig: string) {
   emailsToday.n++;
   db.prepare('UPDATE client_errors SET emailed_at = ? WHERE sig = ?').run(new Date().toISOString(), sig);
   const pages: string[] = JSON.parse(r.pages || '[]');
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  const link = `https://sportlikely.com${pages[0] || '/'}`;
-  const text = `A page broke on sportlikely.com.\n\nPage: ${link}\nError: ${r.message}\nTimes so far: ${r.count}\n\nAll site errors: Admin → Site health → Site errors.`;
-  const html = `<p>A page broke on sportlikely.com.</p><p><b>Page:</b> <a href="${esc(link)}">${esc(link)}</a><br><b>Error:</b> ${esc(r.message)}<br><b>Times so far:</b> ${r.count}</p><p>All site errors: Admin → Site health → Site errors.</p>`;
-  try { await sendMail({ to, subject: `SportLikely: a page broke (${r.page_kind})`, text, html }); }
-  catch (e: any) { logger.warn(`client error email: ${e.message}`); }
+  // fix239: the admin template, the page as a clean link, times in Israel time
+  const link = siteUrl(pages[0] || '/');
+  await sendAdminMail(`Site problem: a page broke (${r.page_kind})`, {
+    label: 'Site errors', tone: 'fail',
+    title: `A page broke for visitors (${r.page_kind})`,
+    what: `The ${r.page_kind} page showed an error in a visitor’s browser ${r.count === 1 ? 'once' : `${r.count} times`} so far: “${String(r.message).slice(0, 160)}”.`,
+    todo: 'Tell Claude about it; press "Mark fixed" in Admin once the fix is live.',
+    rows: [{ title: link, titleHref: link, when: `First seen ${israelTime(r.first_at || r.last_at)} · last ${israelTime(r.last_at)}`, detail: [r.where_ ? `Where: ${r.where_}` : '', pages.length > 1 ? `Also on: ${pages.slice(1, 4).join(', ')}` : ''].filter(Boolean).join(' · ') || undefined }],
+    buttons: [{ text: 'Open site errors in Admin', href: adminUrl('site') }, { text: 'Open the page', href: link, kind: 'secondary' }]
+  });
 }
 
 export function clientErrorList(days = 30) {

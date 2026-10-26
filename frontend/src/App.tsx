@@ -69,6 +69,7 @@ const Login = page(() => import('./pages/Login'))
 const Account = page(() => import('./pages/Account'))
 const Premium = page(() => import('./pages/Premium'))
 const Admin = page(() => import('./pages/Admin'))
+const AdminAction = page(() => import('./pages/AdminAction'))
 const Verify = page(() => import('./pages/Verify'))
 const Forgot = page(() => import('./pages/Forgot'))
 const Favorites = page(() => import('./pages/Favorites'))
@@ -164,8 +165,11 @@ function RecordGate({ home, children }: { home: string; children: ReactNode }) {
 
 function AdminOnly({ children }: { children: ReactNode }) {
   const { access, loading, user, logout } = useAuth()
+  const loc = useLocation()
   if (loading) return null
   if (access === 'admin') return <>{children}</>
+  // fix239: a link from an admin email opened without a session: sign in first, then back to the same address
+  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />
   // an admin whose session did not pass two-step login: sign in again with the code
   if (user?.isAdmin)
     return (
@@ -791,6 +795,7 @@ function Shell() {
             <Route path="/premium/packs" element={<Premium />} />
             <Route path="/admin" element={<AdminOnly><ConsoleGate><Admin /></ConsoleGate></AdminOnly>} />
             <Route path="/admin/:tab" element={<AdminOnly><ConsoleGate><Admin /></ConsoleGate></AdminOnly>} />
+            <Route path="/admin/act/:token" element={<AdminOnly><ConsoleGate><AdminAction /></ConsoleGate></AdminOnly>} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/accessibility" element={<Accessibility />} />

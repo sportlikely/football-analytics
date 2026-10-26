@@ -8,7 +8,6 @@ import { betterGoals } from './utils/scorers';
 import { runLinkCheck, lastLinkCheck } from './services/linkCheck';
 import { markMissingPlayer } from './services/missingPlayers';
 import { signupToken, checkSignupToken, honeypotHit, turnstileOk, turnstileSiteKey, checkSignupSurge } from './services/signupGuard';
-import { sendMail as sendMailFix168 } from './services/email';
 import { perfStatus, perfSummary, setJob, timed, yieldLoop, every, track, routeLabel, after, inBatches, requestDetail, heavy, perGames, mapGames } from './services/perf';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -70,6 +69,8 @@ import { runDataAudit, lastDataAudit } from './services/dataAudit';
 import { newsFor as newsForB, newsStatus, bbTeamNames, footballTeamNames, nflTeamNamesById } from './services/news';
 import { bbGet, bbStatus, bbSyncNow } from './services/basketball';
 import { adminResult, resultChecksList, checkResults, openCheck, resultFix, ResultError } from './services/bbResults';
+import { decideReview, openReviews, ReviewError } from './services/resultChecks';
+import { actionInfo, runAction } from './services/adminMail';
 import { bdlGet, refreshNbaInjuries, nbaInjuryStatus } from './services/bbInjuries';
 import { bbPublic, bbLeagues, bbGames, bbGame as bbGameB, bbStandings, bbTeam as bbTeamB } from './services/bbSite';
 import { bbPlayer as bbPlayerB, nbaLeaders, bbSearch, bbLeagueLeaders } from './services/bbPlayers';
@@ -718,7 +719,7 @@ app.post('/api/auth/signup', jsonOnly, async (req, res) => {
     // fix216: the picks emails' time zone and language from the browser; the switches follow the (unchecked) opt-in box
     try { initEmailPrefs(user.id, { optIn: req.body?.picksOptIn === true, tz: req.body?.tz, lang: req.body?.lang }); }
     catch (e: any) { logger.warn('Email settings not saved at sign-up', { message: e?.message }); }
-    void checkSignupSurge(sendMailFix168);
+    void checkSignupSurge();
     const s = createSession(user.id, req.headers['user-agent']);
     setSessionCookie(res, s.token, s.expires, req.secure);
     // Send the confirmation code; if the email fails the account still exists and the code can be re-sent
@@ -3574,7 +3575,27 @@ app.get('/api/basketball/game/:id(\\d+)', async (req, res) => {
   }
 });
 // Basketball results: checks and admin corrections (services/bbResults.ts)
-app.get('/api/admin/bb/result-checks', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: resultChecksList() }); });
+app.get('/api/admin/bb/result-checks', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...resultChecksList(), other: openReviews() } }); });
+// fix239: American football / tennis results waiting for a decision (services/resultChecks.ts): swap / confirm
+app.post('/api/admin/result-review/:sport/:id(\\d+)', jsonOnly, (req, res) => {
+  try {
+    const r = decideReview(req.params.sport, parseInt(req.params.id, 10), String(req.body?.action || ''), req.user?.email || 'admin');
+    securityLog(req, 'result_corrected', req.user, `${req.params.sport} ${req.params.id}: ${req.body?.action}`);
+    res.json({ data: r });
+  } catch (e: any) {
+    if (e instanceof ReviewError) return res.status(e.status).json({ error: e.message });
+    sendError(res, e, 'Correction failed');
+  }
+});
+// fix239: the buttons of the admin emails (services/adminMail.ts): /admin/act/<token> asks what the link does (GET) and
+// runs it once (POST, from a signed-in admin's page — a mail scanner opening the link changes nothing); every use logged
+app.get('/api/admin/email-action/:token', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: actionInfo(req.params.token) }); });
+app.post('/api/admin/email-action/:token', jsonOnly, (req, res) => {
+  const r = runAction(req.params.token, req.user?.email || 'admin');
+  securityLog(req, 'email_action', req.user, `${r.label || 'link'}: ${r.message || r.state}`);
+  if (r.payloadGame) for (const k of [`${r.payloadGame}|0`, `${r.payloadGame}|1`]) bbGameCache.delete(k); // the corrected page at once
+  res.status(r.state === 'invalid' ? 404 : 200).json({ data: r });
+});
 app.post('/api/admin/bb/result-checks/run', async (_req, res) => {
   try { res.json({ data: await checkResults(30) }); } catch (e) { sendError(res, e, 'Check failed'); }
 });

@@ -20,6 +20,7 @@
 import { Readable } from 'stream';
 import zlib from 'zlib';
 import readline from 'readline';
+import { applyTennisFix } from './resultChecks';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { every, after, slicer, stalledWithin, yieldLoop, everyHeavy, afterHeavy, heavy } from './perf';
@@ -443,6 +444,7 @@ export function storeMatch(m: any, source: 'fixture' | 'live' | 'history'): bool
   for (const p of [p1, p2]) if (num(p.id) !== null) seePlayer.run(num(p.id), str(p.name), str(p.country), str(p.tour), num(p.ranking), num(p.ranking_points), nowIso());
   // fix197: never under an event of the other gender (the provider put the men's Cali Challenger under the WTA 125 "Cali");
   // fix197b: always the stored row (what the upsert kept + what the provider sent), never the provider's fields alone
+  applyTennisFix(num(m.id)!); // fix239: our winner corrections win over the provider's (services/resultChecks.ts)
   settleEvent(num(m.id));
   touched?.add(num(m.id)!);
   return true;

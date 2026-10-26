@@ -53,3 +53,4 @@ presentation/
 
 # fix213: layout check screenshots
 frontend/test-output/
+backend/test-output/

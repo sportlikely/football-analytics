@@ -24,7 +24,7 @@ import { once } from 'events';
 import { Worker } from 'worker_threads';
 import { db } from '../db';
 import logger from '../utils/logger';
-import { sendMail } from './email';
+import { sendAdminMail, adminUrl } from './adminMail';
 import { after } from './perf';
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
@@ -270,12 +270,15 @@ async function doBackup(trigger: string) {
   }
 }
 
+// fix239: a real problem → its own email in the admin template
 async function alert(msg: string) {
-  const to = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
-  if (!to) return;
-  try {
-    await sendMail({ to, subject: 'SportLikely: database / disk warning', text: `${msg}\n\nCheck Users → Overview → Backups on sportlikely.com.`, html: `<p>${msg.replace(/</g, '&lt;')}</p><p>Check Users → Overview → Backups on sportlikely.com.</p>` });
-  } catch { /* email off */ }
+  await sendAdminMail(/fail/i.test(msg) ? 'Site problem: the database backup failed' : 'Site problem: database / disk warning', {
+    label: 'Backups', tone: 'fail',
+    title: /fail/i.test(msg) ? 'The database backup failed' : 'Database / disk warning',
+    what: msg.replace(/\s+$/, '').replace(/([^.])$/, '$1.'),
+    todo: 'Open Admin → Site health → Database backups and press "Back up now"; if it fails again, tell Claude.',
+    buttons: [{ text: 'Open backups in Admin', href: adminUrl('site') }]
+  });
 }
 
 export function backupStatus() {

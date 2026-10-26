@@ -16,6 +16,7 @@
  * Keys: VAPID_PUBLIC / VAPID_PRIVATE (Railway variables, base64url; never logged or printed). Without them nothing is
  * sent and the account page says alerts are not switched on yet.
  */
+import { alertOncePerDay, adminUrl, israelTime } from './adminMail';
 import crypto from 'crypto';
 import { pubPath } from './slugs';
 import axios from 'axios';
@@ -511,6 +512,13 @@ export async function sendDue(now = Date.now(), post: Poster = realPost): Promis
     if (okAny) sent++; else if (res.fail) failed++;
   }
   st.sent += sent; st.failed += failed;
+  // fix239: a delivery problem (10+ people's alerts failed in one run, most of the run) → one admin email a day
+  if (failed >= 10 && failed * 2 >= sent + failed) void alertOncePerDay('push-failed', `Site problem: ${failed} push alerts failed`, {
+    label: 'Push alerts', tone: 'fail', title: `${failed} of ${sent + failed} push alerts failed`,
+    what: `The push services refused alerts for ${failed} people in one run (${israelTime(now)}); the reasons are in Admin → Emails & alerts.`,
+    todo: 'Tell Claude — usually the VAPID keys or a push service outage (never change the keys yourself).',
+    buttons: [{ text: 'Open alerts in Admin', href: adminUrl('messages') }]
+  }, now);
   return { sent, failed };
 }
 

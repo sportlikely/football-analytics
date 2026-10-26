@@ -5,16 +5,20 @@
  * 10 Oct 2026: the provider had 108–114, the real result was 114–108 to Washington in overtime). We showed the
  * provider's numbers as they were. Now:
  *  1. NBA (not pre-season): every final is compared with balldontlie; a different result is corrected automatically.
- *  2. Every league: the players' points in the box score are added up per team. When they match the score the
- *     other way round, or the quarters don't add up to the total, the game is put "under review": no Right/Wrong
- *     badge and left out of the record until it is settled. The admin gets an email.
- *  3. The admin can correct any result by hand (swap, set the score, or confirm the provider) on the game page or
- *     in Users → Results to check. A correction survives every later provider update; "undo" removes it.
+ *  2. Every league: the players' points in the box score are added up per team. fix239: when they match the score
+ *     the other way round and the quarters (when we have them) add up the same way, the scores are swapped
+ *     automatically (bb_result_fix source "box score", logged, listed in the 07:00 summary email). When the signals
+ *     disagree or one is missing, or the quarters don't add up to the total, the game is put "under review": no
+ *     Right/Wrong badge and left out of the record until it is settled; the admin gets a "Needs you" email with
+ *     Swap scores / Keep as is buttons (services/adminMail.ts).
+ *  3. The admin can correct any result by hand (swap, set the score, or confirm the provider) on the game page, in
+ *     Admin → Needs you, or from the email. A correction survives every later provider update; "undo" removes it.
  * Missing overtime column (provider sends quarters 1–4 only): overtime = total − quarters, shown on the page.
  */
 import { db } from '../db';
 import logger from '../utils/logger';
-import { sendMail } from './email';
+import { swapVerdict } from '../utils/resultSwap';
+import { actionLink, adminUrl, israelTime, noteAutoFix, onEmailAction, sendAdminMail, siteUrl, type AdminMail } from './adminMail';
 import { isPreseason } from './bbModel';
 
 db.exec(`
@@ -132,10 +136,19 @@ function bdlFinal(g: any): { hs: number; as_: number } | null {
 }
 
 let alerted = new Set<number>();
+/** fix239: the players' points per team (null when a team has no box score) */
+function boxPoints(g: any): [number, number] | null {
+  const pts = (team: number) => (db.prepare('SELECT SUM(pts) AS s, COUNT(*) AS n FROM bb_player_stats WHERE game_id = ? AND team_id = ?').get(g.game_id, team) as any);
+  const ph = pts(g.home_id), pa = pts(g.away_id);
+  return ph?.n && pa?.n && ph.s != null && pa.s != null ? [ph.s, pa.s] : null;
+}
+const gameName = (g: any) => `${g.home_name} – ${g.away_name}`;
+const gamePath = (g: any) => `/basketball/game/${g.game_id}`;
+
 export async function checkResults(days = 10) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const games = db.prepare(`SELECT * FROM bb_games WHERE status IN ('FT','AOT') AND hs IS NOT NULL AND as_ IS NOT NULL AND kickoff >= ?`).all(since) as any[];
-  const fresh: string[] = [];
+  const fresh: any[] = [];
   let fixedAuto = 0;
   for (const g of games) {
     const fix = resultFix(g.game_id);
@@ -149,23 +162,30 @@ export async function checkResults(days = 10) {
         saveFix(g, b.hs, b.as_, swapped ? swapQ(parseQ(g.quarters)) : null, 'balldontlie', `provider had ${g.hs}-${g.as_}`, null);
         resolve(g.game_id, 'corrected from balldontlie', null);
         fixedAuto++;
-        logger.warn(`bb result: ${g.home_name}–${g.away_name} corrected from balldontlie ${g.hs}-${g.as_} → ${b.hs}-${b.as_}`);
-        fresh.push(`${g.home_name} – ${g.away_name} (${g.kickoff.slice(0, 10)}): corrected automatically from ${g.hs}-${g.as_} to ${b.hs}-${b.as_} (balldontlie).`);
+        logger.warn(`bb result: ${gameName(g)} corrected from balldontlie ${g.hs}-${g.as_} → ${b.hs}-${b.as_}`);
+        noteAutoFix('basketball result', `${gameName(g)}: ${g.hs}-${g.as_} → ${b.hs}-${b.as_}`, `${g.code}, ${israelTime(g.kickoff)}. balldontlie (the NBA's second source) had the other result; corrected and counted in the record.`, siteUrl(gamePath(g)));
         continue;
       }
       if (b) continue; // both sources agree
     }
-    if (done) continue; // already reviewed (or open)
-    // 2) box score: players' points per team the other way round
-    const pts = (team: number) => (db.prepare('SELECT SUM(pts) AS s, COUNT(*) AS n FROM bb_player_stats WHERE game_id = ? AND team_id = ?').get(g.game_id, team) as any);
-    const ph = pts(g.home_id), pa = pts(g.away_id);
-    let issue: string | null = null, detail: string | null = null;
-    if (ph?.n && pa?.n && ph.s === g.as_ && pa.s === g.hs && g.hs !== g.as_) {
-      issue = 'swapped?';
-      detail = `Score ${g.hs}-${g.as_}, but the players' points add up to ${ph.s}-${pa.s}: home and away may be swapped.`;
-    }
-    // 3) quarters that can't add up to the total (more than a missing overtime explains)
+    if (done?.resolved_at || fix) continue; // already reviewed, or already corrected
+    // 2) fix239: box score (and quarters) the other way round → swapped automatically when every signal agrees
     const q = parseQ(g.quarters);
+    const v = swapVerdict({ score: [g.hs, g.as_], box: boxPoints(g), periods: q });
+    let issue: string | null = null, detail: string | null = null;
+    if (v.action === 'swap') {
+      // the quarters (when there) already add up to the corrected score: only the totals change
+      saveFix(g, g.as_, g.hs, null, 'box score', `provider had ${g.hs}-${g.as_}; ${v.why}`, null);
+      if (done) resolve(g.game_id, 'swapped automatically (box score)', null);
+      fixedAuto++;
+      logger.warn(`bb result: ${gameName(g)} swapped automatically ${g.hs}-${g.as_} → ${g.as_}-${g.hs} (${v.why})`);
+      noteAutoFix('basketball result', `${gameName(g)}: ${g.hs}-${g.as_} → ${g.as_}-${g.hs}`,
+        `${g.code}, ${israelTime(g.kickoff)}. Home and away scores were swapped in the data: the players' points${q ? ' and the quarters' : ''} add up to ${g.as_}-${g.hs}. Corrected and back in the record.`, siteUrl(gamePath(g)));
+      continue;
+    }
+    if (done) continue; // open, still waiting for the admin
+    if (v.action === 'review') { issue = 'swapped?'; detail = `Score ${g.hs}-${g.as_}: ${v.why}.`; }
+    // 3) quarters that can't add up to the total (more than a missing overtime explains)
     if (!issue && q && q.home.slice(0, 4).every(v => v != null) && q.away.slice(0, 4).every(v => v != null)) {
       const oh = g.hs - sum4(q.home) - (q.home[4] ?? 0), oa = g.as_ - sum4(q.away) - (q.away[4] ?? 0);
       if (oh < 0 || oa < 0 || (q.home[4] != null && (oh !== 0 || oa !== 0))) {
@@ -175,22 +195,54 @@ export async function checkResults(days = 10) {
     }
     if (issue) {
       db.prepare('INSERT OR IGNORE INTO bb_result_check (game_id, issue, detail, found_at) VALUES (?, ?, ?, ?)').run(g.game_id, issue, detail, new Date().toISOString());
-      if (!alerted.has(g.game_id)) { alerted.add(g.game_id); fresh.push(`${g.home_name} – ${g.away_name} (${g.kickoff.slice(0, 10)}): ${detail} It is left out of the record until you check it.`); }
+      if (!alerted.has(g.game_id)) { alerted.add(g.game_id); fresh.push({ ...g, issue, detail }); }
     }
   }
+  if (alerted.size > 5000) alerted = new Set();
   if (fresh.length) await alert(fresh);
   return { checked: games.length, fixedAuto, open: (db.prepare('SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL').get() as any).n };
 }
 
-async function alert(lines: string[]) {
-  const to = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
-  if (!to) return;
-  try {
-    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    await sendMail({
-      to, subject: `SportLikely: ${lines.length} basketball result${lines.length === 1 ? '' : 's'} to check`,
-      text: `${lines.join('\n')}\n\nUsers → Overview → Results to check, or the game page.`,
-      html: `<ul>${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul><p>Users → Overview → Results to check, or the game page.</p>`
-    });
-  } catch { /* email off */ }
+/** fix239: the "Needs you" email (one per run with new games): each game with Swap scores / Keep as is / Open game. */
+export function needsYouMail(games: any[], now = Date.now()) {
+  const n = games.length;
+  const mail: AdminMail = {
+    label: 'Basketball results', tone: 'warn',
+    title: `${n} basketball result${n === 1 ? '' : 's'} to check`,
+    what: n === 1
+      ? `The score of ${gameName(games[0])} may be wrong in the data (${games[0].detail?.replace(/\.$/, '') || 'the checks disagree'}), so it is left out of the record.`
+      : `The scores of ${n} games may be wrong in the data and the checks disagree, so they are left out of the record.`,
+    todo: 'Compare with the league’s own site, then press "Swap scores" or "Keep as is".',
+    rows: games.map(g => ({
+      when: `${g.code} · ${israelTime(g.kickoff)}`,
+      title: `${g.home_name} ${g.hs}–${g.as_} ${g.away_name}`, titleHref: siteUrl(gamePath(g)),
+      detail: g.detail || undefined,
+      buttons: [
+        ...(g.issue === 'swapped?' ? [{ text: `Swap scores (${g.as_}–${g.hs})`, href: actionLink('bb-result', { game: g.game_id, act: 'swap' }, `Swap ${gameName(g)} to ${g.as_}-${g.hs}`, now) }] : []),
+        { text: 'Keep as is', href: actionLink('bb-result', { game: g.game_id, act: 'confirm' }, `Keep ${gameName(g)} at ${g.hs}-${g.as_}`, now), kind: 'secondary' as const },
+        { text: 'Open game', href: siteUrl(gamePath(g)), kind: 'secondary' as const }
+      ]
+    })),
+    buttons: [{ text: 'Open in Admin', href: adminUrl('needs-you') }],
+    footer: 'Swapped scores that the box score and the quarters confirm are fixed automatically and listed in the 07:00 summary instead.'
+  };
+  return { subject: `Needs you: ${n} basketball result${n === 1 ? '' : 's'}`, mail };
 }
+
+async function alert(games: any[]) {
+  const { subject, mail } = needsYouMail(games);
+  await sendAdminMail(subject, mail);
+}
+
+// the email buttons (services/adminMail.ts): Swap scores / Keep as is
+onEmailAction('bb-result', (p: { game: number; act: 'swap' | 'confirm' }, by) => {
+  const g: any = db.prepare('SELECT game_id, home_name, away_name, hs, as_ FROM bb_games WHERE game_id = ?').get(p.game);
+  if (!g) return { message: 'This game is no longer in the data.' };
+  const open = siteUrl(gamePath(g)).replace(/^https:\/\/[^/]+/, '');
+  const c: any = db.prepare('SELECT resolved_at, resolution, by_user FROM bb_result_check WHERE game_id = ?').get(p.game);
+  if (c?.resolved_at) return { message: `Already decided (${c.resolution}${c.by_user ? `, ${c.by_user}` : ''}): ${g.home_name} ${g.hs}–${g.as_} ${g.away_name}.`, open };
+  const r: any = adminResult(p.game, p.act, { note: 'from the admin email' }, by);
+  return p.act === 'swap'
+    ? { message: `Scores swapped: ${g.home_name} ${r.hs}–${r.as_} ${g.away_name}. The game counts in the record again.`, open }
+    : { message: `Kept as is: ${g.home_name} ${g.hs}–${g.as_} ${g.away_name}. The game counts in the record again.`, open };
+});

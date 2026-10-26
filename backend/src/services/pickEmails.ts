@@ -20,6 +20,7 @@
  * bounces and complaints stop the address (email_suppressed), opens and clicks are counted. No odds, no bookmakers,
  * no betting words; the footer carries the site's 18+ / responsible-use line. Words: locales/email/<lang>.json.
  */
+import { alertOncePerDay, adminUrl, israelTime } from './adminMail';
 import crypto from 'crypto';
 import { pubPath } from './slugs';
 import fs from 'fs';
@@ -873,6 +874,13 @@ export async function picksEmailTick(now = Date.now(), opts: { wait?: (ms: numbe
     }
     Object.assign(lastRun, { at: new Date(now).toISOString(), sent, skipped, failed });
     if (sent || failed || skipped) logger.info(`picks emails: ${sent} sent, ${skipped} skipped (nothing to send), ${failed} failed`);
+    // fix239: a delivery problem (3+ failed and at least a fifth of the run) → one admin email a day
+    if (failed >= 3 && failed * 5 >= sent + failed) void alertOncePerDay('picks-email-failed', `Site problem: ${failed} picks emails failed`, {
+      label: 'Emails', tone: 'fail', title: `${failed} of ${sent + failed} picks emails failed to send`,
+      what: `The email provider refused ${failed} daily / weekly picks emails in the run of ${israelTime(now)}; the reasons are in Admin → Emails & alerts.`,
+      todo: 'Check the email provider’s dashboard (sending domain, quota); tell Claude if it fails again tomorrow.',
+      buttons: [{ text: 'Open emails in Admin', href: adminUrl('messages') }]
+    }, now);
     return lastRun;
   } finally { running = false; }
 }

@@ -64,6 +64,7 @@ export function levelOf(conference: string | null, division: string | null = nul
 import { isFbsName } from './collegeFbs';
 import { boxUpdated, gameViews } from './gameViews';
 import { dueGames, budgetAllows } from '../utils/liveBox';
+import { applyNflFixes } from './resultChecks';
 export const HIDE_OTHER = `AND home_id NOT IN (SELECT team_id FROM nfl_teams WHERE level = 'other') AND away_id NOT IN (SELECT team_id FROM nfl_teams WHERE level = 'other')`;
 
 /**
@@ -320,6 +321,8 @@ export function storeGames(list: any[], season?: number, league: LeagueId = 1) {
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+  // fix239: our score corrections win over the provider's numbers (services/resultChecks.ts)
+  applyNflFixes(list.filter(g => NFL_DONE.includes(g?.game?.status?.short)).map(g => num(g?.game?.id)).filter((x): x is number => !!x));
   // live and just-finished games: one win-chance sample each (the swing chart)
   if (storedHook) {
     const ids = list.filter(g => [...LIVE_STATUS, ...NFL_DONE].includes(g?.game?.status?.short)).map(g => num(g?.game?.id)).filter((x): x is number => !!x);

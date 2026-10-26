@@ -27,7 +27,8 @@ import { GROUPS, seasonCodes } from './history';
 import { applyStoredTuning } from './gridModel';
 import { v3WindowRun, liveVector, applyVector, isTuning } from './v3Tuner';
 import { clearPredictionCache } from './predCache';
-import { sendEmail, emailEnabled, SITE, esc } from './email';
+import { sendEmail, emailEnabled, SITE } from './email';
+import { renderAdminMail, adminUrl, type AdminMail } from './adminMail';
 import { lastDataHealth } from './dataHealth';
 import { nbaV4ReportLines } from './nbaV4';
 import { gridReportLines, autoTuneLine, leagueTuneLine, missFitLine, impactFitLine } from './bbTuner';
@@ -361,7 +362,21 @@ export async function sendMorningReport(force = false) {
   db.prepare(`INSERT INTO model_daily (date, report) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET report = excluded.report`).run(date, text);
   const to = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean);
   if (emailEnabled && to.length) {
-    const html = `<pre style="font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap">${esc(text)}</pre>`;
+    // fix239: the admin template — the report as its body, a "what to do" only when something went wrong
+    const r: any = db.prepare(`SELECT decision, reason, rollback FROM model_daily WHERE date = ?`).get(date);
+    const health = lastDataHealth();
+    const red = health ? health.checks.filter(c => c.level === 'fail') : [];
+    const rolled = !!r?.rollback;
+    const mail: AdminMail = {
+      label: 'Model report', tone: rolled || red.length ? 'warn' : 'ok',
+      title: `Model report ${nice(date)}`,
+      what: !r ? 'The daily model job has not run today.' : rolled ? 'Last night’s model change was rolled back automatically: it predicted worse.' : r.decision === 'keep' ? 'The football model kept last night’s settings; yesterday’s numbers are below.' : `The football model changed last night: ${String(r.reason || '').replace(/\.$/, '')}.`,
+      todo: !r ? 'Check that the worker is running (Admin → Site health); tell Claude if it stays so tomorrow.'
+        : red.length ? `${red.length} data check${red.length === 1 ? ' is' : 's are'} red — open Admin → Needs you.` : null,
+      pre: text.split('\n').slice(2).join('\n'),
+      buttons: [{ text: 'Open models in Admin', href: adminUrl('models') }, ...(red.length ? [{ text: 'Open Needs you', href: adminUrl('needs-you'), kind: 'secondary' as const }] : [])]
+    };
+    const { html } = renderAdminMail(mail);
     for (const addr of to) await sendEmail(addr, `Model report ${nice(date)}`, html, text);
   }
   db.prepare(`UPDATE model_daily SET report_sent_at = ? WHERE date = ?`).run(new Date().toISOString(), date);

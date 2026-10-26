@@ -21,7 +21,8 @@ import footballDataAPI from './footballDataAPI';
 import { afUpcoming, afWithPredictions, afOverdue, fallbackReason } from './afMatches';
 import { afConfigured } from './apiFootball';
 import { feedState, bootedAt } from './freshness';
-import { emailEnabled, sendEmail, layout, section, esc, C, SITE } from './email';
+import { emailEnabled, sendEmail } from './email';
+import { renderAdminMail, adminUrl, israelTime as ilTime, type AdminMail } from './adminMail';
 import { lastDataAudit } from './dataAudit';
 import { everyHeavy, afterHeavy, heavySlicer, inBatches } from './perf';
 import { missingPredictions } from './missingPredictions';
@@ -467,46 +468,23 @@ export const lastDataHealth = () => store.read();
 export const storedDataHealth = () => store.read() || NOT_YET;
 
 /** Alert email: what has been failing for 30+ minutes, then what still works. */
+/** Alert email (fix239: the admin template): what has been failing for 30+ minutes, then what still works. */
 export function healthEmail(failing: Check[], all: Check[]) {
-  const when = new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
   const okCount = all.filter(c => c.level === 'ok').length;
-  let body = `<tr><td style="padding:18px 28px 4px">
-    <div style="font-size:13px;color:${C.muted};font-weight:600">Data alert</div>
-    <div style="font-size:22px;line-height:1.25;font-weight:800;color:${C.red};margin-top:6px">${failing.length === 1 ? esc(failing[0].label) + ' has a problem' : `${failing.length} data feeds have a problem`}</div>
-    <div style="font-size:14px;color:${C.muted};margin-top:6px">Failing for 30 minutes or more. ${okCount} of ${all.length} checks are still fine.</div>
-  </td></tr>`;
-  body += section('What’s wrong');
-  body += `<tr><td style="padding:0 28px">${failing
-    .map(c => `<div style="border:1px solid ${C.line};border-left:4px solid ${C.red};border-radius:10px;padding:10px 12px;margin:8px 0">
-      <div style="font-size:14px;font-weight:700">${esc(c.label)}</div>
-      <div style="font-size:13px;color:${C.muted};margin-top:3px">${esc(c.detail)}</div>
-      ${c.items?.length ? `<div style="font-size:12px;color:${C.muted};margin-top:6px">${c.items.slice(0, 6).map(i => '· ' + esc(i)).join('<br>')}${c.items.length > 6 ? `<br><span style="color:${C.faint}">+${c.items.length - 6} more</span>` : ''}</div>` : ''}
-    </div>`)
-    .join('')}</td></tr>`;
-  const others = all.filter(c => !failing.includes(c));
-  if (others.length) {
-    body += section('Everything else');
-    body += `<tr><td style="padding:0 28px;font-size:13px;line-height:1.9">${others
-      .map(c => `<span style="color:${c.level === 'ok' ? C.green : c.level === 'warn' ? C.amber : C.red}">●</span>&nbsp; ${esc(c.label)}`)
-      .join('<br>')}</td></tr>`;
-  }
-  body += `<tr><td style="height:12px"></td></tr>`;
-  const subject = `Data alert: ${failing.map(c => c.label).slice(0, 2).join(', ')}${failing.length > 2 ? ` +${failing.length - 2}` : ''}`;
-  const html = layout({
-    preheader: `${failing.map(c => c.label).join(', ')}: failing for 30+ minutes.`,
-    label: when,
-    body,
-    cta: { text: 'Open Data health', href: `${SITE}/admin` },
-    footer: 'You get at most one alert every 6 hours. It stops by itself once the feed recovers.'
-  });
-  const text = [
-    `SportLikely · data alert · ${when}`,
-    'Failing for 30+ minutes:',
-    ...failing.map(c => `- ${c.label}: ${c.detail}${c.items?.length ? '\n    ' + c.items.slice(0, 6).join('\n    ') : ''}`),
-    '',
-    `Data health: ${SITE}/admin`
-  ].join('\n');
-  return { subject, html, text };
+  const title = failing.length === 1 ? `${failing[0].label}: failing for 30+ minutes` : `${failing.length} data checks failing for 30+ minutes`;
+  const mail: AdminMail = {
+    label: 'Data health', tone: 'fail', title,
+    what: `${failing.length === 1 ? `“${failing[0].label}” has` : `${failing.length} checks have`} been red since ${ilTime(Date.now() - 30 * 60000, false)} or earlier; ${okCount} of ${all.length} checks are still fine.`,
+    todo: 'Open the check in Admin and do what its card says; most feeds recover by themselves, so tell Claude only if it is still red in a few hours.',
+    rows: [
+      ...failing.map(c => ({ title: c.label, detail: [c.detail, ...(c.items || []).slice(0, 6)].join(' · ') + ((c.items?.length || 0) > 6 ? ` · +${c.items!.length - 6} more` : ''), tone: 'fail' as const })),
+      ...all.filter(c => !failing.includes(c) && c.level !== 'ok').slice(0, 8).map(c => ({ title: c.label, detail: c.detail, tone: c.level === 'warn' ? 'warn' as const : 'fail' as const }))
+    ],
+    buttons: [{ text: 'Open in Admin', href: adminUrl('needs-you') }],
+    footer: 'At most one data alert every 6 hours; it stops by itself once the feed recovers.'
+  };
+  const subject = `Site problem: ${failing.map(c => c.label).slice(0, 2).join(', ')}${failing.length > 2 ? ` +${failing.length - 2}` : ''}`;
+  return { subject, ...renderAdminMail(mail) };
 }
 
 async function run() {
