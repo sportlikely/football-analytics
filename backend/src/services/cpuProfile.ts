@@ -4,7 +4,7 @@
  * on this thread, 5 ms sampling, parsed in that thread) and every stall over 300 ms gets the top 15 functions by
  * self-time in its window (answered at the profile's next swap: every 5 min, CPU_PROFILE_ROTATE_S) (file:line in the .ts source, the callers of the top 5). /api/perf → web.diagStalls (the last
  * stalls with their functions) and web.cpuTop (the functions summed over every profiled stall since the start).
- * Started from boot.ts before the modules load (so the start-up load is profiled too). CPU_PROFILE=0 turns it off.
+ * Started from boot.ts before the modules load (so the start-up load is profiled too). fix248c: only with CPU_PROFILE=1.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,7 +32,10 @@ function threadFile(): { file: string; execArgv?: string[] } | null {
 
 /** start the profiler thread (once; the process serving visitors only) */
 export function startCpuProfile() {
-  if (w || !isMainThread || process.env.CPU_PROFILE === '0') return;
+  // fix248c: off unless CPU_PROFILE=1 — each swap restarts V8's profiler, which logs every compiled function on the web
+  // thread (160–320 ms under load: the live 'short blocks' every ~5 min and the load test's one block). It measured
+  // what it had to (fix248 / fix248b); turn it on again for the next investigation.
+  if (w || !isMainThread || process.env.CPU_PROFILE !== '1') return;
   const f = threadFile();
   if (!f) return;
   try {

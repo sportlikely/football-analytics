@@ -1,5 +1,5 @@
 /**
- * fix243: stored views read off the web thread (workers/pageReader.ts: one thread, its own read-only connection).
+ * fix243: stored views read off the web thread (workers/pageReader.ts: its own read-only connection; fix248c: a pool).
  * getPage(…, { views }) asks for the views a request will send before it returns, so the request path only sends
  * strings already in memory. Without the thread (tests, PAGE_READER=0, the thread failed) the read is the old
  * synchronous one.
@@ -20,20 +20,50 @@ function threadFile(): { file: string; execArgv?: string[] } | null {
   return null;
 }
 
-let w: Worker | null = null;
-let failedAt = 0;
+/*
+ * fix248c: a pool of reader threads (PAGE_READERS, default 2), each with its own read-only connection; a read goes to
+ * the thread with the fewest reads in flight. With one thread a slow read (1,755 ms live, 27 Oct) held every read
+ * queued behind it.
+ */
+const SIZE = Math.max(1, Math.min(8, Number(process.env.READER_THREADS || process.env.PAGE_READERS) || 2)); // fix250: READER_THREADS
+type Slot = { w: Worker | null; failedAt: number; inflight: number };
+const slots: Slot[] = Array.from({ length: SIZE }, () => ({ w: null, failedAt: 0, inflight: 0 }));
 let seq = 0;
-const pending = new Map<number, { resolve: (m: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
-const stats = { reads: 0, errors: 0, maxMs: 0, restarts: 0 };
-/** /api/perf: the reader thread */
-export const pageReaderStatus = () => ({ on: !!w, pending: pending.size, ...stats });
+const pending = new Map<number, { resolve: (m: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; slot: Slot }>();
+const stats = { reads: 0, errors: 0, maxMs: 0, restarts: 0, over500: 0 };
+// the slowest reads (what they were), for /api/perf
+// fix250: every read over 500 ms is logged with its SQL (or stored key), the time in the thread and the bytes it returned
+// ("slow read 812 ms (thread 790 ms, 3,412 KB): SELECT …"; one line per statement a minute), the last 20 in /api/perf
+const slowest: { ms: number; what: string; at: string; threadMs?: number; kb?: number }[] = [];
+const slowLog: { at: string; ms: number; threadMs: number | null; kb: number | null; what: string }[] = [];
+const loggedAt = new Map<string, number>();
+const noteSlow = (ms: number, what: string, threadMs?: number, bytes?: number) => {
+  if (ms > 500) {
+    stats.over500++;
+    const kb = bytes != null ? Math.round(bytes / 1024) : null, tms = threadMs != null ? Math.round(threadMs) : null;
+    slowLog.push({ at: new Date().toISOString(), ms, threadMs: tms, kb, what: what.slice(0, 300) });
+    if (slowLog.length > 20) slowLog.shift();
+    const k = what.slice(0, 120);
+    if (Date.now() - (loggedAt.get(k) || 0) > 60_000) {
+      loggedAt.set(k, Date.now()); if (loggedAt.size > 500) loggedAt.clear();
+      logger.warn(`slow read ${ms} ms (thread ${tms ?? "?"} ms, ${kb ?? "?"} KB): ${what.slice(0, 300)}`);
+    }
+  }
+  if (slowest.length >= 5 && ms <= slowest[slowest.length - 1].ms) return;
+  slowest.push({ ms, what: what.slice(0, 160), at: new Date().toISOString(), threadMs: threadMs != null ? Math.round(threadMs) : undefined, kb: bytes != null ? Math.round(bytes / 1024) : undefined });
+  slowest.sort((a, b) => b.ms - a.ms);
+  slowest.length = Math.min(5, slowest.length);
+};
+/** /api/perf: the reader threads */
+export const pageReaderStatus = () => ({ on: slots.some(x => !!x.w), threads: slots.filter(x => !!x.w).length, size: SIZE, pending: pending.size, inflight: slots.map(x => x.inflight), ...stats, slowest, slowLog: slowLog.slice().reverse() });
 
-function failAll(e: Error) {
-  for (const [id, p] of pending) { clearTimeout(p.timer); pending.delete(id); p.reject(e); }
+function failSlot(slot: Slot, e: Error) {
+  for (const [id, p] of pending) if (p.slot === slot) { clearTimeout(p.timer); pending.delete(id); p.reject(e); }
+  slot.inflight = 0;
 }
-function thread(): Worker | null {
-  if (w) return w;
-  if (process.env.PAGE_READER === '0' || !isMainThread || Date.now() - failedAt < 60_000) return null;
+function start(slot: Slot): Worker | null {
+  if (slot.w) return slot.w;
+  if (process.env.PAGE_READER === '0' || !isMainThread || Date.now() - slot.failedAt < 60_000) return null;
   const f = threadFile();
   if (!f) return null;
   try {
@@ -46,23 +76,39 @@ function thread(): Worker | null {
       if (m.error) { stats.errors++; p.reject(new Error(m.error)); return; }
       p.resolve(m);
     });
-    const down = (e: Error) => { if (w === t) { w = null; failedAt = Date.now(); stats.restarts++; } failAll(e); };
+    const down = (e: Error) => { if (slot.w === t) { slot.w = null; slot.failedAt = Date.now(); stats.restarts++; } failSlot(slot, e); };
     t.on('error', e => { logger.warn(`page reader: ${e.message}`); down(e); });
     t.on('exit', c => down(new Error(`page reader stopped (${c})`)));
-    w = t;
-  } catch (e: any) { logger.warn(`page reader: ${e?.message || e}`); failedAt = Date.now(); return null; }
-  return w;
+    slot.w = t;
+  } catch (e: any) { logger.warn(`page reader: ${e?.message || e}`); slot.failedAt = Date.now(); return null; }
+  return slot.w;
 }
-/** is the thread there (else the caller reads synchronously) */
-export const pageReaderOn = () => !!thread();
+/** the least busy thread that is up (started on first use) */
+function pick(): Slot | null {
+  let best: Slot | null = null;
+  for (const slot of slots) if (start(slot) && (!best || slot.inflight < best.inflight)) best = slot;
+  return best;
+}
+/** is a thread there (else the caller reads synchronously) */
+export const pageReaderOn = () => !!pick();
 
 /** one stored row (key + built_at) read in the thread; rejects when the thread is not there or does not answer in 10 s */
 export function readStored(key: string, builtAt: number): Promise<ReadRow | null> {
-  return ask({ key, builtAt }).then(m => {
+  return ask({ key, builtAt }).then(async m => {
     const r = m.row;
-    return r ? { text: r.text, etag: r.etag, gz: r.gz ? asBuffer(r.gz) : null } : null;
+    if (!r) return null;
+    // fix250: a view over 2 MB is stored in parts (pageCache.ts): each part read on its own, spread over the threads
+    const n = partsCount(r.text);
+    const text = n ? (await Promise.all(Array.from({ length: n }, (_, i) => ask({ key: partKey(key, i), builtAt }).then(p => { if (!p.row) throw new Error(`${key}: part ${i} missing`); return p.row.text as string; })))).join("") : r.text;
+    return { text, etag: r.etag, gz: r.gz ? asBuffer(r.gz) : null };
   });
 }
+/** fix250: a stored view over SPLIT_CHARS is kept as a marker row + parts (no single read is slow) */
+export const SPLIT_CHARS = 2 * 1024 * 1024;
+const PARTS_MARK = '\u0003parts:'; // never at the start of a JSON / HTML text
+export const partKey = (key: string, i: number) => `${key}~${i}`;
+export const partsMarker = (n: number) => `${PARTS_MARK}${n}`;
+export const partsCount = (text: string) => (text.startsWith(PARTS_MARK) ? Number(text.slice(PARTS_MARK.length)) || 0 : 0);
 /** a Uint8Array from the thread as a Buffer (no copy) */
 export const asBuffer = (u: Uint8Array) => Buffer.from(u.buffer, u.byteOffset, u.byteLength);
 /**
@@ -72,18 +118,20 @@ export const asBuffer = (u: Uint8Array) => Buffer.from(u.buffer, u.byteOffset, u
 export function readSql<T = any>(sql: string, args: (string | number | null)[] = [], all = false): Promise<T> {
   return ask({ sql, args, all }).then(m => m.out as T);
 }
-function ask(msg: object): Promise<any> {
-  const t = thread();
-  if (!t) return Promise.reject(new Error('no page reader'));
+function ask(msg: { sql?: string; key?: string; [k: string]: unknown }): Promise<any> {
+  const slot = pick();
+  const t = slot?.w;
+  if (!slot || !t) return Promise.reject(new Error('no page reader'));
   const id = ++seq, t0 = Date.now();
+  slot.inflight++;
   return new Promise<any>((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); stats.errors++; reject(new Error('page reader timeout')); }, 10_000);
+    const timer = setTimeout(() => { if (pending.delete(id)) { stats.errors++; reject(new Error('page reader timeout')); } }, 10_000);
     timer.unref();
     pending.set(id, {
-      resolve: r => { stats.reads++; stats.maxMs = Math.max(stats.maxMs, Date.now() - t0); resolve(r); },
-      reject, timer
+      resolve: r => { const ms = Date.now() - t0; stats.reads++; stats.maxMs = Math.max(stats.maxMs, ms); noteSlow(ms, msg.sql ? `${msg.sql} [${JSON.stringify((msg as any).args || []).slice(0, 120)}]` : `page ${msg.key}`, r?.ms, r?.bytes); resolve(r); },
+      reject, timer, slot
     });
     t.ref(); // a read in flight keeps the thread (unref'd again when idle)
     t.postMessage({ id, ...msg });
-  }).finally(() => { if (!pending.size) w?.unref(); });
+  }).finally(() => { slot.inflight = Math.max(0, slot.inflight - 1); if (!slot.inflight) slot.w?.unref(); });
 }

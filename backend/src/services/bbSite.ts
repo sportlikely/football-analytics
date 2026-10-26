@@ -288,6 +288,22 @@ function markets(code: string, pHome: number, margin: number, total: number, hom
 
 /** API-Basketball standings of a league's current season (cached 1 hour), grouped by utils/bbStandingsGroups (fix201). */
 const standCache = new Map<string, { at: number; data: any }>();
+/*
+ * fix248c: the table for a game page without waiting for the provider — the last one (any age) at once, a new one
+ * fetched in the background once it is over an hour old (one call per league at a time; a failed call is not retried
+ * for 5 min). bbGame awaited bbStandings: every hour and after every failed call a visitor's request waited for the
+ * API-Basketball round-trip (/api/basketball/game/:id avg 2.3 s, max 11.6 s live, 27 Oct).
+ */
+const standRefresh = new Map<string, number>(); // code → when the last background call started
+export function bbStandingsNow(code: string): any {
+  const hit = standCache.get(code);
+  const last = standRefresh.get(code);
+  if ((!hit || Date.now() - hit.at >= 3600 * 1000) && (last === undefined || (last > 0 && Date.now() - last > 5 * 60 * 1000))) {
+    standRefresh.set(code, -1); // running
+    bbStandings(code).then(() => standRefresh.delete(code), () => standRefresh.set(code, Date.now()));
+  }
+  return hit?.data ?? null;
+}
 export async function bbStandings(code: string) {
   const hit = standCache.get(code);
   if (hit && Date.now() - hit.at < 3600 * 1000) return hit.data;
@@ -373,7 +389,7 @@ export async function bbGame(id: number, full: boolean) {
   }
   await mark('h2h + box');
   let standings: any = null;
-  try { standings = await bbStandings(g.code); } catch { /* table not available */ }
+  standings = bbStandingsNow(g.code); // fix248c: never a provider call on the request path
   tp = performance.now(); // (awaits are not counted)
   const ratings = full ? { home: teamRating(g.code, g.home_id), away: teamRating(g.code, g.away_id) } : null;
   // markets and model numbers: whoever sees the full prediction (and everyone once the game is over)
@@ -419,7 +435,8 @@ export async function bbGame(id: number, full: boolean) {
   const keyPlayers = game.state === 'done' ? null : keyPlayersFor(g, open);
   await mark('key players');
   const syncMs = parts.reduce((x, [, ms]) => x + ms, 0);
-  if (syncMs > 300) logger.warn(`bb game page ${id}: ${Math.round(syncMs)} ms (${parts.filter(([, ms]) => ms >= 30).sort((a, b) => b[1] - a[1]).map(([n, ms]) => `${n} ${Math.round(ms)} ms`).join(', ')}; total with waits ${Math.round(performance.now() - t0)} ms)`);
+  // fix248c: also when the waits make it slow (a provider call, the worker busy): total over 1 s
+  if (syncMs > 300 || performance.now() - t0 > 1000) logger.warn(`bb game page ${id}: ${Math.round(syncMs)} ms (${parts.filter(([, ms]) => ms >= 30).sort((a, b) => b[1] - a[1]).map(([n, ms]) => `${n} ${Math.round(ms)} ms`).join(', ')}; total with waits ${Math.round(performance.now() - t0)} ms)`);
   return {
     game,
     why,

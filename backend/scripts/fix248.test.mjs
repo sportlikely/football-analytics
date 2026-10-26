@@ -31,7 +31,7 @@ test('a stall is profiled: the busy function is on top, with its file:line, and 
       console.log('RESULT ' + JSON.stringify({ on: cpuProfileStatus(), diag: s.diagStalls, top: s.cpuTop }));
       process.exit(0);
     })();`;
-  const r = spawnSync(process.execPath, ['--no-warnings', '-e', code], { env: { ...process.env, LOG_LEVEL: 'error' }, encoding: 'utf8', timeout: 60000 });
+  const r = spawnSync(process.execPath, ['--no-warnings', '-e', code], { env: { ...process.env, LOG_LEVEL: 'error', CPU_PROFILE: '1' }, encoding: 'utf8', timeout: 60000 });
   const line = (r.stdout || '').split('\n').find(l => l.startsWith('RESULT '));
   assert.ok(line, `no result (status ${r.status}):\n${(r.stderr || '').slice(-2000)}`);
   const out = JSON.parse(line.slice(7));
@@ -49,4 +49,36 @@ test('a stall is profiled: the busy function is on top, with its file:line, and 
   assert.ok(fns.some(f => /utils\/slugRules\.ts:\d+$/.test(f)), `no source-mapped slugRules.ts line: ${fns.join(' | ')}`);
   assert.ok(slug.cpu.top.slice(0, 5).some(f => (f.stack || []).some(s => s.startsWith('slugLoop'))), 'callers kept');
   assert.ok(out.top.some(f => f.fn === 'burnTheThread'), 'cpuTop sums the stalls');
+});
+
+// fix248c: the reader threads are a pool (PAGE_READERS, default 2): a slow read on one never holds a quick one queued
+test('reader pool: a quick read is answered while a slow read runs on the other thread', () => {
+  const code = `
+    const fs = require('fs'), os = require('os'), path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fix248c-'));
+    process.env.DATA_DIR = dir;
+    const { readSql, pageReaderStatus } = require('${DIST}/services/pageReader.js');
+    (async () => {
+      const slowSql = 'WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 3000000) SELECT COUNT(*) AS n FROM c';
+      await readSql('SELECT 1 AS one'); await readSql('SELECT 1 AS one'); // both threads up
+      const t0 = Date.now();
+      const slow = readSql(slowSql).then(() => Date.now() - t0);
+      await new Promise(r => setTimeout(r, 20));
+      const t1 = Date.now();
+      const quick = await readSql('SELECT 2 AS two');
+      const quickMs = Date.now() - t1;
+      const slowMs = await slow;
+      console.log('RESULT ' + JSON.stringify({ quick, quickMs, slowMs, st: pageReaderStatus() }));
+      process.exit(0);
+    })();`;
+  const r = spawnSync(process.execPath, ['--no-warnings', '-e', code], { env: { ...process.env, LOG_LEVEL: 'error' }, encoding: 'utf8', timeout: 60000 });
+  const line = (r.stdout || '').split('\n').find(l => l.startsWith('RESULT '));
+  assert.ok(line, `no result (status ${r.status}):\n${(r.stderr || '').slice(-2000)}`);
+  const out = JSON.parse(line.slice(7));
+  assert.equal(out.quick.two, 2);
+  assert.equal(out.st.size, 2);
+  assert.equal(out.st.threads, 2);
+  assert.ok(out.slowMs > 150, `the slow read should take a while (${out.slowMs} ms)`);
+  assert.ok(out.quickMs < out.slowMs / 2, `quick read waited behind the slow one: ${out.quickMs} ms vs ${out.slowMs} ms`);
+  assert.ok(out.st.slowest.length >= 1 && /RECURSIVE/.test(out.st.slowest[0].what), JSON.stringify(out.st.slowest));
 });

@@ -519,3 +519,34 @@ the web thread were.**
   (step 6) is not built: decide from the second live profile.
 - Test: `npm run test:fix248` (a 900 ms busy function on top with its line; a dist function mapped to
   utils/slugRules.ts:25 with its caller).
+
+### fix248c — what the second profile left: latency, not blocking (27 Oct)
+
+The second live profile (acaabb2, 24 min of real traffic): **0 stalls over 300 ms** (before: 9–22 an hour, worst 2.5 s);
+4 blocks of 150–300 ms (URL parsing, one SQLite prepare). Left: every HTML route with a max of 6.0–6.7 s, the reader
+thread's maxMs 1,755, /api/basketball/game/:id avg 2.3 s / max 11.6 s, ~900 /basketball/* renders in 24 min.
+
+- **HTML waits**: the 6 s = the slug lookup asking the worker (3 s) + the wait for a first build (SEO_WAIT_MS 3 s). A
+  visitor now waits for neither: 800 ms at most for the slug answer, no first-build wait (the plain app page at once,
+  the worker builds the copy in the background). A verified search engine keeps both 3 s waits (it gets the full
+  HTML). /api/perf → `seoMisses`: which pages were sent as the app page and why (`not stored yet` / `no html` /
+  `old build`, per kind and language, the last 20 addresses) — a kind that keeps missing is one the worker does not
+  pre-build.
+- **Reader pool**: services/pageReader.ts runs PAGE_READERS threads (default 2, each its own read-only connection),
+  a read goes to the least busy one. /api/perf → pageReader: `threads`, `inflight` per thread, `over500`, the 5
+  slowest reads (`slowest`: the statement or page key) — names the read behind a max like 1,755 ms.
+- **/api/basketball/game/:id**: locally the build is 36–119 ms cold, 1 ms from the kept copy, 6–28 ms signed in (10 Oct
+  copy). The live time was the data provider on the request path: `bbStandings` (kept an hour, then the next game
+  view waited for API-Basketball; a failed call cached nothing, so every view retried it) and each team's roster
+  (`rosterOf`, once 6–24 h old). Now the game page takes the last table (`bbStandingsNow`) and the stored roster at
+  once and refreshes them in the background (one call per league / team at a time; a failed table call waits 5 min).
+  It stays a worker route with kept copies (signed out: the copy at once, refreshed after 20 s) — the build itself is
+  not the slow part. A game page over 1 s in all (waits included) is logged with its parts ("bb game page …").
+- **Step 5, who sends the renders**: /api/perf → `htmlBy` (this hour and the last): HTML renders by user-agent
+  family × network (AS name, or "other"), "verified" / "unverified bot", and how many were refused. An unverified bot
+  (a crawler / tool user-agent that is not a verified search engine, or none) now gets the fix199 address limits on HTML
+  from any network (60 an hour, 300 a day per address, 600 an hour per network: botHtmlLimiter) → 429 + Retry-After.
+  Before, only data-centre / proxy addresses were counted. Browsers and verified search engines are never counted
+  here; this machine's own address is not either (tests).
+- The cluster (step 6) is not built: nothing blocks the web thread any more (Yarin, 27 Oct).
+- **Profiler off by default** (CPU_PROFILE=1 turns it on): its 5-min swap was the remaining block (321 ms in the load test; the live short blocks of 160–220 ms every ~5 min, mostly (program)). **Load test** (27 Oct, 10 Oct copy, 1,000 visitors × 5 min): 296,628 requests, 980 req/s, p50 2 ms · p95 8 ms · p99 15 ms, 0 × 5xx, 0 network errors, longest web block 97 ms → PASS. Once in the run every route's max reached ~4 s at the same moment while the web thread was free (97 ms): suspected this PC (load client, web and the worker's model builds on one machine) — the live route max tells.

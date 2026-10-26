@@ -33,10 +33,25 @@ db.exec(`CREATE TABLE IF NOT EXISTS bb_roster_check (team_id INTEGER NOT NULL, s
  * A team's current squad from API-Basketball (on failure the last stored list is used). fix166: refreshed once a day,
  * every 6 hours when the team has played in the last 24 hours; crawlers get the stored list (never a provider call).
  */
+/*
+ * fix248c: a roster due for its check is fetched in the background when one is stored (the page is built from the
+ * stored one at once); the provider call was on the game page's request path for both teams once a roster was 6–24 h
+ * old (/api/basketball/game/:id avg 2.3 s, max 11.6 s live, 27 Oct). Only a team with no roster at all waits for it.
+ */
+const rosterRefresh = new Set<string>();
 async function rosterOf(teamId: number, season: string) {
   const read = () => db.prepare(`SELECT * FROM bb_roster WHERE team_id = ? AND season = ? ORDER BY name`).all(teamId, season) as any[];
   const have = read();
   if (isCrawlerRequest()) return have;
+  if (!have.length) return rosterFetch(teamId, season, have, read);
+  const k = `${teamId}|${season}`;
+  if (!rosterRefresh.has(k)) {
+    rosterRefresh.add(k);
+    void rosterFetch(teamId, season, have, read).finally(() => rosterRefresh.delete(k));
+  }
+  return have;
+}
+async function rosterFetch(teamId: number, season: string, have: any[], read: () => any[]) {
   const checked: any = db.prepare(`SELECT at FROM bb_roster_check WHERE team_id = ? AND season = ?`).get(teamId, season);
   const at = Math.max(have.length ? Date.parse(have[0].updated_at) : 0, checked ? Date.parse(checked.at) : 0);
   const played = !!db.prepare(`SELECT 1 FROM bb_games WHERE (home_id = ? OR away_id = ?) AND status IN ('FT','AOT') AND kickoff > ? AND kickoff <= ? LIMIT 1`)
