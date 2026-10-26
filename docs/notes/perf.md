@@ -581,3 +581,13 @@ signed-in visitors (Yarin) always waited for the worker's fresh answer.
   marker row + 2 MB parts read in parallel (pageCache.ts / pageReader.readStored).
 - Test: npm run test:fix250. Load: `LOAD_COLD=1 npm run test:load` = the server started, 200 visitors in its first
   minute, pass = every request < 1 s and no 5xx.
+- **Measured** (27 Oct, this PC, the 10 Oct database copy, web + worker, provider keys blanked):
+  - steady (`npm run test:load`, 1,000 visitors × 5 min): 297,029 requests, 981 req/s, p50 3 ms · p95 13 ms · p99 65 ms ·
+    **max 930 ms** (every request under 1 s), 0 × 5xx, 627 × pending, longest web block 131 ms → PASS.
+  - cold start (`LOAD_COLD=1 npm run test:load`): port answering 0.49 s after the start, 200 visitors in the first minute:
+    11,960 requests, p95 12 ms, p99 283 ms, **max 908 ms**, 0 × 5xx, 11 × pending → PASS.
+  - paint (`npm run test:paint`, Chromium, cold server, 20 pages across sports / languages, phone size): every page
+    painted (skeleton or content) within 303 ms, none blank → PASS. Content: median 281 ms; 6 football match / team pages
+    stayed on the skeleton + "Updating…" because the worker answered 500 "API_FOOTBALL_KEY is not set" here (no
+    provider key locally) — on the server they are built.
+  - slow-read log: no read over 500 ms in these runs.
