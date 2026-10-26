@@ -697,14 +697,20 @@ export async function getAfScorers(code: string, limit = 40) {
     return {
       season: usedSeason,
       scorers: (j.response || []).slice(0, limit).map((r: any) => {
-        const s = r.statistics?.[0] || {};
+        // fix240: a player who moved between two clubs of this league has one statistics entry per club — all of them
+        // count (the first one alone gave the data check "official 3 goals, his page 7")
+        const all = ((r.statistics || []) as any[]).filter(x => !x.league?.id || x.league.id === id);
+        const list = all.length ? all : (r.statistics || []).slice(0, 1);
+        const s = [...list].sort((a: any, b: any) => (b.games?.appearences || 0) - (a.games?.appearences || 0))[0] || {};
+        const add = (f: (x: any) => any) => list.reduce((t: number, x: any) => t + (Number(f(x)) || 0), 0);
         return {
           player: { id: AF_OFFSET + r.player.id, name: r.player.name, nationality: r.player.nationality },
           team: afTeam(s.team),
-          playedMatches: s.games?.appearences ?? null,
-          goals: s.goals?.total ?? 0,
-          assists: s.goals?.assists ?? 0,
-          penalties: s.penalty?.scored ?? null
+          playedMatches: list.some((x: any) => x.games?.appearences != null) ? add(x => x.games?.appearences) : null,
+          goals: add(x => x.goals?.total),
+          assists: add(x => x.goals?.assists),
+          penalties: list.some((x: any) => x.penalty?.scored != null) ? add(x => x.penalty?.scored) : null,
+          clubs: list.length
         };
       })
     };
@@ -976,6 +982,10 @@ const storeLink = db.prepare(`INSERT OR REPLACE INTO fd_af_links (fd_id, af_id, 
 export function afIdOfFd(fdId: number): { fid: number; swapped: boolean } | null {
   const v = fdToAf.get(fdId);
   return v ? { fid: v, swapped: fdToAfSwap.has(fdId) } : null;
+}
+/** fix240: the Football-Data.org match linked to an API-Football fixture (id without the offset), not swapped ones */
+export function fdIdOfAf(fid: number): number | null {
+  try { return (db.prepare(`SELECT fd_id FROM fd_af_links WHERE af_id = ? AND swapped = 0 ORDER BY at DESC LIMIT 1`).get(fid) as any)?.fd_id ?? null; } catch { return null; }
 }
 /** fix212: API-Football's last live=all reading of a fixture (FD-shaped) and when it was fetched */
 export function afLiveReading(fid: number): { match: any; at: number } | null {

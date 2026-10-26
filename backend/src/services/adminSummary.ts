@@ -29,7 +29,8 @@ export function adminSummary(now = Date.now()): AdminSummary {
   return {
     injuriesToReview: count(`SELECT COUNT(*) AS n FROM bb_news_injuries WHERE state = 'active' AND reviewed = 0`),
     // fix239: + the American football / tennis results waiting for a decision (services/resultChecks.ts)
-    bbResultsToCheck: count(`SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL`) + count(`SELECT COUNT(*) AS n FROM result_review WHERE resolved_at IS NULL`),
+    bbResultsToCheck: count(`SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL`) + count(`SELECT COUNT(*) AS n FROM result_review WHERE resolved_at IS NULL`)
+      + count(`SELECT COUNT(*) AS n FROM settle_review WHERE resolved_at IS NULL`), // fix240: football games with no final at 48 h
     contactOpen: count(`SELECT COUNT(*) AS n FROM contact_messages WHERE handled = 0`),
     // the same "people" rule as the Visitors card (services/visitors.ts)
     visitorsToday: count(`SELECT COUNT(DISTINCT vid) AS n FROM visits WHERE day >= ? AND (human = 1 OR signed_in = 1)`, day),

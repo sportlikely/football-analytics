@@ -110,6 +110,7 @@ export function adminResult(gameId: number, action: string, body: any, by: strin
 }
 
 export function resultChecksList() {
+  closePreseasonChecks(); // fix240: never listed
   const open = db.prepare(`SELECT c.game_id, c.issue, c.detail, c.found_at, g.code, g.kickoff, g.home_name, g.away_name, g.hs, g.as_
     FROM bb_result_check c JOIN bb_games g ON g.game_id = c.game_id WHERE c.resolved_at IS NULL ORDER BY c.found_at DESC`).all();
   const fixes = db.prepare(`SELECT f.game_id, f.hs, f.as_, f.source, f.note, f.by_user, f.at, f.provider_hs, f.provider_as, g.code, g.kickoff, g.home_name, g.away_name
@@ -150,10 +151,23 @@ export async function checkResults(days = 10) {
   const games = db.prepare(`SELECT * FROM bb_games WHERE status IN ('FT','AOT') AND hs IS NOT NULL AND as_ IS NOT NULL AND kickoff >= ?`).all(since) as any[];
   const fresh: any[] = [];
   let fixedAuto = 0;
+  closePreseasonChecks(); // fix240: open checks of pre-season games from before are closed as they are
   for (const g of games) {
     const fix = resultFix(g.game_id);
     if (fix?.source === 'manual') continue; // the admin decided
     const done: any = db.prepare('SELECT resolved_at FROM bb_result_check WHERE game_id = ?').get(g.game_id);
+    if (isPreseason(g)) {
+      // fix240: pre-season is not in the record, so it is never listed: fixed silently when the box score (and the
+      // quarters, when there) clearly say swapped, otherwise kept as the provider has it
+      if (fix || done) continue;
+      const v = swapVerdict({ score: [g.hs, g.as_], box: boxPoints(g), periods: parseQ(g.quarters) });
+      if (v.action === 'swap') {
+        saveFix(g, g.as_, g.hs, null, 'box score', `pre-season; provider had ${g.hs}-${g.as_}; ${v.why}`, null);
+        fixedAuto++;
+        logger.info(`bb result (pre-season): ${gameName(g)} swapped silently ${g.hs}-${g.as_} → ${g.as_}-${g.hs} (${v.why})`);
+      }
+      continue;
+    }
     // 1) NBA regular season / playoffs: balldontlie is the second source
     if (g.code === 'NBA' && !isPreseason({ code: g.code, kickoff: g.kickoff })) {
       const b = bdlFinal(g);
@@ -201,6 +215,14 @@ export async function checkResults(days = 10) {
   if (alerted.size > 5000) alerted = new Set();
   if (fresh.length) await alert(fresh);
   return { checked: games.length, fixedAuto, open: (db.prepare('SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL').get() as any).n };
+}
+
+/** fix240: open checks of pre-season games (not in the record) closed as they are, so Needs you never lists them. */
+export function closePreseasonChecks(): number {
+  const open = db.prepare(`SELECT c.game_id, g.code, g.kickoff, g.stage FROM bb_result_check c JOIN bb_games g ON g.game_id = c.game_id WHERE c.resolved_at IS NULL`).all() as any[];
+  let n = 0;
+  for (const r of open) if (isPreseason(r)) { resolve(r.game_id, 'pre-season (not in the record), kept as is', null); n++; }
+  return n;
 }
 
 /** fix239: the "Needs you" email (one per run with new games): each game with Swap scores / Keep as is / Open game. */

@@ -101,7 +101,7 @@ import { sharedStatus } from './services/shared';
 import { forwardToWorker, fetchFromWorker } from './services/forward';
 import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, type LinkAnswer } from './services/slugs';
 import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
-import { definePage, getPage, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
+import { definePage, getPage, refreshPages, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions } from './services/proxyGuard';
@@ -164,7 +164,7 @@ const nflTeam = builder('NFL team page', nflTeamB);
 const nflPlayer = builder('NFL player page', nflPlayerB);
 const moreForGame = builder('more predictions (game)', moreForGameB);
 const saveOne = builder('more predictions (save)', saveOneB);
-import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders } from './services/unsettled';
+import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders, openSettleReviews, decideSettle, SettleError } from './services/unsettled';
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
 import { createHash, randomBytes } from 'node:crypto';
@@ -3539,7 +3539,19 @@ app.get('/api/basketball/game/:id(\\d+)', async (req, res) => {
   }
 });
 // Basketball results: checks and admin corrections (services/bbResults.ts)
-app.get('/api/admin/bb/result-checks', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...resultChecksList(), other: openReviews() } }); });
+app.get('/api/admin/bb/result-checks', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...resultChecksList(), other: openReviews(), football: openSettleReviews() } }); });
+// fix240: football games with no final 48 h after kick-off (services/unsettled.ts): Enter result { home, away } / Void
+app.post('/api/admin/settle-review/:id(\d+)', jsonOnly, (req, res) => {
+  try {
+    const r = decideSettle(parseInt(req.params.id, 10), String(req.body?.action || ''), req.body, req.user?.email || 'admin');
+    securityLog(req, 'result_corrected', req.user, `football ${req.params.id}: ${req.body?.action}${req.body?.action === 'result' ? ` ${req.body?.home}-${req.body?.away}` : ''}`);
+    refreshPages('summary', 'record', 'results');
+    res.json({ data: r });
+  } catch (e: any) {
+    if (e instanceof SettleError) return res.status(e.status).json({ error: e.message });
+    sendError(res, e, 'Could not settle the game');
+  }
+});
 // fix239: American football / tennis results waiting for a decision (services/resultChecks.ts): swap / confirm
 app.post('/api/admin/result-review/:sport/:id(\\d+)', jsonOnly, (req, res) => {
   try {

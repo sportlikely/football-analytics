@@ -9,18 +9,26 @@
  *  3. Not found (or found but still not started / not final) → one attempt per UTC day; after 3 attempts on 3
  *     different days → void.
  *
+ * fix240 (Slovan Liberec – Baník Ostrava, Morton – Ayr, 24 Oct: still unsettled 50 h later, data health red): the
+ * lookups start at kick-off + 24 h (both providers, the other provider's twin too), and a game the providers still have
+ * no answer for at 48 h is no longer voided by itself after 3 days: it goes to Admin → Needs you with "Enter result" /
+ * "Void" (and keeps being looked up — a final that shows up later settles it and closes the item).
+ *
  * Void = the prediction is out of every accuracy number, hidden from results pages and the users' history, shown in
  * admin with the reason. Never a loss.
  */
+export const REFETCH_AFTER_MS = 24 * 3600 * 1000;
 export const VOID_AFTER_MS = 48 * 3600 * 1000;
+/** fix240: kick-off + 48 h with no answer → Needs you */
+export const REVIEW_AFTER_MS = VOID_AFTER_MS;
 export const VOID_ATTEMPTS = 3;
 export const TEAM_WINDOW_DAYS = 3;
 
 /** What the provider said about the game (null = nothing found by id or by teams). */
 export type Lookup =
-  | { kind: 'final'; home: number; away: number; raw: string; via: 'id' | 'teams'; id?: number }
-  | { kind: 'off'; raw: string; date: string | null; via: 'id' | 'teams'; id?: number }
-  | { kind: 'open'; raw: string; date: string | null; via: 'id' | 'teams'; id?: number }
+  | { kind: 'final'; home: number; away: number; raw: string; via: 'id' | 'teams' | 'twin'; id?: number }
+  | { kind: 'off'; raw: string; date: string | null; via: 'id' | 'teams' | 'twin'; id?: number }
+  | { kind: 'open'; raw: string; date: string | null; via: 'id' | 'teams' | 'twin'; id?: number }
   | null;
 
 export type Decision =
@@ -28,6 +36,7 @@ export type Decision =
   | { action: 'move'; date: string; note: string }
   | { action: 'void'; reason: string }
   | { action: 'retry'; attempts: number; note: string }
+  | { action: 'review'; attempts: number; note: string }
   | { action: 'wait'; note: string };
 
 /** The provider's status of a fixture → the kind used above (API-Football short codes and Football-Data.org names). */
@@ -44,11 +53,11 @@ export const sameDay = (a: string | null | undefined, b: string | null | undefin
 /**
  * The decision for one game.
  * `kickoff` = our stored kick-off; `attempts` / `lastDay` = earlier failed attempts (lastDay = UTC day of the last one);
- * `now` = ms. A game younger than kick-off + 48 h waits (the normal settle job handles it).
+ * `now` = ms. A game younger than kick-off + 24 h waits (the normal settle job handles it).
  */
 export function decide(found: Lookup, o: { kickoff: string; attempts: number; lastDay: string | null; now: number }): Decision {
   const ko = Date.parse(o.kickoff);
-  if (!(o.now - ko >= VOID_AFTER_MS)) return { action: 'wait', note: 'less than 48 h after kick-off' };
+  if (!(o.now - ko >= REFETCH_AFTER_MS)) return { action: 'wait', note: 'less than 24 h after kick-off' };
   const today = new Date(o.now).toISOString().slice(0, 10);
   if (found && found.kind === 'final') return { action: 'settle', home: found.home, away: found.away, raw: found.raw, note: `final ${found.home}–${found.away} (${found.raw}, by ${found.via})` };
   const later = found && found.date && Date.parse(found.date) > o.now ? found.date : null;
@@ -57,12 +66,12 @@ export function decide(found: Lookup, o: { kickoff: string; attempts: number; la
     return { action: 'void', reason: `${found.raw === 'CANC' || found.raw === 'CANCELLED' ? 'cancelled' : found.raw === 'ABD' ? 'abandoned' : 'postponed'} by the provider (${found.raw}), no new date` };
   }
   if (found && found.kind === 'open' && later) return { action: 'move', date: later, note: `moved to ${later} (by ${found.via})` };
-  // not found, or still not final on the provider: one attempt a day
+  // not found, or still not final on the provider: looked up again every run (attempts = days with a lookup)
   const attempts = o.lastDay === today ? o.attempts : o.attempts + 1;
-  if (attempts >= VOID_ATTEMPTS) {
-    return { action: 'void', reason: found ? `still ${found.raw} on the provider after ${attempts} checks on ${attempts} days` : `not found by fixture id or by the two teams (±${TEAM_WINDOW_DAYS} days) after ${attempts} checks on ${attempts} days` };
-  }
-  return { action: 'retry', attempts, note: found ? `still ${found.raw} (check ${attempts} of ${VOID_ATTEMPTS})` : `not found (check ${attempts} of ${VOID_ATTEMPTS})` };
+  const what = found ? `still ${found.raw} on the provider (by ${found.via})` : `not found by fixture id or by the two teams (±${TEAM_WINDOW_DAYS} days)`;
+  // fix240: from kick-off + 48 h a person decides (Needs you: Enter result / Void); no automatic void
+  if (o.now - ko >= REVIEW_AFTER_MS) return { action: 'review', attempts, note: `${what}, ${Math.floor((o.now - ko) / 3600000)} h after kick-off` };
+  return { action: 'retry', attempts, note: what };
 }
 
 /** Team names compared loosely ("Al-Hilal" = "Al Hilal Saudi FC"). */

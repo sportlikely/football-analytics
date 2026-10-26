@@ -589,6 +589,43 @@ async function buildMatches(sport: LinkSport, step: () => Promise<void>, full: b
 /* ---------- the state each sport publishes (web lookups + the app's exception list) ---------- */
 
 const WINDOW_BACK = 60, WINDOW_AHEAD = 30;
+
+/*
+ * fix240: the slug job runs every 15 minutes and published both states of every sport each time (8 publishes, 32 an
+ * hour) although almost nothing changes between two runs; the web process then deserialized and swapped maps of
+ * hundreds of thousands of entries each time, and the old maps went to the garbage collector — major GC pauses that
+ * stalled whatever request was in flight (web stalls 17 / h, 26 Oct). Now a state is published only when its content
+ * changed: an order-independent hash of every entry, kept in slug_state_sig so a worker restart does not republish.
+ */
+db.exec(`CREATE TABLE IF NOT EXISTS slug_state_sig (key TEXT PRIMARY KEY, sig TEXT NOT NULL, at TEXT NOT NULL)`);
+function fnv(s: string, seed: number): number {
+  let h = seed >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h;
+}
+/** content hash of a list of strings, the same whatever their order */
+export async function contentSig(parts: Iterable<string>, step?: () => Promise<void>): Promise<string> {
+  let a = 0, b = 0, n = 0;
+  for (const s of parts) {
+    a = (a + fnv(s, 2166136261)) >>> 0;
+    b = (b ^ Math.imul(fnv(s, 84696351), 2654435761)) >>> 0;
+    if (++n % 5000 === 0 && step) await step();
+  }
+  return `${n}.${a.toString(36)}.${b.toString(36)}`;
+}
+const sigOf = (key: string) => { try { return (db.prepare(`SELECT sig FROM slug_state_sig WHERE key = ?`).get(key) as any)?.sig ?? null; } catch { return null; } };
+/** publish (worker → web) only when the content changed since the last publish; the worker's own copy is always set */
+function publishIfChanged(key: string, value: unknown, sig: string): boolean {
+  let stored = true;
+  try { stored = !!db.prepare(`SELECT 1 FROM shared_state WHERE key = ?`).get(key); } catch { /* one process: no table needed */ }
+  if (stored && sigOf(key) === sig) return false;
+  applyState(key, value);
+  db.prepare(`INSERT OR REPLACE INTO slug_state_sig (key, sig, at) VALUES (?, ?, ?)`).run(key, sig, new Date().toISOString());
+  return true;
+}
+function* mapStrings(map: Map<string, string>) { for (const [k, v] of map) yield `${k}|${v}`; }
+function* chunkStrings(chunks: IdChunk[]) { for (const c of chunks) for (let i = 0; i < c.ids.length; i++) yield `${c.kind}|${c.ids[i]}|${c.text.slice(c.off[i], c.off[i + 1])}`; }
+
 async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   const map = new Map<string, string>();
   const put = (kind: LinkKind, rows: any[]) => {
@@ -634,7 +671,8 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   await step();
   const st: SlugState = { sport, builtAt: Date.now(), map, client: JSON.stringify({ v: 1, ...client }), clientPlayers: JSON.stringify({ v: 1, p: clientP }) };
   states.set(sport, st);
-  applyState(`slugs:${sport}`, st);
+  const sig = `${await contentSig(mapStrings(map), step)}|${await contentSig([st.client, st.clientPlayers])}`;
+  if (!publishIfChanged(`slugs:${sport}`, st, sig)) logger.debug?.(`slugs ${sport}: unchanged, not republished`);
   await step();
   // fix238: every match and player (all seasons) + their old / twin ids → the id index the web answers old links from
   const chunks: IdChunk[] = [];
@@ -652,7 +690,7 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   }
   const ix: IdIndex = { sport, builtAt: Date.now(), entries, chunks };
   idIndexes.set(sport, ix);
-  applyState(`slugs-ids:${sport}`, ix);
+  publishIfChanged(`slugs-ids:${sport}`, ix, await contentSig(chunkStrings(chunks), step));
 }
 function recentPlayers(sport: LinkSport): Set<string> | null {
   if (sport === 'football') { const s = all(`SELECT MAX(season) AS s FROM af_player_season`)[0]?.s; return s ? new Set(all(`SELECT DISTINCT player_id AS id FROM af_player_season WHERE season >= ?`, s - 1).map(r => String(r.id))) : new Set(); }

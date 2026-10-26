@@ -23,7 +23,7 @@ import { afConfigured } from './apiFootball';
 import { feedState, bootedAt } from './freshness';
 import { emailEnabled, sendEmail } from './email';
 import { renderAdminMail, adminUrl, israelTime as ilTime, type AdminMail } from './adminMail';
-import { lastDataAudit } from './dataAudit';
+import { lastDataAudit, leagueShare, AUDIT_TARGET } from './dataAudit';
 import { everyHeavy, afterHeavy, heavySlicer, inBatches } from './perf';
 import { missingPredictions } from './missingPredictions';
 import { tennisDataCheck } from './tennis';
@@ -321,16 +321,25 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     const cutoff = new Date(now - 4 * 3600 * 1000).toISOString();
     const rows = db.prepare(`SELECT match_id, MAX(home_team) AS home_team, MAX(away_team) AS away_team, MAX(competition_name) AS competition_name, MAX(utc_date) AS utc_date
       FROM predictions WHERE settled = 0 AND utc_date < ? GROUP BY match_id ORDER BY utc_date`).all(cutoff) as any[];
+    // fix240: a game in Admin → Needs you (no final at either provider 48 h after kick-off, "Enter result" / "Void")
+    // is waiting for a person, not lost: warn. Fail = older than 48 h and in nobody's hands (the lookups never reached it).
+    const waiting = new Set<number>();
+    try { for (const r of db.prepare(`SELECT match_id FROM settle_review WHERE resolved_at IS NULL`).all() as any[]) waiting.add(r.match_id); } catch { /* none yet */ }
+    // looked up in the last 2 h: the hourly run has it (it moves to Needs you on its next pass after 48 h)
+    const looked = new Set<number>();
+    try { for (const r of db.prepare(`SELECT match_id FROM settle_lookups WHERE updated_at >= ?`).all(new Date(now - 2 * 3600 * 1000).toISOString()) as any[]) looked.add(r.match_id); } catch { /* none yet */ }
     const old = rows.filter(r => new Date(r.utc_date).getTime() < now - 48 * 3600 * 1000);
+    const lost = old.filter(r => !waiting.has(r.match_id) && !looked.has(r.match_id));
     let voided = 0;
     try { voided = voidedThisMonth(now); } catch { /* table missing */ }
     const tries = new Map<number, string>();
     try { for (const t of db.prepare(`SELECT match_id, note FROM settle_lookups`).all() as any[]) tries.set(t.match_id, t.note); } catch { /* none yet */ }
     const note = voided ? ` · ${voided} voided this month` : '';
+    const inNeeds = old.filter(r => waiting.has(r.match_id)).length;
     checks.push({
-      id: 'unsettled', label: 'Finished games are scored in our record', level: old.length ? 'fail' : rows.length ? 'warn' : 'ok',
-      detail: rows.length ? `${rows.length} game(s) past kick-off + 4 h not settled yet (${old.length} older than 48 h)${note}` : `Every finished game is settled${note}`,
-      items: rows.slice(0, 15).map(r => `${gameName(r)}${tries.has(r.match_id) ? ` · ${tries.get(r.match_id)}` : ''}`)
+      id: 'unsettled', label: 'Finished games are scored in our record', level: lost.length ? 'fail' : rows.length ? 'warn' : 'ok',
+      detail: rows.length ? `${rows.length} game(s) past kick-off + 4 h not settled yet (${old.length} older than 48 h${inNeeds ? `, ${inNeeds} in Needs you: enter the result or void` : ''})${note}` : `Every finished game is settled${note}`,
+      items: rows.slice(0, 15).map(r => `${gameName(r)}${waiting.has(r.match_id) ? ' · Needs you' : ''}${tries.has(r.match_id) ? ` · ${tries.get(r.match_id)}` : ''}`)
     });
   } catch (e: any) {
     checks.push({ id: 'unsettled', label: 'Finished games are scored in our record', level: 'warn', detail: `Check failed: ${e.message}` });
@@ -388,12 +397,20 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     const a = lastDataAudit();
     if (a) {
       const age = now - new Date(a.at).getTime();
-      const mism = (a.issues || []).filter((i: any) => i.kind === 'mismatch' || i.kind === 'not-found').length;
+      // fix240: every listed league must reach 95 % (players whose club played in the last 30 h and whose numbers the
+      // provider is still updating are left out and checked again); every remaining note says why
+      const issues = (a.issues || []) as any[];
+      const bad = issues.filter(i => i.kind === 'mismatch' || i.kind === 'not-found');
+      const lag = issues.filter(i => i.kind === 'lag');
+      const by = (a.byLeague || {}) as Record<string, { checked: number; matched: number; lag?: number }>;
+      const low = Object.entries(by).filter(([, t]) => { const s = leagueShare(t); return s != null && s < (a.target ?? AUDIT_TARGET); });
+      const pct = (t: { checked: number; matched: number; lag?: number }) => Math.round((leagueShare(t) ?? 1) * 100);
       checks.push({
         id: 'players', label: 'Player pages match the official stats',
-        level: age > 48 * 3600 * 1000 ? 'warn' : a.checked && mism > a.checked * 0.15 ? 'warn' : 'ok',
-        detail: `${a.matched} of ${a.checked} top scorers match (${a.leagues}) · checked ${ago(age)} ago · ${(a.issues || []).length} note(s)`,
-        items: (a.issues || []).slice(0, 25).map((i: any) => `${i.league || ''} ${i.player || ''}: ${i.detail}`)
+        level: age > 48 * 3600 * 1000 || low.length ? 'warn' : 'ok',
+        detail: `${a.matched} of ${a.checked - (a.lag || 0)} top scorers match (${a.leagues})${lag.length ? ` · ${lag.length} still updating after a game` : ''} · checked ${ago(age)} ago`
+          + (low.length ? ` · under 95 %: ${low.map(([c, t]) => `${c} ${pct(t)} %`).join(', ')}` : ' · every league 95 %+'),
+        items: [...bad, ...lag].slice(0, 25).map((i: any) => `${i.league || ''} ${i.player || ''}: ${i.detail}${i.reason ? ` — ${i.reason}` : ''}`)
       });
     }
   } catch { /* no report yet */ }

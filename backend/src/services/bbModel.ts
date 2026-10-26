@@ -50,8 +50,10 @@ export type NewBasis = 'other-league' | 'bottom3';
  */
 export const V3 = { kEarly: 1.5, earlyN: 10, kha: 0.01, rha: 0.7, w2: 0.5, stretch: 1.05, talent: 0.12, decay: 0.995, priorMin: 800, priorRate: 0 };
 
-/** NBA games before 19 October are pre-season (they count less and are left out of the record). */
-export const isPreseason = (g: { code: string; kickoff: string }) => {
+/** NBA games before 19 October are pre-season (they count less and are left out of the record). fix240: a game the
+ *  provider files under a pre-season stage is too (a late US tip-off on the 18th is already the 19th in UTC). */
+export const isPreseason = (g: { code: string; kickoff: string; stage?: string | null }) => {
+  if (g.stage && /pre[- ]?season/i.test(g.stage)) return true;
   if (g.code !== 'NBA') return false;
   const d = new Date(g.kickoff);
   return d.getUTCMonth() === 9 && d.getUTCDate() < 19;
@@ -1149,12 +1151,12 @@ function scoreOff(rows: { margin: number | null; total: number | null; hs: numbe
 /** The public record: every saved prediction of a finished game in every league (fix203: no "in testing" exclusion; pre-season left out). */
 export function bbRecord(days = 3650, code?: string, recentLimit = 50) {
   const rows = db.prepare(`
-    SELECT p.*, g.hs, g.as_, g.home_name, g.away_name, g.home_logo, g.away_logo, g.status
+    SELECT p.*, g.hs, g.as_, g.home_name, g.away_name, g.home_logo, g.away_logo, g.status, g.stage AS g_stage
     FROM bb_predictions p JOIN bb_games g ON g.game_id = p.game_id
     WHERE g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND p.made_at <= p.kickoff AND p.kickoff >= ? ${code ? 'AND p.code = ?' : ''}
       AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL)
     ORDER BY p.kickoff DESC`).all(...[new Date(Date.now() - days * 86400000).toISOString(), ...(code ? [code] : [])]) as any[];
-  const list = rows.filter(r => !isPreseason({ code: r.code, kickoff: r.kickoff }));
+  const list = rows.filter(r => !isPreseason({ code: r.code, kickoff: r.kickoff, stage: r.g_stage }));
   const by = new Map<string, { n: number; hits: number; strongN: number; strongHits: number }>();
   const tot = { n: 0, hits: 0, strongN: 0, strongHits: 0 };
   for (const r of list) {
@@ -1173,7 +1175,7 @@ export function bbRecord(days = 3650, code?: string, recentLimit = 50) {
     score: [r.hs, r.as_], pick: r.p_home >= 0.5 ? 'H' : 'A', pHome: r.p_home, hit: (r.p_home >= 0.5) === (r.hs > r.as_)
   });
   // pre-season: shown apart, never counted
-  const pre = rows.filter(r => isPreseason({ code: r.code, kickoff: r.kickoff }));
+  const pre = rows.filter(r => isPreseason({ code: r.code, kickoff: r.kickoff, stage: r.g_stage }));
   const preHits = pre.filter(r => (r.p_home >= 0.5) === (r.hs > r.as_)).length;
   // picks already saved and waiting for the result (live now or tipping off in the next 36 hours) — the pick only
   const pending = (db.prepare(`

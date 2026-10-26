@@ -424,3 +424,12 @@ first "bb model" build (every game's impact recomputed) held the heavy queue —
 - Old crawler links → the id index on the web (no 3 s worker ask, no page build first). `/api/matches/upcoming` only the 14 / 30-day
   stored copies. Start-up: boot.ts holds API calls for the app; before the state, a kept route copy (X-SL-Copy: startup) or a wait
   (`STARTUP_WAIT_MS`, 30 s) — no 503 "Starting up" for the API (/health keeps it).
+
+## fix240 — slug states republished only on change (26 Oct)
+Live 26 Oct 14:45 UTC: web stalls 17 / h, worst 1,694 ms. The per-stall list (route + read / build / send / gc) is in the
+admin-only /api/perf and could not be read from the dev machine, so it is not in the commit. One recurring cause found in
+the code: the "slugs" job (every 15 min) published `slugs:<sport>` and `slugs-ids:<sport>` for all four sports on every
+run (32 loads an hour on the web, each a map of up to hundreds of thousands of entries swapped in, the old one left to
+major GC) although almost nothing changes between runs. Now each state is published only when its content hash changed
+(`contentSig`, order-independent; `slug_state_sig` keeps it across worker restarts; published anyway when the stored
+row is missing). Check: /api/perf?shared=1 on the web — slugs:* applied a few times a day; topStalls of the hour.

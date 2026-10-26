@@ -16,7 +16,7 @@ import { recordPredictions, settlePending } from './services/tracking';
 import { oddsTick } from './services/odds';
 import {
   afUpcoming, afWithPredictions, pollAfLive, syncFdLiveFromAf, startAfMatchesScheduler, onAfWindow, withAfOdds, backfillAfOdds, warmMatchExtras
-, afIdOfFd } from './services/afMatches';
+, afIdOfFd, fdIdOfAf } from './services/afMatches';
 import { fdMatchesNeedingAf, linkFdTwins } from './services/fdReconcile';
 import { startSquadValuesScheduler } from './services/squadValues';
 import { startClvScheduler } from './services/clv';
@@ -256,7 +256,13 @@ export function startJobs() {
   const settleProviders: SettleProviders = {
     afByIds: async ids => { if (afRemaining() < 50) throw new Error('API-Football budget reserve'); return (await afGet('/fixtures', { ids: ids.join('-') })).response || []; },
     afByTeams: async (home, away, from, to) => { if (afRemaining() < 50) throw new Error('API-Football budget reserve'); return (await afGet('/fixtures/headtohead', { h2h: `${home}-${away}`, from, to })).response || []; },
-    fdRange: (from, to) => footballDataAPI.getMatchesInRange(from, to)
+    fdRange: (from, to) => footballDataAPI.getMatchesInRange(from, to),
+    // fix240: the same game at the other provider (stored links; home / away swapped twins are left out)
+    twinOf: id => {
+      if (id >= 1_000_000_000) return fdIdOfAf(id - 1_000_000_000);
+      const l = afIdOfFd(id);
+      return l && !l.swapped ? 1_000_000_000 + l.fid : null;
+    }
   };
   let unsettledAt = 0;
   const settle = () =>
@@ -270,7 +276,8 @@ export function startJobs() {
           unsettledAt = Date.now();
           await resolveUnsettledOnce(settleProviders);
           const u = await resolveUnsettled(settleProviders, { log: true });
-          if (u.checked) logger.info(`unsettled: ${u.checked} checked · ${u.settled} settled · ${u.moved} moved · ${u.voided} void · ${u.retry} to retry`);
+          if (u.checked) logger.info(`unsettled: ${u.checked} checked · ${u.settled} settled · ${u.moved} moved · ${u.voided} void · ${u.retry} looked again · ${u.review} in Needs you`);
+          if (u.settled || u.voided) refreshPages('summary', 'record', 'results');
         }
         markFresh('results', r ? `${r.settled} settled, ${r.pending} pending` : undefined);
         if (r?.settled) refreshPages('summary', 'record', 'results');

@@ -179,17 +179,20 @@ function InjuriesToReview({ done }: { done: () => void }) {
   )
 }
 
-/** fix239: each result with its buttons — Swap scores / Keep as is (basketball, American football; tennis: give the win to the other player) */
+/** fix239: each result with its buttons — Swap scores / Keep as is (basketball, American football; tennis: give the win to the other player);
+ *  fix240: football games with no final 48 h after kick-off — Enter result (goals after 90 minutes) / Void */
 function ResultsToCheck({ done }: { done: () => void }) {
-  const [d, setD] = useState<{ open: any[]; other: any[] } | null>(null)
+  const [d, setD] = useState<{ open: any[]; other: any[]; football: any[] } | null>(null)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
-  const load = () => axios.get(`${API_URL}/admin/bb/result-checks`).then(r => setD({ open: r.data.data.open || [], other: r.data.data.other || [] })).catch(() => setD({ open: [], other: [] }))
+  const [score, setScore] = useState<Record<number, { home: string; away: string }>>({})
+  const load = () => axios.get(`${API_URL}/admin/bb/result-checks`).then(r => setD({ open: r.data.data.open || [], other: r.data.data.other || [], football: r.data.data.football || [] })).catch(() => setD({ open: [], other: [], football: [] }))
   useEffect(() => { load() }, [])
-  const act = (key: string, url: string, action: string) => {
+  const act = (key: string, url: string, action: string, extra: object = {}) => {
     setBusy(key); setErr('')
-    axios.post(url, { action }).then(() => { load(); done() }).catch(e => setErr(errorText(e))).finally(() => setBusy(''))
+    axios.post(url, { action, ...extra }).then(() => { load(); done() }).catch(e => setErr(errorText(e))).finally(() => setBusy(''))
   }
+  const goals = (id: number, side: 'home' | 'away', v: string) => setScore(s => ({ ...s, [id]: { ...(s[id] || { home: '', away: '' }), [side]: v.replace(/[^0-9]/g, '').slice(0, 2) } }))
   if (!d) return <p className="text-sm text-faint">Loading…</p>
   const btn = 'h-8 px-3 rounded-lg text-xs font-semibold disabled:opacity-50'
   const rows = [
@@ -207,6 +210,33 @@ function ResultsToCheck({ done }: { done: () => void }) {
   return (
     <>
       {err && <p className="text-xs text-loss mb-1">{err}</p>}
+      {d.football.length > 0 && (
+        <ul className="divide-y divide-line/50 text-sm">
+          {d.football.slice(0, 12).map(x => {
+            const s = score[x.id] || { home: '', away: '' }
+            const url = `${API_URL}/admin/settle-review/${x.id}`
+            const ready = s.home !== '' && s.away !== ''
+            const box = 'w-12 h-8 rounded-lg bg-surface2 border border-line text-center text-ink num'
+            const href = matchHref('football', x.id, { home: x.home, away: x.away, date: x.kickoff })
+            return (
+              <li key={`fb${x.id}`} className="py-2">
+                <div className="flex flex-wrap items-baseline gap-x-3">
+                  <span className="w-14 text-[11px] text-faint num">{x.kickoff ? day(x.kickoff) : ''}</span>
+                  {href ? <Link to={href} className="font-semibold text-draw hover:underline">{x.home} – {x.away}</Link> : <span className="font-semibold text-ink">{x.home} – {x.away}</span>}
+                  <span className="text-[11px] text-muted">Football · {x.competition} · no final at either provider · {x.note}</span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 sm:pl-[68px]">
+                  <input aria-label={`${x.home} goals`} inputMode="numeric" value={s.home} onChange={e => goals(x.id, 'home', e.target.value)} className={box} />
+                  <span className="text-faint">–</span>
+                  <input aria-label={`${x.away} goals`} inputMode="numeric" value={s.away} onChange={e => goals(x.id, 'away', e.target.value)} className={box} />
+                  <button type="button" disabled={!!busy || !ready} onClick={() => act(`fb${x.id}`, url, 'result', { home: Number(s.home), away: Number(s.away) })} className={`${btn} bg-accent text-bg`}>Enter result</button>
+                  <button type="button" disabled={!!busy} onClick={() => act(`fb${x.id}`, url, 'void')} className={`${btn} bg-surface2 border border-line text-ink`}>Void</button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
       <ul className="divide-y divide-line/50 text-sm">
         {rows.slice(0, 12).map(x => (
           <li key={x.key} className="py-2">

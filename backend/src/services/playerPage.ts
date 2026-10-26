@@ -251,24 +251,49 @@ async function findTwins(pid: number, p: any, S: number, src: any[]): Promise<nu
   return out;
 }
 db.exec(`CREATE TABLE IF NOT EXISTS player_twins (dup_id INTEGER PRIMARY KEY, main_id INTEGER NOT NULL)`);
+/** fix240: second record → the main id of the same player */
+function twinMainOf(): Map<number, number> {
+  try { return new Map((db.prepare(`SELECT dup_id, main_id FROM player_twins`).all() as any[]).map(r => [r.dup_id, r.main_id])); } catch { return new Map(); }
+}
 /** Provider ids that are a second record of another player (hidden from search). */
 export function twinDupIds(): Set<number> {
   try { return new Set((db.prepare(`SELECT dup_id FROM player_twins`).all() as any[]).map(r => r.dup_id)); } catch { return new Set(); }
 }
 
-/** Rows of the same competition, club and provider season added together (twin ids of one player). */
-function mergeRows(rows: any[]): any[] {
+/**
+ * Rows of the same competition, club and provider season added together (twin ids of one player: each has part of
+ * his games). fix240: only rows of different ids are added, and only when they are not the same games — the data
+ * check found top scorers with twice their goals: an exact copy of a row (the provider files a league twice for one
+ * id) or a twin record carrying the same games was summed. Copies within one id → the fuller row; a twin row equal
+ * to the main one (same apps, minutes and goals) → a copy, kept once.
+ */
+export function mergeRows(rows: any[]): any[] {
   const SUM = ['apps', 'starts', 'minutes', 'goals', 'assists', 'yellow', 'red', 'shots', 'shotsOn', 'keyPasses', 'tackles', 'interceptions', 'dribbles', 'duelsWon', 'duels', 'saves', 'conceded', 'penScored', 'penMissed'];
-  const by = new Map<string, any>();
+  const groups = new Map<string, Map<string, any>>();
   for (const r of rows) {
     const k = `${r.league.id}|${r.team?.id}|${r.afSeason}`;
-    const cur = by.get(k);
-    if (!cur) { by.set(k, { ...r, _rw: r.rating && r.minutes ? r.rating * r.minutes : 0, _rm: r.rating && r.minutes ? r.minutes : 0 }); continue; }
-    for (const f of SUM) if (r[f] !== null && r[f] !== undefined) cur[f] = (cur[f] || 0) + r[f];
-    if (r.rating && r.minutes) { cur._rw += r.rating * r.minutes; cur._rm += r.minutes; }
+    const id = String(r._pid ?? 'main');
+    const g = groups.get(k) || new Map<string, any>();
+    groups.set(k, g);
+    const cur = g.get(id);
+    if (!cur || r.apps > cur.apps || (r.apps === cur.apps && r.minutes > cur.minutes)) g.set(id, r);
   }
-  return [...by.values()].map(r => {
-    const { _rw, _rm, ...rest } = r;
+  const same = (a: any, b: any) => a.apps === b.apps && a.minutes === b.minutes && a.goals === b.goals;
+  const out: any[] = [];
+  for (const g of groups.values()) {
+    const kept: any[] = [];
+    for (const r of g.values()) if (!kept.some(k => same(k, r))) kept.push(r);
+    const first = kept[0];
+    const cur = { ...first, _rw: first.rating && first.minutes ? first.rating * first.minutes : 0, _rm: first.rating && first.minutes ? first.minutes : 0 };
+    for (const r of kept.slice(1)) {
+      for (const f of SUM) if (r[f] !== null && r[f] !== undefined) cur[f] = (cur[f] || 0) + r[f];
+      if (r.rating && r.minutes) { cur._rw += r.rating * r.minutes; cur._rm += r.minutes; }
+    }
+    if (kept.length > 1) cur.twinIds = kept.length; // the data check says why his page adds up two records
+    out.push(cur);
+  }
+  return out.map(r => {
+    const { _rw, _rm, _pid, ...rest } = r;
     return { ...rest, rating: _rm >= 30 ? Math.round((_rw / _rm) * 100) / 100 : null };
   });
 }
@@ -314,7 +339,7 @@ async function build(pid: number, offline = false) {
   const twins = await findTwins(pid, p, S, src);
   if (twins.length) {
     for (const t of twins) for (const y of [S - 1, S, S + 1]) {
-      try { const d = await rawSeason(t, y, y === S); if (d) all.push(...toRows(d, y)); } catch { /* skip */ }
+      try { const d = await rawSeason(t, y, y === S); if (d) all.push(...toRows(d, y).map((r: any) => ({ ...r, _pid: t }))); } catch { /* skip */ }
     }
     all = mergeRows(all);
   }
@@ -463,14 +488,14 @@ function clubPlayedRecently(data: any): boolean {
 }
 const fresh = (data: any, at: number) => data?.v === PAGE_VERSION && Date.now() - at < (clubPlayedRecently(data) ? PAGE_TTL_PLAYED : PAGE_TTL);
 
-async function pageData(pid: number, wait = false) {
+async function pageData(pid: number, wait = false, minBuiltAt = 0) {
   // crawlers: never a provider call (fix166) — the stored page at any age, else one built from our database only
   if (isCrawlerRequest()) return crawlerPage(pid);
   const mem = cache.get(pid);
-  if (mem && fresh(mem.data, mem.at)) return mem.data;
+  if (mem && mem.at >= minBuiltAt && fresh(mem.data, mem.at)) return mem.data;
   const stored: any = db.prepare(`SELECT json, built_at FROM player_page_store WHERE player_id = ?`).get(pid);
   const storedData = stored ? JSON.parse(stored.json) : null;
-  if (stored && fresh(storedData, new Date(stored.built_at).getTime())) {
+  if (stored && new Date(stored.built_at).getTime() >= minBuiltAt && fresh(storedData, new Date(stored.built_at).getTime())) {
     const data = storedData;
     cache.set(pid, { at: new Date(stored.built_at).getTime(), data });
     return data;
@@ -652,10 +677,13 @@ function tidySeasons(data: any) {
   return { ...data, seasons, career };
 }
 
-/** wait: always the up-to-date page (the data check), never the saved copy while it is being rebuilt */
-export async function playerPage(rawId: number, full: boolean, wait = false) {
+/**
+ * wait: always the up-to-date page (the data check), never the saved copy while it is being rebuilt;
+ * minBuiltAt (fix240, the data check): a copy built before this time is rebuilt (his club played since)
+ */
+export async function playerPage(rawId: number, full: boolean, wait = false, minBuiltAt = 0) {
   const pid = rawId >= AF_OFFSET ? rawId - AF_OFFSET : rawId;
-  const data: any = tidySeasons(await pageData(pid, wait));
+  const data: any = tidySeasons(await pageData(pid, wait, minBuiltAt));
   // fix176: builtAt = the last refresh of the page's numbers — a season answer fetched since the page was stored counts
   // (the audit found builtAt 30 Sep on a page with data to 17 Oct; the admin data-health check reads it)
   try {
@@ -711,8 +739,13 @@ export async function findPlayer(name: string, teamId: number, code?: string, te
   let hit: number | null = null;
   if (af) {
     const S = seasonNow();
-    const rows = db.prepare(`SELECT DISTINCT player_id, name FROM af_player_season WHERE team_id = ? AND season IN (?, ?)`).all(af, S, S - 1) as any[];
+    // fix240: this season's record first, then the one with the most minutes — the first name match could be last
+    // season's id or a second record of the same player with no league numbers ("his page has no league row")
+    const rows = db.prepare(`SELECT player_id, name, MAX(season) AS season, SUM(COALESCE(minutes, 0)) AS minutes FROM af_player_season WHERE team_id = ? AND season IN (?, ?)
+      GROUP BY player_id, name ORDER BY MAX(season) DESC, SUM(COALESCE(minutes, 0)) DESC`).all(af, S, S - 1) as any[];
+    const main = twinMainOf();
     hit = rows.find(r => sameName(r.name, name))?.player_id ?? null;
+    if (hit && main.has(hit)) hit = main.get(hit)!;
     if (!hit && afRemaining() > 500) {
       const last = plain(name).split(' ').pop() || '';
       if (last.length >= 4) {
