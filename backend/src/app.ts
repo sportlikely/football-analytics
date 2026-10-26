@@ -47,6 +47,7 @@ import { oddsTick, oddsStatus, fetchCompetitionOdds, SPORT_KEYS } from './servic
 import { syncSquadValues, squadValuesStatus, squadCompetitions } from './services/squadValues';
 import { syncClubValueHistory, clubValueHistoryStatus, findClub } from './services/squadHistory';
 import { compareModels } from './services/compareModels';
+import { diffViewReport } from './services/diffView';
 import { gapReport } from './services/gapReport';
 import { pastSeasons, pastPredictions, dataInventory, leaguePatterns } from './services/pastView';
 import { marketTest, drawTest, anchoredDrawTest } from './services/marketTest';
@@ -3705,6 +3706,13 @@ app.get('/api/bb/backtest', (_req, res) => res.json({ data: bbBacktest(), timest
 app.get('/api/admin/nba-model-check', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: nbaV4Check(Math.min(90, Number(req.query.days) || 14)) }); } catch (e) { sendError(res, e, 'NBA model check failed'); }
+});
+// fix246 (admin only, not in OPEN_API): "Our different view" — games where our model and the market disagree, by sport,
+// league and gap band (past seasons + live), the upcoming games with a 5+ point gap and the record frozen at kick-off.
+// Market prices stay admin-only. ?fresh=1 rebuilds (else 15 min cache)
+app.get('/api/admin/diff-view', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: await diffViewReport(Date.now(), req.query.fresh === '1') }); } catch (e) { sendError(res, e, 'Different view test failed'); }
 });
 // fix224 (admin): basketball injuries read from news ("reported out"): the review list, dismiss (never applied again) / ok
 app.get('/api/admin/bb/news-injuries', (_req, res) => {

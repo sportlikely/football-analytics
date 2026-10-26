@@ -61,6 +61,7 @@ import { startGameExtrasScheduler } from './services/gameExtras';
 import { fillFromFinals } from './services/history';
 import { checkOtherResults } from './services/resultChecks';
 import { dailySummaryTick } from './services/adminMail';
+import { diffViewFreezeTick } from './services/diffView';
 
 let started = false;
 
@@ -81,6 +82,8 @@ export function startJobs() {
   after('result checks', () => checkOtherResults().catch(e => logger.warn(`result checks: ${e?.message || e}`)), 8 * 60 * 1000).unref();
   every('result checks', () => checkOtherResults().catch(e => logger.warn(`result checks: ${e?.message || e}`)), 30 * 60 * 1000).unref();
   every('admin daily summary', () => dailySummaryTick().catch(e => logger.warn(`admin daily summary: ${e?.message || e}`)), 5 * 60 * 1000).unref();
+  // fix246: "Our different view" (admin only) — games with a 5+ point gap to the market written once after kick-off
+  every('different view', () => { diffViewFreezeTick(); }, 5 * 60 * 1000).unref();
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the
   // first run waits for the leagues and the team index to load (a league's country decides a shared name's slug)
   after('slugs', () => buildSlugs().then(() => every('slugs', () => buildSlugs(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();
