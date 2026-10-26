@@ -18,6 +18,7 @@ import logger from '../utils/logger';
 import { isWeb, isWorker } from './role';
 import { onIpc, sendIpc } from './ipc';
 import { timed, yieldLoop, track } from './perf';
+import { readSql, asBuffer, pageReaderOn } from './pageReader';
 
 db.exec(`CREATE TABLE IF NOT EXISTS shared_state (key TEXT PRIMARY KEY, ver INTEGER NOT NULL, at TEXT NOT NULL, bytes INTEGER NOT NULL, ms INTEGER NOT NULL, data BLOB NOT NULL)`);
 // fix222: the parts of a big state (see splitBig)
@@ -31,52 +32,73 @@ db.exec(`CREATE TABLE IF NOT EXISTS shared_parts (key TEXT NOT NULL, i INTEGER N
  */
 const PART_BYTES = Number(process.env.STATE_PART_KB || 256) * 1024;
 const PARTS = '__sharedParts';
-type Marker = { n: number; ver: number; fields: Record<string, 'a' | 'm'> };
-function splitBig(value: unknown): { head: unknown; parts: Buffer[]; fields: Record<string, 'a' | 'm'> } {
-  const parts: Buffer[] = [], fields: Record<string, 'a' | 'm'> = {};
-  if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) return { head: value, parts, fields };
+// fix248: 'o' = a plain object cut by its entries (a big object of leagues / teams was one deserialize on the web)
+type Kind = 'a' | 'm' | 'o';
+type Marker = { n: number; ver: number; fields: Record<string, Kind> };
+const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;
+function splitBig(value: unknown): { head: unknown; parts: Buffer[]; fields: Record<string, Kind> } {
+  const parts: Buffer[] = [], fields: Record<string, Kind> = {};
+  if (!isPlain(value)) return { head: value, parts, fields };
   let head: Record<string, unknown> | null = null;
-  for (const [f, v] of Object.entries(value as Record<string, unknown>)) {
-    const isA = Array.isArray(v), isM = v instanceof Map;
-    if (!(isA || isM)) continue;
-    const items: unknown[] = isA ? (v as unknown[]) : [...(v as Map<unknown, unknown>).entries()];
-    if (items.length < 50) continue;
+  for (const [f, v] of Object.entries(value)) {
+    const kind: Kind | null = Array.isArray(v) ? 'a' : v instanceof Map ? 'm' : isPlain(v) ? 'o' : null;
+    if (!kind) continue;
+    const items: unknown[] = kind === 'a' ? (v as unknown[]) : kind === 'm' ? [...(v as Map<unknown, unknown>).entries()] : Object.entries(v as object);
+    // fix248: from 2 items (a Map of 20 leagues over 256 KB was kept whole: one long deserialize)
+    if (items.length < 2) continue;
     const size = v8.serialize(items).length;
     if (size <= PART_BYTES) continue;
     const per = Math.max(1, Math.floor((items.length * PART_BYTES) / size));
     for (let i = 0; i < items.length; i += per) parts.push(v8.serialize({ f, x: items.slice(i, i + per) }));
-    fields[f] = isA ? 'a' : 'm';
+    fields[f] = kind;
     if (!head) head = { ...(value as Record<string, unknown>) };
     head[f] = null;
   }
   return { head: head || value, parts, fields };
 }
-/** the whole value from its state row and parts (each part read when asked: `part(i)` → its bytes, or null = replaced) */
-async function joinParts(head: any, part: (i: number) => Buffer | null, pause: () => Promise<void>): Promise<unknown | null> {
+const emptyOf = (t: Kind) => (t === 'a' ? [] : t === 'm' ? new Map() : {});
+const addTo = (dst: any, t: Kind, x: any[]) => {
+  if (t === 'a') for (const it of x) dst.push(it);
+  else if (t === 'm') for (const [k, v] of x) dst.set(k, v);
+  else for (const [k, v] of x) dst[k] = v;
+};
+/**
+ * the whole value from its state row and parts (each part read when asked: `part(i)` → its bytes, or null = replaced).
+ * fix248: `step` gets each deserialize's time (the longest is in /api/perf shared: what still blocks the web).
+ */
+async function joinParts(head: any, part: (i: number) => Buffer | null | Promise<Buffer | null>, pause: () => Promise<void>, step?: (ms: number) => void): Promise<unknown | null> {
   const mk: Marker | undefined = head?.[PARTS];
   if (!mk) return head;
   const out: Record<string, any> = { ...head };
   delete out[PARTS];
-  for (const [f, t] of Object.entries(mk.fields)) out[f] = t === 'a' ? [] : new Map();
+  for (const [f, t] of Object.entries(mk.fields)) out[f] = emptyOf(t);
   for (let i = 0; i < mk.n; i++) {
-    const b = part(i);
+    const b = await part(i);
     if (!b) return null;
+    const t0 = performance.now();
     const { f, x } = v8.deserialize(b) as { f: string; x: any[] };
-    const dst = out[f];
-    if (Array.isArray(dst)) for (const it of x) dst.push(it); else for (const [k, v] of x) dst.set(k, v);
+    addTo(out[f], mk.fields[f], x);
+    step?.(performance.now() - t0);
     await pause();
   }
   return out;
 }
+const PART_SQL = `SELECT data FROM shared_parts WHERE key = ? AND i = ? AND ver = ?`;
 const partReader = (key: string, ver: number) => {
-  const q = db.prepare(`SELECT data FROM shared_parts WHERE key = ? AND i = ? AND ver = ?`);
+  const q = db.prepare(PART_SQL);
   return (i: number) => { const r: any = q.get(key, i, ver); return r ? Buffer.from(r.data) : null; };
+};
+/** fix248 (web): the same, read in the reader thread (services/pageReader.ts): no SQLite read of a big row on the web thread */
+const partReaderOff = (key: string, ver: number) => async (i: number) => {
+  const r = await readSql<{ data: Uint8Array } | null>(PART_SQL, [key, i, ver]);
+  return r ? asBuffer(r.data) : null;
 };
 
 // fix210b: an applier may return a promise (its async part: the NFL engine joins its games); loads wait for it
 type Apply = (key: string, value: any) => void | Promise<void>;
 const appliers: { prefix: string; apply: Apply }[] = [];
-const applied = new Map<string, { ver: number; at: number; ms: number; bytes: number }>();
+// fix248: maxStepMs = the longest single deserialize on the web thread for that state (the head or one part)
+const applied = new Map<string, { ver: number; at: number; ms: number; bytes: number; maxStepMs?: number }>();
 const published = new Map<string, { ver: number; at: number; ms: number; bytes: number }>();
 let lastVer = 0;
 
@@ -140,13 +162,13 @@ export function applyStored(prefix: string) {
       const read = partReader(r.key, mk.ver);
       const out: Record<string, any> = { ...head };
       delete out[PARTS];
-      for (const [f, t] of Object.entries(mk.fields)) out[f] = t === 'a' ? [] : new Map();
+      for (const [f, t] of Object.entries(mk.fields)) out[f] = emptyOf(t);
       let whole = true;
       for (let i = 0; i < mk.n && whole; i++) {
         const b = read(i);
         if (!b) { whole = false; break; }
         const { f, x } = v8.deserialize(b) as { f: string; x: any[] };
-        if (Array.isArray(out[f])) for (const it of x) out[f].push(it); else for (const [k, v] of x) out[f].set(k, v);
+        addTo(out[f], mk.fields[f], x);
       }
       if (whole) applyHere(r.key, out);
     } catch (e: any) { logger.warn(`shared state ${r.key}: ${e?.message || e}`); }
@@ -169,22 +191,40 @@ function queueLoad(key: string, ver?: number) {
   }).catch(e => { logger.warn(`shared state load ${key}: ${e?.message || e}`); });
 }
 
+const ROW_SQL = `SELECT ver, bytes, data FROM shared_state WHERE key = ?`;
+const VERS_SQL = `SELECT key, ver FROM shared_state ORDER BY key`;
+/*
+ * fix248: the CPU profile of 26 Oct showed the web thread's stalls in these reads (`all` 0.8 s from loadNewerStates on
+ * the 30-s timer, `get` in loadNow and the part reader 1.1 s): every shared_state / shared_parts read is done in the
+ * reader thread now; the web thread only deserializes, one part (≤ 256 KB) per turn. The synchronous read stays as
+ * the fallback when the thread is not there (PAGE_READER=0, it failed).
+ */
 async function loadNow(key: string) {
-  const row: any = db.prepare(`SELECT ver, bytes, data FROM shared_state WHERE key = ?`).get(key);
+  let off = pageReaderOn();
+  let row: any;
+  if (off) { try { row = await readSql(ROW_SQL, [key]); } catch { off = false; } }
+  if (!off) row = db.prepare(ROW_SQL).get(key);
   if (!row || (applied.get(key)?.ver || 0) >= row.ver) return;
   const t0 = Date.now();
+  let maxStepMs = 0;
+  const step = (ms: number) => { if (ms > maxStepMs) maxStepMs = ms; };
   // fix222: a big state comes in parts, one deserialized per turn (null = the worker replaced it meanwhile: next round)
-  const value = await joinParts(v8.deserialize(Buffer.from(row.data)), partReader(key, row.ver), yieldLoop);
+  const h0 = performance.now();
+  const head = v8.deserialize(off ? asBuffer(row.data) : Buffer.from(row.data));
+  step(performance.now() - h0);
+  await yieldLoop();
+  const value = await joinParts(head, off ? partReaderOff(key, row.ver) : partReader(key, row.ver), yieldLoop, step);
   if (value === null) { setTimeout(() => queueLoad(key), 1000).unref(); return; }
   await yieldLoop();
   for (const a of appliers) if (key === a.prefix || key.startsWith(a.prefix)) { await a.apply(key, value); await yieldLoop(); }
-  applied.set(key, { ver: row.ver, at: Date.now(), ms: Date.now() - t0, bytes: row.bytes });
+  applied.set(key, { ver: row.ver, at: Date.now(), ms: Date.now() - t0, bytes: row.bytes, maxStepMs: Math.round(maxStepMs) });
 }
 
 /** web: every state newer than what this process holds (start-up, and the 30-s check for missed messages) */
-export function loadNewerStates(): Promise<void> {
-  if (!isWeb) return Promise.resolve();
-  const rows = db.prepare(`SELECT key, ver FROM shared_state ORDER BY key`).all() as { key: string; ver: number }[];
+export async function loadNewerStates(): Promise<void> {
+  if (!isWeb) return;
+  let rows: { key: string; ver: number }[];
+  try { rows = pageReaderOn() ? await readSql(VERS_SQL, [], true) : (db.prepare(VERS_SQL).all() as any[]); } catch { rows = db.prepare(VERS_SQL).all() as any[]; }
   for (const r of rows) queueLoad(r.key, r.ver);
   return chain;
 }

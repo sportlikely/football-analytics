@@ -56,7 +56,8 @@
     "test:fix244": "node --no-warnings --test scripts/fix244.test.ts scripts/proxy-guard.test.ts",
     "test:fix245": "tsc && node --no-warnings --test --test-force-exit scripts/fix245.test.mjs",
     "test:fix246": "tsc && node --no-warnings --test --test-force-exit scripts/fix246.test.mjs",
-    "test:fix248": "tsc && node --no-warnings --test --test-force-exit scripts/fix248.test.mjs"
+    "test:fix248": "tsc && node --no-warnings --test --test-force-exit scripts/fix248.test.mjs",
+    "test:load": "tsc && node --no-warnings scripts/load-test.mjs"
   },
   "keywords": [
     "football",

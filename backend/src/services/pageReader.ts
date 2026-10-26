@@ -23,7 +23,7 @@ function threadFile(): { file: string; execArgv?: string[] } | null {
 let w: Worker | null = null;
 let failedAt = 0;
 let seq = 0;
-const pending = new Map<number, { resolve: (r: ReadRow | null) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+const pending = new Map<number, { resolve: (m: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
 const stats = { reads: 0, errors: 0, maxMs: 0, restarts: 0 };
 /** /api/perf: the reader thread */
 export const pageReaderStatus = () => ({ on: !!w, pending: pending.size, ...stats });
@@ -44,8 +44,7 @@ function thread(): Worker | null {
       if (!p) return;
       pending.delete(m.id); clearTimeout(p.timer);
       if (m.error) { stats.errors++; p.reject(new Error(m.error)); return; }
-      const r = m.row;
-      p.resolve(r ? { text: r.text, etag: r.etag, gz: r.gz ? Buffer.from(r.gz.buffer, r.gz.byteOffset, r.gz.byteLength) : null } : null);
+      p.resolve(m);
     });
     const down = (e: Error) => { if (w === t) { w = null; failedAt = Date.now(); stats.restarts++; } failAll(e); };
     t.on('error', e => { logger.warn(`page reader: ${e.message}`); down(e); });
@@ -59,10 +58,25 @@ export const pageReaderOn = () => !!thread();
 
 /** one stored row (key + built_at) read in the thread; rejects when the thread is not there or does not answer in 10 s */
 export function readStored(key: string, builtAt: number): Promise<ReadRow | null> {
+  return ask({ key, builtAt }).then(m => {
+    const r = m.row;
+    return r ? { text: r.text, etag: r.etag, gz: r.gz ? asBuffer(r.gz) : null } : null;
+  });
+}
+/** a Uint8Array from the thread as a Buffer (no copy) */
+export const asBuffer = (u: Uint8Array) => Buffer.from(u.buffer, u.byteOffset, u.byteLength);
+/**
+ * fix248: one read-only statement run in the thread (`all` = every row, else the first or null). Rejects when the
+ * thread is not there (the caller reads synchronously then) or does not answer in 10 s. BLOBs come back as Uint8Array.
+ */
+export function readSql<T = any>(sql: string, args: (string | number | null)[] = [], all = false): Promise<T> {
+  return ask({ sql, args, all }).then(m => m.out as T);
+}
+function ask(msg: object): Promise<any> {
   const t = thread();
   if (!t) return Promise.reject(new Error('no page reader'));
   const id = ++seq, t0 = Date.now();
-  return new Promise<ReadRow | null>((resolve, reject) => {
+  return new Promise<any>((resolve, reject) => {
     const timer = setTimeout(() => { pending.delete(id); stats.errors++; reject(new Error('page reader timeout')); }, 10_000);
     timer.unref();
     pending.set(id, {
@@ -70,6 +84,6 @@ export function readStored(key: string, builtAt: number): Promise<ReadRow | null
       reject, timer
     });
     t.ref(); // a read in flight keeps the thread (unref'd again when idle)
-    t.postMessage({ id, key, builtAt });
+    t.postMessage({ id, ...msg });
   }).finally(() => { if (!pending.size) w?.unref(); });
 }

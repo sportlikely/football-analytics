@@ -20,6 +20,7 @@ import { isWeb } from './role';
 import { fetchFromWorker, forwardToWorker, waiting, type WorkerAnswer } from './forward';
 import { isWorker } from './role';
 import { deferred } from './deferredWrites';
+import { readSql, asBuffer, pageReaderOn } from './pageReader';
 
 type RouteDef = { re: RegExp; freshMs: number };
 const S = 1000, MIN = 60 * S;
@@ -194,13 +195,21 @@ const saveRow = deferred(`INSERT OR REPLACE INTO route_cache (key, at, status, t
 // fix243: a page that is gone now (410: a past season's match) drops its kept copy (a copy from before is never served again)
 const dropRow = deferred(`DELETE FROM route_cache WHERE key = ?`);
 if (isWorker) setInterval(() => { try { db.prepare(`DELETE FROM route_cache WHERE at < ?`).run(Date.now() - KEEP_MS); } catch { /* next hour */ } }, 3600 * 1000).unref();
-function readCopy(k: string): Copy | null {
+const COPY_SQL = `SELECT at, status, type, cache, body FROM route_cache WHERE key = ?`;
+/*
+ * fix248: a copy not in memory is read in the reader thread (services/pageReader.ts): the CPU profile of 26 Oct showed
+ * the web thread blocked in this read (774 ms, /basketball/* + /de/* + /it/*). The synchronous read only without it.
+ */
+async function readCopy(k: string): Promise<Copy | null> {
   const m = mem.get(k);
   if (m) { mem.delete(k); mem.set(k, m); return m; }
   try {
-    const r: any = db.prepare(`SELECT at, status, type, cache, body FROM route_cache WHERE key = ?`).get(k);
+    let r: any;
+    let off = pageReaderOn();
+    if (off) { try { r = await readSql(COPY_SQL, [k]); } catch { off = false; } }
+    if (!off) r = db.prepare(COPY_SQL).get(k);
     if (!r) return null;
-    const c: Copy = { at: r.at, status: r.status, type: r.type, cache: r.cache, body: Buffer.from(r.body) };
+    const c: Copy = { at: r.at, status: r.status, type: r.type, cache: r.cache, body: off ? asBuffer(r.body) : Buffer.from(r.body) };
     memSet(k, c);
     return c;
   } catch { return null; }
@@ -244,14 +253,14 @@ function fetchCopy(k: string, req: express.Request, keep: boolean): Promise<Copy
 const isCopy = (x: Copy | WorkerAnswer): x is Copy => typeof (x as Copy).at === 'number';
 
 /** web process: the middleware (after the access, rate-limit and crawler checks; before the route handlers) */
-export function workerRoutes(req: express.Request, res: express.Response, next: express.NextFunction) {
+export async function workerRoutes(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (!isWeb || req.method !== 'GET') return next();
   const route = workerRouteOf(req.path);
   if (!route) return next();
   // signed in: the plan and the unlocks change the page — always the worker's fresh answer, streamed
   if (req.user || req.access === 'admin') { stats.forwarded++; return forwardToWorker(req, res); }
   const k = copyKey(req);
-  const have = readCopy(k);
+  const have = await readCopy(k);
   if (have) {
     const stale = Date.now() - have.at > route.freshMs;
     sendCopy(res, have, stale ? 'stale' : 'fresh');
@@ -278,12 +287,12 @@ export function workerRoutes(req: express.Request, res: express.Response, next: 
  * gets its last kept copy at once (X-SL-Copy: startup) instead of 503 "Starting up". The crawler / data-centre flags
  * are not known yet: only the plain signed-out copy is sent. false = no copy (the caller waits for the state).
  */
-export function sendStartupCopy(req: express.Request, res: express.Response, signedIn: boolean): boolean {
+export async function sendStartupCopy(req: express.Request, res: express.Response, signedIn: boolean): Promise<boolean> {
   if (!isWeb || req.method !== 'GET' || signedIn || !workerRouteOf(req.path)) return false;
   const [path, qs = ''] = req.originalUrl.split('?');
   const q = new URLSearchParams(qs);
   q.sort();
-  const c = readCopy(`${path}?${q.toString()}|`);
+  const c = await readCopy(`${path}?${q.toString()}|`);
   if (!c || c.status !== 200) return false;
   stats.startup++;
   sendCopy(res, c, 'startup');

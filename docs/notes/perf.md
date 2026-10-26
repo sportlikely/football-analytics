@@ -466,9 +466,9 @@ from the perf labels (the jobs and requests in flight). Live 26 Oct 20:53 UTC, 3
 in 3 min on /<lang>/* and /basketball/* (many at exactly 3.0 / 6.0 s), /api/basketball/games up to 14.3 s, start-up state
 loads 0.7–1.5 s, and nothing recorded what code ran during a stall.
 
-- Step 1 (this commit, deployed on its own): the web process keeps a rolling CPU profile (`workers/cpuProfiler.ts`: an
+- Step 1 (c215540, deployed on its own): the web process keeps a rolling CPU profile (`workers/cpuProfiler.ts`: an
   inspector session on the main thread from a worker thread, `Session.connectToMainThread`, 5 ms sampling
-  (`CPU_PROFILE_US`), the profile swapped every 30 s and parsed in that thread, never on the web thread). Started in
+  (`CPU_PROFILE_US`), parsed in that thread, never on the web thread; swapped every 5 min since fix248b, see below). Started in
   `boot.ts` before the modules load, so the start-up load is profiled too. `CPU_PROFILE=0` turns it off.
 - Every stall over 300 ms (perf.ts) asks for its window (process.hrtime = the profile's clock): top 15 functions by
   self-time, file:line mapped back to the .ts source through dist's source maps, the callers (6 frames) of the top 5.
@@ -476,7 +476,46 @@ loads 0.7–1.5 s, and nothing recorded what code ran during a stall.
   over every profiled stall since the start), `web.cpuProfile` (on, profiled, notCovered, errors), and the top 3
   functions beside each of `web.topStalls`. A stall over 500 ms logs "Stall N ms CPU: fn file:line ms · …".
   The old `diagStalls` (stalls while only /api/perf or /api/admin ran) is now `adminStalls`.
-- Not changed yet (steps 2–6 of the request wait for the profile, by Yarin's order): stored HTML for every page, the
-  14 s /api/basketball/games, the start-up state parse, who sends ~100 page renders a minute.
+
+**The live profile (c215540, 3 min after a restart, 13 stalls, 0 errors)**: cpuTop = SQLite `get` 2,208 ms / 9 stalls,
+`all` 779 ms / 3, loadNow (shared.ts) 713 ms, the part reader (shared.ts:73) 391 ms, v8 deserialize 271 ms / 3,
+squadValues.ts:288 126 ms, eachRowPaged 54 ms; everything else < 25 ms. The three worst: 851 ms of `all` from
+loadNewerStates on the 30-s timer; 774 ms blocked outside JS (route_cache read in workerRoutes.readCopy); 498 ms of
+`get` in pageCache.builtAtOf ← readRow ← getPage. **Rendering was not the cause: synchronous SQLite reads of big rows on
+the web thread were.**
+
+### fix248b — the web thread reads no big row (26 Oct)
+
+- `workers/pageReader.ts` (fix243's reader thread, its own read-only connection) runs any read-only statement
+  (`readSql` in services/pageReader.ts; BLOBs come back as Uint8Array, no copy). On the web it now does:
+  - shared states (shared.ts): the 30-s version check (`SELECT key, ver`), each state's row and each part. The web
+    thread only deserializes, one part at a time with a yield between. Parts are now cut from 2 items (was 50) and plain
+    objects are cut by their entries too ('o'), so no single deserialize holds a whole big object. /api/perf → shared →
+    `maxStepMs` per state = its longest single deserialize on the web (what is left to split).
+  - stored pages (pageCache.ts): a row's time (builtAtAsync: indexed, plain query if the index is not there yet), the
+    ETag a member's copy checks for 304 (`etags` in getPage, app.ts passes 'full'), and the views (fix243).
+  - kept copies of worker routes (workerRoutes.readCopy, the start-up copy): async, read in the thread.
+  - paged table reads (utils/pagedRead.ts: squad values, club value history): 200 rows per page from the thread.
+  The synchronous read stays only as the fallback when the thread is not there (PAGE_READER=0, it failed).
+- The profiler's own cost: each `Profiler.start` makes V8 log every compiled function on the main thread (30–40 ms
+  idle, far more under load). Swapping the profile on every stall, or every 2 s, made it the cause of the blocks it
+  measured (a 90-s load run went from p95 8 ms to 2.5 s with 2-s swaps). It now swaps every 5 min
+  (`CPU_PROFILE_ROTATE_S`) and a stall's functions arrive at that swap (the "Stall … CPU" log line too).
+- perf.ts: the stall tick is 100 ms (was 500: a 200–500 ms block was mostly invisible to it); blocks of 150–300 ms are
+  profiled too and listed apart (`web.shortBlocks`, not counted as stalls); `web.loopByMinute` = the longest block per
+  minute from Node's event-loop delay histogram (10 ms resolution) — the measure the load test uses.
+- **Load test** (`npm run test:load`, scripts/load-test.mjs): starts the web + worker here (or `LOAD_URL`), waits for
+  the worker's first round of stored pages, then 1,000 visitors (one address each) for 5 min: a page (every language
+  and sport, crawler pages, real slug pages from a database copy) then 3 API calls, ~1 s apart. Passes when p95 < 1 s,
+  no 5xx and the longest web block < 200 ms; reports p50 / p95 / p99, req/s, 5xx by route with the first answer,
+  network errors by kind, the slowest routes, the stalls and their functions. `LOAD_DATA_DIR` = a database copy
+  (Admin → Database backups); without it an empty database (checks the harness only). Locally no data-provider key:
+  /api/basketball/standings/:code (built from a provider call) is left out (`LOAD_SKIP`).
+- **Result** (27 Oct, this PC, the 10 Oct database copy, web + worker, 1,000 visitors × 5 min): 294,069 requests, 971 req/s,
+  p50 3 ms · p95 9 ms · p99 43 ms, 0 × 5xx, 0 network errors, longest web block 199 ms → PASS (the block is at the line).
+  Before fix248b on the same copy: p99 155 ms, 9.7k × 5xx, a 368 ms block. Still open: a few requests reached 5–8 s at the
+  most (max, all routes at about the same moment, the web thread not blocked) — suspected the single reader thread's
+  queue behind one slow read; check `pageReader.maxMs` in /api/perf live, two reader threads if it is that. The cluster
+  (step 6) is not built: decide from the second live profile.
 - Test: `npm run test:fix248` (a 900 ms busy function on top with its line; a dist function mapped to
   utils/slugRules.ts:25 with its caller).

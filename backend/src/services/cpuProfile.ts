@@ -2,7 +2,7 @@
  * fix248: what code ran during a web stall. Nine fixes (135 … 243) guessed the cause from the perf labels (the jobs and
  * requests in flight); here the web process keeps a rolling CPU profile (workers/cpuProfiler.ts: an inspector session
  * on this thread, 5 ms sampling, parsed in that thread) and every stall over 300 ms gets the top 15 functions by
- * self-time in its window (file:line in the .ts source, the callers of the top 5). /api/perf → web.diagStalls (the last
+ * self-time in its window (answered at the profile's next swap: every 5 min, CPU_PROFILE_ROTATE_S) (file:line in the .ts source, the callers of the top 5). /api/perf → web.diagStalls (the last
  * stalls with their functions) and web.cpuTop (the functions summed over every profiled stall since the start).
  * Started from boot.ts before the modules load (so the start-up load is profiled too). CPU_PROFILE=0 turns it off.
  */
@@ -13,6 +13,7 @@ import { Worker, isMainThread } from 'node:worker_threads';
 export type CpuFn = { fn: string; at: string; ms: number; pct: number; stack?: string[] };
 export type CpuResult = { covered: boolean; sampledMs: number; top: CpuFn[] };
 
+const ROTATE_MS = (Number(process.env.CPU_PROFILE_ROTATE_S) || 300) * 1000;
 let w: Worker | null = null;
 let ready = false;
 let seq = 0;
@@ -37,7 +38,7 @@ export function startCpuProfile() {
   try {
     const t = new Worker(f.file, {
       execArgv: f.execArgv, resourceLimits: { maxOldGenerationSizeMb: 192 },
-      workerData: { intervalUs: Number(process.env.CPU_PROFILE_US) || 5000 }
+      workerData: { intervalUs: Number(process.env.CPU_PROFILE_US) || 5000, rotateMs: ROTATE_MS }
     });
     t.unref();
     t.on('message', (m: any) => {
@@ -61,7 +62,8 @@ export function profileWindow(fromNs: bigint, toNs: bigint, n = 15): Promise<Cpu
   if (!w || !ready) return Promise.resolve(null);
   const id = ++seq;
   return new Promise(resolve => {
-    const timer = setTimeout(() => { if (pending.delete(id)) resolve(null); }, 15_000);
+    // the answer comes at the next swap (at most ROTATE_MS)
+    const timer = setTimeout(() => { if (pending.delete(id)) resolve(null); }, ROTATE_MS + 60_000);
     timer.unref();
     pending.set(id, r => {
       clearTimeout(timer);
@@ -81,6 +83,9 @@ export function profileWindow(fromNs: bigint, toNs: bigint, n = 15): Promise<Cpu
     w!.postMessage({ id, fromUs: Number(fromNs / 1000n), toUs: Number(toNs / 1000n), n });
   });
 }
+
+/** answer the waiting windows now (one profiler restart: a short block of its own) — tests */
+export const flushCpuProfile = () => { w?.postMessage({ flush: true }); };
 
 /** /api/perf: the functions with the most self-time over every profiled stall */
 export const cpuTop = (n = 15) => [...totals.values()].sort((a, b) => b.ms - a.ms).slice(0, n);

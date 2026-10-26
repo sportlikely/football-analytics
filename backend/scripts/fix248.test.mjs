@@ -11,7 +11,7 @@ const DIST = path.join(here, '../dist').replace(/\\/g, '/');
 
 test('a stall is profiled: the busy function is on top, with its file:line, and a dist function maps to its .ts line', () => {
   const code = `
-    const { startCpuProfile, cpuProfileStatus } = require('${DIST}/services/cpuProfile.js');
+    const { startCpuProfile, cpuProfileStatus, flushCpuProfile } = require('${DIST}/services/cpuProfile.js');
     const perf = require('${DIST}/services/perf.js');
     const { slugify } = require('${DIST}/utils/slugRules.js');
     startCpuProfile();
@@ -24,6 +24,8 @@ test('a stall is profiled: the busy function is on top, with its file:line, and 
       burnTheThread(900);
       await wait(1500);
       slugLoop(700);
+      await wait(1000);
+      flushCpuProfile();
       await wait(2500);
       const s = perf.perfSummary();
       console.log('RESULT ' + JSON.stringify({ on: cpuProfileStatus(), diag: s.diagStalls, top: s.cpuTop }));

@@ -286,12 +286,12 @@ if (isWeb) app.use(deployErrorsMiddleware);
 // and the socket keep the 503 (Railway's health check must see "not ready").
 const STARTUP_WAIT_MS = Number(process.env.STARTUP_WAIT_MS) || 30000;
 const CRAWLER_STARTUP_WAIT_MS = Number(process.env.CRAWLER_STARTUP_WAIT_MS) || 120000;
-if (isWeb) app.use((req, res, next) => {
+if (isWeb) app.use(async (req, res, next) => {
   if (isReady()) return next();
   if (!needsState(req.path) && (!SITE_PASSWORD || req.path.startsWith('/assets/') || PUBLIC_FILES.has(req.path)) && serveEarly(req, res)) return;
   if (req.path.startsWith('/api/') && req.path !== '/api/health' && !SITE_PASSWORD) {
     const signedIn = !!req.get('authorization') || String(req.get('cookie') || '').includes(`${SESSION_COOKIE}=`);
-    if (sendStartupCopy(req, res, signedIn)) return;
+    if (await sendStartupCopy(req, res, signedIn)) return;
     const t0 = Date.now();
     const tick = () => {
       if (isReady()) return next();
@@ -576,7 +576,8 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   let s: Awaited<ReturnType<typeof getPage>>;
   // fix243: the views this request sends are read in the reader thread, never on the web thread (pageCache prefetch)
   const views = (req as any).proxyAnon ? ['rows', ...(view ? [view] : [])] : keep?.size ? ['rows'] : view ? [view] : [];
-  try { s = await getPage(name, q, { views }); } finally { read(); }
+  // fix248: the 'full' ETag (304 check of a member's copy) is read there too
+  try { s = await getPage(name, q, { views, etags: !(req as any).proxyAnon && keep?.size ? ['full'] : undefined }); } finally { read(); }
   // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
   // fix245: a verified search engine never gets this 503: the worker builds the page now and answers
   if (!s && isWeb && isVerifiedCrawler(req)) return forwardToWorker(req, res);

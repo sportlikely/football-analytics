@@ -1,10 +1,14 @@
 /**
  * fix248: the web process's rolling CPU profile (services/cpuProfile.ts starts this thread). Every stall before fix248
  * was guessed from the perf labels (what was in flight), never from what code ran. This thread holds an inspector
- * session on the main thread (Session.connectToMainThread): the V8 sampler runs at a low rate (5 ms), the profile is
- * swapped every 30 s, and for each stall the main thread reports (its start / end in process.hrtime) the samples of that
- * window are counted here: the top functions by self-time (file:line, mapped back to the .ts source through the build's
+ * session on the main thread (Session.connectToMainThread): the V8 sampler runs at a low rate (5 ms). For each stall
+ * the main thread reports its window (start / end in process.hrtime = the profile's clock); the samples of that window
+ * are counted here: the top functions by self-time (file:line, mapped back to the .ts source through the build's
  * source maps). The profile's JSON is parsed in this thread, never on the web thread.
+ *
+ * The profile is swapped only every 5 minutes (CPU_PROFILE_ROTATE_S) and a stall's answer waits for that swap: each
+ * Profiler.start makes V8 log every compiled function on the main thread (30–40 ms idle, more under load). Swapping
+ * on every stall, or every 2 s, made the profiler the cause of the blocks it measured (load test, 26 Oct).
  */
 import { parentPort, workerData } from 'node:worker_threads';
 import { Session } from 'node:inspector';
@@ -17,26 +21,25 @@ type Node = { id: number; callFrame: Frame; children?: number[] };
 type Profile = { nodes: Node[]; startTime: number; endTime: number; samples: number[]; timeDeltas: number[] };
 
 const INTERVAL_US = Number(workerData?.intervalUs) || 5000;
-const ROTATE_MS = Number(workerData?.rotateMs) || 30_000;
+const ROTATE_MS = Number(workerData?.rotateMs) || 300_000;
+const KEEP = 2; // the last two profiles: a stall at the very start of one still finds its samples
 
 const session = new Session();
 session.connectToMainThread();
 const post = <T = any>(method: string, params?: object) => new Promise<T>((resolve, reject) =>
   session.post(method, params || {}, (err, res) => (err ? reject(err) : resolve(res as T))));
 
-let prev: Profile | null = null;
+const ring: Profile[] = [];
 let busy: Promise<unknown> = Promise.resolve();
-/** one inspector call chain at a time (a stall report and the 30 s swap never overlap) */
+/** one inspector call chain at a time */
 const serial = <T>(fn: () => Promise<T>): Promise<T> => { const p = busy.then(fn, fn); busy = p.catch(() => undefined); return p; };
 
-/** stop the running profile, keep it as the previous one, start the next */
-async function swap(): Promise<Profile | null> {
+/** stop the running profile, keep it in the ring, start the next */
+async function swap(): Promise<void> {
   let cur: Profile | null = null;
   try { cur = (await post<{ profile: Profile }>('Profiler.stop')).profile; } catch { /* not started */ }
   await post('Profiler.start');
-  const before = prev;
-  if (cur) prev = cur;
-  return before;
+  if (cur) { ring.push(cur); if (ring.length > KEEP) ring.shift(); }
 }
 
 /* ---- source maps (dist/*.js → src/*.ts), cached per file ---- */
@@ -142,17 +145,24 @@ function topIn(profiles: Profile[], fromUs: number, toUs: number, n: number) {
   return { sampledMs: Math.round(total), top };
 }
 
-parentPort!.on('message', (m: { id: number; fromUs: number; toUs: number; n?: number }) => {
-  void serial(async () => {
+// the stall windows waiting for the next swap
+const waiting: { id: number; fromUs: number; toUs: number; n?: number }[] = [];
+function answer() {
+  for (const m of waiting.splice(0)) {
     try {
-      const before = await swap(); // the running profile (up to now) becomes prev; before = the one ahead of it
-      const profiles = [before, prev].filter((p): p is Profile => !!p && p.endTime >= m.fromUs && p.startTime <= m.toUs);
+      const profiles = ring.filter(p => p.endTime >= m.fromUs && p.startTime <= m.toUs);
       const covered = profiles.length > 0 && Math.min(...profiles.map(p => p.startTime)) <= m.fromUs + INTERVAL_US;
       parentPort!.postMessage({ id: m.id, covered, ...topIn(profiles, m.fromUs, m.toUs, m.n || 15) });
     } catch (e: any) {
       parentPort!.postMessage({ id: m.id, error: String(e?.message || e) });
     }
-  });
+  }
+}
+parentPort!.on('message', (m: { id?: number; fromUs: number; toUs: number; n?: number; flush?: boolean }) => {
+  // flush = answer now (tests; an admin who wants the answer at once and accepts one profiler restart)
+  if (m.flush) { void serial(swap).then(answer, answer); return; }
+  if (m.id != null) waiting.push(m as { id: number; fromUs: number; toUs: number });
+  if (waiting.length > 200) void serial(swap).then(answer, answer);
 });
 
 void serial(async () => {
@@ -161,4 +171,4 @@ void serial(async () => {
   await post('Profiler.start');
   parentPort!.postMessage({ ready: true });
 }).catch(e => parentPort!.postMessage({ fatal: String(e?.message || e) }));
-setInterval(() => void serial(swap).catch(() => undefined), ROTATE_MS);
+setInterval(() => void serial(swap).then(answer, answer), ROTATE_MS);

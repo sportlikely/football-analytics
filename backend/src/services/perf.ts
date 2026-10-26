@@ -6,7 +6,7 @@
  * fix155: every running job is tracked (several can be in flight at once), a stall names all of them, each job keeps
  * the worst stall seen while it ran, and the live jobs (30 s / 60 s ticks) get an hourly "live ticks: max X ms" line.
  */
-import { PerformanceObserver, performance } from 'node:perf_hooks';
+import { PerformanceObserver, performance, monitorEventLoopDelay } from 'node:perf_hooks';
 import { isMainThread } from 'node:worker_threads';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import logger from '../utils/logger';
@@ -49,9 +49,12 @@ if (isMainThread) for (const s of [process.stdout, process.stderr]) {
   };
 }
 
-const STEP = 500;
+// fix248: 100 ms (was 500): a 200–500 ms block was mostly invisible to a 500 ms tick (it only sees how late it itself
+// ran) — the load test measured a 368 ms web block that no stall named or profiled
+const STEP = 100;
 type Stall = { at: string; ms: number; job: string | null; startup?: true; diag?: true; cpu?: CpuResult };
 const stalls: Stall[] = [];
+const shortBlocks: Stall[] = [];
 /*
  * fix232: a stall while only an admin diagnostic ran (/api/perf, /api/admin/* answered here) is not a stall a visitor
  * waited for: it is kept apart (diagStalls) and not counted in the hour (data health "Web stalls"). On 25 Oct the 5 MB
@@ -115,8 +118,40 @@ if (isMainThread) setInterval(() => {
     // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
     // fix202: the worker's own loop is allowed to be busy (no visitor waits for it): its stalls are logged from 2 s
     if (lag > (isWorker ? 2000 : 500)) logger.warn(`${isWorker ? 'Worker: event' : 'Event'} loop blocked ${lag} ms${job ? ` (${job})` : ''}`);
+  } else if (lag > 150 && startupDone) {
+    /*
+     * fix248: a shorter block (150–300 ms: the load test's target is no block over 200 ms) is profiled too, kept apart
+     * (not a stall in the counts): /api/perf → web.shortBlocks, and its functions in web.cpuTop
+     */
+    const done = ended.slice(0, 3).map(r => `${r.label} ${Math.round(r.end - r.start)} ms`).join(' + ');
+    const b: Stall = { at: new Date(now).toISOString(), ms: lag, job: [logs, runningLabel(), done].filter(Boolean).join(' + ') || null };
+    shortBlocks.push(b);
+    if (shortBlocks.length > 50) shortBlocks.shift();
+    profileStall(b, sinceNs, lastNs);
   }
 }, STEP).unref();
+
+/*
+ * fix248: the longest block per minute, measured by Node's event-loop delay histogram (10 ms resolution). The 500 ms
+ * tick above cannot see a 200 ms block (it only sees how late it itself ran); the load test (npm run test:load) and
+ * the "longest web block under 200 ms" target read this: /api/perf → web.loopByMinute (the last 60 minutes).
+ */
+const loopByMinute: { from: string; to: string; maxMs: number; p99Ms: number }[] = [];
+if (isMainThread) {
+  try {
+    const h = monitorEventLoopDelay({ resolution: 10 });
+    h.enable();
+    let from = Date.now();
+    setInterval(() => {
+      const to = Date.now();
+      loopByMinute.push({ from: new Date(from).toISOString(), to: new Date(to).toISOString(), maxMs: Math.round(h.max / 1e6), p99Ms: Math.round(h.percentile(99) / 1e6) });
+      from = to;
+      if (loopByMinute.length > 60) loopByMinute.shift();
+      h.reset();
+    }, 60_000).unref();
+  } catch { /* not available */ }
+}
+export const loopMinutes = () => loopByMinute.slice();
 
 // once an hour: the worst event-loop stall while each live job was running (the goal: under 500 ms)
 if (isMainThread) setInterval(() => {
@@ -545,6 +580,7 @@ export function perfStatus() {
     adminStalls: stalls.filter(s => s.diag).slice(-5).map(s => ({ at: s.at, ms: s.ms, job: s.job })),
     // fix248: the stalls with what code ran (top 15 functions by self-time in the window), newest first
     diagStalls: stalls.filter(s => s.cpu).slice(-25).reverse(),
+    shortBlocks: shortBlocks.filter(s => s.cpu).slice(-25).reverse(),
     cpuTop: cpuTop(), cpuProfile: cpuProfileStatus(),
     // fix210: the worst stalls of the last hour (what to fix first); fix232: 20
     topStalls: [...recent].sort((a, b) => b.ms - a.ms).slice(0, 20),
@@ -569,11 +605,13 @@ export function perfSummary() {
   const p = perfStatus();
   return {
     uptimeMin: p.uptimeMin, maxLagMs: p.maxLagMs, stallsLastHour: p.stallsLastHour, worstLastHour: p.worstLastHour,
+    loopByMinute: loopMinutes(),
     running: p.running, heavy: { ...p.heavy, waiting: p.heavy.waiting.slice(0, 20) }, memoryMb: p.memoryMb, heapMb: p.heapMb,
     topStalls: p.topStalls.map(s => ({ at: s.at, ms: s.ms, job: s.job ? s.job.slice(0, 300) : null, cpu: s.cpu?.top.slice(0, 3).map(f => `${f.fn} ${f.at} ${f.ms} ms`) })),
     startupStalls: p.startupStalls, adminStalls: p.adminStalls,
     // fix248: the 8 newest profiled stalls (top 15 functions each) and the functions summed over every profiled stall
     diagStalls: p.diagStalls.slice(0, 8).map(s => ({ ...s, job: s.job ? s.job.slice(0, 200) : null })), cpuTop: p.cpuTop, cpuProfile: p.cpuProfile,
+    shortBlocks: p.shortBlocks.slice(0, 5).map(s => ({ at: s.at, ms: s.ms, job: s.job ? s.job.slice(0, 160) : null, cpu: s.cpu?.top.slice(0, 5).map(f => `${f.fn} ${f.at} ${f.ms} ms`) })),
     jobs: jobsTop(30), memByJob: memByJob(10),
     // the last 24 h by the hour, each with its 2 worst stalls
     hours: p.hours.slice(-24).map(h => ({ ...h, top: h.top.slice(0, 2).map(t => ({ ms: t.ms, job: t.job ? t.job.slice(0, 120) : null })) }))
