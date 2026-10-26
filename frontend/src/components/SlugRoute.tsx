@@ -1,5 +1,5 @@
 import { createContext, Fragment, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { knownId, rememberSlug, type LinkKind, type LinkSport } from '../lib/links'
@@ -40,8 +40,11 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
   // a number (an old id) or a code with capitals (an old basketball league code: NBA, BB123) where the slug belongs
   const numeric = /^-?\d+$/.test(slug) || /[A-Z]/.test(slug)
   const [id, setId] = useState<string | null>(() => (numeric ? null : knownId(sport, kind, slug) ?? fromServer(sport, kind, slug)))
+  // fix243: a past season's match (410 from the server): admin-only
+  const [gone, setGone] = useState(false)
   useEffect(() => {
     let off = false
+    setGone(false)
     const clicked = numeric ? null : knownId(sport, kind, slug)
     const now = clicked ?? (numeric ? null : fromServer(sport, kind, slug))
     setId(now)
@@ -61,11 +64,29 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
         if (d.id) rememberSlug(sport, kind, d.slug, d.id)
         nav(`/${sport}/${kind}/${d.slug}${tail.current}`, { replace: true })
       } else if (d.id) setId(String(d.id))
-    }).catch(() => { if (!off) nav(numeric ? `/${sport}` : searchOf(slug), { replace: true }) })
+    }).catch(e => {
+      if (off) return
+      if (e?.response?.status === 410) { setGone(true); return }
+      nav(numeric ? `/${sport}` : searchOf(slug), { replace: true })
+    })
     return () => { off = true }
   }, [sport, kind, slug, numeric, nav])
+  if (gone) return <PastSeason sport={sport} />
   if (!id) return <div className="min-h-[70vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={t('Loading…')} /></div>
   return <EntityId.Provider value={id}><Fragment key={id}>{children}</Fragment></EntityId.Provider>
+}
+
+/** fix243: a past season's match page for a non-admin (the server sends 410 for it) */
+export function PastSeason({ sport }: { sport: LinkSport }) {
+  return (
+    <div className="min-h-[60vh] grid place-items-center px-4">
+      <div className="card p-6 max-w-md text-center flex flex-col gap-3">
+        <h1 className="text-xl font-bold">{t('This game is from a past season')}</h1>
+        <p className="text-muted">{t('Past seasons are not public.')}</p>
+        <Link to={`/${sport}`} className="self-center text-sm font-bold text-bg bg-accent px-4 py-2 rounded-xl">{t("See this season's games")}</Link>
+      </div>
+    </div>
+  )
 }
 
 /**

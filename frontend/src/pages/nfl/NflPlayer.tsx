@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useEntityId } from '../../components/SlugRoute'
-import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t, LOCALE } from '../../lib/i18n'
@@ -11,6 +10,7 @@ import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
 import NameLink, { href } from '../../components/sport/NameLink'
 import { teamHref, matchHref } from '../../lib/links'
+import { MaybeLink } from '../../components/MaybeLink'
 
 interface Data {
   player: { id: number; name: string; position: string | null; group: string | null; number: number | null; age: number | null; height: string | null; weight: string | null; college: string | null; experience: number | null; image: string | null }
@@ -117,14 +117,14 @@ export default function NflPlayer() {
               const g = l.game, home = g.home.id === l.teamId, opp = home ? g.away : g.home
               return (
                 <li key={g.id} className="py-2 text-sm">
-                  <Link to={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} className="flex flex-wrap items-center gap-x-3 gap-y-1 hover:text-accent">
+                  <MaybeLink to={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })} className="flex flex-wrap items-center gap-x-3 gap-y-1 hover:text-accent">
                     <span className="w-16 text-xs text-faint">{new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
                     <span className="flex items-center gap-1.5 min-w-0"><span className="text-xs text-faint">{home ? t('vs') : '@'}</span><TeamLogo team={opp} size={16} /><span className="truncate text-ink">{opp.name}</span></span>
                     {g.score && <span className="num text-muted">{home ? `${g.score.home}–${g.score.away}` : `${g.score.away}–${g.score.home}`}</span>}
                     <span className="basis-full sm:basis-auto sm:ml-auto text-xs text-muted truncate">
                       {Object.entries(l.groups).map(([gn, st]) => `${gn}: ${Object.entries(st).slice(0, 4).map(([k, v]) => `${k} ${v}`).join(', ')}`).join(' · ')}
                     </span>
-                  </Link>
+                  </MaybeLink>
                 </li>
               )
             })}

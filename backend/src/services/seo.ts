@@ -22,6 +22,7 @@ import { fitDescription, pack, shortDate, titleDate, formLetters, STATIC, Lang, 
 import { fbLast as fbLastRaw, fbNext as fbNextRaw, fbH2h as fbH2hRaw, fbWdl, fbTable, fbPosition, fbWeek, fbDay, FbGame, TableRow, bbGameById as bbGameByIdRaw, bbLast as bbLastRaw, bbNext as bbNextRaw, bbH2h as bbH2hRaw, bbWl, bbRecord, bbTable, bbWeek, bbDay, bbTeamName as bbTeamNameRaw, BbGameRow } from './seoFacts';
 import { cleanText } from './sponsorNames';
 import { pubPath, pubLinks, parseNew, parseOld, idOfSlug, internalPath } from './slugs';
+import { isPastSeasonMatch } from './pastSeason';
 import { internalPage } from '../utils/slugRules';
 
 /*
@@ -378,7 +379,7 @@ export function seoPage(rawPath: string): SeoInfo {
   // (an old id address reaches this only while its item has no slug yet — new in the last minutes: its page as before)
   const pubOf = (p: string) => (ent && p === path ? `/${ent.sport}/${ent.kind}/${ent.slug}` : pubPath(p));
   const page = (title: string, description: string, body: string, extra: Partial<SeoInfo> = {}): SeoInfo =>
-    ({ title, description, path: pubOf(path), lang, body: pubLinks(`${NAV(lang)}<main>${body}</main>`), ...extra,
+    ({ title, description, path: pubOf(path), lang, body: pubLinks(unlinkPast(`${NAV(lang)}<main>${body}</main>`)), ...extra,
       ...(extra.jsonld ? { jsonld: JSON.parse(pubLinks(JSON.stringify(extra.jsonld))) } : {}),
       ...(ent ? { ent } : {}) });
   const S = (k: keyof typeof STATIC) => STATIC[k][lang];
@@ -722,6 +723,15 @@ export function renderIndex(html: string, s: SeoInfo): string {
   return out;
 }
 
+/**
+ * fix243: a link to a past season's match (admin-only, 410) becomes its plain text: search engines are never sent to it.
+ * Links here are still old id addresses (pubLinks turns them into slugs afterwards).
+ */
+export function unlinkPast(html: string): string {
+  return html.replace(/<a href="((?:\/(?:es|pt|de|fr|it|tr))?(\/(?:match|basketball\/game|american-football\/game|tennis\/match)\/-?\d+))(?:[?#][^"]*)?"[^>]*>([\s\S]*?)<\/a>/g,
+    (all, _href: string, p: string, inner: string) => { const o = parseOld(p); return o && o.kind === 'match' && isPastSeasonMatch(o.sport, o.id) ? inner : all; });
+}
+
 /* ---------- sitemaps (fix124): an index + one file per kind; lastmod on every entry; no past seasons, no record pages ---------- */
 
 type SmUrl = { loc: string; freq: string; pri: string; mod: string; enOnly?: boolean };
@@ -730,7 +740,9 @@ const SEASON_DAYS = 300; // teams / leagues with a game in the last ~10 months (
 function urlset(urls0: SmUrl[]) {
   // fix229: every item at its slug address; one without a slug yet is left out until the next build (never an old id address)
   const seen = new Set<string>();
-  const urls = urls0.map(u => ({ ...u, loc: pubPath(u.loc) })).filter(u => !parseOld(u.loc) && !seen.has(u.loc) && !!seen.add(u.loc));
+  // fix243: never a past season's match (admin-only: 410)
+  const past = (loc: string) => { const o = parseOld(loc); return !!o && o.kind === 'match' && isPastSeasonMatch(o.sport, o.id); };
+  const urls = urls0.filter(u => !past(u.loc)).map(u => ({ ...u, loc: pubPath(u.loc) })).filter(u => !parseOld(u.loc) && !seen.has(u.loc) && !!seen.add(u.loc));
   const alt = (p: string) => LANGS.map(l => `<xhtml:link rel="alternate" hreflang="${l}" href="${SITE + link(l, p)}"/>`).join('');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls
     .map(u => `  <url><loc>${SITE}${u.loc}</loc>${u.enOnly ? '' : alt(u.loc)}<lastmod>${u.mod}</lastmod><changefreq>${u.freq}</changefreq><priority>${u.pri}</priority></url>`).join('\n')}\n</urlset>\n`;

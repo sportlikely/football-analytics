@@ -18,6 +18,7 @@ import { stringifyAsync } from '../utils/jsonAsync';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
+import { readStored, pageReaderOn } from './pageReader';
 
 db.exec(`CREATE TABLE IF NOT EXISTS page_cache (key TEXT PRIMARY KEY, json TEXT NOT NULL, built_at INTEGER NOT NULL, ms INTEGER NOT NULL DEFAULT 0)`);
 // fix221: each stored view carries its ETag and a gzip copy made by the worker (the web process only sends them)
@@ -127,7 +128,25 @@ const statOf = (key: string) => {
   return st;
 };
 
-const builtAtOf = (key: string): number => (db.prepare(`SELECT built_at FROM page_cache WHERE key = ?`).get(key) as any)?.built_at || 0;
+/*
+ * fix243: a row's time / ETag through its covering index. fix232 built idx_page_cache_meta for this, but SQLite never
+ * used it: for `key = ?` it takes the primary key's index and reads the row, and built_at / etag come after the json
+ * column — every read walked the page's overflow pages (the upcoming list: several MB, from disk after each rebuild:
+ * "stored upcoming: read" 1–2 s on the web, 26 Oct). INDEXED BY makes SQLite read the index only; until the index is
+ * there (dbIndexes.ts builds it in a thread) the plain query.
+ */
+type Q = { st: any; indexed: boolean; at: number };
+const indexedQ = (indexed: string, plain: string) => {
+  let q: Q | null = null;
+  return () => {
+    if (q && (q.indexed || Date.now() - q.at < 60_000)) return q.st;
+    try { q = { st: db.prepare(indexed), indexed: true, at: Date.now() }; } catch { q = { st: db.prepare(plain), indexed: false, at: Date.now() }; }
+    return q.st;
+  };
+};
+const qBuiltAt = indexedQ(`SELECT built_at FROM page_cache INDEXED BY idx_page_cache_meta WHERE key = ?`, `SELECT built_at FROM page_cache WHERE key = ?`);
+const qEtag = indexedQ(`SELECT etag FROM page_cache INDEXED BY idx_page_cache_etag WHERE key = ? AND built_at = ?`, `SELECT etag FROM page_cache WHERE key = ? AND built_at = ?`);
+const builtAtOf = (key: string): number => (qBuiltAt().get(key) as any)?.built_at || 0;
 /** fix221: the web process reads only the row's time here; the page's text is read when its body is asked for */
 function readRow(key: string, withBody = !isWeb): Mem | null {
   if (!withBody) {
@@ -170,7 +189,7 @@ function stored(key: string, m: Mem): Stored {
     etagOf: v => {
       const have = m.variants.get(v);
       if (have !== undefined) return have?.etag;
-      const r: any = db.prepare(`SELECT etag FROM page_cache WHERE key = ? AND built_at = ?`).get(`${key}#${v}`, m.builtAt);
+      const r: any = qEtag().get(`${key}#${v}`, m.builtAt);
       return r ? r.etag || `"${m.builtAt.toString(36)}-${v}"` : undefined;
     },
     rows: () => {
@@ -287,7 +306,23 @@ const WAIT_FIRST_MS = Number(process.env.PAGE_WAIT_MS) || 10_000;
  * The stored copy of a page (null only when none was ever built and the build did not finish in 10 s). A copy older
  * than the page's freshMs is still returned; a new one is built in the background.
  */
-export async function getPage(name: string, q: Query = {}, opts: { waitMs?: number } = {}): Promise<Stored | null> {
+/**
+ * fix243: `views` = the views this request will send (and 'rows'): on the web they are read in the reader thread
+ * (services/pageReader.ts) before getPage returns, so sending them reads nothing on the web thread.
+ */
+async function prefetch(key: string, m: Mem, views: string[] | undefined) {
+  if (!views?.length || !isWeb || !pageReaderOn()) return;
+  for (const v of views) {
+    if (v === 'rows' ? m.rows !== undefined : m.variants.has(v)) continue;
+    let r: Awaited<ReturnType<typeof readStored>>;
+    try { r = await readStored(`${key}#${v}`, m.builtAt); } catch { return; } // the synchronous read, as before
+    if (v === 'rows') { m.rows = r ? parseRows(r.text) : null; grow(key, m, r ? r.text.length * 2 : 0); continue; }
+    const x: View | null = r ? { text: r.text, etag: r.etag || `"${m.builtAt.toString(36)}-${v}"`, gz: r.gz } : null;
+    if (!m.variants.has(v)) { m.variants.set(v, x); grow(key, m, x ? x.text.length * 2 + (x.gz?.length || 0) : 0); }
+  }
+}
+
+export async function getPage(name: string, q: Query = {}, opts: { waitMs?: number; views?: string[] } = {}): Promise<Stored | null> {
   const def = defs.get(name);
   if (!def) throw new Error(`page ${name} is not defined`);
   const key = pageKey(name, q);
@@ -307,6 +342,7 @@ export async function getPage(name: string, q: Query = {}, opts: { waitMs?: numb
     if (Date.now() - m.builtAt > freshOf(def, () => bodyOf(key, mm))) {
       if (runsJobs) { noteRequested(key, def); void buildQueued(key); } else askWorker(key);
     }
+    await prefetch(key, m, opts.views);
     return stored(key, m);
   }
   // never built: one process builds it now; the web process asks the worker and waits (at most 10 s)
@@ -328,6 +364,7 @@ export async function getPage(name: string, q: Query = {}, opts: { waitMs?: numb
     if (row) memSet(key, row);
   }
   const done = mem.get(key);
+  if (done) await prefetch(key, done, opts.views);
   return done ? stored(key, done) : null;
 }
 

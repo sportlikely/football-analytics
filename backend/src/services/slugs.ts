@@ -17,6 +17,7 @@ import logger from '../utils/logger';
 import { isWeb, runsJobs } from './role';
 import { onState, applyState } from './shared';
 import { yieldEvery } from './perf';
+import { isPastSeasonMatch, seasonStarts } from './pastSeason';
 import { assignSlugs, assignMatchSlugs, baseOf, type SlugEntity, type SlugRow, type MatchEntity } from '../utils/slugAssign';
 import { teamSlug, slugify, playerSlug, matchSlug, parseMatchSlug, isSlug, splitTab, movedPage, LINK_SPORTS, ALLOWED_QUERY, type LinkSport, type LinkKind } from '../utils/slugRules';
 
@@ -83,8 +84,9 @@ export function parseNew(path: string): { sport: LinkSport; kind: LinkKind; slug
 
 /* ---------- the published state (web: the only source; worker: its own copy, then the table) ---------- */
 
-export interface SlugState { sport: LinkSport; builtAt: number; map: Map<string, string>; client: string; clientPlayers: string }
-// map keys: `s:<kind>/<slug>` → `<id>` (primary) or `<id> <canonical slug>` (alias); `i:<kind>/<id>` → primary slug
+export interface SlugState { sport: LinkSport; builtAt: number; map: Map<string, string>; client: string; clientPlayers: string; seasons?: string }
+// map keys: `s:<kind>/<slug>` → `<id>` (primary) or `<id> <canonical slug>` (alias); `i:<kind>/<id>` → primary slug;
+// fix243: `p:match/<id>` → '1' for a window match of a past season (its page is admin-only: 410 for everyone else)
 const states = new Map<LinkSport, SlugState>();
 onState('slugs:', (_key, v: SlugState) => { if (v?.sport) states.set(v.sport, v); });
 export const slugState = (sport: LinkSport) => states.get(sport) || null;
@@ -170,6 +172,14 @@ export function idOfSlug(sport: LinkSport, kind: LinkKind, slug: string): { id: 
   } catch { return null; }
 }
 
+/** fix243: a match of a past season? The web process: the flag in its state (window matches; older ones are asked of the worker) */
+export function pastMatch(sport: LinkSport, id: string): boolean {
+  const st = states.get(sport);
+  if (st?.map.has(`p:match/${id}`)) return true;
+  if (isWeb || !runsJobs) return false;
+  return isPastSeasonMatch(sport, id);
+}
+
 /** the new address of an item, null when it has no slug (yet) */
 export function publicPathOf(sport: LinkSport, kind: LinkKind, id: string | number | null | undefined): string | null {
   const s = slugOf(sport, kind, id);
@@ -210,7 +220,7 @@ function keptQuery(qs: string): string {
 export type LinkAnswer =
   | { to: string } // 301 to the new address
   | { search: string } // unknown slug: the search page with its words
-  | { page: { sport: LinkSport; kind: LinkKind; id: string; slug: string } } // a new address: this item
+  | { page: { sport: LinkSport; kind: LinkKind; id: string; slug: string; past?: true } } // a new address: this item (fix243: past = a past season's match)
   | { ask: true } // not in the web state: the worker knows (or not)
   | null; // not an item address
 
@@ -236,7 +246,7 @@ export function linkAnswer(path: string, query = ''): LinkAnswer {
     const hit = idOfSlug(nw.sport, nw.kind, nw.slug);
     if (hit) {
       if (hit.canonical !== nw.slug) return { to: `${lang}/${nw.sport}/${nw.kind}/${hit.canonical}${sub}${kept}` };
-      return { page: { sport: nw.sport, kind: nw.kind, id: hit.id, slug: nw.slug } };
+      return { page: { sport: nw.sport, kind: nw.kind, id: hit.id, slug: nw.slug, ...(nw.kind === 'match' && pastMatch(nw.sport, hit.id) ? { past: true as const } : {}) } };
     }
     if (isWeb) return { ask: true };
     const m = nw.kind === 'match' ? matchBySlugParts(nw.sport, nw.slug) : null;
@@ -654,6 +664,8 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   const mIds = matchIdsInWindow(sport);
   const mRows = mIds.size ? all(`SELECT slug, id, is_primary FROM slugs WHERE sport = ? AND kind = 'match'`, sport).filter(r => mIds.has(String(r.id))) : [];
   const mp = put('match', mRows);
+  // fix243: the window's past-season matches (a league whose new season began within the last 60 days)
+  for (const id of mp.keys()) if (isPastSeasonMatch(sport, id)) map.set(`p:match/${id}`, '1');
   await step();
   // other ids of the same item (old / twin ids): they 301 too
   for (const r of all(`SELECT kind, old_id, id FROM slug_ids WHERE sport = ?`, sport)) {
@@ -669,9 +681,9 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   const side = (id: string | null, n: string) => (id && client.t[id]) || (sport === 'tennis' ? (id && clientP[id]) || playerSlug(n) : teamSlug(n));
   for (const r of names.match) { const s = map.get(`i:match/${r.id}`); if (s && s !== matchSlug(side(r.hid, r.h), side(r.aid, r.a), r.d)) client.m[r.id] = s; }
   await step();
-  const st: SlugState = { sport, builtAt: Date.now(), map, client: JSON.stringify({ v: 1, ...client }), clientPlayers: JSON.stringify({ v: 1, p: clientP }) };
+  const st: SlugState = { sport, builtAt: Date.now(), map, client: JSON.stringify({ v: 1, ...client }), clientPlayers: JSON.stringify({ v: 1, p: clientP }), seasons: JSON.stringify(seasonStarts(sport)) };
   states.set(sport, st);
-  const sig = `${await contentSig(mapStrings(map), step)}|${await contentSig([st.client, st.clientPlayers])}`;
+  const sig = `${await contentSig(mapStrings(map), step)}|${await contentSig([st.client, st.clientPlayers, st.seasons || ''])}`;
   if (!publishIfChanged(`slugs:${sport}`, st, sig)) logger.debug?.(`slugs ${sport}: unchanged, not republished`);
   await step();
   // fix238: every match and player (all seasons) + their old / twin ids → the id index the web answers old links from
@@ -773,9 +785,9 @@ export async function buildSlugs(opts: { full?: boolean; sports?: LinkSport[] } 
   } finally { running = false; }
 }
 
-/** the app's exception list of a sport (`/api/slugs/:sport`; `players` = the players' list) */
-export function clientSlugs(sport: LinkSport, players = false): string | null {
+/** the app's exception list of a sport (`/api/slugs/:sport`; `players` = the players' list; fix243 `seasons` = seasonStarts) */
+export function clientSlugs(sport: LinkSport, players: boolean | 'seasons' = false): string | null {
   const st = states.get(sport);
-  return st ? (players ? st.clientPlayers : st.client) : null;
+  return st ? (players === 'seasons' ? st.seasons ?? null : players ? st.clientPlayers : st.client) : null;
 }
 export { baseOf, slugify };

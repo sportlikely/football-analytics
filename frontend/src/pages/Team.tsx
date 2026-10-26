@@ -16,6 +16,7 @@ import { teamHref, playerHref, matchHref } from '../lib/links'
 import { TeamDifficulty } from '../components/sport/game/GameExtras'
 import PlayerPhoto from '../components/sport/PlayerPhoto'
 import { officialPhoto } from '../lib/photoSources'
+import { MaybeLink } from '../components/MaybeLink'
 
 interface Side { id: number; name: string; logo: string }
 interface Fixture { matchId: number | null; date: string; status: string; comp: string; compCode?: string | null; home: Side; away: Side; hg: number | null; ag: number | null }
@@ -80,7 +81,7 @@ function FixtureRow({ f, teamId }: { f: Fixture; teamId: number }) {
       )}
     </div>
   )
-  return f.matchId ? <Link to={matchHref('football', f.matchId, { home: f.home.name, away: f.away.name, homeId: f.home.id, awayId: f.away.id, date: f.date })!} className="block hover:bg-surface2/40 rounded-lg">{body}</Link> : body
+  return f.matchId ? <MaybeLink to={matchHref('football', f.matchId, { home: f.home.name, away: f.away.name, homeId: f.home.id, awayId: f.away.id, date: f.date })} className="block hover:bg-surface2/40 rounded-lg">{body}</MaybeLink> : body
 }
 
 function Leaders({ items, label, squad }: { items: Leader[]; label: string; squad: Player[] }) {

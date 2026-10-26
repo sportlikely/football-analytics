@@ -2618,5 +2618,8 @@
  "{0} has the edge in the last {1} meetings": "{0} son {1} karşılaşmada üstün",
  "{0} won {1} of the last {2} meetings": "{0} son {2} karşılaşmanın {1}'ini kazandı",
  "An upset watch is not a tip: the favourite still wins or draws most of the time. Probabilities, not promises.": "Sürpriz takibi bir tavsiye değildir: favori çoğu zaman yine kazanır ya da berabere kalır. Olasılıklar, vaatler değil.",
- "An upset watch is not a tip: the favourite still wins most of the time. Probabilities, not promises.": "Sürpriz takibi bir tavsiye değildir: favori çoğu zaman yine kazanır. Olasılıklar, vaatler değil."
+ "An upset watch is not a tip: the favourite still wins most of the time. Probabilities, not promises.": "Sürpriz takibi bir tavsiye değildir: favori çoğu zaman yine kazanır. Olasılıklar, vaatler değil.",
+ "This game is from a past season": "Bu maç geçmiş bir sezona ait",
+ "Past seasons are not public.": "Geçmiş sezonlar herkese açık değil.",
+ "See this season's games": "Bu sezonun maçlarını gör"
 }

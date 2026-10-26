@@ -15,6 +15,7 @@ import TeamForecast from '../../components/sport/forecast/TeamForecast'
 import { TeamDifficulty } from '../../components/sport/game/GameExtras'
 import { BbTeamAnalysisCard, TeamRecordCard, type BbAnalysis } from '../../components/TeamAnalysis'
 import { playerHref, leagueHref, matchHref } from '../../lib/links'
+import { MaybeLink } from '../../components/MaybeLink'
 
 interface Profile { games: number; fgPct: number | null; threePct: number | null; threeAttempts: number | null; ftPct: number | null; rebounds: number | null; assists: number | null; turnovers: number | null; steals: number | null; blocks: number | null }
 interface Analysis {
@@ -179,11 +180,11 @@ function MarginChart({ games, team }: { games: Analysis['last20']; team: { id: n
         {games.map(g => {
           const h = (Math.abs(g.margin) / max) * 50
           return (
-            <Link key={g.id} to={matchHref('basketball', g.id, g.home ? { home: team.name, homeId: team.id, away: g.opponent, date: g.kickoff } : { home: g.opponent, away: team.name, awayId: team.id, date: g.kickoff })!} className="relative h-full group" style={{ width: `${w}%` }}
+            <MaybeLink key={g.id} to={matchHref('basketball', g.id, g.home ? { home: team.name, homeId: team.id, away: g.opponent, date: g.kickoff } : { home: g.opponent, away: team.name, awayId: team.id, date: g.kickoff })} className="relative h-full group" style={{ width: `${w}%` }}
               title={`${new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })} · ${g.home ? t('H') : t('A')} ${g.opponent} · ${g.for}–${g.against}`}>
               <span className={`absolute left-[15%] right-[15%] rounded-sm ${g.margin > 0 ? 'bg-win' : 'bg-loss'} group-hover:opacity-80`}
                 style={g.margin > 0 ? { bottom: '50%', height: `${h}%` } : { top: '50%', height: `${h}%` }} />
-            </Link>
+            </MaybeLink>
           )
         })}
       </div>

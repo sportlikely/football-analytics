@@ -31,6 +31,7 @@ import KeyPlayers from '../../components/sport/game/KeyPlayers'
 import { nflScorers } from '../../lib/scorers'
 import type { Sched } from '../bb/BbGame'
 import { teamHref, playerHref, leagueHref, matchHref } from '../../lib/links'
+import { MaybeLink } from '../../components/MaybeLink'
 
 type Box = {
   firstDowns: number | null; plays: number | null; yards: number | null; yardsPerPlay: number | null; passYards: number | null; rushYards: number | null; rushAttempts: number | null
@@ -394,11 +395,11 @@ function H2HForm({ d }: { d: Data }) {
           <ul className="divide-y divide-line/50">
             {d.h2h.map(m => (
               <li key={m.id}>
-                <Link to={matchHref('american-football', m.id, { home: m.home.name, away: m.away.name, homeId: m.home.id, awayId: m.away.id, date: m.kickoff })!} className="flex items-center gap-3 py-1.5 text-sm hover:text-accent min-w-0">
+                <MaybeLink to={matchHref('american-football', m.id, { home: m.home.name, away: m.away.name, homeId: m.home.id, awayId: m.away.id, date: m.kickoff })} className="flex items-center gap-3 py-1.5 text-sm hover:text-accent min-w-0">
                   <span className="w-20 shrink-0 text-xs text-faint">{new Date(m.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                   <span className="flex-1 truncate text-ink">{m.home.name} – {m.away.name}</span>
                   <span className="num font-bold text-ink">{m.score ? `${m.score.home}–${m.score.away}` : '–'}</span>
-                </Link>
+                </MaybeLink>
               </li>
             ))}
           </ul>
@@ -413,13 +414,13 @@ function H2HForm({ d }: { d: Data }) {
                 <ul className="space-y-1.5">
                   {d.form[s].map(f => (
                     <li key={f.id}>
-                      <Link to={matchHref('american-football', f.id, f.home ? { home: g[s].name, homeId: g[s].id, away: f.opponent.name, awayId: f.opponent.id, date: f.kickoff } : { home: f.opponent.name, homeId: f.opponent.id, away: g[s].name, awayId: g[s].id, date: f.kickoff })!} className="flex items-center gap-2 text-sm hover:text-accent min-w-0">
+                      <MaybeLink to={matchHref('american-football', f.id, f.home ? { home: g[s].name, homeId: g[s].id, away: f.opponent.name, awayId: f.opponent.id, date: f.kickoff } : { home: f.opponent.name, homeId: f.opponent.id, away: g[s].name, awayId: g[s].id, date: f.kickoff })} className="flex items-center gap-2 text-sm hover:text-accent min-w-0">
                         <span className={`w-5 h-5 shrink-0 rounded grid place-items-center text-[10px] font-extrabold ${f.result === 'W' ? 'bg-win/15 text-win' : f.result === 'L' ? 'bg-loss/15 text-loss' : 'bg-draw/15 text-draw'}`}>{f.result}</span>
                         <span className="text-faint text-xs w-6 shrink-0">{f.home ? t('vs') : '@'}</span>
                         <TeamLogo team={f.opponent} size={16} />
                         <span className="flex-1 truncate text-ink">{f.opponent.name}</span>
                         <span className="num font-semibold text-ink">{f.for}–{f.against}</span>
-                      </Link>
+                      </MaybeLink>
                     </li>
                   ))}
                 </ul>

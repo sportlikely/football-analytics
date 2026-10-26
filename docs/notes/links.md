@@ -81,3 +81,19 @@ state). The old addresses keep answering 301 forever.
 fix238: the web process answers old match / player ids of every season from a prebuilt index (`slugs-ids:<sport>`, built with
 the sport's slug state; `/api/admin/slugs` → idIndex). Once it is loaded the web never asks the worker for an old address; one
 without a slug gets the plain app page at once (no page build before answering).
+
+## fix243 — past seasons' match pages are admin-only
+
+Every sport, any language prefix, the page and its tabs: a match of a past season answers **410** with `X-Robots-Tag:
+noindex` (+ robots meta, a short line and a link to the sport home) for everyone but admins; the game APIs
+(`/api/matches/:id…`, `/api/basketball/game/:id…`, `/api/nfl/game/:id…`, `/api/tennis/match/:id…`) and
+`/api/slug/<sport>/match/<slug>` answer 410 too (the app shows "This game is from a past season"). Current-season
+finished games stay public (the record). The rule (services/pastSeason.ts): older than the latest season of the game's
+own competition — API-Football league seasons, Football-Data.org by the European season (1 July; Copa Libertadores,
+Brasileirão, World Cup, Euros by their latest year), basketball by league season (a calendar league such as BSN stays
+current until its next season starts), American football by nflCurrentSeason, tennis by calendar year. The web process
+knows the window's past matches from its slug state (`p:match/<id>`); older ones are asked of the worker (slug-route),
+which reads the tables. Out of every sitemap (urlset) and the crawler HTML (seo.ts `unlinkPast`: the link becomes text).
+The app: `/api/slugs/<sport>/seasons` = the day each team's current season began (+ `d`, the latest such day); matchHref
+gives no link (null) to an older game for non-admins (lib/links.ts `isPastSeasonGame`); list rows that can show one
+(head-to-head, form, game logs, team results) render it as text (components/MaybeLink.tsx). Test: npm run test:fix243.

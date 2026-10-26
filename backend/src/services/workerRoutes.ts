@@ -93,6 +93,7 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   // fix229: clean links — the app's exception lists and slug ↔ id from the worker's published state (a miss is passed on)
   { path: '/api/slugs/:sport', sport: 'all', by: 'stored', sample: '/api/slugs/football' },
   { path: '/api/slugs/:sport/players', sport: 'all', by: 'stored', sample: '/api/slugs/football/players' },
+  { path: '/api/slugs/:sport/seasons', sport: 'all', by: 'stored', sample: '/api/slugs/football/seasons' }, // fix243: each team's season start (no links to past seasons)
   { path: '/api/slug/:sport/:kind/:slug', sport: 'all', by: 'stored', sample: '/api/slug/football/team/barcelona' },
   { path: '/api/slug-of/:sport/:kind/:id', sport: 'all', by: 'stored', sample: '/api/slug-of/football/team/1000000529' },
   { path: '/api/slug-route', sport: 'all', by: 'worker', sample: '/api/slug-route?p=/team/1' },
@@ -190,6 +191,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS route_cache (key TEXT PRIMARY KEY, at INTEGE
 db.exec(`CREATE INDEX IF NOT EXISTS idx_route_cache_at ON route_cache(at)`);
 // fix210b: the web process never writes: the copies go to the worker (deferredWrites), which also drops the old ones
 const saveRow = deferred(`INSERT OR REPLACE INTO route_cache (key, at, status, type, cache, body) VALUES (?, ?, ?, ?, ?, ?)`);
+// fix243: a page that is gone now (410: a past season's match) drops its kept copy (a copy from before is never served again)
+const dropRow = deferred(`DELETE FROM route_cache WHERE key = ?`);
 if (isWorker) setInterval(() => { try { db.prepare(`DELETE FROM route_cache WHERE at < ?`).run(Date.now() - KEEP_MS); } catch { /* next hour */ } }, 3600 * 1000).unref();
 function readCopy(k: string): Copy | null {
   const m = mem.get(k);
@@ -230,7 +233,10 @@ const stats = { forwarded: 0, served: 0, stale: 0, refreshed: 0, failed: 0, star
 function fetchCopy(k: string, req: express.Request, keep: boolean): Promise<Copy | WorkerAnswer> {
   let p = inflight.get(k);
   if (!p) {
-    p = fetchFromWorker(req).then(a => (keep && a.status === 200 ? saveCopy(k, a) : a)).finally(() => inflight.delete(k));
+    p = fetchFromWorker(req).then(a => {
+      if (keep && a.status === 410) { memDel(k); try { dropRow.run(k); } catch { /* next time */ } }
+      return keep && a.status === 200 ? saveCopy(k, a) : a;
+    }).finally(() => inflight.delete(k));
     inflight.set(k, p);
   }
   return p;

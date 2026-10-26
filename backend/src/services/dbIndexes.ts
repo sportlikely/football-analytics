@@ -20,7 +20,10 @@ const INDEXES: { name: string; sql: string }[] = [
   { name: 'idx_bb_games_code_season', sql: 'CREATE INDEX IF NOT EXISTS idx_bb_games_code_season ON bb_games(code, season, kickoff)' },
   // fix232: a stored page's time and size without reading its text (built_at comes after the json column: reading it
   // walked the page's overflow pages — the web's freshness check and /api/perf's page list read every stored page)
-  { name: 'idx_page_cache_meta', sql: 'CREATE INDEX IF NOT EXISTS idx_page_cache_meta ON page_cache(key, built_at, ms, kb)' }
+  { name: 'idx_page_cache_meta', sql: 'CREATE INDEX IF NOT EXISTS idx_page_cache_meta ON page_cache(key, built_at, ms, kb)' },
+  // fix243: a view's ETag without its text (a member's list copy asks for the 'full' view's ETag: it walked the
+  // several-MB text). Both are read with INDEXED BY (pageCache.ts): SQLite's planner preferred the primary key's index.
+  { name: 'idx_page_cache_etag', sql: 'CREATE INDEX IF NOT EXISTS idx_page_cache_etag ON page_cache(key, built_at, etag)' }
 ];
 
 export function ensureIndexes(): Promise<void> {

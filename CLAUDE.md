@@ -31,7 +31,9 @@ is model work, the matching note, in the same commit.
   (model quality). Ads policy reason. Public proof = hit rate, strong picks, calibration.
 - **Israel is treated like every other country** (Yarin, 19 Oct 2026): no special hiding and no highlighting. Ligat
   Ha'al (AF383) is a normal predicted league. The Israeli basketball league is not added yet (ask Yarin first).
-- **Past seasons / backtests are admin-only** on every sport. The public record starts on launch day.
+- **Past seasons / backtests are admin-only** on every sport. The public record starts on launch day. A past season's match page
+  answers 410 + noindex for non-admins, is out of sitemaps / crawler HTML and gets no app link (fix243: `services/pastSeason.ts`,
+  frontend `lib/links.ts` matchHref → null, `components/MaybeLink.tsx`).
 - **Secrets:** never print, log, commit or ask for API keys, tokens or passwords. They live in Railway variables.
   Never change or delete `TOTP_KEY` or `BACKUP_KEY` (two-step login and backups would break).
 - **Accounts and money:** Yarin creates accounts and pays himself. Admin login needs two-step. Staff can't change their

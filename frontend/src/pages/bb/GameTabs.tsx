@@ -8,6 +8,7 @@ import { StandingsTable, type Standings, type StandRow } from './BbLeague'
 import { teamPlace, groupShort, groupIn, ordinal } from '../../lib/bbTable'
 import type { Avg, Sched, Brief, H2H } from './BbGame'
 import { teamHref, matchHref } from '../../lib/links'
+import { MaybeLink } from '../../components/MaybeLink'
 
 /** The richer game-page tabs (Oct 2026): statistics, schedule & rest, head-to-head and standings. */
 
@@ -162,14 +163,14 @@ const Ico = {
 
 /** fix229: a game of a team's schedule: the slug link from the team, the opponent and the day */
 const briefHref = (b: Brief, team: { id: number; name: string }, nfl: boolean) =>
-  matchHref(nfl ? 'american-football' : 'basketball', b.id, b.home ? { home: team.name, homeId: team.id, away: b.opponent, date: b.kickoff } : { home: b.opponent, away: team.name, awayId: team.id, date: b.kickoff })!
+  matchHref(nfl ? 'american-football' : 'basketball', b.id, b.home ? { home: team.name, homeId: team.id, away: b.opponent, date: b.kickoff } : { home: b.opponent, away: team.name, awayId: team.id, date: b.kickoff })
 
 function Result({ b, team, nfl }: { b: Brief; team: { id: number; name: string }; nfl: boolean }) {
   const [x, y] = (b.score || '').split('-').map(Number)
   const margin = Number.isFinite(x) && Number.isFinite(y) ? Math.abs(x - y) : null
   return (
     <li>
-      <Link to={briefHref(b, team, nfl)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
+      <MaybeLink to={briefHref(b, team, nfl)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
         <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${b.result === 'W' ? 'bg-win/15 text-win' : b.result === 'L' ? 'bg-loss/15 text-loss' : 'bg-surface2 text-faint'}`}>{b.result === 'W' ? t('W') : b.result === 'L' ? t('L') : b.result === 'T' ? t('T') : '–'}</span>
         <span className="num text-faint w-12 shrink-0">{new Date(b.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
         <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${b.home ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{b.home ? t('H') : t('A')}</span>
@@ -177,7 +178,7 @@ function Result({ b, team, nfl }: { b: Brief; team: { id: number; name: string }
         <span className="text-ink font-medium truncate">{b.opponent}</span>
         {b.score && <span className="ml-auto num font-bold text-ink shrink-0">{b.score}</span>}
         {margin !== null && b.result !== 'T' && <span className={`num text-[10px] w-8 text-right shrink-0 ${b.result === 'W' ? 'text-win' : 'text-loss'}`}>{b.result === 'W' ? '+' : '−'}{margin}</span>}
-      </Link>
+      </MaybeLink>
     </li>
   )
 }
@@ -186,7 +187,7 @@ function Upcoming({ b, from, team, nfl }: { b: Brief; from: number; team: { id: 
   const days = Math.max(0, Math.round((new Date(b.kickoff).getTime() - from) / DAY))
   return (
     <li>
-      <Link to={briefHref(b, team, nfl)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
+      <MaybeLink to={briefHref(b, team, nfl)} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface2/60 text-xs">
         <span className="w-6 h-6 rounded-md grid place-items-center border border-dashed border-line text-faint shrink-0">
           <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></svg>
         </span>
@@ -195,7 +196,7 @@ function Upcoming({ b, from, team, nfl }: { b: Brief; from: number; team: { id: 
         {b.opponentLogo ? <img src={b.opponentLogo} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
         <span className="text-ink font-medium truncate">{b.opponent}</span>
         <span className="ml-auto rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-muted num shrink-0">{t('+{0} d', { 0: days })}</span>
-      </Link>
+      </MaybeLink>
     </li>
   )
 }
@@ -317,7 +318,7 @@ export function H2HTab({ g, list }: { g: Game; list: H2H[] }) {
               const winner: Side = homeWon ? hs : as
               return (
                 <li key={m.id}>
-                  <Link to={matchHref('basketball', m.id, { home: m.home, away: m.away, homeId: m.homeId, date: m.kickoff })!} className="grid grid-cols-[3.5rem_1fr_auto_1fr_2.5rem] sm:grid-cols-[5.5rem_1fr_auto_1fr_3rem] items-center gap-2 sm:gap-3 py-2 px-1 rounded-lg hover:bg-surface2/50 text-sm">
+                  <MaybeLink to={matchHref('basketball', m.id, { home: m.home, away: m.away, homeId: m.homeId, date: m.kickoff })} className="grid grid-cols-[3.5rem_1fr_auto_1fr_2.5rem] sm:grid-cols-[5.5rem_1fr_auto_1fr_3rem] items-center gap-2 sm:gap-3 py-2 px-1 rounded-lg hover:bg-surface2/50 text-sm">
                     <span className="text-[11px] text-faint leading-tight">
                       {new Date(m.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}
                       <span className="hidden sm:block text-[10px] truncate">{m.league}</span>
@@ -336,7 +337,7 @@ export function H2HTab({ g, list }: { g: Game; list: H2H[] }) {
                       <span className={`truncate ${!homeWon ? 'font-bold text-ink' : 'text-muted'}`}>{m.away}</span>
                     </span>
                     <span className={`justify-self-end w-2 h-2 rounded-full ${BG[winner]}`} title={teamOf(winner).name} />
-                  </Link>
+                  </MaybeLink>
                 </li>
               )
             })}

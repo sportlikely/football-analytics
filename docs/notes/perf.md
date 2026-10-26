@@ -433,3 +433,28 @@ run (32 loads an hour on the web, each a map of up to hundreds of thousands of e
 major GC) although almost nothing changes between runs. Now each state is published only when its content hash changed
 (`contentSig`, order-independent; `slug_state_sig` keeps it across worker restarts; published anyway when the stored
 row is missing). Check: /api/perf?shared=1 on the web — slugs:* applied a few times a day; topStalls of the hour.
+
+## fix243 — crawler bursts and "stored upcoming: read" (26 Oct)
+
+Live 26 Oct: 33 web stalls over 300 ms an hour, worst 3.8 s, during crawler bursts on /pt/* /tr/* /it/* pages and
+past-season basketball games; "stored upcoming: read" alone 1–2 s several times. Causes found in the code:
+- **The covering index was never used.** fix232 built `idx_page_cache_meta(key, built_at, ms, kb)` so a page's time
+  could be read without its text, but for `WHERE key = ?` SQLite picks the primary key's unique index and reads the row;
+  `built_at` / `etag` come after the `json` column, so every freshness check walked the page's overflow chain (the
+  upcoming list: several MB, cold on the volume after each 30 s rebuild). That was the whole "read" phase on the web.
+  Now `INDEXED BY idx_page_cache_meta` (time) and the new `idx_page_cache_etag(key, built_at, etag)` (a member copy's
+  ETag), with the plain query until the index exists (pageCache.ts `indexedQ`). Test: EXPLAIN shows COVERING INDEX.
+- **View text read on the web thread.** The view a request sends (upcoming 'anon' several MB, a crawler page's HTML +
+  gzip) was read with the main connection. Now `getPage(…, { views })` reads them in the web process's reader thread
+  (services/pageReader.ts + workers/pageReader.ts: its own read-only connection) before it returns; the request only
+  sends strings in memory. PAGE_READER=0 = the old synchronous read. /api/perf → `pageReader` (reads, maxMs, errors).
+  Test: 10 × 8 MB views, longest web block 11 ms while the thread took up to 98 ms per read.
+- **Basketball game HTML written on the web.** The crawler route parsed the stored facts (JSON.parse) and wrote the
+  page (bbGameSeo + renderIndex) per request and language. Now `bb-game-seo` (id, lang, slug) is a stored page with its
+  HTML made by the worker; the web sends it like every other crawler page. The pre-fix221 fallback (render from the
+  page body) is gone: the plain app page instead.
+- **Bots limited.** services/botGate.ts: a page render for a bot (crawler / tool user-agent, or none; signed-out, not
+  admin) takes a slot: 4 at a time (BOT_PAGES), 16 waiting up to 4 s (BOT_QUEUE, BOT_WAIT_MS), the rest 503 +
+  Retry-After 30. Browsers never take a slot. /api/perf → `botPages`.
+- **Past-season match pages answer 410** before any render (links.md, fix243), which removes most of the old
+  basketball game pages the crawlers walked (and their worker round trips).

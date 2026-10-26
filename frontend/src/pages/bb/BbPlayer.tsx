@@ -12,6 +12,7 @@ import { bbPlayerFav } from '../../lib/bb'
 import { PlayerInitials } from '../../components/sport/PlayerPhoto'
 import { flagOf, isoOfCountry } from '../../lib/tennis'
 import { teamHref, leagueHref, matchHref } from '../../lib/links'
+import { MaybeLink } from '../../components/MaybeLink'
 
 interface Side { id: number; name: string; logo: string | null }
 interface SeasonRow { code: string; league: string; season: string; team: Side; gp: number; starts: number; min: number | null; pts: number | null; reb: number | null; ast: number | null; fgPct: number | null; tpPct: number | null; ftPct: number | null; tpm: number | null }
@@ -294,10 +295,10 @@ function PointsChart({ form, log, team }: { form: PlayerData['form']; log: LogRo
       <div className="relative flex items-end gap-1.5 h-36">
         <span className="absolute left-0 right-0 border-t border-dashed border-line" style={{ bottom: `${(avg / max) * 100}%` }} />
         {form.map(f => (
-          <Link key={f.gameId} to={gameTo(f.gameId, f.kickoff, team, log.find(r => r.gameId === f.gameId))} className="group relative flex-1 h-full flex items-end" title={`${new Date(f.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}: ${f.pts} pts, ${f.min ?? '–'} min`}>
+          <MaybeLink key={f.gameId} to={gameTo(f.gameId, f.kickoff, team, log.find(r => r.gameId === f.gameId))} className="group relative flex-1 h-full flex items-end" title={`${new Date(f.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}: ${f.pts} pts, ${f.min ?? '–'} min`}>
             <span className={`w-full rounded-t-md ${f.pts >= avg ? 'bg-accent' : 'bg-accent/40'} group-hover:opacity-80`} style={{ height: `${Math.max(3, (f.pts / max) * 100)}%` }} />
             <span className="absolute -top-4 left-0 right-0 text-center text-[10px] num text-muted">{f.pts}</span>
-          </Link>
+          </MaybeLink>
         ))}
       </div>
       <p className="mt-2 text-[11px] text-faint">{t('Dashed line: his average over these games ({0}). Tap a bar for the game.', { 0: Math.round(avg * 10) / 10 })}</p>
@@ -331,13 +332,13 @@ function GameLog({ log, team }: { log: LogRow[]; team: Side }) {
             {log.map(r => (
               <tr key={r.gameId} className="border-t border-line/40 hover:bg-surface2/40">
                 <td className="py-1.5 px-2 font-sans whitespace-nowrap">
-                  <Link to={gameTo(r.gameId, r.kickoff, team, r)} className="flex items-center gap-1.5">
+                  <MaybeLink to={gameTo(r.gameId, r.kickoff, team, r)} className="flex items-center gap-1.5">
                     <span className="text-faint w-12 num">{new Date(r.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
                     <span className="text-faint">{r.home ? t('vs') : '@'}</span>
                     <TeamLogo team={{ name: r.opponent, logo: r.opponentLogo }} size={14} />
                     <span className="text-ink truncate max-w-[110px]">{r.opponent}</span>
                     {r.result && <span className={`ml-1 font-bold ${r.result.win ? 'text-win' : 'text-loss'}`}>{r.result.win ? t('W') : t('L')} {r.result.for}–{r.result.against}</span>}
-                  </Link>
+                  </MaybeLink>
                 </td>
                 <td className="text-right px-1 text-muted">{r.min !== null ? Math.round(r.min) : '–'}</td>
                 <td className="text-right px-1 text-ink font-bold">{v(r.pts)}</td>

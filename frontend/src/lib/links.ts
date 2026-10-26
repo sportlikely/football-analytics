@@ -35,6 +35,45 @@ function load(sport: LinkSport, players = false) {
     })
     .catch(() => { setTimeout(() => asked.delete(k), 30_000) })
 }
+/*
+ * fix243: past seasons are admin-only — no link to a past season's match for anyone else (the server answers its page
+ * with 410). `/api/slugs/<sport>/seasons`: the day each team's current season began (tennis: the year), and `d` = the
+ * latest such day of the sport; a game on or after `d` is never from a past season, so the list is loaded only when
+ * an older game is drawn. Until it has arrived such a game gets no link (the links are drawn again when it does).
+ */
+type Seasons = { d: string | null; team: Map<string, string> | null }
+const seasons: Partial<Record<LinkSport, Seasons>> = {}
+const seasonsAsked = new Set<LinkSport>()
+let linkAdmin = false
+/** set by the sign-in state (lib/auth.tsx): admins get every link */
+export function setLinkAdmin(admin: boolean) { if (admin !== linkAdmin) { linkAdmin = admin; bump() } }
+function loadSeasons(sport: LinkSport) {
+  if (seasonsAsked.has(sport) || typeof fetch === 'undefined') return
+  seasonsAsked.add(sport)
+  fetch(`${API_URL}/slugs/${sport}/seasons`, { credentials: 'same-origin' })
+    .then(r => (r.ok ? r.json() : null))
+    .then(j => {
+      if (!j) { setTimeout(() => seasonsAsked.delete(sport), 30_000); return }
+      const team = new Map<string, string>()
+      for (const [day, ids] of Object.entries((j.s || {}) as Record<string, string>)) for (const id of ids.split(',')) if (id) team.set(id, day)
+      seasons[sport] = { d: j.d || null, team: team.size ? team : null }
+      bump()
+    })
+    .catch(() => { setTimeout(() => seasonsAsked.delete(sport), 30_000) })
+}
+/** true = from a past season (no link for non-admins); null = not known yet (no link until it is) */
+export function isPastSeasonGame(sport: LinkSport, date: string | null | undefined, homeId?: Id, awayId?: Id): boolean | null {
+  if (!date) return false
+  const day = String(date).slice(0, 10)
+  loadSeasons(sport)
+  const s = seasons[sport]
+  if (!s) return null
+  if (!s.d || day >= s.d) return false
+  if (!s.team) return true // tennis: one season (the year) for every player
+  const starts = [homeId, awayId].filter(ok).map(id => s.team!.get(String(id))).filter((x): x is string => !!x)
+  return starts.length ? starts.some(st => day < st) : false
+}
+
 /** the app's links are drawn again when a sport's exception list arrives */
 export function useSlugVersion(): number {
   return useSyncExternalStore(cb => { listeners.add(cb); return () => listeners.delete(cb) }, () => version, () => version)
@@ -97,6 +136,8 @@ export function leagueHref(sport: LinkSport, code: Id, name?: string | null): st
 /** a match: /<sport>/match/<home>-vs-<away>-<yyyy-mm-dd> */
 export function matchHref(sport: LinkSport, id: Id, m: { home: string | null | undefined; away: string | null | undefined; date: string | null | undefined; homeId?: Id; awayId?: Id }): string | null {
   if (!ok(id)) return null
+  // fix243: a past season's match is admin-only: no link (null) for anyone else, also while that is not known yet
+  if (!linkAdmin && isPastSeasonGame(sport, m.date, m.homeId, m.awayId) !== false) return null
   load(sport)
   const slug = ex[sport]?.m[String(id)] || matchSlug(sideSlug(sport, m.homeId, m.home), sideSlug(sport, m.awayId, m.away), m.date)
   return remember(sport, 'match', slug, id)

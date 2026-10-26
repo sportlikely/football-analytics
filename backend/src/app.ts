@@ -99,7 +99,7 @@ import { workerHealth, memorySizing } from './services/workerHealth';
 import { perfHours } from './services/perfHistory';
 import { sharedStatus } from './services/shared';
 import { forwardToWorker, fetchFromWorker } from './services/forward';
-import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, type LinkAnswer } from './services/slugs';
+import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, pastMatch, type LinkAnswer } from './services/slugs';
 import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
 import { definePage, getPage, refreshPages, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
@@ -167,6 +167,8 @@ const saveOne = builder('more predictions (save)', saveOneB);
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders, openSettleReviews, decideSettle, SettleError } from './services/unsettled';
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, costCapped } from './services/afUsage';
+import { botGate, isBotUa } from './services/botGate';
+import { pageReaderStatus } from './services/pageReader';
 import { createHash, randomBytes } from 'node:crypto';
 import { leagueCoverage, pickForAdding } from './services/leagueCoverage';
 import { addExtraLeague, removeExtraLeague, setExtraTrial } from './services/leagueConfig';
@@ -536,7 +538,9 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   // fix222: each phase is its own perf entry ("stored bb-games: read / pick / send"), so a stall names the phase
   const read = track(`stored ${name}: read`);
   let s: Awaited<ReturnType<typeof getPage>>;
-  try { s = await getPage(name, q); } finally { read(); }
+  // fix243: the views this request sends are read in the reader thread, never on the web thread (pageCache prefetch)
+  const views = (req as any).proxyAnon ? ['rows', ...(view ? [view] : [])] : keep?.size ? ['rows'] : view ? [view] : [];
+  try { s = await getPage(name, q, { views }); } finally { read(); }
   // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
   if (!s) { noteLoading(req.path); return res.status(503).set('Retry-After', '5').json({ error: 'Loading, please try again in a moment' }); }
   // fix232: when this copy was built (after a restart: the last copy stored before it, until the worker has a new one)
@@ -1926,6 +1930,15 @@ app.get('/api/matches/live', async (_req, res) => {
   }
 });
 
+// fix243: a past season's match is admin-only: its game APIs answer 410 for everyone else (the worker answers these)
+const PAST_GAME_API = /^\/api\/(?:(matches)|basketball\/(game)|nfl\/(game)|tennis\/(match))\/(\d+)(?:\/[a-z0-9/]+)?$/;
+app.use((req, res, next) => {
+  if (isWeb || req.method !== 'GET' || req.access === 'admin') return next();
+  const m = PAST_GAME_API.exec(req.path);
+  if (!m) return next();
+  const sport = m[1] ? 'football' : m[2] ? 'basketball' : m[3] ? 'american-football' : 'tennis';
+  return pastMatch(sport, m[5]) ? pastGone(res) : next();
+});
 app.get('/api/matches/:id(\\d+)', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -2571,11 +2584,16 @@ const sendSlugs = (req: express.Request, res: express.Response, text: string | n
 };
 app.get('/api/slugs/:sport', (req, res) => { const s = String(req.params.sport); if (!linkSport(s)) return res.status(404).json({ error: 'Not found' }); sendSlugs(req, res, clientSlugs(s)); });
 app.get('/api/slugs/:sport/players', (req, res) => { const s = String(req.params.sport); if (!linkSport(s)) return res.status(404).json({ error: 'Not found' }); sendSlugs(req, res, clientSlugs(s, true)); });
+// fix243: when each team's current season began (the app draws no link to a past season's match for non-admins)
+app.get('/api/slugs/:sport/seasons', (req, res) => { const s = String(req.params.sport); if (!linkSport(s)) return res.status(404).json({ error: 'Not found' }); sendSlugs(req, res, clientSlugs(s, 'seasons')); });
+/** fix243: a past season's match is admin-only (services/pastSeason.ts): 410 for everyone else, never indexed */
+const pastGone = (res: express.Response) => res.status(410).set({ 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-store' }).json({ error: 'past-season', message: 'This game is from a past season. Past seasons are not public.' });
 app.get('/api/slug/:sport/:kind/:slug', (req, res) => {
   const { sport, kind, slug } = req.params as Record<string, string>;
   if (!linkSport(sport) || !linkKind(kind) || !isSlug(slug)) return res.status(404).json({ error: 'Not found' });
   const hit = idOfSlug(sport, kind, slug);
-  if (hit) return res.set('Cache-Control', 'public, max-age=300').json({ data: { id: hit.id, slug: hit.canonical } });
+  if (hit && kind === 'match' && req.access !== 'admin' && pastMatch(sport, hit.id)) return pastGone(res);
+  if (hit) return res.set('Cache-Control', req.access === 'admin' && kind === 'match' ? 'private, no-store' : 'public, max-age=300').json({ data: { id: hit.id, slug: hit.canonical } });
   if (isWeb) return forwardToWorker(req, res);
   const a = linkAnswer(`/${sport}/${kind}/${slug}`);
   if (a && 'to' in a) return res.json({ data: { slug: a.to.split('/').pop() } });
@@ -3876,7 +3894,7 @@ function perfSummaryText(): string {
     topStalls: (w.topStalls || []).slice(0, 20).map((s: any) => ({ at: s.at, ms: s.ms, job: s.job ? String(s.job).slice(0, 300) : null })),
     jobs: topJobs(w.jobs, 30), memByJob: (w.memByJob || []).slice(0, 10)
   };
-  const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), hours };
+  const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), hours };
   let text = JSON.stringify({ data: body, timestamp: new Date().toISOString() });
   if (text.length > PERF_MAX) { body.hours = hours.slice(-6); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
   if (text.length > PERF_MAX) { body.hours = []; body.web.jobs = body.web.jobs.slice(0, 10); if (body.worker?.jobs) body.worker.jobs = body.worker.jobs.slice(0, 10); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
@@ -3888,7 +3906,7 @@ app.get('/api/perf', async (req, res) => {
   if (req.query.full !== '1') return res.type('application/json').send(perfSummaryText());
   // the old detail: this process's numbers, the worker's report and the stored pages (listed by the worker)
   const { shared: _shared, ...worker } = workerHealth() as any;
-  const head = JSON.stringify({ process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker, pageMemory: pageMemStatus(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), threadJobs: threadJobStatus() });
+  const head = JSON.stringify({ process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker, pageMemory: pageMemStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), threadJobs: threadJobStatus() });
   let pages = 'null';
   if (isWeb) {
     const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
@@ -4289,6 +4307,23 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   // jobs.ts "bb game pages"); the web process writes the page's text from it (bbGameSeo: no database, no build)
   definePage({ name: 'bb-game-facts', freshMs: 10 * 60 * 1000, freshOf: bbFactsFreshMs, refresh: false, keepMs: 8 * 86400000, build: q => bbGameFacts(Number(q.id)) });
   definePage({ name: 'seo-page', freshMs: 10 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, variants: VIEWS_HTML, build: q => seoPage(q.path) });
+  // fix243: a basketball game's page per language, finished HTML made by the worker from the shared facts (the web
+  // process parsed the facts and wrote the page itself on every crawler request: part of the 26 Oct bursts)
+  definePage({ name: 'bb-game-seo', freshMs: 5 * 60 * 1000, refresh: false, keepMs: 2 * 86400000, variants: VIEWS_HTML,
+    build: async q => { const f = (await getPage('bb-game-facts', { id: Number(q.id) }))?.body; return f ? bbGameSeo(f, q.lang as any, q.slug || undefined) : null; } });
+  // fix243: a past season's match (410, noindex): the app page with the robots tag and a short line for those without it
+  const pastHtml = new Map<string, string>();
+  const pastPage = (lang: string, sport: string) => {
+    const k = `${lang}|${sport}`;
+    let h = pastHtml.get(k);
+    if (!h) {
+      const home = `${lang === 'en' ? '' : `/${lang}`}/${sport}`;
+      h = indexHtml.replace('</head>', '<meta name="robots" content="noindex"></head>')
+        .replace('<div id="root"></div>', `<div id="root"><div class="sl-seo" style="max-width:960px;margin:0 auto;padding:24px 16px;font-family:system-ui,sans-serif;line-height:1.6"><h1>This game is from a past season</h1><p>Past seasons are not public. <a href="${home}">See this season's games</a>.</p></div></div>`);
+      pastHtml.set(k, h);
+    }
+    return h;
+  };
   // fix235: a tab (/football/match/<slug>/stats) is its page for search engines (one stored copy, canonical = the page)
   const seoPathOf = (p: string) => p.replace(/^((?:\/(?:es|pt|de|fr|it|tr))?\/[a-z-]+\/(?:match|league)\/[a-z0-9-]+)\/[a-z0-9-]+\/?$/, '$1');
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
@@ -4300,6 +4335,12 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     } catch { return null; }
   };
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
+    // fix243: a bot's page takes a slot (services/botGate.ts): over the limit 503 + Retry-After; browsers never wait here
+    if (req.access !== 'admin' && !req.user && isBotUa(req.get('user-agent'))) {
+      const release = await botGate.enter();
+      if (!release) return res.status(503).set({ 'Retry-After': '30', 'Cache-Control': 'no-store' }).type('text/plain').send('Busy, please retry later');
+      res.once('finish', release); res.once('close', release);
+    }
     // fix229: clean links — an old address (/team/86?c=…, /match/1, /basketball/game/1 …, any language) answers 301 with
     // its slug address in one hop, a renamed item's old slug 301 to the new one, an unknown slug the search page
     const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
@@ -4307,6 +4348,11 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     if (la && 'ask' in la) la = await askWorker(req, qs);
     if (la && 'to' in la) return res.redirect(301, la.to);
     if (la && 'search' in la) return res.redirect(302, la.search);
+    // fix243: a past season's match page: admins only (410 + noindex for everyone else, every language)
+    if (la && 'page' in la && la.page.past && req.access !== 'admin') {
+      const lang = /^\/(es|pt|de|fr|it|tr)(\/|$)/.exec(req.path)?.[1] || 'en';
+      return res.status(410).set({ 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-store' }).type('html').send(pastPage(lang, la.page.sport));
+    }
     // old hub URLs (fix134): /predictions/PL → /predictions/premier-league, permanently
     const moved0 = hubRedirect(req.path) || leagueRedirect(req.path); // fix176: /league/BSA → /league/AF71
     const moved = moved0 ? pubPath(moved0) : null; // fix229: straight to the slug address (one hop)
@@ -4334,14 +4380,13 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     try {
       const lang0 = (/^\/(es|pt|de|fr|it|tr)(\/|$)/.exec(req.path)?.[1] || 'en') as any;
       const bbg = !bbPublic() ? null : la && 'page' in la && la.page.sport === 'basketball' && la.page.kind === 'match' ? { id: Number(la.page.id), lang: lang0 } : bbGamePath(req.path);
-      if (bbg) {
-        const f = (await getPage('bb-game-facts', { id: bbg.id }, { waitMs: pageWait }))?.body;
-        if (f) return res.type('html').send(renderIndex(indexHtml, bbGameSeo(f, bbg.lang, la && 'page' in la ? la.page.slug : undefined)));
-      }
       const home = seoHome(req.path);
       // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page
       // (the app renders it in the browser; the next request gets the stored copy)
-      const s = home ? await getPage('seo', { path: home }) : await getPage('seo-page', { path: seoPathOf(req.path).slice(0, 300) }, { waitMs: pageWait });
+      // fix243: the HTML is read in the reader thread (views); a basketball game is its own stored page per language
+      const views = ['html'];
+      const s = bbg ? await getPage('bb-game-seo', { id: bbg.id, lang: bbg.lang, slug: la && 'page' in la ? la.page.slug : '' }, { waitMs: pageWait, views })
+        : home ? await getPage('seo', { path: home }, { views }) : await getPage('seo-page', { path: seoPathOf(req.path).slice(0, 300) }, { waitMs: pageWait, views });
       const html = s?.view('html');
       // fix227: a copy stored before a deploy names the old build's app file (gone: a 404, no app, the crawler text
       // left on screen) — the plain app page until the worker has made the new copy
@@ -4352,9 +4397,9 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
         if (req.fresh) return res.status(304).end();
         return html.gz && req.acceptsEncodings('gzip') === 'gzip' ? res.set('Content-Encoding', 'gzip').send(html.gz) : res.send(html.text);
       }
-      const info = s?.body; // a copy stored before fix221 (no HTML beside it)
-      if (!info) return res.sendFile(path.join(STATIC_DIR, 'index.html'));
-      res.type('html').send(renderIndex(indexHtml, info));
+      // a copy without its HTML (stored before fix221, or nothing to show): the plain app page — fix243: never parsed or
+      // rendered here
+      res.sendFile(path.join(STATIC_DIR, 'index.html'));
     } catch (e: any) {
       logger.warn(`seo page ${req.path}: ${e.message}`);
       res.sendFile(path.join(STATIC_DIR, 'index.html'));

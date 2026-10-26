@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import axios from 'axios'
 import { API_URL, socket } from './socket'
 import { t } from './i18n'
+import { setLinkAdmin } from './links'
 
 // Same-origin cookies are sent by default; this also covers a separate API host
 axios.defaults.withCredentials = true
@@ -188,6 +189,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apply({ user: null, access: 'anon' })
   }
 
+  // fix243: admins get links to past seasons' matches (lib/links.ts)
+  useEffect(() => { setLinkAdmin(access === 'admin') }, [access])
   const full = access === 'pro' || access === 'admin'
   const paid = full || access === 'premium'
   const needsVerification = !!user && verificationRequired && !user.emailVerified

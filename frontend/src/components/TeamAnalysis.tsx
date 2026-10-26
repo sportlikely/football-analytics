@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { t, LOCALE } from '../lib/i18n'
 import RecordLink from './RecordLink'
 import { matchHref } from '../lib/links'
+import { MaybeLink } from './MaybeLink'
 
 /*
  * Team analysis on the team page: strengths & weaknesses, how our model rates the team (with a 6-month trend),
@@ -304,7 +305,7 @@ export function TeamRecordCard({ rec, teamName, sport = 'football' }: { rec: Tea
           {rec.games && rec.games.length > 0 && (
             <div>
               {rec.games.map(g => (
-                <Link key={g.matchId} to={matchHref(bb ? 'basketball' : 'football', g.matchId, g.home ? { home: teamName, away: g.opp, date: g.date } : { home: g.opp, away: teamName, date: g.date })!} className="flex items-center gap-3 py-2 border-b border-line/50 last:border-0 hover:bg-surface2/40 rounded-lg">
+                <MaybeLink key={g.matchId} to={matchHref(bb ? 'basketball' : 'football', g.matchId, g.home ? { home: teamName, away: g.opp, date: g.date } : { home: g.opp, away: teamName, date: g.date })} className="flex items-center gap-3 py-2 border-b border-line/50 last:border-0 hover:bg-surface2/40 rounded-lg">
                   <span className="w-12 text-[11px] text-faint">{shortDate(g.date)}</span>
                   <span className="flex-1 min-w-0 truncate text-sm text-muted">{g.home ? 'vs' : 'at'} <span className="text-ink font-semibold">{g.opp}</span></span>
                   <span className="text-sm num font-bold text-ink">{g.score}</span>
@@ -312,7 +313,7 @@ export function TeamRecordCard({ rec, teamName, sport = 'football' }: { rec: Tea
                   <span className={`w-5 h-5 rounded-full grid place-items-center text-[10px] font-extrabold ${g.hit ? 'bg-win/20 text-win' : 'bg-loss/20 text-loss'}`} aria-label={g.hit ? t("Right") : t("Wrong")}>
                     {g.hit ? '✓' : '✗'}
                   </span>
-                </Link>
+                </MaybeLink>
               ))}
               <p className="text-[11px] text-faint mt-2">{t("Our pick for")}{' '}{teamName} {bb ? t("(win or loss), saved before tip-off.") : t("(win, draw or loss), saved before kick-off.")}</p>
             </div>

@@ -2618,5 +2618,8 @@
  "{0} has the edge in the last {1} meetings": "{0} domina los últimos {1} enfrentamientos",
  "{0} won {1} of the last {2} meetings": "{0} ganó {1} de los últimos {2} enfrentamientos",
  "An upset watch is not a tip: the favourite still wins or draws most of the time. Probabilities, not promises.": "El radar de sorpresas no es un consejo: la mayoría de las veces el favorito gana o empata. Probabilidades, no promesas.",
- "An upset watch is not a tip: the favourite still wins most of the time. Probabilities, not promises.": "El radar de sorpresas no es un consejo: la mayoría de las veces gana el favorito. Probabilidades, no promesas."
+ "An upset watch is not a tip: the favourite still wins most of the time. Probabilities, not promises.": "El radar de sorpresas no es un consejo: la mayoría de las veces gana el favorito. Probabilidades, no promesas.",
+ "This game is from a past season": "Este partido es de una temporada pasada",
+ "Past seasons are not public.": "Las temporadas pasadas no son públicas.",
+ "See this season's games": "Ver los partidos de esta temporada"
 }
