@@ -296,10 +296,12 @@ function loadCacheAsync(): Promise<void> {
   return loadingAsync;
 }
 
-// (the web process reads in pages; the worker and its threads at once: a model build may start right after)
-if (isWeb) void loadCacheAsync().catch(e => logger.warn(`squad values: ${e.message}`)); else loadCache();
-// fix202: the worker syncs; the web process reads the new values from the database when told
-onState('squad:synced', () => loadCacheAsync());
+// (the worker and its threads at once: a model build may start right after)
+// fix249: the web process loads nothing — every caller (v3 rows, line-up values, the admin routes) runs in the worker;
+// the web's 200-row pages of squad_players took up to 9.8 s each in the reader threads (27 Oct)
+if (!isWeb) loadCache();
+// fix202: the worker syncs; fix249: its job threads reload when told (the web process holds no squad values)
+if (!isWeb) onState('squad:synced', () => loadCacheAsync());
 
 /** Squad value for a football-data.co.uk team name, in EUR (top-15 sum), or null. */
 export function squadValueFor(group: string, fdName: string): { total: number; top: number; club: string } | null {

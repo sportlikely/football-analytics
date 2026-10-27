@@ -15,7 +15,7 @@ import v8 from 'node:v8';
 import { isMainThread, workerData } from 'node:worker_threads';
 import { db } from '../db';
 import logger from '../utils/logger';
-import { isWeb, isWorker } from './role';
+import { isWeb, isWorker, runsJobs } from './role';
 import { onIpc, sendIpc } from './ipc';
 import { timed, yieldLoop, track } from './perf';
 import { readSql, asBuffer, pageReaderOn } from './pageReader';
@@ -192,7 +192,17 @@ function queueLoad(key: string, ver?: number) {
 }
 
 const ROW_SQL = `SELECT ver, bytes, data FROM shared_state WHERE key = ?`;
-const VERS_SQL = `SELECT key, ver FROM shared_state ORDER BY key`;
+/*
+ * fix249: the version list from a covering index. Without it every row was visited for its ver (the rows hold the
+ * states themselves, MBs each): "SELECT key, ver FROM shared_state ORDER BY key" 5.5 s in the reader thread, 27 Oct.
+ */
+const VERS_IDX = 'idx_shared_state_ver';
+if (runsJobs && isMainThread) db.exec(`CREATE INDEX IF NOT EXISTS ${VERS_IDX} ON shared_state(key, ver)`);
+let versIdx = false;
+const versSql = () => {
+  if (!versIdx) { try { versIdx = !!db.prepare(`SELECT 1 AS x FROM sqlite_master WHERE type = 'index' AND name = ?`).get(VERS_IDX); } catch { /* next time */ } }
+  return versIdx ? `SELECT key, ver FROM shared_state INDEXED BY ${VERS_IDX} ORDER BY key` : `SELECT key, ver FROM shared_state ORDER BY key`;
+};
 /*
  * fix248: the CPU profile of 26 Oct showed the web thread's stalls in these reads (`all` 0.8 s from loadNewerStates on
  * the 30-s timer, `get` in loadNow and the part reader 1.1 s): every shared_state / shared_parts read is done in the
@@ -224,7 +234,8 @@ async function loadNow(key: string) {
 export async function loadNewerStates(): Promise<void> {
   if (!isWeb) return;
   let rows: { key: string; ver: number }[];
-  try { rows = pageReaderOn() ? await readSql(VERS_SQL, [], true) : (db.prepare(VERS_SQL).all() as any[]); } catch { rows = db.prepare(VERS_SQL).all() as any[]; }
+  const sql = versSql();
+  try { rows = pageReaderOn() ? await readSql(sql, [], true) : (db.prepare(sql).all() as any[]); } catch { rows = db.prepare(sql).all() as any[]; }
   for (const r of rows) queueLoad(r.key, r.ver);
   return chain;
 }

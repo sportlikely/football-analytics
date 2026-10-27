@@ -11,12 +11,15 @@ import logger from '../utils/logger';
 import { hourBuckets } from './perf';
 import { isWeb } from './role';
 import { deferred } from './deferredWrites';
+import { readerHours } from './pageReader';
 
 db.exec(`CREATE TABLE IF NOT EXISTS perf_hours (proc TEXT NOT NULL, hour TEXT NOT NULL, stalls INTEGER NOT NULL, worst_ms INTEGER NOT NULL,
   heap_max_mb INTEGER NOT NULL, rss_max_mb INTEGER NOT NULL, top_json TEXT, PRIMARY KEY (proc, hour))`);
 db.exec(`CREATE TABLE IF NOT EXISTS worker_exits (at INTEGER NOT NULL, code INTEGER, signal TEXT, reason TEXT NOT NULL, ran_min INTEGER NOT NULL,
   heap_limit_mb INTEGER, stderr TEXT)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_worker_exits_at ON worker_exits(at)`);
+// fix249: the web's reader threads per hour (reads, over 500 ms, the longest and what it was; 14 days: utils/retention.ts)
+db.exec(`CREATE TABLE IF NOT EXISTS reader_hours (hour TEXT PRIMARY KEY, reads INTEGER NOT NULL, over500 INTEGER NOT NULL, max_ms INTEGER NOT NULL, top TEXT)`);
 
 export type Proc = 'web' | 'worker';
 
@@ -30,12 +33,28 @@ export function saveHours(proc: Proc) {
         heap_max_mb = MAX(heap_max_mb, excluded.heap_max_mb), rss_max_mb = MAX(rss_max_mb, excluded.rss_max_mb),
         top_json = CASE WHEN excluded.worst_ms >= worst_ms THEN excluded.top_json ELSE top_json END`);
     for (const b of hourBuckets().slice(-2)) up.run(proc, b.hour, b.stalls, b.worstMs, b.heapMaxMb, b.rssMaxMb, JSON.stringify(b.top));
+    // fix249: the reader threads' hours (the web process only; a restart within the hour keeps the larger numbers)
+    if (proc === 'web') {
+      const rh = deferred(`INSERT INTO reader_hours (hour, reads, over500, max_ms, top) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(hour) DO UPDATE SET reads = MAX(reads, excluded.reads), over500 = MAX(over500, excluded.over500),
+          top = CASE WHEN excluded.max_ms >= max_ms THEN excluded.top ELSE top END, max_ms = MAX(max_ms, excluded.max_ms)`);
+      for (const h of readerHours().slice(-2)) rh.run(h.hour, h.reads, h.over500, h.maxMs, h.top);
+    }
     if (!isWeb) db.prepare(`DELETE FROM perf_hours WHERE hour < ?`).run(new Date(Date.now() - 48 * 3600 * 1000).toISOString().slice(0, 13));
   } catch (e: any) { logger.warn(`perf hours: ${e?.message || e}`); }
 }
 /** every minute (each process calls it once at start) */
 export function startPerfHistory(proc: Proc) {
   setInterval(() => saveHours(proc), 60 * 1000).unref();
+}
+
+/** fix249: the reader threads' last `hours` hours, oldest first */
+export function readerHourRows(hours = 3): { hour: string; reads: number; over500: number; maxMs: number; top: string | null }[] {
+  const since = new Date(Date.now() - hours * 3600 * 1000).toISOString().slice(0, 13);
+  try {
+    return (db.prepare(`SELECT hour, reads, over500, max_ms, top FROM reader_hours WHERE hour >= ? ORDER BY hour`).all(since) as any[])
+      .map(r => ({ hour: r.hour, reads: r.reads, over500: r.over500, maxMs: r.max_ms, top: r.top }));
+  } catch { return []; }
 }
 
 export type HourRow = { hour: string; stalls: number; worstMs: number; heapMaxMb: number; rssMaxMb: number; top: { ms: number; job: string | null }[] };

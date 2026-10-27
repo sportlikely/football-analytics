@@ -37,6 +37,7 @@ import { securityLog, securityLogList } from './services/securityLog';
 import { recordActivity, activityList } from './services/activity';
 import { createInvite, setInviteOpen, inviteInfo, joinAsTester, testerOf, testerOverview, TesterError } from './services/testers';
 import { runBackup, backupStatus, localPath, remoteList, remoteReady } from './services/backup';
+import { dbSpaceStatus, sizeReport, convertToIncremental, vacuumSlices, checkpoint } from './services/dbSpace';
 import { reportClientError, clientErrorList, resolveClientError } from './services/clientErrors';
 import { gamePicks, setPick, personalRecord, PickError } from './services/userPicks';
 import { inboxList, inboxThread, reply, addNote, setStatus, assign, canOpen, searchCustomers, customerProfile, signOutEverywhere, segmentPreview, campaignList, sendTest, startCampaign, revenue, unsubscribe, CrmError, type Viewer } from './services/crm';
@@ -1685,6 +1686,25 @@ app.get('/api/admin/backups/download/:name', needSudo, (req, res) => {
   securityLog(req, 'backup_downloaded', req.user, req.params.name);
   res.set('Cache-Control', 'no-store');
   res.download(file, req.params.name);
+});
+// fix249: database size — the biggest tables / indexes (?report=1 measures now: dbstat reads every page, a minute or
+// two), WAL, volume, 7-day growth, retention / checkpoint / vacuum runs. POST …/vacuum gives the space back now.
+app.get('/api/admin/db-space', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (req.query.report === '1') await sizeReport();
+    res.json({ data: dbSpaceStatus() });
+  } catch (e: any) { sendError(res, e, 'Database size failed'); }
+});
+app.post('/api/admin/db-space/vacuum', async (req, res) => {
+  securityLog(req, 'db_vacuum', req.user);
+  // (minutes on a big file: started here, the result in GET /api/admin/db-space and the log)
+  void (async () => {
+    await checkpoint('TRUNCATE');
+    await convertToIncremental(true);
+    await vacuumSlices(120_000);
+  })().catch(e => logger.warn(`db vacuum (admin): ${e?.message || e}`));
+  res.json({ data: { started: true } });
 });
 app.get('/api/admin/waitlist', (_req, res) => res.json({ data: waitlistStats() }));
 app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...visitorStats(), who: whoToday(), crawlers: crawlerReport() } }); }); // fix245: + search engines // fix199: + who is calling today

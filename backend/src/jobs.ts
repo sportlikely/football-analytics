@@ -64,6 +64,7 @@ import { fillFromFinals } from './services/history';
 import { checkOtherResults } from './services/resultChecks';
 import { dailySummaryTick } from './services/adminMail';
 import { diffViewFreezeTick } from './services/diffView';
+import { startDbSpaceScheduler } from './services/dbSpace';
 
 let started = false;
 
@@ -93,6 +94,8 @@ export function startJobs() {
   every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
   // fix175: indexes for the crawler pages, built off the main thread
   after('db indexes', () => ensureIndexes(), 20 * 1000).unref();
+  // fix249: checkpoints, retention (logs 14 days, in slices), incremental vacuum, the size report and history
+  startDbSpaceScheduler();
   after('hub warm', () => warmHubs(), 60 * 1000).unref();
   // fix174: the player → games index for NFL player careers (once, in slices)
   after('nfl player games', () => backfillPlayerGames().catch(e => logger.warn(`nfl player games: ${e.message}`)), 5 * 60 * 1000).unref();

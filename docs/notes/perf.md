@@ -591,3 +591,37 @@ signed-in visitors (Yarin) always waited for the worker's fresh answer.
     stayed on the skeleton + "Updating…" because the worker answered 500 "API_FOOTBALL_KEY is not set" here (no
     provider key locally) — on the server they are built.
   - slow-read log: no read over 500 ms in these runs.
+
+## fix249 — database growth and the last slow reads (27 Oct)
+
+Overnight 27 Oct: reader-thread reads up to 9.8 s (paged reads of club_value_comp / squad_players, the state version
+list 5.5 s), 104 over 500 ms; "database" 2.6 GB (1.1 GB on 18 Oct). No database copy was available in the session, so
+the numbers come from the server itself.
+
+- **The size shown is file + WAL** (backup.ts `dbSize`). The WAL never shrank: no `journal_size_limit`, and a WAL only
+  starts over when a checkpoint caught up with no reader on an old snapshot. Now `journal_size_limit` = 64 MB on the
+  main connection and the upkeep thread (workers/dbMaint.ts, its own connection) runs PASSIVE every 5 min and TRUNCATE
+  every 30 min — TRUNCATE takes the writer lock before it copies, so it runs only after a lock-free PASSIVE pass caught
+  up, with a 300 ms wait for old readers (writers are held at most that long). "Blocked by a reader N in a row" in Disk = a
+  long read transaction somewhere (dbstat, VACUUM INTO backup, a thread) keeps the WAL.
+- **Retention** (utils/retention.ts, hourly, 2,000 rows a statement, 20 ms pause, 30 s a run): bot / no-signs visits and
+  bots' league opens 14 days (people's 90 days: the 30-day numbers), crawler / scraper days, user-agent usage, browser
+  errors, worker exits, reader hours, once-a-day alert marks, auto-fix notes already summarised, data-audit runs (last
+  kept), deploy errors — 14 days; route copies 2 days (was one big hourly DELETE). PROTECTED lists the tables no rule
+  may name (record, predictions, results, accounts, money, consent, security log). Kept as before: security_log 90 days,
+  perf_hours 48 h, slow_requests 7 days, push_events 60 days, page_cache (cleanPageCache). Looked at and bounded
+  already: market_odds / tennis_prices (one row per match), diff_view_flags (one per game, frozen), feature_model (40),
+  shared_state / page_cache (replaced in place).
+- **Space back**: the file had auto_vacuum = 0 (freed pages stay in the file). The one full VACUUM that turns on
+  INCREMENTAL runs in the upkeep thread between 01:00 and 02:30 UTC (before the 02:40 backup) when free pages are
+  ≥ 256 MB / 15% and the volume and temp disk have the file's size left (DB_VACUUM=0: never; POST
+  /api/admin/db-space/vacuum: now). Writes wait while it runs (reads go on). After that every 10 min: incremental
+  vacuum 1,024 pages a slice, 250 ms pause, ≤ 45 s, then TRUNCATE — the file shrinks at that checkpoint.
+- **Slow reads**: the state version list reads `idx_shared_state_ver (key, ver)` with INDEXED BY (covering: the state
+  rows are not visited); the web process no longer loads squad values or club value history at all (every caller is in
+  the worker; the worker loads them once, its job threads on the state message). The paged reads were rowid range
+  seeks already — their 9.8 s was time in the reader thread's queue / disk, not a scan.
+- **Measured**: reader_hours (per hour: reads, over 500 ms, longest + what, written by the web via deferred); data
+  health "Slow reads (3 h)" = the proof (no read over 500 ms, no slow request); "Disk" = volume free %, file + WAL,
+  7-day growth from db_size_days, days until full (warn < 30, fail < 7 or < 10% free), the 15 biggest tables / indexes
+  from the daily dbstat report (01:10 UTC, upkeep thread) with their own 7-day growth (db_space_tables).

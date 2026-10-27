@@ -54,6 +54,7 @@ import { slowRequestsHealth } from './deadline';
 import { upsetTextHealth } from './upsetHealth';
 import { crawlerHealth } from './crawlerIps';
 import { modelDailyHealth } from './modelDailyHealth';
+import { diskHealth } from './dbSpace';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -480,6 +481,9 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...deployErrorsHealth()); } catch (e: any) { logger.warn(`deploy errors health: ${e?.message || e}`); }
   // fix250: public requests over 1 s in the last hour (services/deadline.ts)
   try { checks.push(slowRequestsHealth()); } catch (e: any) { logger.warn(`slow requests health: ${e?.message || e}`); }
+
+  // fix249: volume free, database size and 7-day growth (warn when it would fill the volume within 30 days); reads over 500 ms for 3 h
+  try { checks.push(...diskHealth()); } catch (e: any) { logger.warn(`disk health: ${e?.message || e}`); }
 
   const level: Level = checks.some(c => c.level === 'fail') ? 'fail' : checks.some(c => c.level === 'warn') ? 'warn' : 'ok';
   return { level, at: new Date(now).toISOString(), checks };

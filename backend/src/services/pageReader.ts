@@ -54,6 +54,21 @@ const noteSlow = (ms: number, what: string, threadMs?: number, bytes?: number) =
   slowest.sort((a, b) => b.ms - a.ms);
   slowest.length = Math.min(5, slowest.length);
 };
+/*
+ * fix249: the same per hour (reads, over 500 ms, the longest and what it was), written to reader_hours every minute
+ * (perfHistory.saveHours) — the data-health proof "no read over 500 ms for 3 h" reads it in the worker
+ */
+export type ReaderHour = { hour: string; reads: number; over500: number; maxMs: number; top: string | null };
+const hours: ReaderHour[] = [];
+function noteHour(ms: number, what: string) {
+  const hour = new Date().toISOString().slice(0, 13);
+  let h = hours[hours.length - 1];
+  if (!h || h.hour !== hour) { h = { hour, reads: 0, over500: 0, maxMs: 0, top: null }; hours.push(h); if (hours.length > 4) hours.shift(); }
+  h.reads++;
+  if (ms > 500) h.over500++;
+  if (ms > h.maxMs) { h.maxMs = ms; h.top = what.slice(0, 200); }
+}
+export const readerHours = (): ReaderHour[] => hours.map(h => ({ ...h }));
 /** /api/perf: the reader threads */
 export const pageReaderStatus = () => ({ on: slots.some(x => !!x.w), threads: slots.filter(x => !!x.w).length, size: SIZE, pending: pending.size, inflight: slots.map(x => x.inflight), ...stats, slowest, slowLog: slowLog.slice().reverse() });
 
@@ -128,7 +143,10 @@ function ask(msg: { sql?: string; key?: string; [k: string]: unknown }): Promise
     const timer = setTimeout(() => { if (pending.delete(id)) { stats.errors++; reject(new Error('page reader timeout')); } }, 10_000);
     timer.unref();
     pending.set(id, {
-      resolve: r => { const ms = Date.now() - t0; stats.reads++; stats.maxMs = Math.max(stats.maxMs, ms); noteSlow(ms, msg.sql ? `${msg.sql} [${JSON.stringify((msg as any).args || []).slice(0, 120)}]` : `page ${msg.key}`, r?.ms, r?.bytes); resolve(r); },
+      resolve: r => {
+        const ms = Date.now() - t0, what = msg.sql ? `${msg.sql} [${JSON.stringify((msg as any).args || []).slice(0, 120)}]` : `page ${msg.key}`;
+        stats.reads++; stats.maxMs = Math.max(stats.maxMs, ms); noteSlow(ms, what, r?.ms, r?.bytes); noteHour(ms, r?.ms != null ? `thread ${Math.round(r.ms)} ms · ${what}` : what); resolve(r);
+      },
       reject, timer, slot
     });
     t.ref(); // a read in flight keeps the thread (unref'd again when idle)

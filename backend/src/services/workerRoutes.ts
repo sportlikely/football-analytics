@@ -200,7 +200,7 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_route_cache_at ON route_cache(at)`);
 const saveRow = deferred(`INSERT OR REPLACE INTO route_cache (key, at, status, type, cache, body) VALUES (?, ?, ?, ?, ?, ?)`);
 // fix243: a page that is gone now (410: a past season's match) drops its kept copy (a copy from before is never served again)
 const dropRow = deferred(`DELETE FROM route_cache WHERE key = ?`);
-if (isWorker) setInterval(() => { try { db.prepare(`DELETE FROM route_cache WHERE at < ?`).run(Date.now() - KEEP_MS); } catch { /* next hour */ } }, 3600 * 1000).unref();
+// fix249: copies older than KEEP_MS (2 days) are deleted in slices by the worker's retention job (utils/retention.ts)
 const COPY_SQL = `SELECT at, status, type, cache, body FROM route_cache WHERE key = ?`;
 /*
  * fix248: a copy not in memory is read in the reader thread (services/pageReader.ts): the CPU profile of 26 Oct showed

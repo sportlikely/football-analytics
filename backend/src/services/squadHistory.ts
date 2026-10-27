@@ -56,9 +56,9 @@ async function loadAsync(): Promise<void> {
   await eachRowPaged('club_value_month', 'club, month, top_eur', r => { (by.get(r.club) || by.set(r.club, new Map()).get(r.club)!).set(r.month, r.top_eur); });
   byClub = by; compOf = comp; loadCount++;
 }
-if (isWeb) void loadAsync().catch(e => logger.warn(`club value history: ${e.message}`)); else load(); // (the worker at once)
-// fix202: synced in the worker; the web process reloads from the database when told
-onState('squad:history', () => loadAsync());
+// fix249: worker (and its threads) only — the web never reads club values (its paged reads of club_value_comp took
+// up to 9.8 s in the reader threads, 27 Oct); the worker reloads after its own sync
+if (!isWeb) { load(); onState('squad:history', () => loadAsync()); }
 
 /** Squad value (top-15 sum, EUR) of a Transfermarkt club as known at the start of date's month; null if unknown. */
 export function clubValueAt(club: string, date: string): number | null {

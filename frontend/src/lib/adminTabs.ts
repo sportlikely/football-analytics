@@ -156,6 +156,8 @@ export const HEALTH_RULES: HealthRule[] = [
   { match: 'perf:worker-restarts', tab: 'site', title: 'Background restarts', what: 'How often the background jobs restarted in 24 hours.', todo: 'Tell Claude if it happens three times a day.' },
   { match: 'crawlers-verified', tab: 'site', title: 'Search engines verified', what: 'Google, Bing and Apple crawlers today: how many were checked against the engines’ own address lists (or DNS), and whether any request from Google’s addresses was refused (429 / 503). Refusing Google hurts the site in search.', todo: 'Red: tell Claude straight away, with the lines listed. Yellow (few verified): tell Claude with the DNS sample line.' },
   { match: 'deploy-errors', tab: 'site', what: 'Pages or files that failed for visitors right after the last restart.', todo: 'Tell Claude, with the time of the deploy.' },
+  { match: 'disk', tab: 'site', title: 'Disk', what: 'How full the server disk is, how big the database is, how fast it grew in the last 7 days and its biggest tables. Yellow when it would fill the disk within 30 days.', todo: 'Nothing while green. If yellow or red, tell Claude with the table list.' },
+  { match: 'slow-reads', tab: 'site', title: 'Slow reads (3 h)', what: 'Reads of stored pages and data that took over half a second, and public requests over 1 second, in the last 3 hours (target: none).', todo: 'Tell Claude if it stays yellow, with the longest read listed.' },
   { match: 'slow-requests', tab: 'site', title: 'Slow requests', what: 'Public pages or data that took over 1 second to answer in the last hour (target: none).', todo: 'Tell Claude, with the routes listed.' },
 
   // ---------- Emails & alerts ----------
