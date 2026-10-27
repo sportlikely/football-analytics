@@ -1,7 +1,9 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './index.css'
-import { loadLocale, redirectToPreferred } from './lib/i18n'
+import { loadLocale, redirectToPreferred, basename } from './lib/i18n'
+import { captureStoredHtml } from './lib/storedHtml'
+import { AppBoundary } from './components/ErrorFallback'
 import { watchErrors } from './lib/report'
 import { watchChunkErrors, isChunkError, isReloading, reloadForNewVersion, moduleDefault, dropReloadParam } from './lib/chunkReload'
 import { watchSeen } from './lib/seen'
@@ -44,9 +46,12 @@ if (!redirectToPreferred()) {
   loadLocale().then(() => import('./App')).then(m => {
     if (isReloading()) return
     const App = moduleDefault(m)
+    captureStoredHtml() // fix252c: the page's stored copy, shown under an error box (never a blank page)
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
-        <App />
+        <AppBoundary home={basename + '/'}>
+          <App />
+        </AppBoundary>
       </React.StrictMode>
     )
     boot?.mounted()

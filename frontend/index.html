@@ -37,18 +37,18 @@
         if (t === 'dark') document.documentElement.classList.add('dark');
       } catch (e) {}
     </script>
-    <style>.js .sl-seo{display:none}</style>
+    <style>.js .sl-seo{display:none}.js .sl-stored .sl-seo{display:block}</style>
     <script>
       // fix227: never a raw text page. The crawler text inside #root is for crawlers and browsers without JavaScript
       // (hidden here until the app replaces it: same HTML for everyone). If the app file fails (a 502 / 503 while
-      // the server restarts) or hasn't started within 6 s, it is asked for again (2 tries, 2 s apart, a fresh
-      // address); then a "Updating SportLikely…" card with a Reload button, reloading itself every 10 s (6 times).
+      // the server restarts) or hasn't started within 6 s, the page is reloaded (2 tries, 2 s apart, a fresh
+      // address; fix252c); then a "Updating SportLikely…" card with a Reload button, reloading itself every 10 s (6 times).
       // main.tsx calls __slBoot.started() / mounted() / fail(). The card's words follow the address's language.
       // fix252: before the card, one hard reload per build per session (hardReload).
       (function () {
         var d = document, w = window, de = d.documentElement, KEY = 'sl-boot-reloads', HARD = 'sl-hard-reload';
         de.classList.add('js');
-        var attempt = 0, started = false, mounted = false, card = null;
+        var TRIES = 'sl-boot-tries', failed = false, started = false, mounted = false, card = null;
         var main = function () { return d.querySelector('script[type=module][src*="/assets/"]'); };
         var store = function (v) { try { if (v === undefined) return Number(sessionStorage.getItem(KEY)) || 0; if (v) sessionStorage.setItem(KEY, String(v)); else sessionStorage.removeItem(KEY); } catch (e) { return 0; } };
         var WORDS = {
@@ -101,35 +101,34 @@
           var n = store();
           if (n < 6) setTimeout(function () { if (!mounted) { store(n + 1); location.reload(); } }, 10000);
         };
-        var fail = function (a, why) {
-          if (a !== attempt || started || mounted) return;
-          if (attempt >= 2) return showCard(why);
-          var next = ++attempt;
-          setTimeout(function () { load(next); }, 2000);
-        };
-        var load = function (a) {
-          var s = main();
-          if (started || !s) return s ? undefined : showCard('no app file in the page');
-          var n = d.createElement('script');
-          n.type = 'module'; n.crossOrigin = '';
-          n.src = s.src.split('?')[0] + '?r=' + Date.now();
-          n.onerror = function () { fail(a, 'app file failed ' + (a + 1) + ' times'); };
-          d.head.appendChild(n);
-          setTimeout(function () { fail(a, 'app file not started after ' + (a + 1) + ' tries'); }, 6000);
+        // fix252c: a retry reloads the page (a fresh address), never a second copy of the app file: index-<hash>.js?r=
+        // is another module than the index-<hash>.js every page file imports, so the page ran two Reacts ("Cannot read
+        // properties of null (reading 'useState')", 27 Oct). Tries per session (TRIES, cleared once the app is on
+        // screen); without sessionStorage: the card.
+        var tries = function (v) { try { if (v === undefined) return Number(sessionStorage.getItem(TRIES)) || 0; if (v) sessionStorage.setItem(TRIES, String(v)); else sessionStorage.removeItem(TRIES); return v; } catch (e) { return -1; } };
+        var fail = function (why) {
+          if (failed || started || mounted) return;
+          failed = true;
+          var n = tries();
+          if (n < 0 || n >= 2 || tries(n + 1) < 0) return showCard(why + ' (' + (n + 1) + ' tries)');
+          setTimeout(function () {
+            if (started || mounted) return;
+            try { var u = new URL(location.href); u.searchParams.set('sl_v', String(Date.now())); location.replace(u.toString()); } catch (e) { location.reload(); }
+          }, 2000);
         };
         // the page's own app file: an error (404 / 502 / 503) or no start within 6 s
         w.addEventListener('error', function (e) {
           var el = e.target;
-          if (el && el.tagName === 'SCRIPT' && el === main()) fail(0, 'app file failed');
+          if (el && el.tagName === 'SCRIPT' && el === main()) fail('app file failed');
         }, true);
-        setTimeout(function () { fail(0, 'app file not started after 6 s'); }, 6000);
+        setTimeout(function () { fail('app file not started after 6 s'); }, 6000);
         w.__slBoot = {
           started: function () {
             started = true;
             // started but never on screen (a page file or the language file kept failing): the card after 20 s
             setTimeout(function () { if (!mounted) showCard('app started, not shown after 20 s'); }, 20000);
           },
-          mounted: function () { mounted = true; store(0); if (card) { card.remove(); card = null; } },
+          mounted: function () { mounted = true; store(0); tries(0); if (card) { card.remove(); card = null; } },
           fail: function (why) { showCard(String(why || 'start failed')); }
         };
       })();

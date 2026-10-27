@@ -21,7 +21,8 @@ import { socket } from './lib/socket'
 import { useTheme } from './lib/theme'
 import { useUnlocks, resetDay } from './lib/unlocks'
 import { reportError } from './lib/report'
-import { isChunkError, isReloading, reloadForNewVersion, moduleDefault } from './lib/chunkReload'
+import { isChunkError, isReloading, isTwoReacts, reloadForNewVersion, moduleDefault } from './lib/chunkReload'
+import { ErrorFallback } from './components/ErrorFallback'
 import { HUBS, hubHref } from './lib/hubs'
 import { howPath } from './lib/howItWorks'
 import { SOCIAL, type SocialId } from './lib/social'
@@ -127,21 +128,16 @@ const NotFound = page(() => import('./pages/Legal').then(m => ({ default: m.NotF
 class PageBoundary extends Component<{ children?: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() { return { failed: true } }
-  componentDidCatch(err: unknown) { console.error('page error', err); reportError(err, 'page') }
+  componentDidCatch(err: unknown) {
+    // fix252c: two copies of React (app files that don't belong together): one hard reload instead of the box
+    if (isReloading() || (isTwoReacts(err) && reloadForNewVersion())) return
+    console.error('page error', err); reportError(err, 'page')
+  }
   render() {
     if (!this.state.failed) return this.props.children
-    return (
-      <div className="min-h-[60vh] grid place-items-center px-4">
-        <div className="card p-8 text-center space-y-3 max-w-md">
-          <div className="font-display text-lg font-bold text-ink">{tt("Something went wrong on this page")}</div>
-          <p className="text-sm text-muted">{tt("The rest of the site works. Try again, or go back to the home page.")}</p>
-          <div className="flex justify-center gap-2 pt-1">
-            <button type="button" onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-accent text-bg font-semibold text-sm">{tt("Try again")}</button>
-            <a href={basename + '/'} className="px-4 py-2 rounded-xl border border-line text-ink font-semibold text-sm">{tt("Home")}</a>
-          </div>
-        </div>
-      </div>
-    )
+    if (isReloading()) return <PageLoading />
+    // fix252c: on the address the tab was opened on, the page's stored copy under the message (never a blank page)
+    return <div className="min-h-[60vh]"><ErrorFallback home={basename + '/'} /></div>
   }
 }
 function PageGuard({ children }: { children: ReactNode }) {

@@ -13,6 +13,12 @@ export const isChunkError = (e: unknown) =>
   /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|Unable to preload CSS|Loading (CSS )?chunk|ChunkLoadError|dynamically imported module \((empty|no default)\)|destructure property 'default' of 'undefined'|reading 'default'/i
     .test(String((e as any)?.message ?? e))
 
+/** fix252c: React's hooks with no renderer behind them — "Cannot read properties of null (reading 'useState')", "Invalid
+ *  hook call": two copies of React on one page (app files that don't belong together), cured by one hard reload */
+export const isTwoReacts = (e: unknown) =>
+  /reading 'use[A-Z][A-Za-z]*'\)|Invalid hook call|null is not an object \(evaluating '[A-Za-z_$]+\.use[A-Z]/i
+    .test(String((e as any)?.message ?? e))
+
 /** fix252: a lazy import's result — the module with its default export, or a chunk error (treated like a failed load) */
 export function moduleDefault<T>(m: { default?: T } | null | undefined): T {
   if (!m) throw new Error('Failed to fetch dynamically imported module (empty)')
