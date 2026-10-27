@@ -38,6 +38,29 @@ Research behind the feature model / v3-mix: `all-data-test-model-oct-2026.md`, `
   the previous 60 days. Guardrail: ≥ 100 games after a promotion and worse than the previous champion by > 0.005 →
   automatic rollback (feature model id, v3 vector, mix weight). Log: `model_daily`, `/api/admin/model-daily`
   (`?run=1`, `?preview=1`, `?report=1`), Admin → "Model: daily self-learning". `MODEL_DAILY=off` stops the job.
+- **fix251 (27 Oct 2026): the daily job never learned** (decision "keep" every day 13–26 Oct). Causes: (1) the first
+  champion record was saved with `featCutoff` null ("feature fit to —"), so the staleness was 0 and challenger (a) was
+  never built — the live fit stayed the 13 Oct one while each night's refit (id 17 …) was stored and ignored; (2) the fixed
+  −0.003 bar: on 26 Oct the feature model alone was −0.0024 / −0.0030 in both windows, refitted v3 −0.0012, mix 0.6
+  −0.0011, none a promotion (the feature model alone was not even a candidate). Now (`utils/dailyRules.ts`):
+  - the champion takes the live settings each run (mix weight / group weights / anchor / the active feature fit id +
+    cutoff); (a) "fresher feature fit" is always a candidate (fresh = fit to the window start; current = a fit as stale
+    as the live one); promoting it activates the night's refit;
+  - candidates: mix 0.4 … 1.0 (1.0 = feature alone) × {current, fresh fit}; refitted v3 with the champion's mix and with
+    the best mix (best over both windows); a mix weight per league group (big = E0 / SP1 / I1 / D1 / F1, rest = the
+    others; each group's best weight, only with ≥ 300 games per group in each window); market anchor on the champion
+    and on the best mix: on games with stored prices p = (1 − a)·ours + a·market (margin-free), a ∈ 0.1–0.4 chosen on
+    the 60 days before each window (W ← Wp, Wp ← the 60 days before it; live weight chosen on W). Live: `model_config`
+    `mix_weight_groups` (JSON) and `market_anchor` read by `mixPredictions` (prices from `odds.ts`, never shown — the
+    payload only says `anchored: true`);
+  - the bar: paired bootstrap of per-game log-loss differences (candidate − champion) over both windows, 2,000
+    resamples, seeded; promote when better in both windows, better in ≥ 90% of the resamples, ≥ 300 games per window,
+    hit rate not down > 0.5 pp; the passing candidate with the biggest pooled gain wins. Guardrail unchanged (≥ 100
+    games after a promotion, worse than the previous champion by > 0.005 → rollback, now with group weights / anchor).
+  - Admin card: last promotion, days since, today's best candidate and how far it is from passing, the candidate table.
+    Data health "Football model still learning" (`model-daily-learning`): warn after 30 days without a promotion while
+    the best candidate is better in both windows. Tests: `npm run test:fix251` (bootstrap, verdict, candidate list).
+  - Not run on real data in the session (no database copy): the first table is what the server's run shows.
 - **Morning report**: 07:00 Asia/Jerusalem (Intl time zone, DST-aware; waits for the job until 09:00) to ADMIN_EMAILS,
   plain text: champion, today's change or "No change", yesterday and last 30 days (games, picks right, log loss v3-mix /
   v3 / feature / bookmakers, 60%+ hit rate), data health + unsettled games, next 3 challengers. Stored in `model_daily`.

@@ -2,22 +2,27 @@
  * Daily self-learning for the football league model (Oct 2026) — champion / challenger, and the 07:00 morning report.
  *
  * 04:00 UTC (after the night's results are settled), once a day:
- *  1. Rebuild the feature-model state and refit the feature model on every settled game (stored, not yet live).
- *  2. Challengers: (a) a fresher feature-model fit, (b) v3 row weights refitted with the v3 tuner on the two previous
- *     seasons + this season, (c) the mix weight at 0.4 / 0.5 / 0.6 (the ones not in use).
- *  3. Score the champion and every challenger on the last 60 days of settled league games, out of sample: every fit
- *     used for scoring was trained only on games before the window (walk-forward). Metric: log loss, tie-break Brier;
- *     the hit rate must not drop by more than 0.5 pp.
- *  4. Promote one challenger only if: ≥ 300 games in the window, log loss better by ≥ 0.003, and better or equal in
- *     the previous 60-day window too. Otherwise keep the champion.
+ *  1. Rebuild the feature-model state and refit the feature model on every settled game (stored, live only if promoted).
+ *  2. Candidates (fix251, utils/dailyRules.ts): (a) the champion with the fresher feature fit (the daily refit); the
+ *     mix weight 0.4 … 1.0 (1.0 = the feature model alone), each with the current and the fresh fit; (b) the v3 row
+ *     weights refitted with the v3 tuner (2 previous seasons + this season), with the champion's mix and with the
+ *     best mix; a mix weight per league group (big leagues / rest) when each has ≥ 300 games; the market anchor
+ *     (games with stored prices: blend toward the market, weight 0.1–0.4 chosen on the 60 days before each window).
+ *  3. Score every candidate against the champion on the last 60 days (W) and the 60 before (Wp), out of sample: every
+ *     fit used for scoring was trained only on games before its window (walk-forward). "Current fit" = a fit as stale
+ *     as the live one (trained that many days before the window), "fresh" = trained up to the window start.
+ *  4. Promote the best candidate only if: ≥ 300 games in each window, per-game log loss better in both windows, better
+ *     in ≥ 90% of 2,000 paired bootstrap resamples of both windows together, hit rate not down by > 0.5 pp
+ *     (fix251 — fix113's fixed −0.003 was never met: 14 days of "keep" with candidates better in both windows).
  *  5. Guardrail: once the champion has played ≥ 100 games since it was promoted, if it is worse than the previous
  *     champion on those games by > 0.005, roll back automatically and flag it in the report.
  *  6. Everything goes to `model_daily` (admin: /api/admin/model-daily, card on the Admin page).
- * Challenger (a) is scored as a procedure: a fit trained up to the window start vs a fit as stale as the live one
- * (trained that many days earlier) — the live fit itself was trained on recent games and can't be scored honestly.
+ * The champion records the live settings: mix weight (or one per group), market anchor, v3 weights and the feature fit
+ * in use (id + cutoff, from the active fit — fix113's first record said "feature fit to —", so (a) was never built).
  * v3-mix publishing (mix_mode 'auto'): switched on the first day v3-mix beats v3 alone in both 60-day windows
  * (≥ 300 games each), off again if it falls behind v3 by > 0.005.
- * Never touches national-team (elo-intl), European-cup (elo-euro) or basketball models.
+ * Never touches national-team (elo-intl), European-cup (elo-euro) or basketball models. Prices stay admin-only: the
+ * anchor moves the public probabilities, no price is shown.
  *
  * 07:00 Asia/Jerusalem (DST-aware, checked every 5 minutes): plain-text report to ADMIN_EMAILS, also stored in the row.
  */
@@ -34,14 +39,19 @@ import { nbaV4ReportLines } from './nbaV4';
 import { gridReportLines, autoTuneLine, leagueTuneLine, missFitLine, impactFitLine } from './bbTuner';
 import { timed, slicer, yieldLoop, heavy } from './perf';
 import {
-  buildFeatures, buildFeaturesAsync, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
-  fixtureByNames, getConfig, setConfig, mixWeight, mixMode, mixLive, setMixLive, scoreProbs, FEAT_MODEL, MIX_MODEL,
+  buildFeaturesAsync, fitFeatureModel, predictWith, storeFeatureModel, activateFeatureModel, activeFeatureModel, loadFeatureModel,
+  fixtureByNames, getConfig, setConfig, mixWeight, mixWeightGroups, marketAnchor, mixMode, mixLive, setMixLive, scoreProbs, FEAT_MODEL, MIX_MODEL,
   dropFeatureState, FittedModel, FeatState
 } from './featureModel';
+import {
+  DAILY_RULES, candidateList, chooseAnchor, chooseWeight, groupOfDiv, mixP, anchorP, paired, preJudge, finishJudge, pairedBootstrapAsync, closeness,
+  type P3, type Spec, type CandSpec, type FitKind
+} from '../utils/dailyRules';
+import { learningStatus } from './modelDailyHealth';
 
+export { DAILY_RULES };
 const DAY = 24 * 3600 * 1000;
 const TZ = 'Asia/Jerusalem';
-export const DAILY_RULES = { windowDays: 60, minGames: 300, minGain: 0.003, maxHitDrop: 0.5, guardGames: 100, guardWorse: 0.005, mixOffWorse: 0.005 };
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS model_daily (
@@ -58,9 +68,9 @@ db.exec(`
   );
 `);
 
-type P3 = [number, number, number];
 interface Champion {
-  mixWeight: number; featModelId: number | null; featCutoff: string | null; v3Vector: number[]; since: string;
+  mixWeight: number; groupW?: { big: number; rest: number } | null; anchor?: number;
+  featModelId: number | null; featCutoff: string | null; v3Vector: number[]; since: string;
   label: string; prev?: Omit<Champion, 'prev'> | null;
 }
 
@@ -76,20 +86,36 @@ const nice = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB
 
 /* ---------- champion ---------- */
 
+/** The stored champion with the live settings filled in (fix251: the feature fit in use comes from the active fit). */
 function champion(): Champion {
-  try { const c = JSON.parse(getConfig('champion', '')); if (c && Array.isArray(c.v3Vector)) return c; } catch { /* first run */ }
   const act = activeFeatureModel();
-  return { mixWeight: mixWeight(), featModelId: act?.id ?? null, featCutoff: act?.cutoff ?? null, v3Vector: liveVector(), since: new Date().toISOString().slice(0, 10), label: 'initial' };
+  const live = { mixWeight: mixWeight(), groupW: mixWeightGroups(), anchor: marketAnchor(), featModelId: act?.id ?? null, featCutoff: act?.cutoff ?? null };
+  try { const c = JSON.parse(getConfig('champion', '')); if (c && Array.isArray(c.v3Vector)) return { ...c, ...live }; } catch { /* first run */ }
+  return { ...live, v3Vector: liveVector(), since: new Date().toISOString().slice(0, 10), label: 'initial' };
 }
 const saveChampion = (c: Champion) => setConfig('champion', JSON.stringify(c));
-const describe = (c: Champion) => `v3-mix, feature weight ${c.mixWeight}, feature fit to ${c.featCutoff || '—'}, champion since ${c.since}`;
+const describe = (c: Champion) => {
+  const w = c.groupW ? `feature weight ${c.groupW.big} big leagues / ${c.groupW.rest} rest` : `feature weight ${c.mixWeight}`;
+  return `v3-mix, ${w}${c.anchor ? `, market anchor ${c.anchor}` : ''}, feature fit to ${c.featCutoff || '—'}${c.featModelId ? ` (#${c.featModelId})` : ''}, champion since ${c.since}`;
+};
+const specOf = (c: Omit<Champion, 'prev'>): Spec => ({ w: c.mixWeight, groupW: c.groupW || null, fit: 'current', v3: 'champion', anchor: c.anchor || 0 });
 
 /* ---------- scoring ---------- */
 
-const mixP = (w: number, v: P3, f: P3): P3 => [0, 1, 2].map(i => (1 - w) * v[i] + w * f[i]) as P3;
-interface Game { fid: number; date: string; y: number; mkt: P3 | null; v3: P3; v3fit: P3 | null; fChamp: P3; fFresh: P3 | null; fPrev: P3 | null; v3Prev: P3 | null }
-interface Cand { id: string; label: string; kind: 'champion' | 'feature' | 'v3' | 'mix'; probs: (g: Game) => P3 | null; apply?: () => Promise<string> }
-
+type WinKey = 'W' | 'Wp' | 'Wpp';
+interface Game {
+  fid: number; date: string; div: string; win: WinKey; y: number; mkt: P3 | null;
+  v3: P3; v3fit: P3 | null; fCur: P3; fFresh: P3; fLive: P3 | null; fPrev: P3 | null; v3Prev: P3 | null;
+}
+/** a setting's probabilities for one game; `aWf` = the walk-forward anchor weight of the game's window */
+function probsOf(s: Spec, g: Game, aWf: number | null): P3 | null {
+  const v = s.v3 === 'refit' ? g.v3fit : g.v3;
+  if (!v) return null;
+  const f = s.fit === 'fresh' ? g.fFresh : g.fCur;
+  const w = s.groupW ? s.groupW[groupOfDiv(g.div)] : s.w;
+  const a = s.anchor === 'wf' ? aWf : s.anchor;
+  return anchorP(mixP(w, v, f), g.mkt, a || 0);
+}
 function scoreSet(games: Game[], f: (g: Game) => P3 | null) {
   const rows = games.map(g => ({ p: f(g), y: g.y })).filter(r => r.p) as { p: P3; y: number }[];
   return scoreProbs(rows);
@@ -113,34 +139,38 @@ export async function runModelDaily(force = false): Promise<any> {
       decision = excluded.decision, reason = excluded.reason, rollback = excluded.rollback, ms = excluded.ms`)
       .run(today, new Date().toISOString(), JSON.stringify(o.champion), JSON.stringify(o.challengers), o.decision, o.reason, o.rollback ? 1 : 0, Date.now() - t0);
   };
-  // the live v3 weights are the truth (an admin may have re-tuned v3 since the last run)
-  let champ: Champion = { ...champion(), v3Vector: liveVector(), mixWeight: mixWeight() };
+  // the live settings are the truth (an admin may have re-tuned v3 or changed the weight since the last run)
+  let champ: Champion = { ...champion(), v3Vector: liveVector() };
   try {
     const R = DAILY_RULES;
     const now = Date.now();
     const W = { from: iso(now - R.windowDays * DAY), to: iso(now + DAY) };
     const Wp = { from: iso(now - 2 * R.windowDays * DAY), to: W.from };
+    const Wpp = { from: iso(now - 3 * R.windowDays * DAY), to: Wp.from }; // only to choose the anchor weight for Wp
     const todayIso = iso(now);
 
-    // 1. state + the routine refit on every settled game (stored, not live)
+    // 1. state + the routine refit on every settled game (stored; live only when a "fresh fit" candidate is promoted)
     dropFeatureState();
     const st: FeatState = await buildFeaturesAsync(); // fix167: in slices
     const refit = await fitFeatureModel(st, todayIso);
     const refitId = refit ? storeFeatureModel(refit.model, todayIso, refit.n, null, false) : null;
 
-    // feature fits for scoring (walk-forward: trained before each window)
+    // feature fits for scoring (walk-forward: trained before each window). "current" = as stale as the live fit
     const champModel = champ.featModelId ? loadFeatureModel(champ.featModelId) : activeFeatureModel()?.model || null;
     const stale = champ.featCutoff ? Math.max(0, Math.round((now - Date.parse(champ.featCutoff)) / DAY)) : 0;
-    const fitAt = async (cut: string) => (await fitFeatureModel(st, cut))?.model || null;
-    const freshW = await fitAt(W.from), freshWp = await fitAt(Wp.from);
-    const staleW = stale >= 7 ? await fitAt(iso(Date.parse(W.from) - stale * DAY)) : freshW;
-    const staleWp = stale >= 7 ? await fitAt(iso(Date.parse(Wp.from) - stale * DAY)) : freshWp;
-    if (!freshW || !freshWp || !staleW || !staleWp) throw new Error('too few games to fit the feature model for the windows');
+    const fits = new Map<string, FittedModel | null>();
+    const fitAt = async (cut: string) => { if (!fits.has(cut)) fits.set(cut, (await fitFeatureModel(st, cut))?.model || null); return fits.get(cut)!; };
+    const back = (d: string) => iso(Date.parse(d) - stale * DAY);
+    const fit = {
+      cur: { W: await fitAt(back(W.from)), Wp: await fitAt(back(Wp.from)), Wpp: await fitAt(back(Wpp.from)) },
+      fresh: { W: await fitAt(W.from), Wp: await fitAt(Wp.from) }
+    };
+    if (!fit.cur.W || !fit.cur.Wp || !fit.fresh.W || !fit.fresh.Wp) throw new Error('too few games to fit the feature model for the windows');
 
     // 2b. v3 window run: live (champion) weights, refits before each window and on everything (for promotion)
     const prev = champ.prev || null;
     const run = await v3WindowRun({
-      seasons: seasonCodes(3), scoreFrom: Wp.from,
+      seasons: seasonCodes(3), scoreFrom: fit.cur.Wpp ? Wpp.from : Wp.from,
       fits: [{ label: 'W', trainBefore: W.from }, { label: 'Wp', trainBefore: Wp.from }, { label: 'all', trainBefore: iso(now + DAY) }],
       vectors: { champion: champ.v3Vector, ...(prev ? { previous: prev.v3Vector } : {}) }
     });
@@ -148,7 +178,7 @@ export async function runModelDaily(force = false): Promise<any> {
     for (const [g, cfg] of Object.entries(GROUPS)) for (const d of cfg.divisions) divGroup.set(d, g);
     const rowsByFid = new Map(st.rows.map(r => [r.fid, r]));
     const prevModel = prev?.featModelId ? loadFeatureModel(prev.featModelId) : null;
-    const games: { W: Game[]; Wp: Game[] } = { W: [], Wp: [] };
+    const games: Record<WinKey, Game[]> = { W: [], Wp: [], Wpp: [] };
     const slice = slicer(); // fix169: the job yields every 30 ms (it froze the server 0.5 s unlabelled)
     for (let i = 0; i < run.items.length; i++) {
       await slice();
@@ -158,108 +188,164 @@ export async function runModelDaily(force = false): Promise<any> {
       const fx = fixtureByNames(st, grp, it.home, it.away, it.date);
       const row = fx ? rowsByFid.get(fx.fid) : null;
       if (!fx || !row || !row.ok) continue;
-      const inW = it.date >= W.from;
+      const win: WinKey = it.date >= W.from ? 'W' : it.date >= Wp.from ? 'Wp' : 'Wpp';
+      if (win === 'Wpp' && !fit.cur.Wpp) continue;
       const fm = (m: FittedModel | null) => (m ? predictWith(m, row.x) : null);
-      const v3 = (run.vectors.champion?.[i] || run.live[i]) as P3;
+      const fCur = fm(fit.cur[win])!;
       const g: Game = {
-        fid: fx.fid, date: it.date, y: it.o === 'H' ? 0 : it.o === 'D' ? 1 : 2, mkt: it.mkt, v3,
-        v3fit: (run.fits[inW ? 'W' : 'Wp']?.probs[i] as P3) || null,
-        fChamp: fm(inW ? staleW : staleWp)!, fFresh: stale >= 7 ? fm(inW ? freshW : freshWp) : null,
+        fid: fx.fid, date: it.date, div: it.div, win, y: it.o === 'H' ? 0 : it.o === 'D' ? 1 : 2, mkt: it.mkt,
+        v3: (run.vectors.champion?.[i] || run.live[i]) as P3,
+        v3fit: win === 'Wpp' ? null : (run.fits[win]?.probs[i] as P3) || null,
+        fCur, fFresh: win === 'Wpp' ? fCur : fm(fit.fresh[win])!,
+        // the live fit on games after its cutoff (truly unseen) — for the guardrail
+        fLive: champ.featCutoff && it.date >= champ.featCutoff ? fm(champModel) : null,
         fPrev: fm(prevModel), v3Prev: (run.vectors.previous?.[i] as P3) || null
       };
-      (inW ? games.W : games.Wp).push(g);
+      games[win].push(g);
     }
 
-    // 3. candidates
-    const w0 = champ.mixWeight;
-    const cands: Cand[] = [{ id: 'champion', label: `champion (${describe(champ)})`, kind: 'champion', probs: g => mixP(w0, g.v3, g.fChamp) }];
-    if (stale >= 7 && refit && refitId) cands.push({
-      id: 'feature-refit', label: `feature model refit (live fit is ${stale} days old)`, kind: 'feature', probs: g => (g.fFresh ? mixP(w0, g.v3, g.fFresh) : null),
-      apply: async () => { activateFeatureModel(refitId); champ = { ...champ, featModelId: refitId, featCutoff: todayIso }; return `feature model refit (fit ${todayIso}, ${refit.n} games)`; }
-    });
-    if (run.fits.W && run.fits.Wp && run.fits.all) cands.push({
-      id: 'v3-weights', label: 'v3 row weights refitted (v3 tuner, 2 seasons + this season)', kind: 'v3', probs: g => (g.v3fit ? mixP(w0, g.v3fit, g.fChamp) : null),
-      apply: async () => {
-        const x = run.fits.all.x;
-        applyVector(x, { source: 'model-daily', date: today, train: run.fits.all.train });
-        applyStoredTuning();
-        champ = { ...champ, v3Vector: x };
-        return `v3 row weights refitted on ${run.fits.all.train} games`;
+    // 3. candidates, stage 1: the champion, the mix grid × {current, fresh fit}, the refitted v3 weights
+    const c0 = specOf(champ);
+    const v3Refit = !!(run.fits.W && run.fits.Wp && run.fits.all);
+    const dropFresh = (l: CandSpec[]) => (refitId ? l : l.filter(c => c.fit !== 'fresh'));
+    const champP = { W: games.W.map(g => probsOf(c0, g, null)), Wp: games.Wp.map(g => probsOf(c0, g, null)) };
+    // the market-anchor weight of each window, chosen on the window before (walk-forward); `live` = chosen on W
+    const anchorFor = (s: Spec) => {
+      const base: Spec = { ...s, anchor: 0 };
+      const rows = (k: WinKey) => games[k].map(g => ({ p: probsOf(base, g, null)!, mkt: g.mkt, y: g.y })).filter(r => r.p);
+      return { W: chooseAnchor(rows('Wp')), Wp: games.Wpp.length ? chooseAnchor(rows('Wpp')) : null, live: chooseAnchor(rows('W')) };
+    };
+    const pairedOf = (s: Spec, k: 'W' | 'Wp', a: number | null) => paired(games[k].map((g, j) => ({ c: probsOf(s, g, a), b: champP[k][j], y: g.y })));
+    const evalCand = async (c: CandSpec) => {
+      await yieldLoop();
+      const aw = c.anchor === 'wf' ? anchorFor(c) : null;
+      const pw = pairedOf(c, 'W', aw?.W ?? null), pwp = pairedOf(c, 'Wp', aw?.Wp ?? null);
+      return { c, aw, pw, pwp, W: scoreSet(games.W, g => probsOf(c, g, aw?.W ?? null)), Wp: scoreSet(games.Wp, g => probsOf(c, g, aw?.Wp ?? null)) };
+    };
+    const stage1 = dropFresh(candidateList({ champion: c0, v3Refit }));
+    const scored: Awaited<ReturnType<typeof evalCand>>[] = [];
+    for (const c of stage1) scored.push(await evalCand(c));
+    const pooled = (x: { pw: { s: { n: number; diff: number } }; pwp: { s: { n: number; diff: number } } }) =>
+      (x.pw.s.n * x.pw.s.diff + x.pwp.s.n * x.pwp.s.diff) / Math.max(1, x.pw.s.n + x.pwp.s.n);
+    // the best plain mix (champion included) over both windows → stage 2
+    const mixes = scored.filter(x => x.c.id === 'champion' || x.c.kind === 'mix' || x.c.kind === 'feature').filter(x => !x.c.groupW && x.c.v3 === 'champion');
+    const bestMix = mixes.slice().sort((a, b) => pooled(a) - pooled(b))[0];
+    const best = bestMix ? { w: bestMix.c.w, fit: bestMix.c.fit } : null;
+    // per-group weight: each group's own best weight (both windows, the best mix's fit), only with ≥ 300 games per group per window
+    let group: { big: number; rest: number; fit: FitKind } | null = null;
+    if (best) {
+      const inG = (k: 'W' | 'Wp', gr: string) => games[k].filter(g => groupOfDiv(g.div) === gr);
+      const enough = ['big', 'rest'].every(gr => inG('W', gr).length >= R.groupMinGames && inG('Wp', gr).length >= R.groupMinGames);
+      if (enough) {
+        const ws = [...new Set([...R.mixWeights, c0.w])];
+        const pick = (gr: string) => chooseWeight([...inG('W', gr), ...inG('Wp', gr)], ws, (g: Game, w) => probsOf({ ...c0, w, groupW: null, fit: best.fit }, g, null))?.w;
+        const big = pick('big'), rest = pick('rest');
+        if (big != null && rest != null && Math.abs(big - rest) > 1e-9) group = { big, rest, fit: best.fit };
       }
-    });
-    for (const w of [0.4, 0.5, 0.6]) if (Math.abs(w - w0) > 1e-9) cands.push({
-      id: `mix-${w}`, label: `mix weight ${w}`, kind: 'mix', probs: g => mixP(w, g.v3, g.fChamp),
-      apply: async () => { setConfig('mix_weight', String(w)); champ = { ...champ, mixWeight: w }; return `mix weight ${w0} → ${w}`; }
-    });
-
-    const scored: { c: Cand; W: ReturnType<typeof scoreSet>; Wp: ReturnType<typeof scoreSet> }[] = [];
-    for (const c of cands) { await yieldLoop(); scored.push({ c, W: scoreSet(games.W, c.probs), Wp: scoreSet(games.Wp, c.probs) }); }
+    }
+    const anchorOk = games.W.some(g => g.mkt) && games.Wp.some(g => g.mkt);
+    const stage2 = dropFresh(candidateList({ champion: c0, v3Refit, best, group, anchor: anchorOk })).filter(c => !stage1.some(s => s.id === c.id));
+    for (const c of stage2) scored.push(await evalCand(c));
     await yieldLoop();
+
+    // verdicts: the cheap checks first, the bootstrap only for candidates better in both windows
+    const table: any[] = [];
+    for (const x of scored) {
+      let v: { pass: boolean; why: string; boot: any; gap: string | null };
+      if (x.c.id === 'champion') v = { pass: false, why: 'champion', boot: null, gap: null };
+      else {
+        const pre = preJudge(x.pw, x.pwp, R);
+        v = pre || finishJudge(x.pw, x.pwp, await pairedBootstrapAsync([...x.pw.d, ...x.pwp.d], yieldLoop, R.resamples), R);
+      }
+      table.push({
+        id: x.c.id, label: x.c.label, kind: x.c.kind, spec: { w: x.c.w, groupW: x.c.groupW, fit: x.c.fit, v3: x.c.v3, anchor: x.c.anchor },
+        W: x.W, Wp: x.Wp, n: { W: x.pw.s.n, Wp: x.pwp.s.n }, dW: x.pw.s.diff, dWp: x.pwp.s.diff, hit: { W: x.pw.s.hitC, champion: x.pw.s.hitB },
+        ...(x.aw ? { anchorWeights: x.aw } : {}), pass: v.pass, why: v.why, gap: v.gap,
+        boot: v.boot ? { pBetter: v.boot.pBetter, mean: v.boot.mean, lo: v.boot.lo, hi: v.boot.hi, n: v.boot.n } : null,
+        close: Math.round(closeness({ W: x.pw.s, Wp: x.pwp.s, boot: v.boot }) * 1e5) / 1e5
+      });
+    }
     const base = scored[0];
     const reference = {
       v3: { W: scoreSet(games.W, g => g.v3), Wp: scoreSet(games.Wp, g => g.v3) },
-      feature: { W: scoreSet(games.W, g => g.fChamp), Wp: scoreSet(games.Wp, g => g.fChamp) },
+      feature: { W: scoreSet(games.W, g => g.fCur), Wp: scoreSet(games.Wp, g => g.fCur) },
       market: { W: scoreSet(games.W.filter(g => g.mkt), g => g.mkt), Wp: scoreSet(games.Wp.filter(g => g.mkt), g => g.mkt) },
-      championOnOddsGames: scoreSet(games.W.filter(g => g.mkt), base.c.probs)
+      championOnOddsGames: scoreSet(games.W.filter(g => g.mkt), g => probsOf(c0, g, null))
     };
-    const verdict = (s: typeof scored[number]) => {
-      if (s.c.id === 'champion') return { pass: false, why: 'champion' };
-      if (s.W.n < R.minGames) return { pass: false, why: `${s.W.n} games (< ${R.minGames})` };
-      const d = s.W.logLoss - base.W.logLoss;
-      if (d > -R.minGain) return { pass: false, why: `log loss ${d >= 0 ? '+' : ''}${d.toFixed(4)} (needs −${R.minGain})` };
-      if (s.Wp.n && s.Wp.logLoss > base.Wp.logLoss) return { pass: false, why: `worse in the previous 60 days (${s.Wp.logLoss} vs ${base.Wp.logLoss})` };
-      if (s.W.hitRate < base.W.hitRate - R.maxHitDrop) return { pass: false, why: `hit rate ${s.W.hitRate}% vs ${base.W.hitRate}%` };
-      return { pass: true, why: `log loss ${d.toFixed(4)}, previous window ${(s.Wp.logLoss - base.Wp.logLoss).toFixed(4)}` };
+    const bestCand = table.filter(t => t.id !== 'champion').sort((a, b) => a.close - b.close)[0] || null;
+    const challengers = {
+      windows: { W, Wp, Wpp }, games: { W: games.W.length, Wp: games.Wp.length, Wpp: games.Wpp.length }, reference, candidates: table, refitId, stale,
+      liveFit: { id: champ.featModelId, cutoff: champ.featCutoff }, rules: R,
+      best: bestCand ? { id: bestCand.id, label: bestCand.label, dW: bestCand.dW, dWp: bestCand.dWp, pBetter: bestCand.boot?.pBetter ?? null, pass: bestCand.pass, why: bestCand.why, gap: bestCand.gap } : null
     };
-    const table = scored.map(s => ({ id: s.c.id, label: s.c.label, kind: s.c.kind, W: s.W, Wp: s.Wp, dW: Math.round((s.W.logLoss - base.W.logLoss) * 10000) / 10000, ...verdict(s) }));
-    const challengers = { windows: { W, Wp }, games: { W: games.W.length, Wp: games.Wp.length }, reference, candidates: table, refitId, stale };
 
     // 5. guardrail first: a champion that is doing worse than the one it replaced goes back
     if (prev) {
       const since = champ.since;
       const after = [...games.Wp, ...games.W].filter(g => g.date >= since && g.fPrev && g.v3Prev);
       if (after.length >= R.guardGames) {
-        const cur = scoreProbs(after.map(g => ({ p: mixP(champ.mixWeight, g.v3, g.fChamp), y: g.y })));
-        const old = scoreProbs(after.map(g => ({ p: mixP(prev.mixWeight, g.v3Prev!, g.fPrev!), y: g.y })));
+        const cs = specOf(champ), ps = specOf(prev);
+        const cur = scoreProbs(after.map(g => ({ p: anchorP(mixP(cs.groupW ? cs.groupW[groupOfDiv(g.div)] : cs.w, g.v3, g.fLive || g.fCur), g.mkt, Number(cs.anchor) || 0), y: g.y })));
+        const old = scoreProbs(after.map(g => ({ p: anchorP(mixP(ps.groupW ? ps.groupW[groupOfDiv(g.div)] : ps.w, g.v3Prev!, g.fPrev!), g.mkt, Number(ps.anchor) || 0), y: g.y })));
         if (cur.logLoss - old.logLoss > R.guardWorse) {
           if (prev.featModelId) activateFeatureModel(prev.featModelId);
           applyVector(prev.v3Vector, { source: 'model-daily rollback', date: today });
           applyStoredTuning();
           setConfig('mix_weight', String(prev.mixWeight));
-          const back: Champion = { ...prev, since: todayIso, label: `rolled back to ${prev.label}`, prev: null };
-          saveChampion(back);
+          setConfig('mix_weight_groups', prev.groupW ? JSON.stringify(prev.groupW) : '');
+          setConfig('market_anchor', String(prev.anchor || 0));
+          const backTo: Champion = { ...prev, since: todayIso, label: `rolled back to ${prev.label}`, prev: null };
+          saveChampion(backTo);
           clearPredictionCache();
           const reason = `Rollback: since ${since} the champion scored ${cur.logLoss} vs ${old.logLoss} for the previous one (${after.length} games, worse by ${(cur.logLoss - old.logLoss).toFixed(4)} > ${R.guardWorse}).`;
-          save({ champion: back, challengers: { ...challengers, guard: { games: after.length, current: cur, previous: old } }, decision: 'rollback', reason, rollback: true });
+          save({ champion: backTo, challengers: { ...challengers, guard: { games: after.length, current: cur, previous: old } }, decision: 'rollback', reason, rollback: true });
           return { decision: 'rollback', reason };
         }
         (challengers as any).guard = { games: after.length, current: cur, previous: old, ok: true };
       }
     }
 
-    // 4. promotion
-    const passing = table.filter(t => t.pass).sort((a, b) => a.W.logLoss - b.W.logLoss || a.W.brier - b.W.brier);
+    // 4. promotion: the passing candidate with the biggest gain over both windows
+    const passing = table.filter(t => t.pass).sort((a, b) => (a.boot?.mean ?? 0) - (b.boot?.mean ?? 0) || a.W.brier - b.W.brier);
     let decision = 'keep', reason = games.W.length < R.minGames
       ? `No change: only ${games.W.length} scored league games in the last 60 days (rules need ${R.minGames}).`
-      : 'No change: no challenger beat the champion by the rules.';
+      : `No change: no candidate passed the bar${bestCand ? ` (closest: ${bestCand.label} — ${bestCand.why})` : ''}.`;
     if (passing.length) {
       const win = passing[0];
-      const cand = cands.find(c => c.id === win.id)!;
+      const x = scored.find(s => s.c.id === win.id)!;
       const before: Omit<Champion, 'prev'> = { ...champ };
       delete (before as any).prev;
-      const what = await cand.apply!();
-      champ = { ...champ, since: todayIso, label: win.label, prev: before };
+      const what: string[] = [];
+      if (x.c.fit === 'fresh' && refitId && refit) {
+        activateFeatureModel(refitId);
+        champ = { ...champ, featModelId: refitId, featCutoff: todayIso };
+        what.push(`feature fit ${todayIso} (#${refitId}, ${refit.n} games)`);
+      }
+      if (x.c.v3 === 'refit') {
+        const vx = run.fits.all.x;
+        applyVector(vx, { source: 'model-daily', date: today, train: run.fits.all.train });
+        applyStoredTuning();
+        champ = { ...champ, v3Vector: vx };
+        what.push(`v3 row weights refitted on ${run.fits.all.train} games`);
+      }
+      const anchorLive = x.c.anchor === 'wf' ? (x.aw?.live ?? x.aw?.W ?? 0) : Number(x.c.anchor) || 0;
+      if (Math.abs(x.c.w - c0.w) > 1e-9 || JSON.stringify(x.c.groupW) !== JSON.stringify(c0.groupW)) what.push(x.c.groupW ? `mix weight per group: big ${x.c.groupW.big}, rest ${x.c.groupW.rest}` : `mix weight ${c0.w} → ${x.c.w}`);
+      if (Math.abs(anchorLive - (Number(c0.anchor) || 0)) > 1e-9) what.push(`market anchor ${anchorLive}`);
+      setConfig('mix_weight', String(x.c.w));
+      setConfig('mix_weight_groups', x.c.groupW ? JSON.stringify(x.c.groupW) : '');
+      setConfig('market_anchor', String(anchorLive));
+      champ = { ...champ, mixWeight: x.c.w, groupW: x.c.groupW, anchor: anchorLive, since: todayIso, label: win.label, prev: before };
       saveChampion(champ);
       clearPredictionCache();
       decision = 'promote';
-      reason = `Changed: ${what}. Last 60 days log loss ${base.W.logLoss} → ${win.W.logLoss} (${win.W.n} games); previous 60 days ${base.Wp.logLoss} → ${win.Wp.logLoss}; hit ${base.W.hitRate}% → ${win.W.hitRate}%.`;
+      reason = `Changed: ${what.join('; ') || win.label}. Last 60 days log loss ${base.W.logLoss} → ${win.W.logLoss} (${win.n.W} games, ${win.dW.toFixed(4)}); previous 60 days ${base.Wp.logLoss} → ${win.Wp.logLoss} (${win.dWp.toFixed(4)}); better in ${Math.round((win.boot?.pBetter ?? 0) * 100)}% of ${R.resamples} resamples; hit ${win.hit.champion}% → ${win.hit.W}%.`;
     } else {
       saveChampion(champ);
     }
 
     // publishing v3-mix (auto mode)
-    const mixW = scored.find(s => s.c.id === 'champion')!;
     if (mixMode() === 'auto') {
+      const mixW = base;
       const beatsW = mixW.W.n >= R.minGames && mixW.W.logLoss <= reference.v3.W.logLoss;
       const beatsWp = mixW.Wp.n >= R.minGames && mixW.Wp.logLoss <= reference.v3.Wp.logLoss;
       if (!mixLive() && beatsW && beatsWp) { setMixLive(true); clearPredictionCache(); reason += ` v3-mix is now the published model (60 days: ${mixW.W.logLoss} vs v3 ${reference.v3.W.logLoss}; previous 60: ${mixW.Wp.logLoss} vs ${reference.v3.Wp.logLoss}).`; }
@@ -318,7 +404,8 @@ export function buildReport(date = localParts().date): string {
   const m = periodNumbers(iso(startToday - 30 * DAY), yTo);
   let ch: any = null;
   try { ch = row?.challengers ? JSON.parse(row.challengers) : null; } catch { ch = null; }
-  const queued = ch?.candidates ? ch.candidates.filter((c: any) => c.id !== 'champion').sort((a: any, b: any) => a.dW - b.dW).slice(0, 3) : [];
+  const queued = ch?.candidates ? ch.candidates.filter((c: any) => c.id !== 'champion').sort((a: any, b: any) => (a.close ?? a.dW) - (b.close ?? b.dW)).slice(0, 3) : [];
+  const ls = learningStatus();
   const health = lastDataHealth();
   const failing = health ? health.checks.filter(c => c.level !== 'ok') : [];
   const unsettled: any = db.prepare(`SELECT COUNT(DISTINCT match_id) AS n FROM predictions WHERE locked = 1 AND settled = 0 AND utc_date < ?`).get(new Date(Date.now() - 4 * 3600 * 1000).toISOString());
@@ -346,8 +433,9 @@ export function buildReport(date = localParts().date): string {
     ...(() => { const l = leagueTuneLine(); return l ? [l, ''] : []; })(),
     ...(() => { const l = missFitLine(); return l ? [l, ''] : []; })(),
     ...(() => { const l = impactFitLine(); return l ? [l, ''] : []; })(),
+    `Learning: ${ls.lastPromotion ? `last promotion ${ls.lastPromotion.date} (${ls.daysSince} days ago)` : `no promotion yet (${ls.daysSince ?? 0} days)`}.`,
     'Next challengers:',
-    ...(queued.length ? queued.map((c: any, i: number) => `  ${i + 1}. ${c.label}: ${c.dW >= 0 ? '+' : ''}${c.dW.toFixed(4)} vs champion over ${c.W.n} games — ${c.why}`) : ['  none scored today']),
+    ...(queued.length ? queued.map((c: any, i: number) => `  ${i + 1}. ${c.label}: ${c.dW >= 0 ? '+' : ''}${c.dW.toFixed(4)} (previous 60 days ${c.dWp != null ? `${c.dWp >= 0 ? '+' : ''}${c.dWp.toFixed(4)}` : 'n/a'}) vs champion over ${c.n?.W ?? c.W.n} games — ${c.why}`) : ['  none scored today']),
     '',
     `Admin: ${SITE}/admin`
   ];
@@ -387,7 +475,7 @@ export async function sendMorningReport(force = false) {
 export function modelDailyLog(days = 30) {
   const rows = db.prepare(`SELECT * FROM model_daily ORDER BY date DESC LIMIT ?`).all(days) as any[];
   return {
-    champion: champion(), mixLive: mixLive(), mixMode: mixMode(), rules: DAILY_RULES, running,
+    champion: champion(), mixLive: mixLive(), mixMode: mixMode(), rules: DAILY_RULES, running, learning: learningStatus(),
     days: rows.map(r => ({
       date: r.date, ranAt: r.ran_at, decision: r.decision, reason: r.reason, rollback: !!r.rollback, ms: r.ms, report: r.report, reportSentAt: r.report_sent_at,
       champion: r.champion ? JSON.parse(r.champion) : null, challengers: r.challengers ? JSON.parse(r.challengers) : null

@@ -519,10 +519,21 @@ function BackupsCard() {
 /** Basketball results the provider may have wrong (swapped / quarters don't add up), and recent corrections. */
 type SiteError = { sig: string; message: string; where: string | null; pageKind: string; kind: string; count: number; firstAt: string; lastAt: string; pages: string[]; browsers: string[]; version: string | null; resolvedAt: string | null }
 /** Pages that broke in visitors' browsers (sent by the site itself). "Mark fixed" after a fix is deployed: it reopens if it happens again. */
-interface DailyDay { date: string; ranAt: string | null; decision: string | null; reason: string | null; rollback: boolean; ms: number | null; report: string | null; reportSentAt: string | null }
+interface DailyCand {
+  id: string; label: string; kind: string; n: { W: number; Wp: number }; W: { logLoss: number; hitRate: number }; Wp: { logLoss: number }
+  dW: number; dWp: number; pass: boolean; why: string; gap: string | null; close: number; boot: { pBetter: number } | null
+}
+interface DailyDay {
+  date: string; ranAt: string | null; decision: string | null; reason: string | null; rollback: boolean; ms: number | null; report: string | null; reportSentAt: string | null
+  challengers?: { candidates?: DailyCand[]; games?: { W: number; Wp: number }; stale?: number; reference?: { market?: { W?: { n: number; logLoss: number } }; championOnOddsGames?: { n: number; logLoss: number } } } | null
+}
 interface DailyLog {
-  champion: { mixWeight: number; featCutoff: string | null; since: string; label: string }
+  champion: { mixWeight: number; groupW?: { big: number; rest: number } | null; anchor?: number; featModelId?: number | null; featCutoff: string | null; since: string; label: string }
   mixLive: boolean; mixMode: string; running: boolean; days: DailyDay[]
+  learning?: {
+    lastPromotion: { date: string; reason: string } | null; daysSince: number | null; firstRun: string | null
+    best: { label: string; dW: number; dWp: number; pBetter: number | null; pass: boolean; why: string; gap: string | null } | null
+  }
   feature: { active: { id: number; trained_at: string; cutoff: string; train_games: number } | null }
 }
 
@@ -536,6 +547,10 @@ function ModelDailyCard() {
   if (!d) return null
   const act = (q: string, note: string) => axios.get(`${API_URL}/admin/${q}`).then(r => { setMsg(note); if (r.data.data?.text) setPreview(r.data.data.text); load() }).catch(e => setMsg(errorText(e)))
   const latest = d.days.find(x => x.report) || null
+  const ran = d.days.find(x => x.challengers?.candidates?.length) || null
+  const cands = (ran?.challengers?.candidates || []).filter(c => c.id !== 'champion').sort((a, b) => a.close - b.close)
+  const L = d.learning
+  const sg = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(4)}`
   const tone = (x: string | null) => (x === 'promote' ? 'text-win' : x === 'rollback' || x === 'error' ? 'text-loss' : 'text-muted')
   return (
     <section className="card p-5 sm:p-6 mb-8">
@@ -545,9 +560,55 @@ function ModelDailyCard() {
       </div>
       <p className="text-sm text-muted">
         Published league model: <b className="text-ink">{d.mixLive ? slAdmin('v3-mix') : `${slAdmin('grid-v3')}, v3-mix in shadow`}</b> · switch {d.mixMode} ·
-        feature weight {d.champion.mixWeight} · feature fit {d.feature.active ? `${d.feature.active.cutoff} (${d.feature.active.train_games} games)` : 'not fitted yet'} ·
+        feature weight {d.champion.groupW ? `${d.champion.groupW.big} big leagues / ${d.champion.groupW.rest} rest` : d.champion.mixWeight}
+        {d.champion.anchor ? ` · market anchor ${d.champion.anchor}` : ''} · feature fit {d.feature.active ? `${d.feature.active.cutoff} (#${d.feature.active.id}, ${d.feature.active.train_games} games)` : 'not fitted yet'} ·
         champion since {d.champion.since}
       </p>
+      {L && (
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+          <div className="rounded-xl bg-surface2/60 p-3">
+            <div className="text-xs text-faint">Last promotion</div>
+            <div className="font-semibold text-ink">{L.lastPromotion ? L.lastPromotion.date : 'none yet'}</div>
+            {L.lastPromotion && <div className="text-xs text-muted break-words">{L.lastPromotion.reason}</div>}
+          </div>
+          <div className="rounded-xl bg-surface2/60 p-3">
+            <div className="text-xs text-faint">Days since</div>
+            <div className={`font-semibold num ${(L.daysSince ?? 0) >= 30 ? 'text-loss' : 'text-ink'}`}>{L.daysSince ?? '—'}</div>
+            {!L.lastPromotion && L.firstRun && <div className="text-xs text-muted">first run {L.firstRun}</div>}
+          </div>
+          <div className="rounded-xl bg-surface2/60 p-3">
+            <div className="text-xs text-faint">Today’s best candidate</div>
+            {L.best ? (
+              <>
+                <div className={`font-semibold break-words ${L.best.pass ? 'text-win' : 'text-ink'}`}>{L.best.label}</div>
+                <div className="text-xs text-muted num">last 60 days {sg(L.best.dW)} · previous 60 {sg(L.best.dWp)}{L.best.pBetter != null ? ` · better in ${Math.round(L.best.pBetter * 100)}% of resamples` : ''}</div>
+                <div className="text-xs text-muted break-words">{L.best.pass ? 'passed' : `to pass: ${L.best.gap || L.best.why}`}</div>
+              </>
+            ) : <div className="text-faint">not scored yet</div>}
+          </div>
+        </div>
+      )}
+      {cands.length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-faint text-left">
+              <tr><th className="py-1 pr-2 font-normal">Candidate ({ran!.date}, {ran!.challengers?.games?.W ?? 0} / {ran!.challengers?.games?.Wp ?? 0} games)</th><th className="py-1 pr-2 font-normal text-right">last 60</th><th className="py-1 pr-2 font-normal text-right">prev 60</th><th className="py-1 pr-2 font-normal text-right">sure</th><th className="py-1 font-normal">verdict</th></tr>
+            </thead>
+            <tbody className="divide-y divide-line/40">
+              {cands.slice(0, 12).map(c => (
+                <tr key={c.id}>
+                  <td className="py-1 pr-2 text-ink">{c.label}</td>
+                  <td className={`py-1 pr-2 num text-right ${c.dW < 0 ? 'text-win' : 'text-muted'}`}>{sg(c.dW)}</td>
+                  <td className={`py-1 pr-2 num text-right ${c.dWp < 0 ? 'text-win' : 'text-muted'}`}>{sg(c.dWp)}</td>
+                  <td className="py-1 pr-2 num text-right text-muted">{c.boot ? `${Math.round(c.boot.pBetter * 100)}%` : '—'}</td>
+                  <td className={`py-1 ${c.pass ? 'text-win font-semibold' : 'text-muted'}`}>{c.pass ? 'passes' : c.gap || c.why}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1 text-[11px] text-faint">Log loss against the champion per game (below 0 = better). Promoted when better in both windows, better in 90% of 2,000 resamples and the hit rate not down by more than 0.5 points.</p>
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
         <button type="button" className="px-3 py-1.5 rounded-full border border-line text-muted hover:text-ink" onClick={() => act('model-daily?run=1', 'Daily job started (a few minutes).')}>Run today’s job</button>
         <button type="button" className="px-3 py-1.5 rounded-full border border-line text-muted hover:text-ink" onClick={() => act('model-daily?preview=1', 'Report preview below.')}>Preview report</button>

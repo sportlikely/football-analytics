@@ -53,6 +53,7 @@ import { deployErrorsHealth } from './deployErrors';
 import { slowRequestsHealth } from './deadline';
 import { upsetTextHealth } from './upsetHealth';
 import { crawlerHealth } from './crawlerIps';
+import { modelDailyHealth } from './modelDailyHealth';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -469,6 +470,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...upsetTextHealth(now)); } catch (e: any) { logger.warn(`upset watch health: ${e?.message || e}`); }
   // fix245: search engines verified (list / DNS); fail when a request from Google's ranges got a 429 / 503 today
   try { checks.push(...crawlerHealth()); } catch (e: any) { logger.warn(`crawler health: ${e?.message || e}`); }
+  // fix251: the football daily learning — warn after 30 days without a promotion while the best candidate is better in both windows
+  try { checks.push(...modelDailyHealth(now)); } catch (e: any) { logger.warn(`model daily health: ${e?.message || e}`); }
   try { checks.push(...seasonForecastChecks()); } catch (e: any) { logger.warn(`season forecast health: ${e?.message || e}`); }
 
   // fix210: freezes and memory — web stalls, worker stalls, worker memory, worker restarts

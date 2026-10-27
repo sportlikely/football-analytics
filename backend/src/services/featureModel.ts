@@ -24,6 +24,8 @@ import { db } from '../db';
 import { groupForCompetition, fdNameFor } from './history';
 import { playerKey } from './squadValues';
 import type { Prediction } from './predictionModel';
+import { oddsFor } from './odds';
+import { groupOfDiv, type LeagueGroup } from '../utils/dailyRules';
 
 export const FEAT_MODEL = 'feat-v1';
 export const MIX_MODEL = 'v3-mix';
@@ -80,6 +82,14 @@ export function setConfig(key: string, value: string) {
 }
 /** Weight of the feature model in v3-mix (0..1). */
 export const mixWeight = () => Math.min(1, Math.max(0, Number(getConfig('mix_weight', '0.5')) || 0.5));
+/** fix251: a weight per league group (big leagues / rest) when the daily job promoted one, else null */
+export function mixWeightGroups(): { big: number; rest: number } | null {
+  try { const g = JSON.parse(getConfig('mix_weight_groups', '') || 'null'); return g && Number.isFinite(g.big) && Number.isFinite(g.rest) ? g : null; } catch { return null; }
+}
+export const mixWeightFor = (grp: LeagueGroup) => mixWeightGroups()?.[grp] ?? mixWeight();
+/** fix251: weight of the market anchor (0 = off): v3-mix blended toward the margin-free market probabilities on games
+ * with stored prices. The prices themselves are never shown — only the public probabilities move. */
+export const marketAnchor = () => Math.min(0.5, Math.max(0, Number(getConfig('market_anchor', '0')) || 0));
 /** 'auto' (the daily job turns it on once v3-mix passes), 'on' or 'off'. */
 export const mixMode = () => getConfig('mix_mode', 'auto');
 /** v3-mix is the published league model (since `mixLiveSince()`). */
@@ -696,6 +706,9 @@ function newcomerTeam(st: FeatState, grp: string, div: string, season: number): 
 
 /** Feature-model probabilities (%) for a match about to be played, or null. */
 export function featureProbs(match: any): [number, number, number] | null {
+  return featureProbsAt(match)?.p ?? null;
+}
+function featureProbsAt(match: any): { p: [number, number, number]; div: string } | null {
   const act = activeFeatureModel();
   if (!act) return null;
   const st = liveFeatureState();
@@ -712,7 +725,7 @@ export function featureProbs(match: any): [number, number, number] | null {
   const { x, ok } = featuresFor(st, f, over);
   if (!ok) return null;
   const p = predictWith(act.model, x);
-  return [p[0] * 100, p[1] * 100, p[2] * 100];
+  return { p: [p[0] * 100, p[1] * 100, p[2] * 100], div: f.div };
 }
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -722,24 +735,33 @@ const r1 = (x: number) => Math.round(x * 10) / 10;
  */
 export function mixPredictions(match: any, v3: Prediction | null): Prediction[] {
   if (!v3 || v3.grid?.scope && v3.grid.scope !== 'league') return [];
-  let fp: [number, number, number] | null = null;
-  try { fp = featureProbs(match); } catch (e: any) { logger.warn(`feature model: ${e.message}`); }
+  let fp: [number, number, number] | null = null, div: string | null = null;
+  try { const at = featureProbsAt(match); fp = at?.p ?? null; div = at?.div ?? null; } catch (e: any) { logger.warn(`feature model: ${e.message}`); }
   // fix181: right after a deploy the feature state is still being built — the last saved v3-mix numbers of the match
   // are served until it is ready (no jump to grid-v3 and back)
   if (!fp && !STATE) return savedMix(match, v3);
   if (!fp) return [];
-  const w = mixWeight();
+  const w = mixWeightFor(groupOfDiv(div, match?.competition?.code));
   const v = [v3.home, v3.draw, v3.away];
   const m = v.map((x, i) => (1 - w) * x + w * fp![i]);
   const s = m[0] + m[1] + m[2] || 1;
-  const mix = m.map(x => (x / s) * 100);
+  let mix = m.map(x => (x / s) * 100);
+  // fix251: the market anchor (promoted by the daily job only when it predicted better): our numbers move toward the
+  // margin-free market probabilities; no price, bookmaker or market number is added to the prediction
+  const a = marketAnchor();
+  let anchored = false;
+  if (a > 0) {
+    let mk: ReturnType<typeof oddsFor> = null;
+    try { mk = Number.isFinite(Number(match?.id)) ? oddsFor(Number(match.id)) : null; } catch { mk = null; }
+    if (mk) { const q = [mk.probs.home, mk.probs.draw, mk.probs.away]; const qs = q[0] + q[1] + q[2] || 1; mix = mix.map((x, i) => (1 - a) * x + a * (q[i] / qs) * 100); anchored = true; }
+  }
   const fav = v[0] >= v[1] && v[0] >= v[2] ? 0 : v[2] >= v[1] ? 2 : 1;
   // feat-v1 is stored for comparison only: no breakdown copy (the grid stays on grid-v3 / v3-mix)
   const feat: Prediction = { ...v3, model: FEAT_MODEL, home: r1(fp[0]), draw: r1(fp[1]), away: r1(fp[2]), beforeLineups: undefined, grid: undefined, topScores: [] };
   const out: Prediction & { mix?: any } = {
     ...v3, model: MIX_MODEL, home: r1(mix[0]), draw: r1(mix[1]), away: r1(mix[2]), beforeLineups: undefined,
     mix: {
-      weight: w, v3: { home: v3.home, draw: v3.draw, away: v3.away }, feature: { home: r1(fp[0]), draw: r1(fp[1]), away: r1(fp[2]) },
+      weight: w, ...(anchored ? { anchored: true } : {}), v3: { home: v3.home, draw: v3.draw, away: v3.away }, feature: { home: r1(fp[0]), draw: r1(fp[1]), away: r1(fp[2]) },
       favourite: (['H', 'D', 'A'] as const)[fav], gap: r1(fp[fav] - v[fav]), disagrees: Math.abs(fp[fav] - v[fav]) > 8
     }
   };
