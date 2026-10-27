@@ -60,6 +60,7 @@
     "test:fix249": "node --no-warnings --test scripts/fix249.test.ts",
     "test:fix248": "tsc && node --no-warnings --test --test-force-exit scripts/fix248.test.mjs",
     "test:fix250": "tsc && node --no-warnings --test --test-force-exit scripts/fix250.test.mjs",
+    "test:fix253": "tsc && node --no-warnings --test --test-force-exit scripts/fix253.test.mjs scripts/void-rules.test.ts",
     "test:fix252": "tsc && node --no-warnings --test --test-force-exit scripts/fix252.test.ts",
     "test:load": "tsc && node --no-warnings scripts/load-test.mjs",
     "test:paint": "tsc && node --no-warnings scripts/paint-test.mjs"

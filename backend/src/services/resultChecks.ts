@@ -7,12 +7,18 @@
  *    summary. Signals that disagree → result_review ("Needs you" + an email with Swap scores / Keep as is).
  *  - Tennis: the winner field against the games of every set and the provider's sets count (retirements left alone).
  *    Both say the other player won → the winner is corrected (source "sets"); only one says so → review.
+ *  - fix253: nobody is asked any more — a review still open 72 h later is voided (American football: status CANC kept over
+ *    provider updates; tennis: status 'void', which the provider writes never undo) and listed in Done for you with Undo.
  * The record of both sports is read from the stored scores, so a correction counts at once.
  */
 import { db } from '../db';
 import logger from '../utils/logger';
 import { swapVerdict, nflPlayPoints, tennisVerdict, type Verdict } from '../utils/resultSwap';
-import { actionLink, adminUrl, israelTime, noteAutoFix, onEmailAction, sendAdminMail, siteUrl, type AdminMail } from './adminMail';
+import { actionLink, adminUrl, israelTime, onEmailAction, siteUrl, type AdminMail } from './adminMail';
+import { onUndo, recordDone } from './doneForYou';
+
+/** fix253: still unsure this long after it was found → void (out of the record, as a cancelled game) */
+export const REVIEW_VOID_AFTER_MS = 72 * 3600 * 1000;
 
 export type CheckSport = 'american-football' | 'tennis';
 
@@ -45,7 +51,8 @@ export function applyNflFixes(ids?: number[]) {
   try {
     db.exec(`UPDATE nfl_games SET
         home_pts = json_extract((SELECT f.fields FROM result_fix f WHERE f.sport = 'american-football' AND f.id = nfl_games.game_id), '$.home'),
-        away_pts = json_extract((SELECT f.fields FROM result_fix f WHERE f.sport = 'american-football' AND f.id = nfl_games.game_id), '$.away')
+        away_pts = json_extract((SELECT f.fields FROM result_fix f WHERE f.sport = 'american-football' AND f.id = nfl_games.game_id), '$.away'),
+        status = CASE WHEN json_extract((SELECT f.fields FROM result_fix f WHERE f.sport = 'american-football' AND f.id = nfl_games.game_id), '$.void') = 1 THEN 'CANC' ELSE status END
       WHERE game_id IN (SELECT id FROM result_fix WHERE sport = 'american-football')${ids?.length ? ` AND game_id IN (${ids.filter(Number.isInteger).join(',')})` : ''}`);
   } catch { /* table not there yet */ }
 }
@@ -96,8 +103,8 @@ export async function checkOtherResults(days = 10, now = Date.now()): Promise<{ 
       resolveReview('american-football', g.game_id, 'swapped automatically (scoring plays)', null);
       fixedAuto++;
       logger.warn(`af result: ${name} swapped automatically ${g.home_pts}-${g.away_pts} → ${g.away_pts}-${g.home_pts} (${v.why})`);
-      noteAutoFix('American football result', `${name}: ${g.home_pts}-${g.away_pts} → ${g.away_pts}-${g.home_pts}`,
-        `${league}, ${israelTime(g.kickoff)}. Home and away scores were swapped in the data: the scoring plays add up to ${g.away_pts}-${g.home_pts}. Corrected and counted in the record.`, siteUrl(path));
+      recordDone({ kind: 'result-fixed', sport: 'american-football', ref: `af:${g.game_id}`, title: `${name}: ${g.home_pts}-${g.away_pts} → ${g.away_pts}-${g.home_pts}`,
+        why: `${league}, ${israelTime(g.kickoff)}. Home and away scores were swapped in the data: the scoring plays add up to ${g.away_pts}-${g.home_pts}. Corrected and counted in the record.`, link: siteUrl(path), undo: { sport: 'american-football', id: g.game_id } }, now);
     } else if (v.action === 'review' && !reviewOf('american-football', g.game_id)) {
       const detail = `Score ${g.home_pts}-${g.away_pts}: ${v.why}.`;
       db.prepare(`INSERT OR IGNORE INTO result_review (sport, id, issue, detail, found_at) VALUES ('american-football', ?, 'swapped?', ?, ?)`).run(g.game_id, detail, new Date(now).toISOString());
@@ -121,20 +128,68 @@ export async function checkOtherResults(days = 10, now = Date.now()): Promise<{ 
       resolveReview('tennis', m.id, 'winner corrected automatically (sets)', null);
       fixedAuto++;
       logger.warn(`tennis result: ${name} winner corrected automatically → ${winnerName(v.winner)} (${v.why})`);
-      noteAutoFix('tennis result', `${name}: winner → ${winnerName(v.winner)}`,
-        `${m.tournament || m.tour}, ${israelTime(m.scheduled_at)}. The data named ${winnerName(m.winner)} as the winner, but every set score says ${winnerName(v.winner)}. Corrected and counted in the record.`, siteUrl(path));
+      recordDone({ kind: 'result-fixed', sport: 'tennis', ref: `tn:${m.id}`, title: `${name}: winner → ${winnerName(v.winner)}`,
+        why: `${m.tournament || m.tour}, ${israelTime(m.scheduled_at)}. The data named ${winnerName(m.winner)} as the winner, but every set score says ${winnerName(v.winner)}. Corrected and counted in the record.`, link: siteUrl(path), undo: { sport: 'tennis', id: m.id } }, now);
     } else if (v.action === 'review' && !reviewOf('tennis', m.id)) {
       const detail = `Winner in the data: ${winnerName(m.winner)}. ${v.why}.`;
       db.prepare(`INSERT OR IGNORE INTO result_review (sport, id, issue, detail, found_at) VALUES ('tennis', ?, 'winner?', ?, ?)`).run(m.id, detail, new Date(now).toISOString());
       found.push({ sport: 'tennis', id: m.id, name, when: `${m.tournament || m.tour} · ${israelTime(m.scheduled_at)}`, league: m.tour, score: `${name}, winner ${winnerName(m.winner)}`, swapTo: winnerName(m.winner === 1 ? 2 : 1), detail, path });
     }
   }
-  if (found.length) for (const sport of ['american-football', 'tennis'] as CheckSport[]) {
-    const list = found.filter(f => f.sport === sport);
-    if (list.length) { const { subject, mail } = reviewMail(sport, list, now); await sendAdminMail(subject, mail); }
-  }
+  // fix253: no "Needs you" email any more — an unsure result is voided after 72 h (voidStaleReviews)
+  for (const f of found) logger.info(`${SPORT_NAME[f.sport]} result: ${f.score} unsure: void in 72 h unless the data settles it`);
+  voidStaleReviews(now);
   return { checked, fixedAuto, review: (db.prepare(`SELECT COUNT(*) AS n FROM result_review WHERE resolved_at IS NULL`).get() as any).n };
 }
+
+/**
+ * fix253: reviews still open 72 h after they were found → void, written to Done for you (Undo = the provider's result
+ * counts again).
+ */
+export function voidStaleReviews(now = Date.now()): number {
+  const old = db.prepare(`SELECT sport, id, detail FROM result_review WHERE resolved_at IS NULL AND found_at <= ?`).all(new Date(now - REVIEW_VOID_AFTER_MS).toISOString()) as any[];
+  for (const r of old) {
+    const sport = r.sport as CheckSport;
+    let title = '', path = '';
+    if (sport === 'american-football') {
+      const g: any = db.prepare(`SELECT home_name, away_name, home_pts, away_pts, status FROM nfl_games WHERE game_id = ?`).get(r.id);
+      if (!g) { resolveReview(sport, r.id, 'game gone from the data', null); continue; }
+      saveFix(sport, r.id, { home: g.home_pts, away: g.away_pts, void: 1 }, { home: g.home_pts, away: g.away_pts, status: g.status }, 'void', 'still unsure after 72 h', null);
+      title = `${g.home_name} ${g.home_pts}–${g.away_pts} ${g.away_name}: void`; path = `/american-football/game/${r.id}`;
+    } else {
+      const m: any = db.prepare(`SELECT p1_name, p2_name, status FROM tennis_matches WHERE id = ?`).get(r.id);
+      if (!m) { resolveReview(sport, r.id, 'match gone from the data', null); continue; }
+      db.prepare(`UPDATE tennis_matches SET status = 'void', outcome = COALESCE(outcome, 'unresolved') WHERE id = ?`).run(r.id);
+      title = `${m.p1_name} – ${m.p2_name}: void`; path = `/tennis/match/${r.id}`;
+    }
+    resolveReview(sport, r.id, 'void: still unsure after 72 h', null);
+    logger.warn(`${SPORT_NAME[sport]} result: ${title} (still unsure after 72 h)`);
+    recordDone({ kind: 'result-void', sport, ref: `${sport === 'tennis' ? 'tn' : 'af'}:${r.id}`, title, why: `${r.detail || 'Our checks disagree.'} No second source settled it in 72 h, so it is out of the record (as a cancelled game).`, link: siteUrl(path), undo: { sport, id: r.id } }, now);
+  }
+  return old.length;
+}
+
+/** fix253: Undo from Done for you — the stored correction / void is removed and the provider's result is back. */
+function undoFix(p: { sport: CheckSport; id: number }, by: string): string {
+  const f = fixOf(p.sport, p.id);
+  if (p.sport === 'tennis') {
+    const prov = f ? parse(f.provider) : null;
+    if (f) db.prepare(`DELETE FROM result_fix WHERE sport = 'tennis' AND id = ?`).run(p.id);
+    if (prov?.winner) db.prepare(`UPDATE tennis_matches SET winner = ? WHERE id = ?`).run(prov.winner, p.id);
+    db.prepare(`UPDATE tennis_matches SET status = 'completed' WHERE id = ? AND status = 'void'`).run(p.id);
+  } else if (f) {
+    const prov = parse(f.provider) || {};
+    db.prepare(`DELETE FROM result_fix WHERE sport = 'american-football' AND id = ?`).run(p.id);
+    db.prepare(`UPDATE nfl_games SET home_pts = COALESCE(?, home_pts), away_pts = COALESCE(?, away_pts), status = CASE WHEN status = 'CANC' THEN COALESCE(?, 'FT') ELSE status END WHERE game_id = ?`)
+      .run(prov.home ?? null, prov.away ?? null, prov.status ?? null, p.id);
+  }
+  db.prepare(`INSERT INTO result_review (sport, id, issue, detail, found_at, resolved_at, resolution, by_user) VALUES (?, ?, 'undo', NULL, ?, ?, 'undo: provider result kept', ?)
+    ON CONFLICT(sport, id) DO UPDATE SET resolved_at = excluded.resolved_at, resolution = excluded.resolution, by_user = excluded.by_user`)
+    .run(p.sport, p.id, new Date().toISOString(), new Date().toISOString(), by);
+  return 'The provider’s result is back and counts in the record.';
+}
+onUndo('result-void', undoFix, 'american-football'); onUndo('result-void', undoFix, 'tennis');
+onUndo('result-fixed', undoFix, 'american-football'); onUndo('result-fixed', undoFix, 'tennis');
 
 function reviewMail(sport: CheckSport, list: Found[], now: number): { subject: string; mail: AdminMail } {
   const n = list.length, what = `${SPORT_NAME[sport]} result${n === 1 ? '' : 's'}`;

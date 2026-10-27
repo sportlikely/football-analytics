@@ -60,7 +60,7 @@ function teamRecord(teamId: number) {
     SELECT p.game_id, p.code, p.kickoff, p.p_home, g.home_id, g.home_name, g.away_name, g.hs, g.as_
     FROM bb_predictions p JOIN bb_games g ON g.game_id = p.game_id
     WHERE (g.home_id = ? OR g.away_id = ?) AND g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND p.made_at <= p.kickoff
-      AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL)
+      AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL OR voided = 1)
     ORDER BY p.kickoff DESC`).all(teamId, teamId) as any[]).filter(r => !isPreseason(r));
   if (!rows.length) return { n: 0 };
   let hits = 0, sN = 0, sHits = 0;

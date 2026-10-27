@@ -9,8 +9,8 @@
  *     the other way round and the quarters (when we have them) add up the same way, the scores are swapped
  *     automatically (bb_result_fix source "box score", logged, listed in the 07:00 summary email). When the signals
  *     disagree or one is missing, or the quarters don't add up to the total, the game is put "under review": no
- *     Right/Wrong badge and left out of the record until it is settled; the admin gets a "Needs you" email with
- *     Swap scores / Keep as is buttons (services/adminMail.ts).
+ *     Right/Wrong badge and left out of the record until it is settled. fix253: nobody is asked any more — still
+ *     unsure 72 h later → void (out of the record, as a cancelled game), listed in Admin → Done for you with Undo.
  *  3. The admin can correct any result by hand (swap, set the score, or confirm the provider) on the game page, in
  *     Admin → Needs you, or from the email. A correction survives every later provider update; "undo" removes it.
  * Missing overtime column (provider sends quarters 1–4 only): overtime = total − quarters, shown on the page.
@@ -18,8 +18,12 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { swapVerdict } from '../utils/resultSwap';
-import { actionLink, adminUrl, israelTime, noteAutoFix, onEmailAction, sendAdminMail, siteUrl, type AdminMail } from './adminMail';
+import { actionLink, adminUrl, israelTime, onEmailAction, siteUrl, type AdminMail } from './adminMail';
 import { isPreseason } from './bbModel';
+import { onUndo, recordDone } from './doneForYou';
+
+/** fix253: a check still unsure this long after it was found is voided (out of the record, as a cancelled game) */
+export const RESULT_VOID_AFTER_MS = 72 * 3600 * 1000;
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_result_fix (
@@ -31,6 +35,7 @@ db.exec(`
     resolved_at TEXT, resolution TEXT, by_user TEXT
   );
 `);
+if (!(db.prepare('PRAGMA table_info(bb_result_check)').all() as any[]).some(c => c.name === 'voided')) db.exec('ALTER TABLE bb_result_check ADD COLUMN voided INTEGER NOT NULL DEFAULT 0');
 
 type Q = { home: (number | null)[]; away: (number | null)[] } | null;
 const parseQ = (s: string | null): Q => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
@@ -57,7 +62,7 @@ export function applyResultFixes() {
 }
 
 export const openCheck = (gameId: number) =>
-  (db.prepare('SELECT issue, detail, found_at FROM bb_result_check WHERE game_id = ? AND resolved_at IS NULL').get(gameId) as any) || null;
+  (db.prepare('SELECT issue, detail, found_at, voided FROM bb_result_check WHERE game_id = ? AND (resolved_at IS NULL OR voided = 1)').get(gameId) as any) || null; // fix253: voided = no badge either
 export const resultFix = (gameId: number) =>
   (db.prepare('SELECT hs, as_, source, note, by_user, at, provider_hs, provider_as FROM bb_result_fix WHERE game_id = ?').get(gameId) as any) || null;
 
@@ -136,7 +141,6 @@ function bdlFinal(g: any): { hs: number; as_: number } | null {
   } catch { return null; }
 }
 
-let alerted = new Set<number>();
 /** fix239: the players' points per team (null when a team has no box score) */
 function boxPoints(g: any): [number, number] | null {
   const pts = (team: number) => (db.prepare('SELECT SUM(pts) AS s, COUNT(*) AS n FROM bb_player_stats WHERE game_id = ? AND team_id = ?').get(g.game_id, team) as any);
@@ -149,13 +153,13 @@ const gamePath = (g: any) => `/basketball/game/${g.game_id}`;
 export async function checkResults(days = 10) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const games = db.prepare(`SELECT * FROM bb_games WHERE status IN ('FT','AOT') AND hs IS NOT NULL AND as_ IS NOT NULL AND kickoff >= ?`).all(since) as any[];
-  const fresh: any[] = [];
   let fixedAuto = 0;
   closePreseasonChecks(); // fix240: open checks of pre-season games from before are closed as they are
   for (const g of games) {
     const fix = resultFix(g.game_id);
     if (fix?.source === 'manual') continue; // the admin decided
-    const done: any = db.prepare('SELECT resolved_at FROM bb_result_check WHERE game_id = ?').get(g.game_id);
+    const done: any = db.prepare('SELECT resolved_at, resolution FROM bb_result_check WHERE game_id = ?').get(g.game_id);
+    if (String(done?.resolution || '').startsWith('undo')) continue; // fix253: a person undid our decision: left as they chose
     if (isPreseason(g)) {
       // fix240: pre-season is not in the record, so it is never listed: fixed silently when the box score (and the
       // quarters, when there) clearly say swapped, otherwise kept as the provider has it
@@ -177,7 +181,7 @@ export async function checkResults(days = 10) {
         resolve(g.game_id, 'corrected from balldontlie', null);
         fixedAuto++;
         logger.warn(`bb result: ${gameName(g)} corrected from balldontlie ${g.hs}-${g.as_} → ${b.hs}-${b.as_}`);
-        noteAutoFix('basketball result', `${gameName(g)}: ${g.hs}-${g.as_} → ${b.hs}-${b.as_}`, `${g.code}, ${israelTime(g.kickoff)}. balldontlie (the NBA's second source) had the other result; corrected and counted in the record.`, siteUrl(gamePath(g)));
+        recordDone({ kind: 'result-fixed', sport: 'basketball', ref: `bb:${g.game_id}`, title: `${gameName(g)}: ${g.hs}-${g.as_} → ${b.hs}-${b.as_}`, why: `${g.code}, ${israelTime(g.kickoff)}. Two providers: balldontlie (the NBA's second source) had the other result; corrected and counted in the record.`, link: siteUrl(gamePath(g)), undo: { game: g.game_id } });
         continue;
       }
       if (b) continue; // both sources agree
@@ -193,11 +197,11 @@ export async function checkResults(days = 10) {
       if (done) resolve(g.game_id, 'swapped automatically (box score)', null);
       fixedAuto++;
       logger.warn(`bb result: ${gameName(g)} swapped automatically ${g.hs}-${g.as_} → ${g.as_}-${g.hs} (${v.why})`);
-      noteAutoFix('basketball result', `${gameName(g)}: ${g.hs}-${g.as_} → ${g.as_}-${g.hs}`,
-        `${g.code}, ${israelTime(g.kickoff)}. Home and away scores were swapped in the data: the players' points${q ? ' and the quarters' : ''} add up to ${g.as_}-${g.hs}. Corrected and back in the record.`, siteUrl(gamePath(g)));
+      recordDone({ kind: 'result-fixed', sport: 'basketball', ref: `bb:${g.game_id}`, title: `${gameName(g)}: ${g.hs}-${g.as_} → ${g.as_}-${g.hs}`,
+        why: `${g.code}, ${israelTime(g.kickoff)}. Home and away scores were swapped in the data: the players' points${q ? ' and the quarters' : ''} add up to ${g.as_}-${g.hs}. Corrected and back in the record.`, link: siteUrl(gamePath(g)), undo: { game: g.game_id } });
       continue;
     }
-    if (done) continue; // open, still waiting for the admin
+    if (done) continue; // open: voided by voidStaleChecks after 72 h unless the data settles it first
     if (v.action === 'review') { issue = 'swapped?'; detail = `Score ${g.hs}-${g.as_}: ${v.why}.`; }
     // 3) quarters that can't add up to the total (more than a missing overtime explains)
     if (!issue && q && q.home.slice(0, 4).every(v => v != null) && q.away.slice(0, 4).every(v => v != null)) {
@@ -209,13 +213,47 @@ export async function checkResults(days = 10) {
     }
     if (issue) {
       db.prepare('INSERT OR IGNORE INTO bb_result_check (game_id, issue, detail, found_at) VALUES (?, ?, ?, ?)').run(g.game_id, issue, detail, new Date().toISOString());
-      if (!alerted.has(g.game_id)) { alerted.add(g.game_id); fresh.push({ ...g, issue, detail }); }
+      logger.info(`bb result: ${gameName(g)} ${g.hs}-${g.as_} unsure (${issue}): out of the record, void in 72 h unless the data settles it`);
     }
   }
-  if (alerted.size > 5000) alerted = new Set();
-  if (fresh.length) await alert(fresh);
-  return { checked: games.length, fixedAuto, open: (db.prepare('SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL').get() as any).n };
+  const voided = voidStaleChecks();
+  return { checked: games.length, fixedAuto, voided, open: (db.prepare('SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL').get() as any).n };
 }
+
+/**
+ * fix253: a result still unsure 72 h after it was found is voided — out of the record, as a cancelled game — and
+ * written to "Done for you" (Undo = keep the provider's score in the record). Nobody is asked.
+ */
+export function voidStaleChecks(now = Date.now()): number {
+  const old = db.prepare(`SELECT c.game_id, c.issue, c.detail, c.found_at, g.code, g.kickoff, g.home_name, g.away_name, g.hs, g.as_ FROM bb_result_check c
+    JOIN bb_games g ON g.game_id = c.game_id WHERE c.resolved_at IS NULL AND c.found_at <= ?`).all(new Date(now - RESULT_VOID_AFTER_MS).toISOString()) as any[];
+  for (const g of old) {
+    db.prepare('UPDATE bb_result_check SET resolved_at = ?, resolution = ?, voided = 1 WHERE game_id = ? AND resolved_at IS NULL')
+      .run(new Date(now).toISOString(), 'void: still unsure after 72 h', g.game_id);
+    logger.warn(`bb result: ${gameName(g)} ${g.hs}-${g.as_} void (still unsure after 72 h)`);
+    recordDone({
+      kind: 'result-void', sport: 'basketball', ref: `bb:${g.game_id}`, title: `${g.home_name} ${g.hs}–${g.as_} ${g.away_name}: void`,
+      why: `${g.code}, ${israelTime(g.kickoff)}. ${g.detail || 'The checks disagree.'} No second source settled it in 72 h, so the game is out of the record (as a cancelled game).`,
+      link: siteUrl(gamePath(g)), undo: { game: g.game_id }
+    }, now);
+  }
+  return old.length;
+}
+
+// "Done for you" → Undo. A void: the provider's score counts again. A correction: the provider's score comes back.
+// Both are marked 'undo…' so the checks leave the game as the person chose.
+onUndo('result-void', (p: { game: number }, by) => {
+  db.prepare('UPDATE bb_result_check SET voided = 0, resolution = ?, by_user = ? WHERE game_id = ?').run('undo: kept as the provider has it', by, p.game);
+  return 'The game counts in the record again with the provider’s score.';
+}, 'basketball');
+onUndo('result-fixed', (p: { game: number }, by) => {
+  if (resultFix(p.game)) adminResult(p.game, 'undo', null, by);
+  const at = new Date().toISOString();
+  db.prepare(`INSERT INTO bb_result_check (game_id, issue, detail, found_at, resolved_at, resolution, by_user) VALUES (?, 'undo', NULL, ?, ?, ?, ?)
+    ON CONFLICT(game_id) DO UPDATE SET resolved_at = excluded.resolved_at, resolution = excluded.resolution, by_user = excluded.by_user, voided = 0`)
+    .run(p.game, at, at, 'undo: provider score kept', by);
+  return 'The provider’s score is back.';
+}, 'basketball');
 
 /** fix240: open checks of pre-season games (not in the record) closed as they are, so Needs you never lists them. */
 export function closePreseasonChecks(): number {
@@ -251,10 +289,6 @@ export function needsYouMail(games: any[], now = Date.now()) {
   return { subject: `Needs you: ${n} basketball result${n === 1 ? '' : 's'}`, mail };
 }
 
-async function alert(games: any[]) {
-  const { subject, mail } = needsYouMail(games);
-  await sendAdminMail(subject, mail);
-}
 
 // the email buttons (services/adminMail.ts): Swap scores / Keep as is
 onEmailAction('bb-result', (p: { game: number; act: 'swap' | 'confirm' }, by) => {

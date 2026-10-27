@@ -1154,7 +1154,7 @@ export function bbRecord(days = 3650, code?: string, recentLimit = 50) {
     SELECT p.*, g.hs, g.as_, g.home_name, g.away_name, g.home_logo, g.away_logo, g.status, g.stage AS g_stage
     FROM bb_predictions p JOIN bb_games g ON g.game_id = p.game_id
     WHERE g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND p.made_at <= p.kickoff AND p.kickoff >= ? ${code ? 'AND p.code = ?' : ''}
-      AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL)
+      AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL OR voided = 1)
     ORDER BY p.kickoff DESC`).all(...[new Date(Date.now() - days * 86400000).toISOString(), ...(code ? [code] : [])]) as any[];
   const list = rows.filter(r => !isPreseason({ code: r.code, kickoff: r.kickoff, stage: r.g_stage }));
   const by = new Map<string, { n: number; hits: number; strongN: number; strongHits: number }>();

@@ -4,14 +4,21 @@
  * report is read by the page from /api/data-health (stored), so nothing here runs a check.
  */
 import { db } from '../db';
+import { errorsForClaude } from './clientErrors';
 
 const count = (sql: string, ...args: any[]): number => {
   try { return Number((db.prepare(sql).get(...args) as any)?.n) || 0; } catch { return 0; }
 };
 
 export interface AdminSummary {
-  /** waiting for Yarin (Needs you) */
-  injuriesToReview: number; bbResultsToCheck: number; contactOpen: number
+  /** fix253: Needs you = only what legally needs a person: contact messages and payment issues */
+  needsYou: number; contactOpen: number; paymentIssues: number
+  /** handled by the site, no button (listed for information): injury items not decided yet, results waiting for their automatic decision */
+  injuriesToReview: number; bbResultsToCheck: number
+  /** automatic decisions in the last 24 h (Done for you) */
+  done24h: number
+  /** the daily list for Claude: open site-error groups, top 10 with counts */
+  forClaude: ReturnType<typeof errorsForClaude> | null
   /** tiles */
   visitorsToday: number; signupsToday: number; accounts: number; paying: number
   siteErrorsOpen: number; siteErrors24h: number; failedSignIns24h: number
@@ -26,12 +33,18 @@ export function adminSummary(now = Date.now()): AdminSummary {
   try { lastBackupAt = (db.prepare('SELECT at FROM backup_log WHERE ok = 1 ORDER BY id DESC LIMIT 1').get() as any)?.at || null; } catch { /* no backups yet */ }
   let backupTable = true;
   try { db.prepare('SELECT 1 FROM backup_log LIMIT 1').get(); } catch { backupTable = false; }
+  const contactOpen = count(`SELECT COUNT(*) AS n FROM contact_messages WHERE handled = 0`);
+  // payment issues: the table comes with real payments (a payments change, on its own branch); 0 until then
+  const paymentIssues = count(`SELECT COUNT(*) AS n FROM payment_issues WHERE resolved_at IS NULL`);
+  let forClaude: AdminSummary['forClaude'] = null;
+  try { forClaude = errorsForClaude(now); } catch { /* table missing */ }
   return {
+    needsYou: contactOpen + paymentIssues, contactOpen, paymentIssues, forClaude,
+    done24h: count(`SELECT COUNT(*) AS n FROM done_for_you WHERE at >= ?`, dayAgo),
     injuriesToReview: count(`SELECT COUNT(*) AS n FROM bb_news_injuries WHERE state = 'active' AND reviewed = 0`),
     // fix239: + the American football / tennis results waiting for a decision (services/resultChecks.ts)
     bbResultsToCheck: count(`SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL`) + count(`SELECT COUNT(*) AS n FROM result_review WHERE resolved_at IS NULL`)
       + count(`SELECT COUNT(*) AS n FROM settle_review WHERE resolved_at IS NULL`), // fix240: football games with no final at 48 h
-    contactOpen: count(`SELECT COUNT(*) AS n FROM contact_messages WHERE handled = 0`),
     // the same "people" rule as the Visitors card (services/visitors.ts)
     visitorsToday: count(`SELECT COUNT(DISTINCT vid) AS n FROM visits WHERE day >= ? AND (human = 1 OR signed_in = 1)`, day),
     signupsToday: count(`SELECT COUNT(*) AS n FROM users WHERE created_at >= ?`, day),

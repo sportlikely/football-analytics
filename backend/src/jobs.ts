@@ -61,12 +61,30 @@ import { pushAlertsTick } from './services/pushAlerts';
 import { buildSlugs } from './services/slugs';
 import { startGameExtrasScheduler } from './services/gameExtras';
 import { fillFromFinals } from './services/history';
-import { checkOtherResults } from './services/resultChecks';
+import { checkOtherResults, voidStaleReviews } from './services/resultChecks';
+import { decidePendingNews } from './services/keyPlayers';
+import { voidStaleChecks, closePreseasonChecks } from './services/bbResults';
+import { pruneDone } from './services/doneForYou';
 import { dailySummaryTick } from './services/adminMail';
 import { diffViewFreezeTick } from './services/diffView';
 import { startDbSpaceScheduler } from './services/dbSpace';
 
 let started = false;
+
+/** fix253: the deploy-day backlog decided by the new rules (once per database; a line per item in the log). */
+export function clearBacklogOnce(now = Date.now()) {
+  db.exec(`CREATE TABLE IF NOT EXISTS done_meta (k TEXT PRIMARY KEY, v TEXT, at TEXT NOT NULL)`);
+  if (db.prepare(`SELECT 1 FROM done_meta WHERE k = 'fix253_backlog'`).get()) return null;
+  const injuries = decidePendingNews(now);
+  const pre = closePreseasonChecks();
+  const open = db.prepare(`SELECT g.home_name || ' – ' || g.away_name AS name, c.found_at FROM bb_result_check c JOIN bb_games g ON g.game_id = c.game_id WHERE c.resolved_at IS NULL`).all() as any[];
+  const bbVoid = voidStaleChecks(now), otherVoid = voidStaleReviews(now);
+  const waiting = open.filter(r => Date.parse(r.found_at) > now - 72 * 3600 * 1000).map(r => `${r.name} (void at ${new Date(Date.parse(r.found_at) + 72 * 3600 * 1000).toISOString().slice(0, 16)} UTC unless the data settles it)`);
+  const r = { injuries, preseasonClosed: pre, basketballVoided: bbVoid, otherVoided: otherVoid, resultsWaiting: waiting };
+  db.prepare(`INSERT OR REPLACE INTO done_meta (k, v, at) VALUES ('fix253_backlog', ?, ?)`).run(JSON.stringify(r), new Date(now).toISOString());
+  logger.info(`fix253 backlog: ${injuries.length} injury item(s) applied [${injuries.join(' · ')}] · results: ${bbVoid + otherVoid} voided, ${pre} pre-season closed, ${waiting.length} waiting [${waiting.join(' · ')}]`);
+  return r;
+}
 
 /** Start every scheduler (once). The worker calls it right after start; WORKER=0 calls it after listen. */
 export function startJobs() {
@@ -85,6 +103,11 @@ export function startJobs() {
   after('result checks', () => checkOtherResults().catch(e => logger.warn(`result checks: ${e?.message || e}`)), 8 * 60 * 1000).unref();
   every('result checks', () => checkOtherResults().catch(e => logger.warn(`result checks: ${e?.message || e}`)), 30 * 60 * 1000).unref();
   every('admin daily summary', () => dailySummaryTick().catch(e => logger.warn(`admin daily summary: ${e?.message || e}`)), 5 * 60 * 1000).unref();
+  // fix253: Needs you → done automatically. Once per database after the deploy: the items still waiting for a person are
+  // decided by the rules (injury news applied, results older than 72 h voided; younger ones are voided when they reach
+  // 72 h by the result checks); every decision in Done for you. Then the log is kept 90 days.
+  after('fix253 backlog', () => { try { clearBacklogOnce(); } catch (e: any) { logger.warn(`fix253 backlog: ${e?.message || e}`); } }, 3 * 60 * 1000).unref();
+  every('done for you prune', () => pruneDone(), 24 * 3600 * 1000).unref();
   // fix246: "Our different view" (admin only) — games with a 5+ point gap to the market written once after kick-off
   every('different view', () => { diffViewFreezeTick(); }, 5 * 60 * 1000).unref();
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the

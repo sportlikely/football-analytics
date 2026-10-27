@@ -11,11 +11,15 @@
  * game's own provider by id and by the two teams, and the other provider's twin (fd_af_links) when there is one. Still
  * nothing at 48 h → settle_review: Admin → Needs you lists the game with "Enter result" / "Void" (and one email with a
  * Void button); the lookups go on, and a final that shows up later settles the game and closes the item.
+ *
+ * fix253: nobody is asked any more: no email, not in Needs you; still no final 7 days after kick-off → void by itself,
+ * written to Admin → Done for you (Undo: the game is open again and held — looked up, never voided by itself again).
  */
 import { db } from '../db';
 import logger from '../utils/logger';
 import { decide, kindOfStatus, sameDay, sameTeamName, Lookup, Decision, TEAM_WINDOW_DAYS, REFETCH_AFTER_MS } from '../utils/voidRules';
-import { actionLink, adminUrl, israelTime, onEmailAction, sendAdminMail, siteUrl, type AdminMail } from './adminMail';
+import { actionLink, adminUrl, israelTime, onEmailAction, siteUrl, type AdminMail } from './adminMail';
+import { onUndo, recordDone } from './doneForYou';
 
 const AF_OFFSET = 1_000_000_000;
 const DAY = 86400000;
@@ -24,6 +28,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS settle_lookups (match_id INTEGER PRIMARY KEY
   CREATE TABLE IF NOT EXISTS settle_meta (k TEXT PRIMARY KEY, v TEXT, at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS settle_review (match_id INTEGER PRIMARY KEY, note TEXT, found_at TEXT NOT NULL, resolved_at TEXT, resolution TEXT, by_user TEXT)`);
 if (!(db.prepare(`PRAGMA table_info(results)`).all() as any[]).some(c => c.name === 'reason')) db.exec(`ALTER TABLE results ADD COLUMN reason TEXT`);
+// fix253: hold = a person undid our automatic void: never voided by itself again
+if (!(db.prepare(`PRAGMA table_info(settle_review)`).all() as any[]).some(c => c.name === 'hold')) db.exec(`ALTER TABLE settle_review ADD COLUMN hold INTEGER NOT NULL DEFAULT 0`);
 
 /** The provider calls, injected (jobs.ts wires API-Football / Football-Data.org; tests pass fakes). */
 export interface Providers {
@@ -123,7 +129,7 @@ const dropTry = db.prepare(`DELETE FROM settle_lookups WHERE match_id = ?`);
 const openReview = db.prepare(`INSERT INTO settle_review (match_id, note, found_at) VALUES (?, ?, ?)
   ON CONFLICT(match_id) DO UPDATE SET note = excluded.note WHERE settle_review.resolved_at IS NULL`);
 const closeReview = db.prepare(`UPDATE settle_review SET resolved_at = ?, resolution = ?, by_user = ? WHERE match_id = ? AND resolved_at IS NULL`);
-const reviewRow = db.prepare(`SELECT match_id, resolved_at FROM settle_review WHERE match_id = ?`);
+const reviewRow = db.prepare(`SELECT match_id, resolved_at, hold FROM settle_review WHERE match_id = ?`);
 
 /** Apply one decision (one short transaction per game). Returns true when a new Needs-you item was opened. */
 export function applyDecision(matchId: number, d: Decision, now: number): boolean {
@@ -193,7 +199,6 @@ export async function resolveUnsettled(p: Providers, opts: { now?: number; log?:
       try { for (const f of await p.afByIds(af.slice(i, i + 20))) if (f?.fixture?.id) byId.set(AF_OFFSET + f.fixture.id, f); }
       catch (e: any) { afDown = true; logger.warn(`unsettled: fixtures by id failed: ${e.message}`); break; }
     }
-    const fresh: { g: Pending; note: string }[] = [];
     for (const g of games) {
       // a provider error skips the game this run: an outage is not an attempt
       if (afDown && g.match_id >= AF_OFFSET) continue;
@@ -214,20 +219,19 @@ export async function resolveUnsettled(p: Providers, opts: { now?: number; log?:
       try { found = await lookupGame(p, g, id, g.match_id < AF_OFFSET ? fdList : undefined, twin); } catch (e: any) { logger.warn(`unsettled ${g.match_id}: team search failed: ${e.message}`); continue; }
       out.checked++;
       const t = getTry.get(g.match_id) as any;
-      const d = decide(found, { kickoff: g.utc_date, attempts: t?.attempts || 0, lastDay: t?.last_day || null, now });
+      const d = decide(found, { kickoff: g.utc_date, attempts: t?.attempts || 0, lastDay: t?.last_day || null, now, hold: !!(reviewRow.get(g.match_id) as any)?.hold });
       if (d.action === 'wait') continue;
       const opened = applyDecision(g.match_id, d, now);
       if (d.action === 'settle') out.settled++; else if (d.action === 'move') out.moved++; else if (d.action === 'void') out.voided++; else if (d.action === 'review') out.review++; else out.retry++;
-      if (opened && d.action === 'review') fresh.push({ g, note: d.note });
+      if (d.action === 'void') recordDone({
+        kind: 'football-void', sport: 'football', ref: String(g.match_id), title: `${g.home} – ${g.away}: void`,
+        why: `${g.comp || 'Football'}, ${israelTime(g.utc_date)}. ${d.reason[0].toUpperCase()}${d.reason.slice(1)}. Out of the record.`, link: siteUrl(matchPath(g.match_id)), undo: { id: g.match_id }
+      }, now);
       const what = d.action === 'settle' ? `settled — ${d.note}` : d.action === 'move' ? `kick-off moved — ${d.note}` : d.action === 'void' ? `void — ${d.reason}`
         : d.action === 'review' ? `Needs you — ${d.note}` : `looked again — ${d.note}`;
       const line = `${g.home} – ${g.away} (${g.comp || '?'}, ${String(g.utc_date).slice(0, 10)}, id ${g.match_id}): ${what}`;
       out.lines.push(line);
       if (opts.log && (d.action !== 'review' || opened)) logger.info(`${opts.tag || 'unsettled'}: ${line}`);
-    }
-    if (fresh.length) {
-      const { subject, mail } = reviewMail(fresh, now);
-      await sendAdminMail(subject, mail).catch(e => logger.warn(`unsettled: Needs you email failed: ${e?.message || e}`));
     }
     return out;
   } finally { running = false; }
@@ -248,7 +252,8 @@ const matchPath = (id: number) => `/match/${id}`;
 const gameOf = (id: number) => db.prepare(`SELECT match_id, MAX(utc_date) AS utc_date, MAX(home_team) AS home, MAX(away_team) AS away, MAX(competition_name) AS comp,
   MAX(settled) AS settled FROM predictions WHERE match_id = ? GROUP BY match_id`).get(id) as any;
 
-function reviewMail(list: { g: Pending; note: string }[], now: number): { subject: string; mail: AdminMail } {
+/** fix240's Needs-you email (fix253: no longer sent; kept for the admin preview and the tests) */
+export function reviewMail(list: { g: Pending; note: string }[], now: number): { subject: string; mail: AdminMail } {
   const n = list.length, what = `football result${n === 1 ? '' : 's'}`;
   return {
     subject: `Needs you: ${n} ${what}`,
@@ -311,6 +316,20 @@ export function decideSettle(matchId: number, act: string, body: any, by: string
   } catch (e) { try { db.exec('ROLLBACK'); } catch { /* none open */ } throw e; }
   return { message: `${g.home} ${h}–${a} ${g.away} settled and counted in the record.` };
 }
+
+// fix253: Done for you → Undo of an automatic void: the game is open again (no result), held, and looked up as before
+onUndo('football-void', (p: { id: number }, by) => {
+  const at = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM results WHERE match_id = ? AND outcome = 'VOID'`).run(p.id);
+    db.prepare(`UPDATE predictions SET settled = 0, updated_at = ? WHERE match_id = ?`).run(at, p.id);
+    db.prepare(`INSERT INTO settle_review (match_id, note, found_at, hold) VALUES (?, ?, ?, 1)
+      ON CONFLICT(match_id) DO UPDATE SET resolved_at = NULL, resolution = NULL, by_user = ?, hold = 1`).run(p.id, 'void undone by an admin: waiting for a final', at, by);
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch { /* none open */ } throw e; }
+  return 'The game is open again: a final from either provider settles it, or enter the result in Admin → Data → Results.';
+});
 
 onEmailAction('settle-review', (p: { id: number; act: string }, by) => ({ ...decideSettle(p.id, p.act, null, by), open: matchPath(p.id) }));
 

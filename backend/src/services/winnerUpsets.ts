@@ -36,7 +36,7 @@ function bbRows(upcoming: boolean, now: number): Row[] {
     ? db.prepare(`SELECT ${COLS} ${FROM} WHERE p.kickoff > ? AND p.kickoff < ? AND (g.status IS NULL OR g.status = 'NS')`).all(nowIso, soon)
     : db.prepare(`SELECT ${COLS} ${FROM}
         WHERE g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND p.made_at <= p.kickoff AND p.kickoff > ? AND p.kickoff <= ?
-          AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL)`).all(since, nowIso)) as any[];
+          AND p.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL OR voided = 1)`).all(since, nowIso)) as any[];
   // pre-season games stay out (as in the basketball record)
   return rows.filter(r => !isPreseason({ code: r.code, kickoff: r.kickoff })).map(r => ({
     id: r.game_id, league: r.league || r.code, code: r.code, tier: bbTier(r.code), date: r.kickoff, home: r.home_name, away: r.away_name, homeId: r.home_id, awayId: r.away_id,

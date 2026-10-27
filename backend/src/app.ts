@@ -32,6 +32,7 @@ import { withLive, liveHalfTimeTest } from './services/liveChance';
 import { backtestUpsets, upsetWatchReport, upsetWatchBacktest } from './services/upsetAlerts';
 import { submitContact, contactInbox, markContact, ContactError } from './services/contact';
 import { adminSummary } from './services/adminSummary';
+import { doneList, undoDone, UndoError } from './services/doneForYou';
 import { ADMIN_2FA_REQUIRED, checkCode, revealSetup, twoFactorEnabled, twoFactorStatus, startSetup, confirmSetup, newRecovery, disableTwoFactor, issueTicket, redeemTicket, securePastSessions, TwoFactorError } from './services/twoFactor';
 import { securityLog, securityLogList } from './services/securityLog';
 import { recordActivity, activityList } from './services/activity';
@@ -3731,6 +3732,19 @@ app.post('/api/admin/result-review/:sport/:id(\\d+)', jsonOnly, (req, res) => {
   } catch (e: any) {
     if (e instanceof ReviewError) return res.status(e.status).json({ error: e.message });
     sendError(res, e, 'Correction failed');
+  }
+});
+// fix253: "Done for you" — every automatic decision (services/doneForYou.ts), with Undo for 24 h (security log)
+app.get('/api/admin/done-for-you', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: doneList(Math.min(30, Math.max(1, parseInt(String(req.query.days || '7'), 10) || 7))) }); });
+app.post('/api/admin/done-for-you/:id(\\d+)/undo', jsonOnly, (req, res) => {
+  try {
+    const r = undoDone(parseInt(req.params.id, 10), req.user?.email || 'admin');
+    securityLog(req, 'auto_decision_undone', req.user, `done-for-you #${req.params.id}: ${r.message}`);
+    refreshPages('summary', 'record', 'results');
+    res.json({ data: r });
+  } catch (e: any) {
+    if (e instanceof UndoError) return res.status(e.status).json({ error: e.message });
+    sendError(res, e, 'Undo failed');
   }
 });
 // fix239: the buttons of the admin emails (services/adminMail.ts): /admin/act/<token> asks what the link does (GET) and

@@ -27,13 +27,13 @@ const SENTENCES = [
   ['Nikola Mirotic is out for three weeks with a calf injury.', { status: 'out', days: 21, injury: 'calf' }],
   ['Real Madrid: Edy Tavares will miss 4-6 weeks after knee surgery', { status: 'out', days: 42, injury: 'knee' }],
   ['Facundo Campazzo sidelined with an ankle sprain, out two to three weeks', { status: 'out', days: 21, injury: 'ankle' }],
-  ['Vezenkov ruled out for the rest of the season with a torn ACL', { status: 'out', days: 150, injury: null }],
-  ["Shane Larkin is doubtful for Friday's game with a hamstring strain", { status: 'doubtful', days: 3, injury: 'hamstring' }],
+  ['Vezenkov ruled out for the rest of the season with a torn ACL', { status: 'out', days: 150, injury: null, season: true }], // fix253: until = the season's end
+  ["Shane Larkin is doubtful for Friday's game with a hamstring strain", { status: 'doubtful', days: 3, injury: 'hamstring', unclear: true }],
   ['Mike James to miss 10 days with a back injury', { status: 'out', days: 10, injury: 'back' }],
   ['Wade Baldwin out indefinitely after a shoulder injury', { status: 'out', days: 60, injury: 'shoulder' }],
   ['Kevin Punter will miss the next two games with a groin problem', { status: 'out', days: 7, injury: 'groin' }],
   ["Partizan's Jabari Parker had surgery on his foot and will be out for a month", { status: 'out', days: 30, injury: 'foot' }],
-  ['Sasha Vezenkov is questionable with an illness', { status: 'doubtful', days: 3, injury: 'illness' }],
+  ['Sasha Vezenkov is questionable with an illness', { status: 'doubtful', days: 3, injury: 'illness', unclear: true }],
   ['Nick Calathes suffered a fractured finger and is sidelined for several weeks', { status: 'out', days: 28, injury: 'finger' }],
   ['Injured Hezonja misses the Clasico', { status: 'out', days: 7, injury: null }],
   ['Olympiacos reveal details on Lessort surgery amid Panathinaikos dispute', null], // surgery alone, no time out
@@ -184,7 +184,8 @@ test('fixture game: card for both teams, statuses, news "reported out" → reaso
 
   // the news story → "reported out"
   db.prepare(`INSERT INTO news_items (link, title, source, published, summary, leagues, seen_at, sport) VALUES (?, ?, ?, ?, ?, ',ACB,', ?, 'basketball')`)
-    .run('https://example.test/tavares', 'Real Madrid blow before the Clasico', 'Test News', iso(now - 3600 * 1000), 'Walter Tavares will miss three weeks with a knee injury, the club said. Musa scored 20 in the win.', iso(now - 3000 * 1000));
+    .run('https://example.test/tavares', 'Real Madrid blow before the Clasico', 'Eurohoops', // fix253: a trusted source (others = doubtful)
+       iso(now - 3600 * 1000), 'Walter Tavares will miss three weeks with a knee injury, the club said. Musa scored 20 in the win.', iso(now - 3000 * 1000));
   const scan = await S.scanNewsInjuries();
   assert.equal(scan.found, 1);
   k = S.keyPlayersFor(g, true);

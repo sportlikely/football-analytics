@@ -23,12 +23,16 @@ test('fix237: summary on an empty database is all zeros, never throws', () => {
 
 test('fix237: Needs you counts what waits', () => {
   db.exec(`CREATE TABLE IF NOT EXISTS contact_messages (id INTEGER PRIMARY KEY, handled INTEGER);
-    CREATE TABLE IF NOT EXISTS client_errors (sig TEXT, count INTEGER, last_at TEXT, resolved_at TEXT);`);
+  `);
   db.exec(`INSERT INTO contact_messages (handled) VALUES (0), (1);`);
-  db.prepare(`INSERT INTO client_errors VALUES ('a', 4, ?, NULL), ('b', 2, ?, ?)`).run(new Date().toISOString(), new Date().toISOString(), new Date().toISOString());
+  require('../dist/services/clientErrors.js'); // the real table (fix253: the summary reads its list for Claude)
+  const t = new Date().toISOString();
+  db.prepare(`INSERT INTO client_errors (sig, message, page_kind, kind, count, first_at, last_at, resolved_at) VALUES ('a', 'm', '/', 'page', 4, ?, ?, NULL), ('b', 'm', '/', 'page', 2, ?, ?, ?)`).run(t, t, t, t, t);
   const s = adminSummary();
   assert.equal(s.photosToReview, undefined); // fix241: no photo review queue (official photos only)
   assert.equal(s.contactOpen, 1);
+  assert.equal(s.needsYou, 1); // fix253: contact messages + payment issues only
+  assert.equal(s.forClaude.open, 1);
   assert.equal(s.siteErrorsOpen, 1);
   assert.equal(s.siteErrors24h, 4);
 });

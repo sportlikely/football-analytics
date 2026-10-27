@@ -42,14 +42,15 @@ test('moved to a later date without a status: the kick-off moves', () => {
   assert.equal(decide({ kind: 'open', raw: 'NS', date: new Date(now + DAY).toISOString(), via: 'teams' }, { kickoff: KO, ...fresh, now }).action, 'move');
 });
 
-test('fix240: not found at 48 h → Needs you (never voided by itself), attempts count days', () => {
+test('fix240: not found at 48 h → watched (fix253: void by itself at 7 days), attempts count days', () => {
   const d1 = decide(null, { kickoff: KO, attempts: 0, lastDay: null, now: at(30 * H) });
   assert.equal(d1.action, 'retry');
   const d2 = decide(null, { kickoff: KO, attempts: 1, lastDay: new Date(at(30 * H)).toISOString().slice(0, 10), now: at(49 * H) });
   assert.equal(d2.action, 'review');
   if (d2.action === 'review') { assert.equal(d2.attempts, 2); assert.match(d2.note, /not found/); }
-  const d3 = decide(null, { kickoff: KO, attempts: 5, lastDay: null, now: at(10 * DAY) });
+  const d3 = decide(null, { kickoff: KO, attempts: 5, lastDay: null, now: at(6 * DAY) });
   assert.equal(d3.action, 'review');
+  assert.equal(decide(null, { kickoff: KO, attempts: 5, lastDay: null, now: at(10 * DAY) }).action, 'void'); // fix253
 });
 
 test('fix240: found but never started on the provider at 48 h: Needs you', () => {

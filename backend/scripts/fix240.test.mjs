@@ -36,8 +36,8 @@ test('fix240: a game past 48 h in Needs you is waiting for a person (warn), one 
   assert.equal(r.review, 1);
   c = await check();
   assert.equal(c.level, 'warn');
-  assert.match(c.detail, /1 in Needs you/);
-  assert.ok(c.items.some(i => /Slovan Liberec.*Needs you/.test(i)));
+  assert.match(c.detail, /1 watched/);
+  assert.ok(c.items.some(i => /Slovan Liberec.*watched/.test(i)));
   const { adminSummary } = require('../dist/services/adminSummary.js');
   assert.equal(adminSummary().bbResultsToCheck, 1);
   u.decideSettle(AF + 1, 'result', { home: 2, away: 0 }, 'admin@test');

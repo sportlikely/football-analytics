@@ -22,11 +22,17 @@ export const adminPath = (t: AdminTab) => `/admin/${t}`
 
 /** what /api/admin/summary answers (backend services/adminSummary.ts) */
 export interface AdminSummary {
-  injuriesToReview: number; bbResultsToCheck: number; contactOpen: number
+  /** fix253: Needs you = contact messages + payment issues only */
+  needsYou: number; contactOpen: number; paymentIssues: number
+  /** handled by the site (information only) */
+  injuriesToReview: number; bbResultsToCheck: number; done24h: number
+  forClaude: ForClaude | null
   visitorsToday: number; signupsToday: number; accounts: number; paying: number
   siteErrorsOpen: number; siteErrors24h: number; failedSignIns24h: number
   backupOk: boolean | null; lastBackupAt: string | null; at: string
 }
+/** fix253: the daily "for Claude" list (open site-error groups, top 10) */
+export interface ForClaude { day: string; open: number; top: { message: string; page: string; where: string | null; count: number; firstAt: string; lastAt: string; builds: string[] }[] }
 export interface HealthCheck { id: string; label: string; level: Level; detail: string; items?: string[] }
 
 export interface AdminCardDef {
@@ -45,7 +51,9 @@ export interface AdminCardDef {
 
 export const ADMIN_CARDS: AdminCardDef[] = [
   // ---------- Needs you ----------
-  { id: 'needs-you', tab: 'needs-you', title: 'Waiting for you', what: 'Everything on the site that only a person can decide, with a button for each.', todo: 'Go through the list from the top; each item leaves once it is done.' },
+  { id: 'needs-you', tab: 'needs-you', title: 'Waiting for you', what: 'Only what a person must handle: messages from customers and payment problems. Everything else the site decides by itself.', todo: 'Answer the messages; each one leaves once it is marked answered.' },
+  { id: 'done-for-you', tab: 'needs-you', title: 'Done for you', what: 'Every decision the site made by itself (injury news applied, results corrected or voided, site errors closed), with why and the source.', todo: 'Nothing — press Undo within 24 hours if one is wrong.', checks: ['done-for-you'] },
+  { id: 'for-claude', tab: 'needs-you', title: 'For Claude today', what: 'Site errors still open, grouped by message: the 10 with the most reports, with their counts and builds. They close by themselves once a new build stops them.', todo: 'Nothing to press — paste the list to Claude when you have a session open.', status: s => (s.forClaude?.open ? 'warn' : 'ok') },
 
   // ---------- Visitors & users ----------
   { id: 'visitors', tab: 'users', title: 'Visitors', what: 'How many people opened the site today, this week and this month, and from which countries (never their address).', todo: 'Nothing — it is information only.' },
@@ -70,13 +78,13 @@ export const ADMIN_CARDS: AdminCardDef[] = [
   { id: 'leagues-football', tab: 'data', title: 'Football leagues', what: 'The extra football leagues and cups we predict, and the ones you can add.', todo: 'Nothing — add or remove leagues when you want.' },
   { id: 'leagues-basketball', tab: 'data', title: 'Basketball leagues', what: 'The basketball leagues we predict, and the ones you can add.', todo: 'Nothing — add or remove leagues when you want.' },
   { id: 'game-extras', tab: 'data', title: 'Game extras', what: 'Weather, referee, fixture difficulty and trend sentences on the game pages of the next two days.', todo: 'Nothing — it fills in by itself within a few hours. Tell Claude if it stays under 80%.', checks: ['game-extras'] },
-  { id: 'news-injuries', tab: 'data', title: 'Basketball injuries from news', what: 'Players reported out in news stories, for leagues without an official injury report; they lower the player’s minutes in the model.', todo: 'Press OK when the story is right, Dismiss when it is wrong.', checks: ['bb-news-injuries'], status: s => (s.injuriesToReview ? 'warn' : 'ok') },
-  { id: 'bb-results', tab: 'data', title: 'Results to check', what: 'Scores the data source may have wrong (home and away swapped, quarters that don’t add up) in basketball, American football and tennis, and football games with no final from either provider 48 hours after kick-off; clear cases are fixed by themselves and listed in the 07:00 summary email, the rest don’t count until checked. Pre-season games are never listed (they are not in the record).', todo: 'Compare with the league’s own site, then press "Swap scores" or "Keep as is" — for football, enter the result or press Void (in Needs you or in the email).', status: s => (s.bbResultsToCheck ? 'warn' : 'ok') },
+  { id: 'news-injuries', tab: 'data', title: 'Basketball injuries from news', what: 'Players reported out in news stories, for leagues without an official injury report; they lower the player’s minutes in the model. Applied by themselves: trusted source and a clear story = out until the date it gives (7 days if none); anything unclear = doubtful for 3 days. A box score showing he played clears it.', todo: 'Nothing — press Dismiss (or Undo in Done for you) if one is wrong.', checks: ['bb-news-injuries'] },
+  { id: 'bb-results', tab: 'data', title: 'Results the site is settling', what: 'Scores the data source may have wrong (home and away swapped, quarters that don’t add up) in basketball, American football and tennis, and football games with no final yet. Two sources agree → fixed; still unsure after 72 hours → void (out of the record, as a cancelled game); football with no final after 7 days → void. Every decision is in Done for you. Pre-season games are never listed.', todo: 'Nothing — the buttons stay here if you want to decide one earlier.' },
 
   // ---------- Site health ----------
   { id: 'speed', tab: 'site', title: 'Speed', what: 'Whether the website and the background jobs freeze, how much memory they use and how often they restarted.', todo: 'Nothing if it happens once — tell Claude if it stays red.', checks: ['perf:'] },
   { id: 'deploy-errors', tab: 'site', title: 'Errors during the last deploy', what: 'Pages or files that failed for visitors in the 5 minutes after the site last restarted (target: none).', todo: 'Tell Claude, with the time of the deploy.', checks: ['deploy-errors'] },
-  { id: 'site-errors', tab: 'site', title: 'Site errors', what: 'Pages that broke in visitors’ browsers, sent by the site itself.', todo: 'Tell Claude about each open one; press "Mark fixed" once the fix is live.', status: s => (s.siteErrors24h ? 'fail' : s.siteErrorsOpen ? 'warn' : 'ok') },
+  { id: 'site-errors', tab: 'site', title: 'Site errors', what: 'Pages that broke in visitors’ browsers, sent by the site itself, grouped by message. A group with no report since a newer build went live closes by itself.', todo: 'Nothing — the open ones are on the “For Claude today” list in Needs you.', status: s => (s.siteErrors24h ? 'warn' : 'ok') },
   { id: 'link-check', tab: 'site', title: 'Broken team links', what: 'Team links on the games of the last and next 7 days that would open "team not found".', todo: 'Tell Claude — usually a team the data source renamed.' },
   { id: 'backups', tab: 'site', title: 'Database backups', what: 'The daily copy of the database, on the server and off-site, and the free disk space.', todo: 'Press "Back up now"; if it fails again, tell Claude.', status: s => (s.backupOk === false ? 'fail' : 'ok') },
   { id: 'parity', tab: 'site', title: 'Same features in every sport', what: 'Whether every block on the football pages also exists for basketball, American football and tennis.', todo: 'Tell Claude which gaps to build.' },
@@ -126,7 +134,8 @@ export const HEALTH_RULES: HealthRule[] = [
   { match: 'live-box', tab: 'data', title: 'Live box scores', what: 'Player numbers during live games arrive on time.', todo: FIXES },
   { match: 'scorers', tab: 'data', title: 'Scorers shown', what: 'Who scored is shown for finished games in every sport.', todo: FIXES },
   { match: 'photo-sources', tab: 'data', what: 'Player photos come only from an official source (API-Football today); everyone else shows initials + flag. Red = a photo from another source (the old free-licence files) is still stored.', todo: 'Nothing — they are removed a minute after the next start. Tell Claude if it stays red.' },
-  { match: 'bb-news-injuries', tab: 'data', title: 'Basketball injuries from news', what: 'Players reported out in news stories that the model uses.', todo: 'Review the waiting stories in Data & feeds.' },
+  { match: 'bb-news-injuries', tab: 'data', title: 'Basketball injuries from news', what: 'Players reported out in news stories that the model uses (applied by themselves).', todo: FIXES },
+  { match: 'done-for-you', tab: 'needs-you', title: 'Nothing waits for a person', what: 'Whether anything other than a customer message or a payment issue has waited over 24 hours for a decision the site should make itself.', todo: 'Tell Claude — one of the automatic decisions did not run.' },
   { match: 'game-extras', tab: 'data', what: 'Weather, referee and trends on the next two days’ game pages.', todo: FIXES },
 
   // ---------- Predictions & models ----------
@@ -136,7 +145,7 @@ export const HEALTH_RULES: HealthRule[] = [
   { match: 'more-predictions', tab: 'models', title: 'More predictions', what: 'Extra predictions (goals, both teams score …) saved before each game and checked after it.', todo: FIXES },
   { match: 'v1-fallback', tab: 'models', title: 'Every game on our main model', what: 'Games that had to use the old simple model because data was missing.', todo: 'Tell Claude which league if it stays on the list.' },
   { match: 'probabilities', tab: 'models', title: 'Percentages add up to 100%', what: 'Every prediction’s home / draw / away adds up to 100%.', todo: 'Tell Claude straight away.' },
-  { match: 'unsettled', tab: 'models', title: 'Finished games in our record', what: 'Finished games that are not yet counted as right or wrong in our public record.', todo: 'Usually nothing: from 24 hours after kick-off both data providers are asked again. A game with no final at 48 hours shows in Needs you — enter the result (goals after 90 minutes) or press Void. Tell Claude if it stays red.' },
+  { match: 'unsettled', tab: 'models', title: 'Finished games in our record', what: 'Finished games that are not yet counted as right or wrong in our public record.', todo: 'Usually nothing: from 24 hours after kick-off both data providers are asked again. A game with no final after 7 days is voided by itself (Done for you, with Undo). Tell Claude if it stays red.' },
   { match: 'bb-vs-backtest', tab: 'models', title: 'Basketball: recent hit rate vs past seasons', what: 'Each league’s last 30 days against the same model on past seasons.', todo: 'Nothing for a few days. Tell Claude if the gap stays over 8 points.' },
   { match: 'bb-grid-rows', tab: 'models', title: 'Basketball model inputs look normal', what: 'No factor of an upcoming game is far outside what the model was trained on.', todo: 'Tell Claude which game — usually a data mistake.' },
   { match: 'bb-missing-row', tab: 'models', title: 'Missing players (basketball model)', what: 'How much missing players move the basketball prediction, measured on who actually played.', todo: 'Nothing — it is refitted by itself. Tell Claude if it stays red.' },
@@ -192,8 +201,8 @@ export const cardChecks = (c: AdminCardDef, checks: HealthCheck[] | null) => (c.
 export const cardsOf = (t: AdminTab) => ADMIN_CARDS.filter(c => c.tab === t)
 export const cardDef = (id: string) => ADMIN_CARDS.find(c => c.id === id)!
 
-/** what waits for Yarin: the Needs you count (red checks are added by the page) */
-export const waitingCount = (s: AdminSummary | null) => (s ? s.injuriesToReview + s.bbResultsToCheck + s.contactOpen : 0)
+/** what waits for Yarin (fix253: contact messages + payment issues only) */
+export const waitingCount = (s: AdminSummary | null) => (s ? s.needsYou : 0)
 
 /** words that must not appear in the admin explanations (plain English, Yarin) */
 export const CODE_WORDS = /\b(oracle|LL|proxy|stalls?|sd|bb-v\d|grid-v\d|v3-mix|5xx|heap|worker)\b/i

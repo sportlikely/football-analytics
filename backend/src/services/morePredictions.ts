@@ -640,7 +640,7 @@ export function settleExtras(): Record<string, number> {
     }
     for (const r of db.prepare(`SELECT e.game_id, e.json, g.status, g.hs, g.as_, g.quarters FROM prediction_extras e JOIN bb_games g ON g.game_id = e.game_id
       WHERE e.sport = 'basketball' AND e.settled = 0 AND g.status IN ('FT','AOT','CANC','ABD','AWD')
-        AND e.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL)`).all() as any[]) {
+        AND e.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL OR voided = 1)`).all() as any[]) {
       const x = parse(r.json);
       if (!x || VOID_BB.has(r.status) || r.hs == null) { mark('basketball', r.game_id, null); continue; }
       const q = parseQ(r.quarters);
@@ -1368,7 +1368,7 @@ export function moreHealth() {
   const unchecked: Record<MoreSport, number[]> = {
     football: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN results r ON r.match_id = e.game_id WHERE e.sport = 'football' AND e.settled = 0 AND r.settled_at < ?`, ago24),
     basketball: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN bb_games g ON g.game_id = e.game_id WHERE e.sport = 'basketball' AND e.settled = 0 AND g.status IN ('FT','AOT') AND g.kickoff < ?
-      AND e.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL)`, new Date(Date.now() - 30 * 3600000).toISOString()),
+      AND e.game_id NOT IN (SELECT game_id FROM bb_result_check WHERE resolved_at IS NULL OR voided = 1)`, new Date(Date.now() - 30 * 3600000).toISOString()),
     nfl: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN nfl_games g ON g.game_id = e.game_id WHERE e.sport = 'nfl' AND e.settled = 0 AND g.status IN ('FT','AOT') AND g.kickoff < ?`, new Date(Date.now() - 30 * 3600000).toISOString()),
     tennis: q(`SELECT e.game_id AS id FROM prediction_extras e JOIN tennis_matches m ON m.id = e.game_id WHERE e.sport = 'tennis' AND e.settled = 0 AND m.status = 'completed' AND m.scheduled_at < ?`, new Date(Date.now() - 30 * 3600000).toISOString())
   };

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { errorText } from '../../lib/auth'
-import { matchHref, playerHref } from '../../lib/links'
+import { matchHref } from '../../lib/links'
 import {
   adminPath, byLevel, cardChecks, cardDef, cardLevel, healthRule, healthTab, worst,
   type AdminSummary, type AdminTab, type HealthCheck, type Level
@@ -153,35 +153,10 @@ function Group({ title, n, to, children }: { title: string; n: number; to?: Admi
   )
 }
 
-function InjuriesToReview({ done }: { done: () => void }) {
-  const [rows, setRows] = useState<any[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const load = () => axios.get(`${API_URL}/admin/bb/news-injuries`).then(r => setRows((r.data.data as any[]).filter(x => x.state === 'active' && !x.reviewed))).catch(() => setRows([]))
-  useEffect(() => { load() }, [])
-  const act = (id: number, action: 'ok' | 'dismiss') => { setBusy(true); axios.post(`${API_URL}/admin/bb/news-injuries/${id}/${action}`, {}).then(() => { load(); done() }).finally(() => setBusy(false)) }
-  if (!rows) return <p className="text-sm text-faint">Loading…</p>
-  return (
-    <ul className="divide-y divide-line/50 text-sm">
-      {rows.slice(0, 10).map(x => (
-        <li key={x.id} className="py-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link to={playerHref('basketball', x.playerId, x.name)!} className="font-semibold text-ink hover:underline">{x.name}</Link>
-            <span className="text-xs text-faint">{x.team || x.teamId} · {x.code} · {x.status} until {String(x.until).slice(0, 10)}</span>
-            <span className="ml-auto flex gap-1">
-              <button type="button" disabled={busy} onClick={() => act(x.id, 'ok')} className="h-8 px-3 rounded-lg text-xs font-semibold bg-win/15 text-win hover:bg-win/25">OK</button>
-              <button type="button" disabled={busy} onClick={() => act(x.id, 'dismiss')} className="h-8 px-3 rounded-lg text-xs font-semibold bg-loss/15 text-loss hover:bg-loss/25">Dismiss</button>
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted">“{x.sentence}” — <a href={x.link} target="_blank" rel="noopener noreferrer nofollow" className="underline">{x.source || 'story'}</a></p>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 /** fix239: each result with its buttons — Swap scores / Keep as is (basketball, American football; tennis: give the win to the other player);
- *  fix240: football games with no final 48 h after kick-off — Enter result (goals after 90 minutes) / Void */
-function ResultsToCheck({ done }: { done: () => void }) {
+ *  fix240: football games with no final 48 h after kick-off — Enter result (goals after 90 minutes) / Void.
+ *  fix253: optional — the site voids what is still unsure (72 h; football 7 days); shown in Data & feeds, not Needs you */
+export function ResultsToCheck({ done }: { done: () => void }) {
   const [d, setD] = useState<{ open: any[]; other: any[]; football: any[] } | null>(null)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
@@ -279,28 +254,87 @@ function ContactOpen({ done }: { done: () => void }) {
   )
 }
 
-/** Needs you: only what a person must do — each kind with its count and its buttons; red checks with what to do */
+/** fix253: Needs you = only what legally needs a person — customer messages and payment issues */
 export function NeedsYouCard({ ctx, reload }: { ctx: Ctx; reload: () => void }) {
   const s = ctx.summary
-  const red = (ctx.checks || []).filter(c => c.level === 'fail')
-  if (!s || !ctx.checks) return <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Loading…</section>
-  const none = !s.injuriesToReview && !s.bbResultsToCheck && !s.contactOpen && !red.length
+  if (!s) return <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Loading…</section>
+  const none = !s.contactOpen && !s.paymentIssues
   return (
     <section className="card p-5 sm:p-6 mb-8">
       {none ? (
         <p className="text-base font-semibold text-win py-4 text-center">Nothing needs you right now ✓</p>
       ) : (
         <div className="divide-y divide-line/50">
-          {s.injuriesToReview > 0 && <Group title="Injury news to review (basketball)" n={s.injuriesToReview} to="data"><InjuriesToReview done={reload} /></Group>}
-          {s.bbResultsToCheck > 0 && <Group title="Results to check" n={s.bbResultsToCheck} to="data"><p className="text-xs text-muted mb-1">The data may have these scores wrong and our checks disagree (clear cases are fixed automatically). Compare with the league’s own site, then swap or keep.</p><ResultsToCheck done={reload} /></Group>}
           {s.contactOpen > 0 && <Group title="Contact messages to answer" n={s.contactOpen} to="users"><ContactOpen done={reload} /></Group>}
-          {red.length > 0 && (
-            <Group title="Checks with a problem" n={red.length}>
-              <CheckList checks={red} />
-              <p className="mt-2 text-[11px] text-faint">Each one also shows in its own tab: {[...new Set(red.map(c => healthTab(c.id)))].map((t, i) => <span key={t}>{i ? ' · ' : ''}<Link to={adminPath(t)} className="text-accent">{t.replace('-', ' ')}</Link></span>)}</p>
-            </Group>
-          )}
+          {s.paymentIssues > 0 && <Group title="Payment issues" n={s.paymentIssues}><p className="text-sm text-muted">Open the payment provider’s dashboard and answer the customer.</p></Group>}
         </div>
+      )}
+      <p className="mt-3 text-[11px] text-faint">Everything else the site decides by itself: see Done for you below ({s.done24h} in the last 24 h).</p>
+    </section>
+  )
+}
+
+/** fix253: the daily list for Claude — open site-error groups, top 10 with counts (copy it into a session) */
+export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
+  const f = ctx.summary?.forClaude
+  const [copied, setCopied] = useState(false)
+  if (!f) return <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Loading…</section>
+  const text = [`SportLikely site errors, ${f.day}: ${f.open} open group(s). Top ${f.top.length}:`,
+    ...f.top.map((x, i) => `${i + 1}. ${x.count}× “${x.message}” on ${x.page}${x.where ? ` at ${x.where}` : ''} (last ${x.lastAt.slice(0, 16).replace('T', ' ')} UTC; builds ${x.builds.join(', ') || '?'})`)].join('\n')
+  const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }).catch(() => undefined)
+  return (
+    <section className="card p-5 sm:p-6 mb-8">
+      {!f.open ? <p className="text-sm text-win">No open site errors ✓</p> : (
+        <>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+            <p className="text-sm text-muted"><b className="num text-ink">{f.open}</b> open group(s); the 10 with most reports:</p>
+            <button type="button" onClick={copy} className="h-8 px-3 rounded-lg text-xs font-semibold bg-surface2 border border-line text-ink">{copied ? 'Copied ✓' : 'Copy for Claude'}</button>
+          </div>
+          <ol className="divide-y divide-line/50 text-sm">
+            {f.top.map((x, i) => (
+              <li key={i} className="py-2 flex flex-wrap items-baseline gap-x-3">
+                <span className="num w-12 text-right font-bold text-ink">{x.count}×</span>
+                <span className="text-ink break-words min-w-0 flex-1">{x.message}</span>
+                <span className="text-[11px] text-faint">{x.page} · last {day(x.lastAt)}</span>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+    </section>
+  )
+}
+
+/** fix253: every automatic decision (what, why, source link), Undo within 24 h */
+export function DoneForYouCard({ reload }: { reload: () => void }) {
+  const [rows, setRows] = useState<any[] | null>(null)
+  const [busy, setBusy] = useState<number | null>(null)
+  const [msg, setMsg] = useState('')
+  const load = () => axios.get(`${API_URL}/admin/done-for-you`).then(r => setRows(r.data.data)).catch(() => setRows([]))
+  useEffect(() => { load() }, [])
+  const undo = (id: number) => {
+    setBusy(id); setMsg('')
+    axios.post(`${API_URL}/admin/done-for-you/${id}/undo`, {}).then(r => { setMsg(r.data.data.message); load(); reload() }).catch(e => setMsg(errorText(e))).finally(() => setBusy(null))
+  }
+  if (!rows) return <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Loading…</section>
+  return (
+    <section className="card p-5 sm:p-6 mb-8">
+      {msg && <p className="text-xs text-accent mb-2">{msg}</p>}
+      {!rows.length ? <p className="text-sm text-faint">Nothing decided automatically in the last 7 days.</p> : (
+        <ul className="divide-y divide-line/50 text-sm">
+          {rows.slice(0, 60).map(x => (
+            <li key={x.id} className="py-2">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="w-14 text-[11px] text-faint num">{day(x.at)}</span>
+                <span className="text-[11px] font-semibold text-muted">{x.kindLabel}</span>
+                <span className={`font-semibold ${x.undoneAt ? 'text-faint line-through' : 'text-ink'}`}>{x.title}</span>
+                {x.canUndo && <button type="button" disabled={busy !== null} onClick={() => undo(x.id)} className="ml-auto h-8 px-3 rounded-lg text-xs font-semibold bg-surface2 border border-line text-ink disabled:opacity-50">Undo</button>}
+                {x.undoneAt && <span className="ml-auto text-[11px] text-faint">undone{x.undoneBy ? ` by ${x.undoneBy}` : ''}</span>}
+              </div>
+              <p className="mt-1 text-xs text-muted sm:pl-[68px] break-words">{x.why}{x.link && <> — <a href={x.link} target="_blank" rel="noopener noreferrer nofollow" className="underline">source</a></>}</p>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   )

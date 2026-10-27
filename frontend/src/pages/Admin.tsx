@@ -13,7 +13,7 @@ import NewsInjuriesCard from '../components/NewsInjuriesCard'
 import GameExtrasAdminCard from '../components/GameExtrasAdminCard'
 import BbGridCard from '../components/BbGridCard'
 import DiffViewCard from '../components/DiffViewCard'
-import { ChecksCard, Explained, NeedsYouCard, SpeedCard, TabChecks, Tiles, type Ctx, type TileDef } from '../components/admin/AdminParts'
+import { ChecksCard, DoneForYouCard, Explained, ForClaudeCard, NeedsYouCard, ResultsToCheck, SpeedCard, TabChecks, Tiles, type Ctx, type TileDef } from '../components/admin/AdminParts'
 import { ADMIN_TABS, adminPath, adminTabOf, healthTab, waitingCount, type AdminSummary, type AdminTab, type HealthCheck } from '../lib/adminTabs'
 import { PARITY_REPORT } from '../lib/sportParity.report'
 import { slAdmin } from '../lib/modelNames'
@@ -59,7 +59,8 @@ export default function Admin() {
   const ctx: Ctx = { summary, checks }
   const red = (checks || []).filter(c => c.level === 'fail')
   const inTab = (t: AdminTab) => (checks || []).filter(c => healthTab(c.id) === t)
-  const badge = (t: AdminTab) => (t === 'needs-you' ? waitingCount(summary) + red.length : inTab(t).filter(c => c.level === 'fail').length)
+  // fix253: Needs you counts only customer messages and payment issues; red checks show in their own tabs
+  const badge = (t: AdminTab) => (t === 'needs-you' ? waitingCount(summary) : inTab(t).filter(c => c.level === 'fail').length)
   const checkTiles = (t: AdminTab): TileDef[] => {
     const l = inTab(t)
     return [
@@ -69,12 +70,12 @@ export default function Admin() {
     ]
   }
   const s = summary
-  const waiting = s ? waitingCount(s) + red.length : null
+  const waiting = s ? waitingCount(s) : null
   const TILES: Record<AdminTab, TileDef[]> = {
     'needs-you': [
       { label: 'Waiting for you', value: waiting, level: waiting ? 'warn' : 'ok' },
-      { label: 'Checks with a problem', value: checks ? red.length : null, level: red.length ? 'fail' : 'ok' },
-      { label: 'Site errors today', value: s?.siteErrors24h ?? null, level: s?.siteErrors24h ? 'fail' : 'ok', to: adminPath('site') },
+      { label: 'Done for you (24 h)', value: s?.done24h ?? null },
+      { label: 'Checks with a problem', value: checks ? red.length : null, level: red.length ? 'fail' : 'ok', hint: 'in their own tabs' },
       { label: 'Visitors today', value: s?.visitorsToday ?? null, to: adminPath('users') }
     ],
     users: [
@@ -86,11 +87,11 @@ export default function Admin() {
     models: checkTiles('models'),
     data: [
       ...checkTiles('data').slice(0, 2),
-      { label: 'Results to check', value: s?.bbResultsToCheck ?? null, level: s?.bbResultsToCheck ? 'warn' : 'ok' }
+      { label: 'Results being settled', value: s?.bbResultsToCheck ?? null, hint: 'by the site' }
     ],
     site: [
-      { label: 'Site errors today', value: s?.siteErrors24h ?? null, level: s?.siteErrors24h ? 'fail' : 'ok', hint: 'times a page broke' },
-      { label: 'Open site errors', value: s?.siteErrorsOpen ?? null, level: s?.siteErrorsOpen ? 'warn' : 'ok' },
+      { label: 'Site errors today', value: s?.siteErrors24h ?? null, level: s?.siteErrors24h ? 'warn' : 'ok', hint: 'times a page broke' },
+      { label: 'Open site errors', value: s?.siteErrorsOpen ?? null, hint: 'on the list for Claude', to: adminPath('needs-you') },
       { label: 'Backup', value: !s ? null : s.backupOk === null ? '–' : s.backupOk ? 'OK' : 'Late', level: s?.backupOk === false ? 'fail' : 'ok', hint: s?.lastBackupAt ? `last ${fmt(s.lastBackupAt)}` : undefined },
       checkTiles('site')[0]
     ],
@@ -125,7 +126,13 @@ export default function Admin() {
 
       <Tiles tiles={TILES[tab]} />
 
-      {tab === 'needs-you' && <Explained ctx={ctx} id="needs-you"><NeedsYouCard ctx={ctx} reload={reload} /></Explained>}
+      {tab === 'needs-you' && (
+        <>
+          <Explained ctx={ctx} id="needs-you"><NeedsYouCard ctx={ctx} reload={reload} /></Explained>
+          <Explained ctx={ctx} id="for-claude"><ForClaudeCard ctx={ctx} /></Explained>
+          <Explained ctx={ctx} id="done-for-you"><DoneForYouCard reload={reload} /></Explained>
+        </>
+      )}
 
       {tab === 'users' && (
         <>
@@ -910,20 +917,10 @@ function BbResultsCard() {
   return (
     <section className="card p-5 sm:p-6 mb-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-        <h2 className="font-display text-lg font-bold text-ink">Basketball results to check</h2>
-        <span className="text-xs text-faint">Checked every 30 min · NBA corrected automatically from balldontlie · flagged games don't count until checked</span>
+        <h2 className="font-display text-lg font-bold text-ink">Results being settled</h2>
+        <span className="text-xs text-faint">Checked every 30 min · two sources agree → fixed · still unsure after 72 h → void (football: 7 days) · the buttons only decide one earlier</span>
       </div>
-      {d.open.length === 0 ? <p className="text-sm text-faint">Nothing to check.</p> : (
-        <ul className="divide-y divide-line/50 text-sm">
-          {d.open.map(x => (
-            <li key={x.game_id} className="py-2 flex flex-wrap items-baseline gap-x-3">
-              <span className="w-16 text-[11px] text-faint num">{day(x.kickoff)}</span>
-              <Link to={matchHref('basketball', x.game_id, { home: x.home_name, away: x.away_name, date: x.kickoff })!} className="font-semibold text-draw hover:underline">{x.home_name} {x.hs}–{x.as_} {x.away_name}</Link>
-              <span className="text-[11px] text-muted">{x.code} · {x.detail}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ResultsToCheck done={() => undefined} />
       {d.fixes.length > 0 && (
         <details className="mt-3 text-xs text-muted">
           <summary className="cursor-pointer">Corrections ({d.fixes.length})</summary>

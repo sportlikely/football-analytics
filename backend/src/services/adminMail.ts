@@ -239,6 +239,18 @@ export function noteAutoFix(area: string, title: string, detail?: string | null,
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** fix253: three lines per kind (in the order the kinds first happened), then "+N more" for that kind */
+export function summaryRows(items: { at: string; area: string; title: string; detail: string | null; href: string | null }[], per = 3): MailRow[] {
+  const by = new Map<string, typeof items>();
+  for (const i of items) { const l = by.get(i.area) || []; l.push(i); by.set(i.area, l); }
+  const rows: MailRow[] = [];
+  for (const [area, l] of by) {
+    for (const i of l.slice(0, per)) rows.push({ when: `${israelTime(i.at)} · ${area}`, title: i.title, titleHref: i.href, detail: i.detail || undefined, tone: 'ok' as Tone });
+    if (l.length > per) rows.push({ when: area, title: `+${l.length - per} more ${area.toLowerCase()}`, titleHref: adminUrl('needs-you'), tone: 'ok' as Tone });
+  }
+  return rows;
+}
+
 /** what the summary says (also used by the test and the admin preview) */
 export function buildSummary(items: { at: string; area: string; title: string; detail: string | null; href: string | null }[]): { subject: string; mail: AdminMail } {
   const results = items.filter(i => /result/.test(i.area)).length;
@@ -250,9 +262,9 @@ export function buildSummary(items: { at: string; area: string; title: string; d
       title: `Fixed automatically: ${what}`,
       what: `Since the last summary the site found and fixed ${plural(items.length, 'problem')} by itself; each one is listed below.`,
       todo: null,
-      rows: items.slice(0, 40).map(i => ({ when: `${israelTime(i.at)} · ${i.area}`, title: i.title, titleHref: i.href, detail: i.detail || undefined, tone: 'ok' as Tone })),
-      buttons: [{ text: 'Open in Admin', href: adminUrl('needs-you') }],
-      footer: items.length > 40 ? `+${items.length - 40} more in Admin.` : 'One summary a day at 07:00; separate emails only when something needs you.'
+      rows: summaryRows(items),
+      buttons: [{ text: 'Open Done for you in Admin', href: adminUrl('needs-you') }],
+      footer: 'One summary a day at 07:00: three lines per kind, the rest (with Undo) in Admin → Needs you → Done for you.'
     }
   };
 }

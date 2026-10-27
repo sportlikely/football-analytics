@@ -11,8 +11,9 @@
  *    other leagues: the bbGrid keep hook); every application is logged per game (bb_rest_log).
  *  - Injuries from news (worker, every 30 min → bb_news_injuries): basketball stories naming a club, scanned for
  *    "out / injured / weeks" sentences about its players (every league but the NBA, which has its injury report). A
- *    "reported out" status with the story's link, until the stated time or until he plays. Admin review list; a
- *    dismissed item is never applied again.
+ *    "reported out" status with the story's link, until the stated time or until he plays. fix253: applied by the rule
+ *    (trusted source + clear story = out; unclear = doubtful 3 days), listed in Done for you; a dismissed item is never
+ *    applied again.
  *  - Player page "Impact": rating, rank in his league, his team's record with and without him this season.
  */
 import logger from '../utils/logger';
@@ -25,12 +26,15 @@ import { bbTeamNames } from './news';
 import { photoUrl } from './playerPhotos';
 import { statusKeep, V4_TUNED } from '../utils/nbaImpact';
 import {
-  keyList, nbaRestCounts, elRestCounts, restKeep, nbaSpot, weekOf, scanStory, normText,
+  keyList, nbaRestCounts, elRestCounts, restKeep, nbaSpot, weekOf, scanStory, normText, newsDecision, trustedSource, parseInjury,
   type RestKind, type TeamGame, type KpIn, type RestCount
 } from '../utils/keyPlayers';
 import type { Check } from './dataHealth';
+import { recordDone, onUndo } from './doneForYou';
 
 const DAY = 86400000;
+/** fix253: minutes a player keeps with a news status — out 0, doubtful half (was 0.25) */
+export const NEWS_KEEP: Record<'out' | 'doubtful', number> = { out: 0, doubtful: 0.5 };
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_rest_rates (
     player_id INTEGER NOT NULL, team_id INTEGER NOT NULL, kind TEXT NOT NULL, sat INTEGER NOT NULL, chances INTEGER NOT NULL,
@@ -135,7 +139,7 @@ export function nbaRestKeep(gameId: number, teamId: number, kickoff: string | nu
 setKeepHook((g, teamId) => {
   if (g.code === 'NBA' || !inModel()) return null;
   const out = new Map<number, number>();
-  for (const [id, n] of newsFor(teamId)) out.set(id, n.status === 'out' ? 0 : 0.25);
+  for (const [id, n] of newsFor(teamId)) out.set(id, NEWS_KEEP[n.status]);
   for (const [id, r] of restFor(g, teamId)) out.set(id, Math.min(out.get(id) ?? 1, r.keep));
   return out.size ? out : null;
 });
@@ -241,30 +245,44 @@ export async function scanNewsInjuries(now = Date.now()): Promise<{ stories: num
       last = s.seen_at > last ? s.seen_at : last;
       const text = normText(`${s.title} . ${s.summary || ''}`);
       if (!/injur|out|miss|sidelin|surgery|doubt/.test(text)) continue;
+      // fix253: every team's hits first, so a name that fits players of two teams is known before anything is applied
+      const hits: { t: (typeof teams)[number]; hit: ReturnType<typeof scanStory>[number]; name: string }[] = [];
       for (const t of teams) {
         if (!t.re.test(text)) continue;
-        for (const hit of scanStory(s.title, s.summary || '', t.roster, t.names)) {
-          const p = t.roster.find(r => r.id === hit.playerId)!;
-          const pub = new Date(Date.parse(s.published) || now).toISOString();
-          const until = new Date(Date.parse(pub) + hit.inj.days * DAY).toISOString();
-          if (until <= new Date(now).toISOString()) continue;
-          const r = ins.run(hit.playerId, t.id, t.code, p.name, hit.inj.status, hit.inj.injury, hit.inj.days, hit.sentence, s.link, s.source || null, pub, until, new Date(now).toISOString());
-          if (r.changes) found++;
-        }
+        for (const hit of scanStory(s.title, s.summary || '', t.roster, t.names)) hits.push({ t, hit, name: t.roster.find(r => r.id === hit.playerId)!.name });
+      }
+      for (const { t, hit, name } of hits) {
+        const pubMs = Date.parse(s.published) || now, pub = new Date(pubMs).toISOString();
+        const teamsWithName = new Set(hits.filter(h => playerKey(h.name) === playerKey(name)).map(h => h.t.id)).size;
+        const d = newsDecision({ inj: hit.inj, trusted: trustedSource(s.source, s.link, t.names), teams: teamsWithName, published: pubMs });
+        const until = new Date(d.until).toISOString();
+        if (until <= new Date(now).toISOString()) continue;
+        // applied at once, no review (reviewed = 1): the person sees it in "Done for you" and can undo it
+        const r = ins.run(hit.playerId, t.id, t.code, name, d.status, hit.inj.injury, d.days, hit.sentence, s.link, s.source || null, pub, until, new Date(now).toISOString());
+        if (!r.changes) continue;
+        found++;
+        const id = Number(r.lastInsertRowid);
+        db.prepare(`UPDATE bb_news_injuries SET reviewed = 1 WHERE id = ?`).run(id);
+        recordDone({
+          kind: 'injury-news', sport: 'basketball', ref: String(id),
+          title: `${name} (${t.name}): ${d.status === 'out' ? 'out' : 'doubtful'} until ${until.slice(0, 10)}`,
+          why: `${d.why} “${hit.sentence.slice(0, 160)}”${s.source ? ` — ${s.source}` : ''}`, link: s.link, undo: { id }
+        }, now);
       }
     }
     setMeta('news-scan', last);
   }
-  // expiry: the stated time is over, or he has played since the story (12 h later)
+  // expiry: the stated time is over, or a box score shows he played in a game after the story (fix253: at once)
   const nowIso = new Date(now).toISOString();
   let expired = Number(db.prepare(`UPDATE bb_news_injuries SET state = 'expired' WHERE state = 'active' AND until <= ?`).run(nowIso).changes);
   for (const x of db.prepare(`SELECT id, player_id, published FROM bb_news_injuries WHERE state = 'active'`).all() as any[]) {
     const played = db.prepare(`SELECT 1 FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE ps.player_id = ? AND ps.minutes > 0 AND g.kickoff > ? LIMIT 1`)
-      .get(x.player_id, new Date(Date.parse(x.published) + 12 * 3600 * 1000).toISOString());
+      .get(x.player_id, x.published);
     if (played) { db.prepare(`UPDATE bb_news_injuries SET state = 'played' WHERE id = ?`).run(x.id); expired++; }
   }
+  decidePendingNews(now); // fix253: anything still waiting from before is decided by the rule
   if (found || expired) ensure(true);
-  if (found) logger.info(`bb news injuries: ${found} new "reported out" item(s) from ${stories.length} stories (admin review list)`);
+  if (found) logger.info(`bb news injuries: ${found} new "reported out" item(s) from ${stories.length} stories (applied, listed in Done for you)`);
   return { stories: stories.length, found, expired };
 }
 
@@ -283,6 +301,38 @@ export function reviewNewsInjury(id: number, action: 'dismiss' | 'ok'): boolean 
   return Number(r.changes) > 0;
 }
 
+/**
+ * fix253: the items still waiting for a review (from before the rule) decided by the rule: each one re-read from its own
+ * sentence and source, applied (out / doubtful, until), marked reviewed and written to "Done for you". Returns one line each.
+ */
+export function decidePendingNews(now = Date.now()): string[] {
+  const rows = db.prepare(`SELECT * FROM bb_news_injuries WHERE state = 'active' AND reviewed = 0 ORDER BY id`).all() as any[];
+  const team = db.prepare(`SELECT home_name AS n FROM bb_games WHERE home_id = ? ORDER BY kickoff DESC LIMIT 1`);
+  const lines: string[] = [];
+  for (const r of rows) {
+    const teamName = String((team.get(r.team_id) as any)?.n || '');
+    const inj = parseInjury(r.sentence) || { status: r.status, days: r.days, injury: r.injury };
+    const twins = new Set((db.prepare(`SELECT team_id, name FROM bb_news_injuries WHERE link = ? AND state = 'active'`).all(r.link) as any[])
+      .filter(x => playerKey(x.name) === playerKey(r.name)).map(x => x.team_id)).size;
+    const pub = Date.parse(r.published) || now;
+    const d = newsDecision({ inj, trusted: trustedSource(r.source, r.link, teamName ? bbTeamNames(teamName, r.code) : []), teams: twins, published: pub });
+    const until = new Date(d.until).toISOString(), live = until > new Date(now).toISOString();
+    db.prepare(`UPDATE bb_news_injuries SET status = ?, days = ?, until = ?, reviewed = 1, state = ? WHERE id = ?`).run(d.status, d.days, until, live ? 'active' : 'expired', r.id);
+    const title = `${r.name}${teamName ? ` (${teamName})` : ''}: ${live ? `${d.status} until ${until.slice(0, 10)}` : `${d.status}, already over (${until.slice(0, 10)})`}`;
+    recordDone({ kind: 'injury-news', sport: 'basketball', ref: String(r.id), title, why: `${d.why} “${String(r.sentence).slice(0, 160)}”${r.source ? ` — ${r.source}` : ''}`, link: r.link, undo: { id: r.id } }, now);
+    lines.push(title);
+  }
+  if (rows.length) { ensure(true); logger.info(`bb news injuries (fix253): ${rows.length} waiting item(s) decided by the rule — ${lines.join(' · ')}`); }
+  return lines;
+}
+
+// "Done for you" → Undo: the item is dismissed (never applied again, the same story never brings it back)
+onUndo('injury-news', (p: { id: number }) => {
+  db.prepare(`UPDATE bb_news_injuries SET state = 'dismissed', reviewed = 1 WHERE id = ?`).run(p.id);
+  ensure(true);
+  return 'Removed: the player is no longer counted as missing.';
+});
+
 /* ---------- worker: what was applied to each game (every 30 min, games of the next 36 h) ---------- */
 
 export function logApplied(now = Date.now()): number {
@@ -296,7 +346,7 @@ export function logApplied(now = Date.now()): number {
     for (const g of games) for (const team of [g.home_id, g.away_id]) {
       const confirmed = g.code === 'NBA' && restConfirmed(g.kickoff, now);
       if (!confirmed) for (const [pid, r] of restFor(g, team)) { up.run(g.game_id, team, pid, r.kind, r.keep, g.kickoff, at); n++; }
-      if (g.code !== 'NBA') for (const [pid, x] of newsFor(team)) { up.run(g.game_id, team, pid, 'news', x.status === 'out' ? 0 : 0.25, g.kickoff, at); n++; }
+      if (g.code !== 'NBA') for (const [pid, x] of newsFor(team)) { up.run(g.game_id, team, pid, 'news', NEWS_KEEP[x.status], g.kickoff, at); n++; }
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -361,7 +411,7 @@ function sideCard(g: { game_id: number; code: string; kickoff: string }, teamId:
     }
   } else {
     for (const [id, n] of newsFor(teamId)) {
-      keep.set(id, Math.min(keep.get(id) ?? 1, n.status === 'out' ? 0 : 0.25));
+      keep.set(id, Math.min(keep.get(id) ?? 1, NEWS_KEEP[n.status]));
       st.set(id, { status: n.status === 'out' ? 'reported-out' : 'doubtful', note: n.injury, noteKind: n.injury ? 'injury' : null, link: n.link });
     }
   }
@@ -463,9 +513,10 @@ export function keyPlayersHealth(now = Date.now()): Check[] {
     detail: rates?.n ? `${rates.used || 0} player pattern(s) in use of ${rates.n} (built ${String(rates.at).slice(0, 16).replace('T', ' ')} UTC)` : 'No rest patterns built yet (daily job)',
     items: [...by.entries()].sort((a, b) => b[0] - a[0]).map(([w, b]) => `week of ${new Date((w * 7 - 3) * DAY).toISOString().slice(0, 10)}: ${b.n} player reduction(s) in ${b.games.size} game(s)`)
   });
-  // reported out (news) waiting for review
-  const pend = db.prepare(`SELECT name, code, status, until, link FROM bb_news_injuries WHERE state = 'active' AND reviewed = 0 ORDER BY at DESC`).all() as any[];
-  out.push({ id: 'bb-news-injuries', label: 'Reported out from news (basketball)', level: pend.length ? 'warn' : 'ok', detail: pend.length ? `${pend.length} item(s) pending review in Admin → Basketball injuries from news` : 'Nothing pending review', items: pend.slice(0, 15).map(p => `${p.name} (${p.code}): ${p.status} until ${String(p.until).slice(0, 10)} — ${p.link}`) });
+  // reported out (news): fix253 — applied by the rule, nobody reviews; the active ones listed
+  const act = db.prepare(`SELECT name, code, status, until, link FROM bb_news_injuries WHERE state = 'active' ORDER BY at DESC`).all() as any[];
+  const waiting = act.length - (db.prepare(`SELECT COUNT(*) AS n FROM bb_news_injuries WHERE state = 'active' AND reviewed = 1`).get() as any).n;
+  out.push({ id: 'bb-news-injuries', label: 'Reported out from news (basketball)', level: waiting ? 'warn' : 'ok', detail: waiting ? `${waiting} item(s) not decided yet (decided by the next news scan)` : `${act.length} applied now (out / doubtful), each in Done for you`, items: act.slice(0, 15).map(p => `${p.name} (${p.code}): ${p.status} until ${String(p.until).slice(0, 10)} — ${p.link}`) });
   return out;
 }
 

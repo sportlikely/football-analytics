@@ -48,6 +48,7 @@ import { seasonForecastChecks } from './seasonForecast';
 import { emailHealth } from './pickEmails';
 import { pushHealth } from './pushAlerts';
 import { keyPlayersHealth } from './keyPlayers';
+import { doneForYouHealth } from './doneForYou';
 import { gameExtrasHealth } from './gameExtras';
 import { deployErrorsHealth } from './deployErrors';
 import { slowRequestsHealth } from './deadline';
@@ -343,8 +344,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     const inNeeds = old.filter(r => waiting.has(r.match_id)).length;
     checks.push({
       id: 'unsettled', label: 'Finished games are scored in our record', level: lost.length ? 'fail' : rows.length ? 'warn' : 'ok',
-      detail: rows.length ? `${rows.length} game(s) past kick-off + 4 h not settled yet (${old.length} older than 48 h${inNeeds ? `, ${inNeeds} in Needs you: enter the result or void` : ''})${note}` : `Every finished game is settled${note}`,
-      items: rows.slice(0, 15).map(r => `${gameName(r)}${waiting.has(r.match_id) ? ' · Needs you' : ''}${tries.has(r.match_id) ? ` · ${tries.get(r.match_id)}` : ''}`)
+      detail: rows.length ? `${rows.length} game(s) past kick-off + 4 h not settled yet (${old.length} older than 48 h${inNeeds ? `, ${inNeeds} watched: settled by a final or void at 7 days` : ''})${note}` : `Every finished game is settled${note}`,
+      items: rows.slice(0, 15).map(r => `${gameName(r)}${waiting.has(r.match_id) ? ' · watched (void at 7 days)' : ''}${tries.has(r.match_id) ? ` · ${tries.get(r.match_id)}` : ''}`)
     });
   } catch (e: any) {
     checks.push({ id: 'unsettled', label: 'Finished games are scored in our record', level: 'warn', detail: `Check failed: ${e.message}` });
@@ -461,6 +462,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...leagueSettingsHealth(now)); } catch (e: any) { logger.warn(`league settings health: ${e?.message || e}`); }
   // fix215: season forecast — every league re-run after its last finished game, zone rules, position chances add up, last season's replay
   try { checks.push(...keyPlayersHealth(now)); } catch (e: any) { logger.warn(`key players health: ${e?.message || e}`); }
+  // fix253: nothing waits for a person (only contact messages and payment issues may)
+  try { checks.push(doneForYouHealth(now)); } catch (e: any) { logger.warn(`done for you health: ${e?.message || e}`); }
   // fix228: basketball row #4 — the weight live (frozen at the who-actually-played fit) and the games it moved this week
   try { checks.push(...missingRowHealth(now)); } catch (e: any) { logger.warn(`missing players row health: ${e?.message || e}`); }
   // fix236: which engine each basketball group runs (v3 / v4), why and since when; warn when the NBA runs bb-v3

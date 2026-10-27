@@ -143,7 +143,9 @@ export function restKeep(kind: RestKind, c: RestCount | undefined): number {
 
 /* ---------- injuries from news ---------- */
 
-export type NewsInjury = { status: 'out' | 'doubtful'; days: number; injury: string | null };
+/** fix253: `season` = "out for the season" (until = the season's end, see seasonEnd); `unclear` = rumour words ("could",
+ *  "might", "doubtful"…): applied as doubtful, 3 days */
+export type NewsInjury = { status: 'out' | 'doubtful'; days: number; injury: string | null; season?: boolean; unclear?: boolean };
 
 const NUM: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, 'a couple of': 2, 'a few': 3, several: 4 };
 const UNIT: Record<string, number> = { day: 1, week: 7, month: 30, game: 3.5 };
@@ -157,6 +159,8 @@ const ABSENT = /\b(ruled out|will miss|to miss|miss(es|ing)?|out (for|with|until
 /** an injury word (an absence word alone, "misses the trip", is not enough) */
 const HURT = /\b(injur(y|ies|ed)|surgery|operated|torn|tear|ruptur(e|ed)|fracture[ds]?|broken|sprain(ed)?|strain(ed)?|knee|ankle|hamstring|achilles|calf|groin|shoulder|foot|hand|wrist|finger|thumb|hip|concussion|illness|ill|thigh|elbow|toe|quad|adductor|muscle|back (injury|problem|spasms|pain)|setback|physical problem|discomfort)\b/;
 const DOUBT = /\b(doubtful|questionable|in doubt|game-time decision|uncertain)\b/;
+/** fix253: rumour words — the story is not sure he is out */
+const RUMOUR = /\b(could|might|may|possibly|reportedly|doubtful|questionable|in doubt|game-time decision|uncertain|fears?)\b/;
 const PART = /\b(knee|ankle|hamstring|achilles|calf|groin|shoulder|foot|hand|wrist|finger|thumb|hip|concussion|illness|thigh|elbow|toe|quad|adductor|back)\b/;
 
 export const normText = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’`]/g, "'").toLowerCase();
@@ -167,17 +171,62 @@ export function parseInjury(sentence: string): NewsInjury | null {
   if (NEG.test(s) || !ABSENT.test(s) || !HURT.test(s)) return null;
   // "surgery" alone (no other absence word, no time out) is often an old operation or a dispute about one
   if (!DUR_ANY.test(s) && !ABSENT.test(s.replace(/\b(surgery|operated)\b/g, ' '))) return null;
-  const status: NewsInjury['status'] = DOUBT.test(s) && !/\b(ruled out|will miss|out for|sidelined|surgery)\b/.test(s) ? 'doubtful' : 'out';
+  const unclear = RUMOUR.test(s);
+  const status: NewsInjury['status'] = unclear || (DOUBT.test(s) && !/\b(ruled out|will miss|out for|sidelined|surgery)\b/.test(s)) ? 'doubtful' : 'out';
   let days = 0;
   for (const m of s.matchAll(DUR)) {
     const n = Math.max(NUM[m[1]] ?? Number(m[1]), m[2] ? NUM[m[2]] ?? Number(m[2]) : 0);
     if (Number.isFinite(n) && n > 0 && n < 400) days = Math.max(days, n * UNIT[m[3]]);
   }
-  if (/\b(rest of the season|for the season|season-ending|season ending|out for the year)\b/.test(s)) days = Math.max(days, 150);
+  const season = /\b(rest of the season|for the season|season-ending|season ending|out for the year|done for the season)\b/.test(s);
+  if (season) days = Math.max(days, 150);
   else if (/\b(indefinitely|long-term|long term)\b/.test(s)) days = Math.max(days, 60);
-  if (!days) days = status === 'out' ? 7 : 3;
+  if (!days) days = 7; // fix253: no time in the story → 7 days
+  if (status === 'doubtful') days = 3; // fix253: unclear → doubtful, 3 days
   const part = s.match(PART);
-  return { status, days: Math.round(days), injury: part ? part[1] : null };
+  return { status, days: Math.round(days), injury: part ? part[1] : null, ...(season && status === 'out' ? { season: true } : {}), ...(unclear ? { unclear: true } : {}) };
+}
+
+/** fix253: the end of the basketball season a date is in (30 June; from August on, next year's). */
+export function seasonEnd(ms: number): number {
+  const d = new Date(ms), y = d.getUTCMonth() >= 7 ? d.getUTCFullYear() + 1 : d.getUTCFullYear();
+  return Date.UTC(y, 5, 30, 23, 59);
+}
+
+/**
+ * fix253: sources whose injury news is applied as it says — league / club sites, Eurohoops, ESPN, Basketball News,
+ * BasketNews, Sportando, the provider's own feed. Anything else is applied as "doubtful" for 3 days.
+ */
+export const TRUSTED_SOURCES = ['eurohoops', 'espn', 'basketball news', 'basketballnews', 'basketnews', 'sportando', 'api-basketball', 'euroleague', 'eurocup', 'fiba'];
+export const TRUSTED_HOSTS = /(^|\.)(eurohoops\.net|espn\.com|basketballnews\.com|basketnews\.com|sportando\.basketball|euroleaguebasketball\.net|euroleague\.net|eurocupbasketball\.com|fiba\.basketball|acb\.com|legabasket\.it|lnb\.fr|easycredit-bbl\.de|bsl\.org\.tr|aba-liga\.com|esake\.gr|basket\.co\.il|nbl\.com\.au|plk\.pl|lkl\.lt|vtb-league\.com|nba\.com)$/;
+/** a club's own site counts too: its host carries the club's name (6+ letters: "olympiacosbc.gr", "realmadrid.com") */
+export function trustedSource(source: string | null, link: string, clubNames: string[] = []): boolean {
+  const src = normText(String(source || ''));
+  if (TRUSTED_SOURCES.some(t => src.includes(t))) return true;
+  let host = '';
+  try { host = new URL(link).hostname.toLowerCase().replace(/^www\./, ''); } catch { return false; }
+  if (TRUSTED_HOSTS.test(host)) return true;
+  const flat = host.replace(/[^a-z]/g, '');
+  return clubNames.some(n => { const w = normText(n).replace(/[^a-z]/g, ''); return w.length >= 6 && flat.includes(w); });
+}
+
+/**
+ * fix253: what is applied for one story → player (no person decides any more).
+ *  - trusted source, one team, no rumour words → as the story says (out until the stated time, the season's end, or 7 days)
+ *  - otherwise ("unclear": untrusted source, the name fits players of two teams, "could" / "might" / "doubtful") →
+ *    doubtful (half weight) for 3 days
+ */
+export function newsDecision(o: { inj: NewsInjury; trusted: boolean; teams: number; published: number }): { status: 'out' | 'doubtful'; until: number; days: number; why: string } {
+  const reasons: string[] = [];
+  if (!o.trusted) reasons.push('source not on the trusted list');
+  if (o.teams > 1) reasons.push('the name fits players of two teams');
+  if (o.inj.unclear || o.inj.status === 'doubtful') reasons.push('the story is not sure ("could", "might", "doubtful")');
+  if (reasons.length) return { status: 'doubtful', until: o.published + 3 * DAY, days: 3, why: `Applied as doubtful (half weight) for 3 days: ${reasons.join('; ')}.` };
+  if (o.inj.season) {
+    const until = seasonEnd(o.published);
+    return { status: 'out', until, days: Math.max(1, Math.round((until - o.published) / DAY)), why: 'Out for the season (until the season ends); trusted source.' };
+  }
+  return { status: 'out', until: o.published + o.inj.days * DAY, days: o.inj.days, why: `Out ${o.inj.days} days from the story; trusted source.` };
 }
 
 /** Split a story into sentences (title first). */

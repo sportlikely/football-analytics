@@ -14,6 +14,9 @@
  * no answer for at 48 h is no longer voided by itself after 3 days: it goes to Admin → Needs you with "Enter result" /
  * "Void" (and keeps being looked up — a final that shows up later settles it and closes the item).
  *
+ * fix253 (Yarin: "I want you to do it all"): still no final 7 days after kick-off → void by itself (out of the record), listed
+ * in Admin → Done for you with Undo; an undone void is held (`hold`): looked up again, never voided by itself again.
+ *
  * Void = the prediction is out of every accuracy number, hidden from results pages and the users' history, shown in
  * admin with the reason. Never a loss.
  */
@@ -22,6 +25,8 @@ export const VOID_AFTER_MS = 48 * 3600 * 1000;
 /** fix240: kick-off + 48 h with no answer → Needs you */
 export const REVIEW_AFTER_MS = VOID_AFTER_MS;
 export const VOID_ATTEMPTS = 3;
+/** fix253: no final this long after kick-off → void automatically */
+export const AUTO_VOID_AFTER_MS = 7 * 24 * 3600 * 1000;
 export const TEAM_WINDOW_DAYS = 3;
 
 /** What the provider said about the game (null = nothing found by id or by teams). */
@@ -55,7 +60,7 @@ export const sameDay = (a: string | null | undefined, b: string | null | undefin
  * `kickoff` = our stored kick-off; `attempts` / `lastDay` = earlier failed attempts (lastDay = UTC day of the last one);
  * `now` = ms. A game younger than kick-off + 24 h waits (the normal settle job handles it).
  */
-export function decide(found: Lookup, o: { kickoff: string; attempts: number; lastDay: string | null; now: number }): Decision {
+export function decide(found: Lookup, o: { kickoff: string; attempts: number; lastDay: string | null; now: number; hold?: boolean }): Decision {
   const ko = Date.parse(o.kickoff);
   if (!(o.now - ko >= REFETCH_AFTER_MS)) return { action: 'wait', note: 'less than 24 h after kick-off' };
   const today = new Date(o.now).toISOString().slice(0, 10);
@@ -69,7 +74,9 @@ export function decide(found: Lookup, o: { kickoff: string; attempts: number; la
   // not found, or still not final on the provider: looked up again every run (attempts = days with a lookup)
   const attempts = o.lastDay === today ? o.attempts : o.attempts + 1;
   const what = found ? `still ${found.raw} on the provider (by ${found.via})` : `not found by fixture id or by the two teams (±${TEAM_WINDOW_DAYS} days)`;
-  // fix240: from kick-off + 48 h a person decides (Needs you: Enter result / Void); no automatic void
+  // fix253: 7 days with no final at either provider → void (unless a person undid that void: hold)
+  if (o.now - ko >= AUTO_VOID_AFTER_MS && !o.hold) return { action: 'void', reason: `no final from either provider ${Math.floor((o.now - ko) / 86400000)} days after kick-off (${what})` };
+  // fix240: from kick-off + 48 h it is watched (settle_review: Enter result / Void stay possible); fix253: nobody is asked
   if (o.now - ko >= REVIEW_AFTER_MS) return { action: 'review', attempts, note: `${what}, ${Math.floor((o.now - ko) / 3600000)} h after kick-off` };
   return { action: 'retry', attempts, note: what };
 }

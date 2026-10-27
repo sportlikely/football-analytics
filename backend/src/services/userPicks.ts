@@ -94,7 +94,11 @@ function outcomeOf(sport: Sport, gameId: number, market: string, pick: string, l
   if (!g) return 'void';
   if (BB_VOID.includes(g.status)) return 'void';
   if (!BB_DONE.includes(g.status) || g.hs === null) return 'pending';
-  try { if (db.prepare('SELECT 1 FROM bb_result_check WHERE game_id = ? AND resolved_at IS NULL').get(gameId)) return 'pending'; } catch { /* table missing */ }
+  try {
+    const c = db.prepare('SELECT resolved_at, voided FROM bb_result_check WHERE game_id = ?').get(gameId) as any;
+    if (c?.voided) return 'void'; // fix253: still unsure after 72 h
+    if (c && !c.resolved_at) return 'pending';
+  } catch { /* table missing */ }
   if (market === 'win') return (g.hs > g.as_ ? 'H' : 'A') === pick ? 'hit' : 'miss';
   if (market === 'total') { if (line === null) return 'void'; return (g.hs + g.as_ > line) === (pick === 'O') ? 'hit' : 'miss'; }
   return 'void';
