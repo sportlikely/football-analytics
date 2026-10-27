@@ -5,10 +5,12 @@
  * /assets/* (hashed, a year), sw.js, the manifest, icons and the other files in the build, and index.html (the plain
  * app page, no crawler text) for every other page address. The ready gate keeps answering 503 only for /health and
  * the API (those need the state). Also used by boot.ts, the listener that answers while the modules load.
+ * fix252: an /assets file of an older build comes from services/assetArchive.ts (kept 48 h after its deploy).
  */
 import fs from 'fs';
 import path from 'path';
 import type { IncomingMessage, ServerResponse } from 'http';
+import { archivedAsset } from './assetArchive';
 
 export const STATIC_DIR = process.env.STATIC_DIR || path.resolve(__dirname, '../../../frontend/dist');
 
@@ -54,7 +56,12 @@ export function serveEarly(req: IncomingMessage, res: ServerResponse): boolean {
     const inside = file.startsWith(path.normalize(STATIC_DIR + path.sep));
     const isFile = inside && p !== '/' && fs.existsSync(file) && fs.statSync(file).isFile();
     if (p.startsWith('/assets/')) {
-      if (!isFile) { send(res, 404, 'text/plain; charset=utf-8', 'no-store', 'Not found', head); return true; }
+      if (!isFile) {
+        // fix252: an older build's file (a tab opened before the deploy): from the archive on the volume
+        const old = archivedAsset(p.slice('/assets/'.length));
+        if (old) { send(res, 200, TYPES[path.extname(old).toLowerCase()] || 'application/octet-stream', 'public, max-age=31536000, immutable', fs.readFileSync(old), head); return true; }
+        send(res, 404, 'text/plain; charset=utf-8', 'no-store', 'Not found', head); return true;
+      }
       send(res, 200, TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream', 'public, max-age=31536000, immutable', fs.readFileSync(file), head);
       return true;
     }

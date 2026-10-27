@@ -33,7 +33,8 @@ function useData(): GamesData {
         .finally(() => { if (!off) setLoading(false) })
     }
     load(true)
-    axios.get(`${API_URL}/public/results`, { params: { days: 30, limit: 40 } }).then(r => !off && setResults(r.data.data?.rows || [])).catch(() => !off && setResults([]))
+    // fix252: the home's query (30 days, 50 rows: the warm stored copy, never "Loading"), the first 40 shown as before
+    axios.get(`${API_URL}/public/results`, { params: { days: 30, limit: 50 } }).then(r => !off && setResults((r.data.data?.rows || []).slice(0, 40))).catch(() => !off && setResults([]))
     // fix212: every 60 s while open, and again the moment the tab is back in front or the page comes out of the
     // back / forward cache (iPhone Safari): a game that ended while the phone was in a pocket never keeps its old row
     const timer = setInterval(() => load(false), 60 * 1000)

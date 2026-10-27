@@ -14,7 +14,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 import ts from 'typescript'
-import { footballScorers, basketballScorers, nflScorers, goalSides, namedGoals, hasScorerLine, type FbMatch, type ScorerLines } from '../src/lib/scorers.ts'
+import { footballScorers, basketballScorers, nflScorers, goalSides, namedGoals, hasScorerLine, scorersRoute, type FbMatch, type ScorerLines } from '../src/lib/scorers.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const FRONT = path.resolve(here, '..')
@@ -167,6 +167,25 @@ await check('tennis keeps its set scores under the score', () => {
   const a = gamePageAttr('pages/tennis/TennisMatch.tsx', 'scoreSub') || ''
   const f = gamePageAttr('pages/tennis/TennisMatch.tsx', 'footer') || ''
   assert.ok(a.includes('setsText') && f.includes('SetTable'), 'TennisMatch.tsx: set scores (scoreSub setsText / footer SetTable) missing')
+})
+
+await check('fix252: a list row without a link (null) has no scorers line, never a crash', () => {
+  for (const v of [null, undefined, '', 0, {}] as any[]) assert.equal(scorersRoute(v), null, `scorersRoute(${JSON.stringify(v)})`)
+  assert.equal(scorersRoute(null, () => 1), null)
+  assert.deepEqual(scorersRoute('/match/537#stats'), { sport: 'football', id: '537' })
+  assert.deepEqual(scorersRoute('/basketball/game/42'), { sport: 'basketball', id: '42' })
+  assert.deepEqual(scorersRoute('/american-football/college/game/7'), { sport: 'nfl', id: '7' })
+  const ids: Record<string, number> = { 'football/arsenal-vs-chelsea-2026-10-26': 537, 'american-football/bills-vs-jets-2026-10-26': 9 }
+  const idOf = (sp: string, slug: string) => ids[`${sp}/${slug}`] ?? null
+  assert.deepEqual(scorersRoute('/es/football/match/arsenal-vs-chelsea-2026-10-26/stats', idOf), { sport: 'football', id: '537' })
+  assert.deepEqual(scorersRoute('/american-football/match/bills-vs-jets-2026-10-26', idOf), { sport: 'nfl', id: '9' })
+  assert.equal(scorersRoute('/basketball/match/unknown-slug', idOf), null)
+  assert.equal(scorersRoute('/tennis/match/sinner-vs-alcaraz-2026-10-26', () => 5), null)
+})
+await check('fix252: every scorersSource / RowScorersLine caller may pass a null link', () => {
+  const s = src('components/sport/RowScorers.tsx')
+  assert.ok(/scorersSource\(href: string \| null \| undefined\)/.test(s) && /href: string \| null \| undefined;/.test(s), 'RowScorers.tsx: scorersSource / RowScorersLine no longer accept a null link')
+  assert.ok(!/href\.split\(/.test(s), 'RowScorers.tsx: href.split on a link that can be null')
 })
 
 if (fails.length) {

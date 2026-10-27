@@ -21,7 +21,7 @@ import { socket } from './lib/socket'
 import { useTheme } from './lib/theme'
 import { useUnlocks, resetDay } from './lib/unlocks'
 import { reportError } from './lib/report'
-import { isChunkError, isReloading, reloadForNewVersion } from './lib/chunkReload'
+import { isChunkError, isReloading, reloadForNewVersion, moduleDefault } from './lib/chunkReload'
 import { HUBS, hubHref } from './lib/hubs'
 import { howPath } from './lib/howItWorks'
 import { SOCIAL, type SocialId } from './lib/social'
@@ -43,9 +43,10 @@ function page<T extends ComponentType<any>>(load: () => Promise<{ default: T }>)
     load().then(
       m => {
         if (m?.default) return m
-        // Vite's loader returns nothing when its vite:preloadError was handled (lib/chunkReload.ts reloads)
+        // Vite's loader returns nothing when its vite:preloadError was handled (lib/chunkReload.ts reloads); fix252: a
+        // module without its default export is a failed load too (one hard reload, else the page's error box)
         if (isReloading() || reloadForNewVersion()) return never()
-        throw new Error('Failed to fetch dynamically imported module (empty)')
+        return { default: moduleDefault(m) }
       },
       err => {
         if (isReloading() || (isChunkError(err) && reloadForNewVersion())) return never()

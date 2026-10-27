@@ -31,6 +31,8 @@ import { WORKER_PORT } from './services/forward';
 import { workerState, type WorkerReport } from './services/workerHealth';
 import { heapShareMb } from './utils/memLimit';
 import { exitReason, saveWorkerExit, startPerfHistory } from './services/perfHistory';
+import { archiveBuild } from './services/assetArchive';
+import { STATIC_DIR } from './services/earlyStatic';
 
 // fix227: boot.ts (the container's entry) already listens on PORT and answers the site's files while this loads: take
 // its server over (this app answers from now on). Started alone (node dist/index.js, tests) it listens itself.
@@ -222,6 +224,8 @@ const onListening = () => {
   logger.info(`Server running on http://localhost:${PORT}`);
   logger.info(`WebSocket server ready (CORS: ${isDev ? 'any origin [dev]' : allowedOrigins.join(', ')})`);
   startPerfHistory('web'); // fix210: this process's hourly stalls and memory (perf_hours)
+  // fix252: this build's app files kept on the volume for tabs still running it after the next deploy (48 h)
+  setTimeout(() => void archiveBuild(STATIC_DIR).then(r => r && logger.info(`old app files: ${r.copied} copied, ${r.kept} kept, ${r.dropped} dropped`)), 10_000).unref();
   if (isWeb) {
     // fix202: serve straight away from the stored pages and the model state the worker left; then start the worker
     workerState.enabled = true;

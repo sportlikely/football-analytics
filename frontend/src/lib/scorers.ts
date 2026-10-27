@@ -172,3 +172,31 @@ export function nflScorers(plays: NflPlay[], homeId: number, awayId: number): Sc
 
 /** Does a header line exist for this game (the parity render check)? */
 export const hasScorerLine = (l: ScorerLines | null | undefined) => !!l && (l.home.length > 0 || l.away.length > 0)
+
+/** a list row's sport (the API key of its /scorers route) */
+export type ScorerSport = 'football' | 'basketball' | 'nfl'
+const SCORER_SPORT: Record<string, ScorerSport> = { football: 'football', basketball: 'basketball', 'american-football': 'nfl' }
+
+/**
+ * fix252 — which game a list row's link opens, for its scorers line: { sport, id } or null (no line). The link can be
+ * null (fix243: a past season's game, or one not known yet, has no link — "Cannot read properties of null (reading
+ * 'split')" on the homes and lists, 26–27 Oct), an old id address (/match/<id>, /basketball/game/<id>,
+ * /american-football/(college/)game/<id>) or a slug address (/<lang?>/<sport>/match/<slug>[/<tab>]): its id from
+ * `idOf` (lib/links knownId). Tennis has its set scores instead.
+ */
+export function scorersRoute(href: string | null | undefined, idOf: (sport: 'football' | 'basketball' | 'american-football', slug: string) => string | number | null = () => null): { sport: ScorerSport; id: string } | null {
+  if (typeof href !== 'string' || !href) return null
+  const path = href.split('#')[0].split('?')[0]
+  let x = /^\/match\/(\d+)/.exec(path)
+  if (x) return { sport: 'football', id: x[1] }
+  x = /^\/basketball\/game\/(\d+)/.exec(path)
+  if (x) return { sport: 'basketball', id: x[1] }
+  x = /^\/american-football\/(?:college\/)?game\/(\d+)/.exec(path)
+  if (x) return { sport: 'nfl', id: x[1] }
+  x = /^(?:\/[a-z]{2})?\/(football|basketball|american-football)\/match\/([^/]+)/.exec(path)
+  if (x) {
+    const id = idOf(x[1] as 'football' | 'basketball' | 'american-football', x[2])
+    return id == null || id === '' ? null : { sport: SCORER_SPORT[x[1]], id: String(id) }
+  }
+  return null
+}

@@ -105,7 +105,8 @@ import { sharedStatus } from './services/shared';
 import { forwardToWorker, fetchFromWorker } from './services/forward';
 import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, pastMatch, type LinkAnswer } from './services/slugs';
 import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
-import { definePage, getPage, refreshPages, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
+import { archivedAsset } from './services/assetArchive';
+import { definePage, getPage, fallbackQuery, refreshPages, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions, viewIdOf, makePass, readPass, PASS_COOKIE, PASS_MS } from './services/proxyGuard';
@@ -635,6 +636,16 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
   // fix245: a verified search engine never gets this 503: the worker builds the page now and answers
   if (!s && isWeb && isVerifiedCrawler(req)) return forwardToWorker(req, res);
+  // fix252: a query with no copy yet (2 × /api/public/results after the 12:21 deploy on 27 Oct): the page's stand-in copy
+  // (PageDef.fallback: a warm query, always stored) while the worker builds this one — never "Loading" when one exists
+  if (!s) {
+    const fb = fallbackQuery(name, q);
+    if (fb) {
+      const t = track(`stored ${name}: fallback`);
+      try { s = await getPage(name, fb, { views, waitMs: 0 }); } finally { t(); }
+      if (s) res.set('X-SL-Copy', 'nearest');
+    }
+  }
   if (!s) { noteLoading(req.path); return res.status(202).set({ 'Cache-Control': 'no-store', 'X-SL-Pending': '1' }).json({ pending: true, data: null }); }
   // fix232: when this copy was built (after a restart: the last copy stored before it, until the worker has a new one)
   res.set('X-SL-Built-At', new Date(s.builtAt).toISOString());
@@ -2952,6 +2963,8 @@ app.get('/api/public/record', async (req, res) => {
 const hideResultP = (b: any) => ({ ...b, data: { ...b.data, rows: b.data.rows.map((r: any) => ({ ...r, p: null, dc: r.dc ? { ...r.dc, p: null } : null })) } });
 definePage({
   name: 'results', freshMs: 5 * 60 * 1000, warm: [{ days: 30, limit: 50 }],
+  // fix252: every league's latest results, any period / length, first answered from the warm copy (30 days, 50 rows)
+  fallback: q => (q.competition ? null : { days: 30, limit: 50 }),
   build: async q => {
     const days = Number(q.days) || 30, limit = Number(q.limit) || 50, competition = q.competition || undefined;
     await preloadSettled(days, competition); // fix210b: one paged read, the three counts below share it
@@ -4441,8 +4454,16 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   // fix167: a file that isn't there (an old version's page file, asked by a tab opened before a deploy) is a plain 404:
   // never the HTML page (the browser would run it as a script), never an error log line; not cached, so a CDN or
   // browser asks again. The page reloads itself for the new version (frontend lib/chunkReload.ts).
+  // fix252: before that 404, an older build's file from the archive on the volume (services/assetArchive.ts: kept 48 h
+  // after the deploy that replaced it), so a tab opened before a deploy keeps loading its pages
+  app.use('/assets', (req, res, next) => {
+    const old = req.method === 'GET' || req.method === 'HEAD' ? archivedAsset(req.path.replace(/^\//, '')) : null;
+    if (!old) return next();
+    res.set('Cache-Control', 'public, max-age=31536000, immutable').sendFile(old);
+  });
   app.use('/assets', (_req, res) => { res.status(404).set('Cache-Control', 'no-store').type('text/plain').send('Not found'); });
-  app.use(express.static(STATIC_DIR, { index: false, maxAge: '7d' }));
+  // fix252: index.html itself (asked as /index.html) is never kept by a browser or CDN: it names this build's files
+  app.use(express.static(STATIC_DIR, { index: false, maxAge: '7d', setHeaders: (res, file) => { if (file.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); } }));
   const indexHtml = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
   // fix202: the sport home pages (every language) as search engines get them: stored pages built in the worker
   const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr'].map(l => `/${l}`)].flatMap(l => ['', '/football', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));

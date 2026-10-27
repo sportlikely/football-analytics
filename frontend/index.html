@@ -44,8 +44,9 @@
       // the server restarts) or hasn't started within 6 s, it is asked for again (2 tries, 2 s apart, a fresh
       // address); then a "Updating SportLikely…" card with a Reload button, reloading itself every 10 s (6 times).
       // main.tsx calls __slBoot.started() / mounted() / fail(). The card's words follow the address's language.
+      // fix252: before the card, one hard reload per build per session (hardReload).
       (function () {
-        var d = document, w = window, de = d.documentElement, KEY = 'sl-boot-reloads';
+        var d = document, w = window, de = d.documentElement, KEY = 'sl-boot-reloads', HARD = 'sl-hard-reload';
         de.classList.add('js');
         var attempt = 0, started = false, mounted = false, card = null;
         var main = function () { return d.querySelector('script[type=module][src*="/assets/"]'); };
@@ -65,8 +66,24 @@
               body: JSON.stringify({ message: 'App did not load (fix227 loader): ' + why, page: location.pathname, kind: 'uncaught', version: (main() || {}).src || '', browser: navigator.userAgent.slice(0, 120) }) })['catch'](function () {});
           } catch (e) {}
         };
+        // fix252: an old page (a browser / CDN copy naming the last build's files, gone after a deploy) — before the card,
+        // one hard reload with ?sl_v=<time> (no copy can answer it), once per session for this build: the same key and
+        // value as lib/chunkReload.ts, so the loader and the app never reload twice for one build. Without
+        // sessionStorage: no reload (the card, as before).
+        var hardReload = function () {
+          try {
+            var s = main(), app = s ? s.src.split('?')[0] : '';
+            if (!app || sessionStorage.getItem(HARD) === app) return false;
+            sessionStorage.setItem(HARD, app);
+            var u = new URL(location.href);
+            u.searchParams.set('sl_v', String(Date.now()));
+            location.replace(u.toString());
+            return true;
+          } catch (e) { return false; }
+        };
         var showCard = function (why) {
           if (card || mounted) return;
+          if (hardReload()) return;
           var lang = (/^\/(de|es|fr|it|pt|tr)(\/|$)/.exec(location.pathname) || [])[1] || 'en', t = WORDS[lang];
           var dark = de.classList.contains('dark');
           card = d.createElement('div');

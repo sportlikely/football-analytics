@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { t } from '../../lib/i18n'
-import { footballScorers, basketballScorers, nflScorers, hasScorerLine, type ScorerLines } from '../../lib/scorers'
+import { footballScorers, basketballScorers, nflScorers, hasScorerLine, scorersRoute, type ScorerLines } from '../../lib/scorers'
+import { knownId } from '../../lib/links'
 import { RowScorers } from './game/ScoreLines'
 
 /**
@@ -11,16 +12,14 @@ import { RowScorers } from './game/ScoreLines'
  * (no provider call), every 60 s while open and live.
  */
 
-/** The /scorers route of a game page link, and how to read it; null = this row has no scorers line (tennis: the sets). */
-export function scorersSource(href: string): { url: string; read: (d: any) => ScorerLines | null } | null {
-  const path = href.split('#')[0]
-  let x = /^\/match\/(\d+)/.exec(path)
-  if (x) return { url: `${API_URL}/matches/${x[1]}/scorers`, read: d => (d ? footballScorers(d) : null) }
-  x = /^\/basketball\/game\/(\d+)/.exec(path)
-  if (x) return { url: `${API_URL}/basketball/game/${x[1]}/scorers`, read: d => (d ? basketballScorers(d) : null) }
-  x = /^\/american-football\/(?:college\/)?game\/(\d+)/.exec(path)
-  if (x) return { url: `${API_URL}/nfl/game/${x[1]}/scorers`, read: d => (d ? nflScorers(d.plays || [], d.homeId, d.awayId) : null) }
-  return null
+/** The /scorers route of a game page link, and how to read it; null = this row has no scorers line (tennis: the sets, a
+ *  past season's game: no link). fix252: the link may be null, and a slug link finds its id in lib/links. */
+export function scorersSource(href: string | null | undefined): { url: string; read: (d: any) => ScorerLines | null } | null {
+  const r = scorersRoute(href, (sport, slug) => knownId(sport, 'match', slug))
+  if (!r) return null
+  if (r.sport === 'football') return { url: `${API_URL}/matches/${r.id}/scorers`, read: d => (d ? footballScorers(d) : null) }
+  if (r.sport === 'basketball') return { url: `${API_URL}/basketball/game/${r.id}/scorers`, read: d => (d ? basketballScorers(d) : null) }
+  return { url: `${API_URL}/nfl/game/${r.id}/scorers`, read: d => (d ? nflScorers(d.plays || [], d.homeId, d.awayId) : null) }
 }
 
 /** The arrow (inside the row's link: it opens the line, never the page). */
@@ -35,7 +34,7 @@ export function ScorersToggle({ open, onToggle }: { open: boolean; onToggle: () 
 }
 
 /** The opened line under the row. */
-export function RowScorersLine({ href, live, homeName, awayName, className = '' }: { href: string; live: boolean; homeName: string; awayName: string; className?: string }) {
+export function RowScorersLine({ href, live, homeName, awayName, className = '' }: { href: string | null | undefined; live: boolean; homeName: string; awayName: string; className?: string }) {
   const src = scorersSource(href)
   const [lines, setLines] = useState<ScorerLines | null | undefined>(undefined)
   useEffect(() => {

@@ -48,6 +48,11 @@ export interface PageDef {
   keepMs?: number;
   /** fix210: false = built only when a visitor asks for it (player / match / news pages …), never kept fresh by the warmer */
   refresh?: boolean;
+  /**
+   * fix252: the stored copy to send while a query never asked before is being built (fix232's rule: a stored copy, never
+   * "Loading"), e.g. a list's warm query for the same list with other limits; null = none fits (the visitor waits)
+   */
+  fallback?: (q: Query) => Query | null;
 }
 /** fix221: a list as text: `head` + rows joined by ',' + `tail`; a row's tease / locked text (missing = same as the one before) */
 export interface Rows { head: string; tail: string; rows: { id: number; full: string; tease?: string; locked?: string }[] }
@@ -459,6 +464,12 @@ export function cleanPageCache(now = Date.now()) {
     db.prepare(`DELETE FROM page_cache WHERE built_at < ?${keep.length ? ` AND ${base} NOT IN (${keep.map(() => '?').join(',')})` : ''}`).run(now - 7 * 86400000, ...keep);
     for (const d of defs.values()) if (d.keepMs) db.prepare(`DELETE FROM page_cache WHERE (key = ? OR key LIKE ?) AND built_at < ?`).run(d.name, `${d.name}?%`, now - d.keepMs);
   } catch { /* next hour */ }
+}
+
+/** fix252: the query whose stored copy stands in for `q` while `q` is built (PageDef.fallback), or null */
+export function fallbackQuery(name: string, q: Query = {}): Query | null {
+  const fb = defs.get(name)?.fallback?.(q) || null;
+  return fb && pageKey(name, fb) !== pageKey(name, q) ? fb : null;
 }
 
 /** fix210b (worker): when this page was last stored (0 = never) — prebuild jobs skip what is fresh */
