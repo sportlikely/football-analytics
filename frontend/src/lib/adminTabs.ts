@@ -178,7 +178,8 @@ export const HEALTH_RULES: HealthRule[] = [
   { match: 'deploy-errors', tab: 'site', what: 'Pages or files that failed for visitors right after the last restart.', todo: 'Tell Claude, with the time of the deploy.' },
   { match: 'disk', tab: 'site', title: 'Disk', what: 'How full the server disk is, how big the database is, how fast it grew in the last 7 days and its biggest tables. Yellow when it would fill the disk within 30 days.', todo: 'Nothing while green. If yellow or red, tell Claude with the table list.' },
   { match: 'slow-reads', tab: 'site', title: 'Slow reads (3 h)', what: 'Reads of stored pages and data that took over half a second, and public requests over 1 second, in the last 3 hours (target: none).', todo: 'Tell Claude if it stays yellow, with the longest read listed.' },
-  { match: 'slow-requests', tab: 'site', title: 'Slow requests', what: 'Public pages or data that took over 1 second to answer in the last hour (target: none).', todo: 'Tell Claude, with the routes listed.' },
+  { match: 'slow-requests', tab: 'site', title: 'Slow requests', what: 'Public pages or data that took over 1 second to answer in the last hour, for visitors signed in or out (target: none).', todo: 'Tell Claude, with the routes listed.' },
+  { match: 'slow-requests-admin', tab: 'site', title: 'Slow requests (admin)', what: 'Pages and lists that took over 1 second to answer for an admin in the last hour (red: an admin should get the same speed as visitors), and admin tools over 3 seconds (yellow).', todo: 'Tell Claude, with the routes listed.' },
 
   // ---------- Emails & alerts ----------
   { match: 'email-daily', tab: 'messages', what: 'Everyone due an email today got one (or has a reason why not).', todo: 'Send yourself a test; if it is still red, tell Claude.' },

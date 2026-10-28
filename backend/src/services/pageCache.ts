@@ -33,7 +33,7 @@ export interface PageDef {
   freshMs: number;
   build: (q: Record<string, string>) => Promise<unknown> | unknown;
   /** ready-made strings stored beside the page (e.g. the signed-out copy), so a request only sends them */
-  variants?: Record<string, (body: any, q: Record<string, string>) => string | Promise<string>>;
+  variants?: Record<string, (body: any, q: Record<string, string>) => string | null | Promise<string | null>>;
   /**
    * fix221: a list page as one string per row (full / teased / locked), made by the worker. The web process puts a
    * member's own copy together from them (their unlocked games in full) without parsing or serialising anything; the
@@ -333,7 +333,8 @@ function buildNow(key: string): Promise<void> {
     // fix210: a long list becomes JSON in slices (the upcoming list is several MB)
     const json = await stringifyAsync(body);
     const texts: [string, string][] = [];
-    for (const [v, fn] of Object.entries(def.variants || {})) { texts.push([v, await fn(body, q)]); await yieldLoop(); }
+    // (null = this query has no such view, e.g. fix266's 'admin' copy only on the full lists)
+    for (const [v, fn] of Object.entries(def.variants || {})) { const t = await fn(body, q); if (t !== null) texts.push([v, t]); await yieldLoop(); }
     // fix221: a list page's rows, and its 'anon' / 'full' views made from them
     if (def.rows) {
       const r = await def.rows(body, q);
@@ -585,6 +586,22 @@ export async function getPage(name: string, q: Query = {}, opts: { waitMs?: numb
 }
 
 /**
+ * fix266: the first round after a (re)start: the stale copies first — the lists (pages stored row by row) and the sport
+ * homes before the rest — then the copies that are still fresh. On 28 Oct the lists waited behind everything else the
+ * worker started with (291 states, the names job) while every request for them went to the worker.
+ */
+const FIRST_NAMES = new Set(['upcoming', 'bb-games', 'nfl-home', 'tennis-home', 'results', 'record', 'summary']);
+function firstOrder(keys: Set<string>, due: (key: string, def: PageDef) => boolean): string[] {
+  const rank = (key: string) => {
+    const def = defs.get(parseKey(key).name);
+    if (!def) return 9;
+    const list = !!def.rows || FIRST_NAMES.has(def.name);
+    return due(key, def) ? (list ? 0 : 1) : list ? 2 : 3;
+  };
+  const ranked = [...keys].map(k => [rank(k), k] as const);
+  return ranked.sort((a, b) => a[0] - b[0]).map(([, k]) => k); // (a stable sort: each group keeps its order)
+}
+/**
  * worker / one process: build every page's `warm` queries now (one at a time) and keep them, and every key a visitor
  * asked for within the last hour, fresh. Returns when the first round is done.
  */
@@ -594,7 +611,7 @@ export async function startPageWarmer(): Promise<void> {
     const keys = new Set<string>();
     for (const def of defs.values()) for (const q of def.warm || []) keys.add(pageKey(def.name, q));
     for (const [k, at] of requestedAt) if (Date.now() - at < 3600 * 1000) keys.add(k); else requestedAt.delete(k);
-    for (const key of keys) {
+    for (const key of first ? firstOrder(keys, due) : keys) {
       const def = defs.get(parseKey(key).name);
       if (!def || (!first && !due(key, def))) continue;
       await buildQueued(key); // fix210: one heavy job at a time (the first round took 205 s beside every other start-up job)
@@ -711,6 +728,8 @@ export function pageCacheStatus() {
 export const _forgetPageMemory = () => { mem.clear(); memBytes = 0; };
 /** tests: a page's definition (fix221: the big-list test swaps the builder for real-size data, keeping the views) */
 export const _pageDef = (name: string) => defs.get(name);
+/** fix266 (tests): the first round's order */
+export const _firstOrder = (keys: string[], stale: (key: string) => boolean) => firstOrder(new Set(keys), key => stale(key));
 /** /api/perf: this process's in-memory copies (fix210: capped) */
 export const pageMemStatus = () => ({ copies: mem.size, mb: Math.round(memBytes / 1048576), maxCopies: MEM_MAX, maxMb: Math.round(MEM_MAX_BYTES / 1048576) });
 /** tests (fix263): every warm key */

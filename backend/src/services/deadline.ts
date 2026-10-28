@@ -13,6 +13,9 @@
  *   X-SL-Stale and the handler runs again in the background (one run per address at a time) to refresh it.
  * - Every public GET over 1,000 ms is counted by route (`slowRequests`, /api/perf) and written each minute to
  *   slow_requests (through the worker): data health "Slow requests" fails on any in the last hour.
+ * - fix266: signed-in requests count too (an admin's list took 3–53 s on 28 Oct and no check saw it): every /api GET is
+ *   timed, by who asked (admin / signed in / signed out); a request the guard cut counts until its handler ended, not
+ *   until the 202 (it was never over 1 s that way). Admins' own: data health "Slow requests (admin)".
  */
 import type express from 'express';
 import { db } from '../db';
@@ -51,28 +54,31 @@ const SKIP_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection
 
 /* ---------- the slow-request counter ---------- */
 
-type Slow = { n: number; maxMs: number; crawler: number };
+type Slow = { n: number; maxMs: number; crawler: number; admin: number; signed: number };
+type Who = 'crawler' | 'admin' | 'signed' | 'anon';
 const minutes = new Map<number, Map<string, Slow>>(); // minute → route → counts (this process, last 60 minutes)
 const slowStats = { total: 0, pendingSent: 0, appPageSent: 0, lateServed: 0, lateStale: 0, lateKept: 0, lateRefreshed: 0 };
-function noteSlow(route: string, ms: number, crawler: boolean) {
+function noteSlow(route: string, ms: number, who: Who) {
   const m = Math.floor(Date.now() / 60_000);
   let b = minutes.get(m);
   if (!b) { minutes.set(m, (b = new Map())); for (const k of minutes.keys()) if (k < m - 60) minutes.delete(k); }
-  const e = b.get(route) || { n: 0, maxMs: 0, crawler: 0 };
-  e.n++; e.maxMs = Math.max(e.maxMs, Math.round(ms)); if (crawler) e.crawler++;
+  const e = b.get(route) || { n: 0, maxMs: 0, crawler: 0, admin: 0, signed: 0 };
+  e.n++; e.maxMs = Math.max(e.maxMs, Math.round(ms));
+  if (who === 'crawler') e.crawler++; else if (who === 'admin') e.admin++; else if (who === 'signed') e.signed++;
   if (b.size < 200 || b.has(route)) b.set(route, e);
   slowStats.total++;
 }
 if (runsJobs) {
   db.exec(`CREATE TABLE IF NOT EXISTS slow_requests (minute INTEGER NOT NULL, route TEXT NOT NULL, n INTEGER NOT NULL, max_ms INTEGER NOT NULL, crawler INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (minute, route))`);
+  for (const col of ['admin INTEGER NOT NULL DEFAULT 0', 'signed INTEGER NOT NULL DEFAULT 0']) { try { db.exec(`ALTER TABLE slow_requests ADD COLUMN ${col}`); } catch { /* there already */ } }
   setInterval(() => { try { db.prepare(`DELETE FROM slow_requests WHERE minute < ?`).run(Math.floor(Date.now() / 60_000) - 7 * 1440); } catch { /* next hour */ } }, 3600_000).unref();
 }
 // each finished minute goes to slow_requests (written by the worker: the web process writes nothing itself)
-const saveSlow = deferred(`INSERT OR REPLACE INTO slow_requests (minute, route, n, max_ms, crawler) VALUES (?, ?, ?, ?, ?)`);
+const saveSlow = deferred(`INSERT OR REPLACE INTO slow_requests (minute, route, n, max_ms, crawler, admin, signed) VALUES (?, ?, ?, ?, ?, ?, ?)`);
 const savedUpTo = { m: Math.floor(Date.now() / 60_000) - 1 };
 if (isWeb || runsJobs) setInterval(() => {
   const now = Math.floor(Date.now() / 60_000);
-  for (const [m, b] of minutes) if (m > savedUpTo.m && m < now) for (const [route, e] of b) { try { saveSlow.run(m, route, e.n, e.maxMs, e.crawler); } catch { /* next minute */ } }
+  for (const [m, b] of minutes) if (m > savedUpTo.m && m < now) for (const [route, e] of b) { try { saveSlow.run(m, route, e.n, e.maxMs, e.crawler, e.admin, e.signed); } catch { /* next minute */ } }
   savedUpTo.m = now - 1;
 }, 60_000).unref();
 
@@ -81,8 +87,8 @@ export function slowRequests() {
   const since = Math.floor(Date.now() / 60_000) - 60;
   const by = new Map<string, Slow>();
   for (const [m, b] of minutes) if (m >= since) for (const [r, e] of b) {
-    const x = by.get(r) || { n: 0, maxMs: 0, crawler: 0 };
-    x.n += e.n; x.maxMs = Math.max(x.maxMs, e.maxMs); x.crawler += e.crawler;
+    const x = by.get(r) || { n: 0, maxMs: 0, crawler: 0, admin: 0, signed: 0 };
+    x.n += e.n; x.maxMs = Math.max(x.maxMs, e.maxMs); x.crawler += e.crawler; x.admin += e.admin; x.signed += e.signed;
     by.set(r, x);
   }
   return { deadlineMs: DEADLINE_MS, ...slowStats, lastHour: [...by].sort((a, b) => b[1].n - a[1].n).slice(0, 20).map(([route, e]) => ({ route, ...e })), late: { copies: late.size, mb: Math.round(lateBytes / 1048576) } };
@@ -135,11 +141,15 @@ export interface DeadlineOpts {
   isApi: (path: string) => boolean;
   /** an app page (the guard answers the plain app page); null = pages are not guarded */
   sendAppPage: ((res: express.Response) => boolean) | null;
+  /** fix266: any other /api GET (account, admin): timed for the counter, never cut */
+  isTimedApi?: (path: string) => boolean;
   /** route label for the counter (perf.routeLabel) */
   label: (req: express.Request) => string;
   /** a verified search engine (never cut short) */
   crawler: (req: express.Request) => boolean;
 }
+/** fix266: who asked (read when the answer is done: sign-in has run by then) */
+const whoOf = (req: express.Request, crawler: boolean): Who => (crawler ? 'crawler' : req.access === 'admin' ? 'admin' : req.user ? 'signed' : 'anon');
 type Loc = { slT0: number; slKey?: string | null; slNoLate?: boolean; slTimer?: NodeJS.Timeout; slCut?: boolean };
 const loc = (res: express.Response) => res.locals as Loc;
 const isPage = (req: express.Request) => !req.path.startsWith('/api/') && !req.path.startsWith('/socket.io') && !req.path.startsWith('/assets/')
@@ -160,15 +170,23 @@ export function deadlineStart(opts: DeadlineOpts) {
     if (!isWeb || (req.method !== 'GET' && req.method !== 'HEAD')) return next();
     const api = opts.isApi(req.path);
     const page = !api && !!opts.sendAppPage && isPage(req);
-    if (!api && !page) return next();
+    if (!api && !page) {
+      // fix266: an account / admin read is timed too (never cut: admin tools wait for their answer)
+      if (opts.isTimedApi?.(req.path)) {
+        const t0 = performance.now();
+        res.once('finish', () => { const ms = performance.now() - t0; if (ms > SLOW_MS) noteSlow(opts.label(req), ms, whoOf(req, false)); });
+      }
+      return next();
+    }
     const l = loc(res);
     l.slT0 = performance.now();
     // fix254: the app's own JSON lookups keep the 1-s rule for search engines too (slug-of 9.1 s, results 4.0 s, 28 Oct)
     const crawler = opts.crawler(req) && !ALWAYS_CUT.test(req.path);
+    // fix266: a request the guard cut counts until its handler ended (the visitor waited for that answer through retries)
+    const note = () => { const ms = performance.now() - l.slT0; if (ms > SLOW_MS) noteSlow(opts.label(req), ms, whoOf(req, crawler)); };
     res.once('finish', () => {
       clearTimeout(l.slTimer);
-      const ms = performance.now() - l.slT0;
-      if (ms > SLOW_MS) noteSlow(opts.label(req), ms, crawler);
+      if (!l.slCut) note();
     });
     res.once('close', () => clearTimeout(l.slTimer));
     if (!crawler) {
@@ -180,11 +198,12 @@ export function deadlineStart(opts: DeadlineOpts) {
           res.status(202).set({ 'Cache-Control': 'no-store', 'X-SL-Pending': '1', 'Content-Type': 'application/json; charset=utf-8' }).end('{"pending":true,"data":null}');
           const k = l.slKey;
           capture(res, (status, headers, body) => {
+            note();
             if (!k || l.slNoLate || status !== 200 || headers.has('set-cookie') || !body.length) return;
             slowStats.lateKept++;
             lateSet(k, { at: Date.now(), status, headers: [...headers].filter(([h]) => !SKIP_HEADERS.has(h)), body });
           });
-        } else if (opts.sendAppPage!(res)) { slowStats.appPageSent++; capture(res, () => undefined); }
+        } else if (opts.sendAppPage!(res)) { slowStats.appPageSent++; capture(res, () => note()); }
       }, DEADLINE_MS);
       l.slTimer.unref?.();
     }
@@ -232,18 +251,42 @@ export const keepsOwnCopies = (res: express.Response) => { loc(res).slNoLate = t
 export const wasCut = (res: express.Response) => !!loc(res).slCut;
 
 type Check = { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items?: string[] };
+/** routes only staff use (admin tools, CRM, staff console) */
+const ADMIN_ROUTE = /^http GET \/api\/(admin|crm|staff|perf)(\/|$)/;
 /** data health (worker): public GETs over 1 s in the last hour (search engines apart: they wait on purpose) */
 export function slowRequestsHealth(): Check {
   const since = Math.floor(Date.now() / 60_000) - 60;
   let rows: any[] = [];
-  try { rows = db.prepare(`SELECT route, SUM(n) AS n, MAX(max_ms) AS max_ms, SUM(crawler) AS crawler FROM slow_requests WHERE minute >= ? GROUP BY route ORDER BY n DESC`).all(since) as any[]; } catch { /* no table yet */ }
-  const people = rows.map(r => ({ ...r, people: r.n - r.crawler })).filter(r => r.people > 0);
+  try { rows = db.prepare(`SELECT route, SUM(n) AS n, MAX(max_ms) AS max_ms, SUM(crawler) AS crawler, SUM(admin) AS admin, SUM(signed) AS signed FROM slow_requests WHERE minute >= ? GROUP BY route ORDER BY n DESC`).all(since) as any[]; } catch { /* no table yet */ }
+  // fix266: visitors signed in or out (admins have their own check below; account / admin routes are only theirs)
+  const people = rows.filter(r => !ADMIN_ROUTE.test(r.route)).map(r => ({ ...r, people: r.n - r.crawler - r.admin })).filter(r => r.people > 0);
   const crawlers = rows.reduce((t, r) => t + r.crawler, 0);
   const total = people.reduce((t, r) => t + r.people, 0);
+  const signed = people.reduce((t, r) => t + r.signed, 0);
   return {
     id: 'slow-requests', label: 'Slow requests',
     level: total ? 'fail' : 'ok',
-    detail: total ? `${total} public request(s) took over 1 s in the last hour (target 0)` : `No public request over 1 s in the last hour${crawlers ? ` (search engines waiting for a first page build: ${crawlers})` : ''}`,
-    items: people.slice(0, 15).map(r => `${r.route}: ${r.people} × over 1 s, longest ${(r.max_ms / 1000).toFixed(1)} s`)
+    detail: total ? `${total} public request(s) took over 1 s in the last hour (target 0)${signed ? `, ${signed} of them signed in` : ''}` : `No public request over 1 s in the last hour${crawlers ? ` (search engines waiting for a first page build: ${crawlers})` : ''}`,
+    items: people.slice(0, 15).map(r => `${r.route}: ${r.people} × over 1 s${r.signed ? ` (${r.signed} signed in)` : ''}, longest ${(r.max_ms / 1000).toFixed(1)} s`)
+  };
+}
+/**
+ * fix266: data health "Slow requests (admin)" — admins' requests over 1 s in the last hour. The lists and pages
+ * visitors open too: red on any (an admin's list is a stored copy like everyone's); admin tools: yellow over 3 s.
+ */
+export function slowAdminRequestsHealth(): Check {
+  const since = Math.floor(Date.now() / 60_000) - 60;
+  let rows: any[] = [];
+  try { rows = db.prepare(`SELECT route, SUM(admin) AS n, MAX(max_ms) AS max_ms FROM slow_requests WHERE minute >= ? AND admin > 0 GROUP BY route ORDER BY n DESC`).all(since) as any[]; } catch { /* no table yet */ }
+  const pages = rows.filter(r => !ADMIN_ROUTE.test(r.route));
+  const tools = rows.filter(r => ADMIN_ROUTE.test(r.route));
+  const slowTools = tools.filter(r => r.max_ms > 3000);
+  const n = (l: any[]) => l.reduce((t, r) => t + r.n, 0);
+  return {
+    id: 'slow-requests-admin', label: 'Slow requests (admin)',
+    level: pages.length ? 'fail' : slowTools.length ? 'warn' : 'ok',
+    detail: pages.length ? `${n(pages)} admin request(s) for public pages took over 1 s in the last hour (target 0)`
+      : slowTools.length ? `${n(slowTools)} admin tool request(s) over 3 s in the last hour` : `No admin page over 1 s in the last hour${tools.length ? ` (admin tools over 1 s: ${n(tools)}, none over 3 s)` : ''}`,
+    items: [...pages, ...tools].slice(0, 15).map(r => `${r.route}: ${r.n} × over 1 s, longest ${(r.max_ms / 1000).toFixed(1)} s`)
   };
 }

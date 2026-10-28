@@ -95,6 +95,7 @@ import { isReady, readiness } from './services/readiness';
 import { serveEarly, needsState, currentMainScript } from './services/earlyStatic';
 import { deployErrorsMiddleware, noteLoading } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
+import { stringifyAsync } from './utils/jsonAsync';
 import { workerRoutes, workerRoutesStatus, sendStartupCopy, newsIsStored } from './services/workerRoutes';
 import { namesTick, namesJson, namesAdmin, setAdminName, latinFor, viewOf, VIEW_SQL } from './services/names';
 import { deadlineStart, lateCopy, slowRequests } from './services/deadline';
@@ -302,6 +303,8 @@ app.use(deadlineStart({
     res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-SL-Pending': '1' }).end(page);
     return true;
   },
+  // fix266: every other /api read is timed too (signed-in, admin); file downloads and the live stream apart
+  isTimedApi: p => p.startsWith('/api/') && !/^\/api\/(health$|client-error$|webhooks\/|assistant\/)|\/(download|backups?)(\/|$)|\.(csv|json|sqlite|gz|zip)$/.test(p),
   label: req => routeLabel(req.method, req.path),
   crawler: req => isVerifiedCrawler(req)
 }));
@@ -584,10 +587,17 @@ app.use('/api', (req, res, next) => {
  * the worker. The big lists (football upcoming, basketball games) are also stored row by row: a member with unlocked
  * games and a data-centre visitor get their copy joined from those strings. Anything else that would need the page
  * itself (admins, a view not stored) is passed to the worker — the web process never parses or serialises a page.
+ * fix266: admins have their own stored view ('admin') on every list; a copy without the view a request needs gets the
+ * nearest stored view and is rebuilt — no list request goes to the worker (a data-centre network's big page aside).
  */
 const jsonText = (x: unknown) => JSON.stringify(x, app.get('json replacer'));
-const VIEWS_PLAIN = { full: (b: any) => jsonText(stripMarket(b)) };
-const VIEWS_MATCHES = { anon: (b: any) => jsonText(stripMarket(teaseDeep(b))), full: (b: any) => jsonText(stripMarket(b)) };
+/**
+ * fix266: the admins' copy (bookmaker data kept, nothing trimmed: what res.json sent them) stored beside 'anon' / 'full'.
+ * Admins got every list from the worker (view null → the page through res.json there): 3.3 s on average, 53 s at most
+ * while the worker was busy after a restart (28 Oct). Now an admin's list is a stored string like everyone else's.
+ */
+const adminText = (b: any) => stringifyAsync(b, app.get('json replacer'));
+const VIEWS_PLAIN = { full: (b: any) => jsonText(stripMarket(b)), admin: adminText };
 const ROWS_MARK = '\u0003rows';
 /**
  * fix221: a list page ({ ..., [key]: rows }) as row strings: full (bookmaker data stripped), teased (`tease`, default the
@@ -610,13 +620,13 @@ async function listRows(body: any, opts: { key?: string; id?: (row: any) => numb
   }
   return { head: `${shell.slice(0, at)}[`, tail: `]${shell.slice(at + JSON.stringify(ROWS_MARK).length)}`, rows };
 }
-/** the stored view for a match list (/api/matches/*): null = send the page through res.json */
+/** the stored view for a match list (/api/matches/*) — fix266: every reader has one (admins 'admin') */
 const matchView = (req: express.Request) => {
   const access = req.access || 'anon';
-  return access === 'admin' ? null : !req.user && access === 'anon' ? 'anon' : canSeeFull(access) ? 'full' : null;
+  return access === 'admin' ? 'admin' : canSeeFull(access) ? 'full' : 'anon';
 };
-/** the stored view for any other page: everyone but admins gets the same copy */
-const plainView = (req: express.Request) => (req.access === 'admin' ? null : 'full');
+/** the stored view for any other page: everyone but admins gets the same copy (fix266: admins theirs, stored too) */
+const plainView = (req: express.Request) => (req.access === 'admin' ? 'admin' : 'full');
 /** fix221: one stored string as it is: ETag (304 when the browser has it), gzip copy when the browser takes gzip */
 function sendView(req: express.Request, res: express.Response, v: View) {
   res.set('ETag', v.etag).vary('Accept-Encoding').type('application/json');
@@ -675,30 +685,49 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   res.set('X-SL-Built-At', new Date(s.builtAt).toISOString());
   if (s.staleS) res.set('X-SL-Stale', String(s.staleS)); // fix250: older than the page's freshness (a new one is being built)
   const pick = track(`stored ${name}: pick`);
-  try { return sendStoredPick(req, res, s, view, keep, name); } finally { pick(); }
+  let missing: string | null;
+  try { missing = sendStoredPick(req, res, s, view, keep, name); } finally { pick(); }
+  if (missing === null) return;
+  // fix266: the copy lacks the view this request needs (built before the view existed: the first minutes after the
+  // deploy that added it): the nearest stored view now — never the worker — and the page is rebuilt with it
+  rebuildPage(name, q);
+  // (an admin: the paid / public copy; a member: the teased list)
+  const alts = missing === 'admin' ? ['full', 'public'] : ['anon'];
+  const t = track(`stored ${name}: other view`);
+  let s2: Awaited<ReturnType<typeof getPage>>;
+  try { s2 = await getPage(name, q, { views: alts, waitMs: 0 }); } finally { t(); }
+  const alt = alts.find(a => s2?.view(a));
+  if (!s2 || !alt) { noteLoading(req.path); return res.status(202).set({ 'Cache-Control': 'no-store', 'X-SL-Pending': '1' }).json({ pending: true, data: null }); }
+  res.set('X-SL-Copy', alt);
+  sendView(req, res, s2.view(alt)!);
 }
-function sendStoredPick(req: express.Request, res: express.Response, s: NonNullable<Awaited<ReturnType<typeof getPage>>>, view: string | null, keep: Set<number> | undefined, name: string) {
-  const send = (f: () => unknown) => { const d = track(`stored ${name}: send`); try { return f(); } finally { d(); } };
+/** sends the stored copy; returns the view it needs and the copy does not have (null = sent) */
+function sendStoredPick(req: express.Request, res: express.Response, s: NonNullable<Awaited<ReturnType<typeof getPage>>>, view: string | null, keep: Set<number> | undefined, name: string): string | null {
+  const send = (f: () => unknown) => { const d = track(`stored ${name}: send`); try { f(); } finally { d(); } return null; };
   // fix199: a signed-out visitor from a data-centre network gets no prediction at all (finished games too)
   if ((req as any).proxyAnon) {
     const r = s.rows();
     if (r) { const text = joinRows(r, () => 'locked'); return send(() => sendJoined(req, res, text)); }
     const text = view ? s.variant(view) : undefined;
-    return text !== undefined && text.length < 256 * 1024 ? res.json(JSON.parse(text)) : byWorker(req, res, () => res.json(s.body));
+    // (a data-centre network, not a person: a big page without rows is locked by the worker, under the 1-s rule)
+    if (text !== undefined && text.length < 256 * 1024) res.json(JSON.parse(text)); else byWorker(req, res, () => res.json(s.body));
+    return null;
   }
   if (keep?.size) {
     const r = s.rows();
-    if (!r) return byWorker(req, res, () => res.json(s.body));
+    if (!r) return 'rows';
     // (fix222: the ETag without reading the whole 'full' view's text and gzip: s.etagOf)
     const base = s.etagOf('full') || String(s.builtAt);
     res.set('ETag', `${base.slice(0, -1)}-${etagOf([...keep].sort((a, b) => a - b).join(',')).slice(1, 9)}"`).vary('Accept-Encoding');
-    if (req.fresh) return res.status(304).end();
+    if (req.fresh) { res.status(304).end(); return null; }
     const text = joinRows(r, id => (keep.has(id) ? 'full' : 'tease'));
     return send(() => sendJoined(req, res, text));
   }
-  const v = view ? s.view(view) : undefined;
-  if (!v) return byWorker(req, res, () => res.json(s.body));
-  send(() => sendView(req, res, v));
+  // fix266: every request names its view now (admins 'admin'); null is left for a caller that still wants res.json
+  if (!view) { byWorker(req, res, () => res.json(s.body)); return null; }
+  const v = s.view(view);
+  if (!v) return view;
+  return send(() => sendView(req, res, v));
 }
 
 // Cross-site guard: another website may not make a signed-in browser change anything here (POST / PUT / DELETE, or a
@@ -1574,11 +1603,12 @@ app.get('/api/admin/tennis/sample', (req, res) => {
 // list of outputs; finished games open for everyone), a sport's record, and the admin view (gates, backtests, health)
 const MORE_RID: Record<string, (id: number) => number> = { football: id => id, basketball: id => -id, nfl: id => nflRid(id), tennis: id => tennisRid(id) };
 // fix202: the visitors' copy is a stored page (admins get theirs built here)
-definePage({ name: 'more-record', freshMs: 10 * 60 * 1000, variants: VIEWS_PLAIN, warm: MORE_SPORTS.map(sport => ({ sport })), build: q => ({ data: moreRecord(q.sport as any, false) }) });
+// fix266: the admins' copy (gates, backtests) is its own stored key (admin: 1), sent as the 'admin' view
+definePage({ name: 'more-record', freshMs: 10 * 60 * 1000, variants: VIEWS_PLAIN, warm: MORE_SPORTS.flatMap(sport => [{ sport }, { sport, admin: 1 }]), build: q => ({ data: moreRecord(q.sport as any, q.admin === '1') }) });
 app.get('/api/more/:sport(football|basketball|nfl|tennis)/record', async (req, res) => {
   try {
     if (req.access !== 'admin') return await sendStored(req, res, 'more-record', { sport: req.params.sport }, 'full');
-    byWorker(req, res, () => res.json({ data: moreRecord(req.params.sport as any, true) }));
+    await sendStored(req, res, 'more-record', { sport: req.params.sport, admin: 1 }, 'admin');
   } catch (e) { sendError(res, e, 'Failed to load the record'); }
 });
 app.get('/api/more/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', async (req, res) => {
@@ -2091,7 +2121,7 @@ async function buildUpcoming(days: number): Promise<any> {
   return { data, count: matches.length, days, cacheAgeMs: footballDataAPI.windowAge, timestamp: new Date().toISOString() };
 }
 // fix221: stored row by row ('anon' / 'full' made from the rows; a member's unlocked games joined in by the web process)
-definePage({ name: 'upcoming', freshMs: 30 * 1000, build: q => buildUpcoming(Number(q.days) || 30), rows: b => listRows(b), warm: [{ days: 14 }, { days: 30 }] });
+definePage({ name: 'upcoming', freshMs: 30 * 1000, build: q => buildUpcoming(Number(q.days) || 30), variants: { admin: adminText }, rows: b => listRows(b), warm: [{ days: 14 }, { days: 30 }] });
 app.get('/api/matches/upcoming', async (req, res) => {
   try {
     // fix238: only the two stored copies (14 / 30 days, warm): any other number was a key never built — the web waited
@@ -3049,14 +3079,14 @@ definePage({
   // fix210b: the settled games read a day at a time first (preloadSettled), then counted from that copy
   build: async q => { await preloadSettled(Number(q.days) || 30, q.competition || undefined); return { data: publicRecord(Number(q.days) || 30, q.competition || undefined), timestamp: new Date().toISOString() }; },
   // the per-competition table is admin-only for now (Yarin, 10 Oct 2026): small samples look bad in public
-  variants: { public: b => jsonText(stripMarket({ ...b, data: { ...b.data, byCompetition: [] } })) }
+  variants: { public: b => jsonText(stripMarket({ ...b, data: { ...b.data, byCompetition: [] } })), admin: adminText }
 });
 app.get('/api/public/record', async (req, res) => {
   try {
     const days = Math.min(400, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
     const competition = req.query.competition ? String(req.query.competition).toUpperCase() : undefined;
     res.set('Cache-Control', 'no-store');
-    await sendStored(req, res, 'record', { days, competition }, req.access === 'admin' ? null : 'public');
+    await sendStored(req, res, 'record', { days, competition }, req.access === 'admin' ? 'admin' : 'public');
   } catch (error: any) {
     sendError(res, error, 'Record failed');
   }
@@ -3089,7 +3119,7 @@ app.get('/api/public/results', async (req, res) => {
     const days = Math.min(400, parseInt(String(req.query.days || '30'), 10) || 30);
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
     const competition = req.query.competition ? String(req.query.competition).toUpperCase() : undefined;
-    await sendStored(req, res, 'results', { days, competition, limit }, req.access === 'admin' ? null : isPaid(req.access || 'anon') ? 'full' : 'free');
+    await sendStored(req, res, 'results', { days, competition, limit }, req.access === 'admin' ? 'admin' : isPaid(req.access || 'anon') ? 'full' : 'free');
   } catch (error: any) {
     sendError(res, error, 'Failed to list results');
   }
@@ -3388,10 +3418,11 @@ const nflWithF = <T extends { id: number; state: string }>(f: boolean | ((id: nu
 const nflConfigBody = (league: ReturnType<typeof asLeague>, admin: boolean) => ({ data: { public: nflPublic(), open: nflPublic() || admin, league, season: nflCurrentSeason(league),
   seasons: nflSeasonsHeld(admin, league), leagues: LEAGUES.map(l => ({ id: l, season: nflCurrentSeason(l) })) } });
 // fix221: a stored page (the season list was a database scan on the web process on every page open); admins: the worker
-definePage({ name: 'nfl-config', freshMs: 60 * 1000, variants: VIEWS_PLAIN, warm: LEAGUES.map(l => ({ league: l })), build: q => nflConfigBody(asLeague(q.league), false) });
+// fix266: admins' copy (past seasons listed) stored too (admin: 1)
+definePage({ name: 'nfl-config', freshMs: 60 * 1000, variants: VIEWS_PLAIN, warm: LEAGUES.flatMap(l => [{ league: l }, { league: l, admin: 1 }]), build: q => nflConfigBody(asLeague(q.league), q.admin === '1') });
 app.get('/api/nfl/config', async (req, res) => {
   try {
-    if (nflAdmin(req)) return byWorker(req, res, () => res.json(nflConfigBody(nflLg(req), true)));
+    if (nflAdmin(req)) return await sendStored(req, res, 'nfl-config', { league: nflLg(req), admin: 1 }, 'admin');
     await sendStored(req, res, 'nfl-config', { league: nflLg(req) }, 'full');
   } catch (e) { sendError(res, e, 'Failed to load the NFL settings'); }
 });
@@ -3622,11 +3653,18 @@ app.get('/api/tennis/config', (req, res) => {
 // fix202: a stored page per tour and access (paid / not), built in the worker every 30 s (admins and members with
 // unlocked matches get it built here)
 // fix263: every public tour is warm (a tour's own page asks ?tour=atp …), all tours stand in for one not stored yet
-definePage({ name: 'tennis-home', freshMs: 30 * 1000, variants: VIEWS_PLAIN, warm: tennisPublic() ? ['all', 'atp', 'wta', 'challenger'].flatMap(tour => [{ tour, full: 0 }, { tour, full: 1 }]) : [], fallback: q => (q.tour !== 'all' ? { tour: 'all', full: q.full } : null), build: q => tennisHomeBody(q.tour || 'all', q.full === '1', false) });
+// fix266: the admins' copy (ITF too) is its own stored key (admin: 1): all tours warm even before tennis is public, a
+// tour's own kept fresh while admins open it
+definePage({
+  name: 'tennis-home', freshMs: 30 * 1000, variants: VIEWS_PLAIN,
+  warm: [...(tennisPublic() ? ['all', 'atp', 'wta', 'challenger'].flatMap(tour => [{ tour, full: 0 }, { tour, full: 1 }]) : []), { tour: 'all', full: 1, admin: 1 }],
+  fallback: q => (q.tour !== 'all' ? { tour: 'all', full: q.full, admin: q.admin } : null), build: q => tennisHomeBody(q.tour || 'all', q.full === '1', q.admin === '1')
+});
 app.get('/api/tennis/home', async (req, res) => {
   try {
     const f = fullFor(req, tennisRid), admin = tnAdmin(req);
     if (typeof f === 'boolean' && !admin) return await sendStored(req, res, 'tennis-home', { tour: tnTour(req), full: f ? 1 : 0 }, plainView(req));
+    if (admin) return await sendStored(req, res, 'tennis-home', { tour: tnTour(req), full: 1, admin: 1 }, 'admin');
     byWorker(req, res, () => res.json(tennisHomeBody(tnTour(req), f, admin)));
   } catch (e) { sendError(res, e, 'Failed to load the tennis home'); }
 });
@@ -3763,6 +3801,7 @@ definePage({
   warm: [{ days: 7, full: 0 }, { days: 7, full: 1 }, { days: 30, full: 0 }, { days: 30, full: 1 }, { days: 7, results: 1, full: 0 }, { days: 7, results: 1, full: 1 },
     { days: 30, results: 1, full: 0 }, { days: 30, results: 1, full: 1 }],
   build: q => bbGamesBody(q.league || undefined, q.results === '1', Number(q.days) || 3, null, q.full === '1'),
+  variants: { admin: (b, q) => (q.full === '1' ? adminText(b) : null) }, // fix266: admins read the full=1 copy
   rows: (b, q) => {
     const open = q.full === '1' ? null : new Map(bbGamesBody(q.league || undefined, q.results === '1', Number(q.days) || 3, null, true).data.map((g: any) => [g.id, g]));
     return listRows(b, { id: g => -g.id, full: g => open?.get(g.id) || g, tease: g => g });
@@ -3785,7 +3824,7 @@ app.get('/api/basketball/games', async (req, res) => {
     const asked = { league: code, results, days, full: full === true ? 1 : 0 };
     if (!range && bbKnown(code)) {
       if (typeof full === 'function') return await sendStored(req, res, 'bb-games', asked, 'anon', new Set([...unlockedIds(req.user!.id)].filter(id => id < 0 && id > -2e9)));
-      return await sendStored(req, res, 'bb-games', asked, req.access === 'admin' ? null : full ? 'full' : 'anon');
+      return await sendStored(req, res, 'bb-games', asked, req.access === 'admin' ? 'admin' : full ? 'full' : 'anon');
     }
     byWorker(req, res, () => res.json(bbGamesBody(code, results, days, range, full)));
   } catch (error: any) {
@@ -4438,11 +4477,11 @@ definePage({
   name: 'draw-alerts', freshMs: 10 * 60 * 1000, warm: [{}],
   build: async () => ({ data: await drawAlertsReportAsync(), timestamp: new Date().toISOString() }), // fix210b: in slices
   // visitors: our own draw picks and draw facts only (the value-alert machinery stays for admins)
-  variants: { public: (b: any) => jsonText(stripMarket({ ...b, data: { picks: b.data.picks, likely: b.data.likely, leagues: b.data.leagues, teams: b.data.teams } })) }
+  variants: { public: (b: any) => jsonText(stripMarket({ ...b, data: { picks: b.data.picks, likely: b.data.likely, leagues: b.data.leagues, teams: b.data.teams } })), admin: adminText }
 });
 app.get('/api/draw-alerts', async (req, res) => {
   try {
-    await sendStored(req, res, 'draw-alerts', {}, req.access === 'admin' ? null : 'public');
+    await sendStored(req, res, 'draw-alerts', {}, req.access === 'admin' ? 'admin' : 'public');
   } catch (error: any) {
     sendError(res, error, 'Draw alerts failed');
   }

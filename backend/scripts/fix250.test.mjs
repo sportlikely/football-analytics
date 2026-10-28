@@ -75,11 +75,12 @@ test('the one-second rule: pending at 900 ms, the late answer kept and sent at o
   assert.equal(r.u1.status, 202, 'a signed-in person has their own copies');
   assert.equal(r.u2.copy, 'late');
   assert.equal(r.u3.status, 202, 'after their POST their copies are gone');
-  // counted: the stream (headers sent, body late) and the search engine's wait; never the cut requests
+  // counted: the stream (headers sent, body late), the search engine's wait and (fix266) the cut requests
   const routes = Object.fromEntries(r.slow.lastHour.map(x => [x.route, x]));
   assert.ok(routes['GET /api/stream']?.n >= 1, JSON.stringify(r.slow.lastHour));
   assert.equal(routes['GET /api/slow']?.crawler, 1, 'the search engine counted apart');
-  assert.equal(routes['GET /api/slow']?.n, 1, 'cut requests are under 1 s');
+  // fix266: a cut request counts until its handler ended (1.5 s here): the visitor waited for that answer
+  assert.ok(routes['GET /api/slow']?.n >= 4, `cut requests count their whole time: ${JSON.stringify(routes['GET /api/slow'])}`);
   assert.ok(r.slow.pendingSent >= 3 && r.slow.appPageSent === 1 && r.slow.lateServed >= 2);
 });
 

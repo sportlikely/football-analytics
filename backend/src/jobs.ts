@@ -7,7 +7,7 @@
  */
 import footballDataAPI from './services/footballDataAPI';
 import logger from './utils/logger';
-import { timed, every, after, inBatches, heavy, mapGames, afterHeavy, everyHeavy, expectPagesFirst } from './services/perf';
+import { timed, every, after, inBatches, heavy, mapGames, afterHeavy, everyHeavy, expectPagesFirst, pagesFirst } from './services/perf';
 import { slimForList } from './services/predCache';
 import { withLiveScore, publishLiveBook } from './services/liveScores';
 import { scorersCheckTick } from './services/scorersCheck';
@@ -125,7 +125,8 @@ export function startJobs() {
   // first run waits for the leagues and the team index to load (a league's country decides a shared name's slug)
   after('slugs', () => buildSlugs().then(() => every('slugs', () => buildSlugs(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();
   // fix261: names in Hebrew / Arabic (press spelling, Wikidata labels, letter rules), then the maps the he / ar pages load
-  after('names', () => namesTick({ collect: true }).then(() => every('names', () => namesTick(), 30 * 60 * 1000).unref()), 6 * 60 * 1000).unref();
+  // fix266: after the first round of stored pages (a restart serves the lists first, the names load after)
+  after('names', () => pagesFirst().then(() => namesTick({ collect: true })).then(() => every('names', () => namesTick(), 30 * 60 * 1000).unref()), 6 * 60 * 1000).unref();
   // fix169: the weekly prediction hubs are rebuilt in the background (visitors and crawlers get the cached copy)
   every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
   // fix175: indexes for the crawler pages, built off the main thread
@@ -138,7 +139,8 @@ export function startJobs() {
   after('link check', () => linkCheckTick(), 10 * 60 * 1000).unref();
   // fix202: the search indexes (teams, players) for the web process
   // fix210: in the heavy-job queue, built in pages
-  afterHeavy('search index', async () => { await warmSearchIndex(); await warmBbSearch(); }, 30 * 1000).unref();
+  // fix266: the search index waits for the first round of stored pages too (lists first after a restart)
+  after('search index wait', () => { void pagesFirst().then(() => heavy('search index', () => timed('search index', async () => { await warmSearchIndex(); await warmBbSearch(); }))).catch(e => logger.warn(`search index: ${e?.message || e}`)); }, 30 * 1000).unref();
   everyHeavy('search index', () => warmSearchIndex(), 6 * 3600 * 1000).unref();
   everyHeavy('bb search index', () => warmBbSearch(), 3600 * 1000).unref();
   // fix210b: every finished basketball game page of the current and last season stored ahead (search engines read old

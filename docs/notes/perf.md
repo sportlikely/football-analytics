@@ -551,6 +551,23 @@ thread's maxMs 1,755, /api/basketball/game/:id avg 2.3 s / max 11.6 s, ~900 /bas
 - The cluster (step 6) is not built: nothing blocks the web thread any more (Yarin, 27 Oct).
 - **Profiler off by default** (CPU_PROFILE=1 turns it on): its 5-min swap was the remaining block (321 ms in the load test; the live short blocks of 160–220 ms every ~5 min, mostly (program)). **Load test** (27 Oct, 10 Oct copy, 1,000 visitors × 5 min): 296,628 requests, 980 req/s, p50 2 ms · p95 8 ms · p99 15 ms, 0 × 5xx, 0 network errors, longest web block 97 ms → PASS. Once in the run every route's max reached ~4 s at the same moment while the web thread was free (97 ms): suspected this PC (load client, web and the worker's model builds on one machine) — the live route max tells.
 
+## fix266 — admins get the same speed as visitors (28 Oct)
+
+- Seen: /api/perf 28 Oct 17:05 (14 min after a deploy): signed out /api/matches/upcoming 0.29–0.45 s (stored copy); as
+  admin > 10 s — worker jobs `http GET /api/matches/upcoming` n135 avg 3,281 ms max 53,818, `/api/public/results` avg
+  3,548 max 10,732. `sendStoredPick` had view null for admins → `byWorker(res.json(s.body))`, and the worker was busy
+  after its restart (291 states, the names job). The web thread itself: 0 stalls. No check saw it: the slow counter
+  counted a cut request at its 202 (900 ms) and only public routes.
+- Now: every list keeps an 'admin' view (app.ts `adminText`: the page with the json replacer, long lists in slices);
+  admin-only bodies (More predictions record, NFL config, tennis home with ITF) are their own warm keys (`admin: 1`).
+  `sendStoredPick` returns the view a copy lacks and `sendStored` sends the nearest stored view (admin → full / public,
+  member rows → anon) while the page is rebuilt. byWorker is left for non-list cases under the 1-s rule only.
+- Restart order: `startPageWarmer`'s first round = stale lists / homes, other stale pages, then the fresh ones
+  (`firstOrder`); names (fix261) and the search index wait for `pagesFirst()`.
+- Counter: `deadlineStart` times every /api GET (`isTimedApi`: account / admin reads, never cut), who asked kept per
+  route (crawler / admin / signed), a cut request noted when its captured handler ends. Checks: "Slow requests"
+  (visitors signed in or out), "Slow requests (admin)" (`slowAdminRequestsHealth`).
+
 ## fix263 — small reads never wait behind big ones (28 Oct)
 
 Site health 28 Oct 15:07: Slow requests 37 / h (/api/matches/upcoming 12× over 1 s, /api/slug-of/football/league/AF143
