@@ -1,19 +1,21 @@
 /**
- * fix255: leagues under 52% on 1X2 — test, then improve only where it is proven (pure rules: utils/leagueFix.ts).
+ * fix255 / fix255b: leagues under 52% on 1X2 — test, then improve only where it is proven (pure rules and the reasons
+ * for the design: utils/leagueFix.ts).
  *
- *  - The games: the public record (/api/accuracy's rows: one main prediction per settled game, saved before kick-off),
- *    90 days scored, up to 150 days before them feeding the fits. A row the layer already moved is read back from its
- *    saved original numbers (predictions.layer_raw), so the test always starts from what the model said.
- *  - History base rates: history_matches of the last 2 seasons + this one (seasonCodes(3)), days before the game only.
- *  - Report (admin, Predictions & models → "Leagues under 52%"): every league with ≥ 20 games — games, hit rate, log loss,
- *    market log loss, H / D / A vs our picks, home bias, draw gap, the causes; each candidate's verdict per league and
- *    per group; the table before → after for the leagues under 52%; the 90-day totals before → after.
- *  - Applied: only a candidate that passed (league, or the group's for a league with < 60 games). Stored in model_config
- *    'league_fix_live' (the fix251 config store) and applied to every model of the game when its prediction is built
- *    (applyLeagueFix). The nightly run (04:40 UTC, after the 04:00 champion / challenger job) re-tests everything on the
- *    new window: a new pass is added, a league already applied stays while it is not worse on the window and the last
- *    45 days, otherwise it is rolled back (written in the run's report).
- *  - Data health "Leagues under 50%": a league with ≥ 60 games under 50% on each of the last 30 days (90-day windows).
+ *  - The games: every settled game of the public record once (the main model's own numbers: predictions.layer_raw when
+ *    this layer moved it, else p_pre when only fix254's recent calibration moved it, else the saved split), 240 days;
+ *    plus the last 2 seasons + this one of the walk-forward grid-v3 backtest (backtest_predictions, latest run per season
+ *    and group), only for games before the league's first record game.
+ *  - Units: every group (pooled), then a league on its own when it has ≥ 150 record games in the 90 days.
+ *  - Applied: the passing candidate (lowest log loss) of a group to every league of the group, a league's own to that
+ *    league; stored in model_config 'league_fix_live' (fix251's config store), applied by leagueFixLive.applyLeagueFix
+ *    on every model of a game but feat-v1 (before fix254's recent calibration layer). Nightly (04:40 UTC) the test runs
+ *    again: a new pass is applied; a unit already live stays while its candidate is not worse on the first and last
+ *    30 days and overall, otherwise it is rolled back (written in the report).
+ *  - Report (admin card "Leagues under 52%", /api/admin/league-fix): every league with ≥ 20 games (stats, causes), the
+ *    verdict of every candidate per group / league, before → after (hit rate, log loss, draw picks) per group and per
+ *    league on out-of-sample numbers, leagues and games above 52%, the 90-day totals.
+ *  - Data health "Leagues under 50%" (services/leagueFixHealth.ts).
  */
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -24,20 +26,20 @@ import { preloadSettled, mainSettledRows } from './tracking';
 import { clearPredictionCache } from './predCache';
 import { yieldLoop } from './perf';
 import {
-  LF_RULES, CANDS, CAND_LABEL, GROUP_NAMES, groupOf, walkForward, judgeCand, judgePick, leagueStats, leaguesUnder, makeHist, norm, argmax, ll,
-  type Row, type Hist, type WRow, type LGroup, type Cand, type P3, type CandResult
+  LF_RULES, CANDS, CAND_LABEL, GROUP_NAMES, groupOf, crossSteps, liveSteps, runAsync, leagueStats, leaguesUnder, norm, argmax, ll,
+  type Game, type LGroup, type Cand, type Variant, type P3, type CandResult, type LeagueSetting
 } from '../utils/leagueFix';
 
 const DAY = 86400000;
-const PRIOR_DAYS = 150;
+const RECORD_DAYS = 240;
 
 db.exec(`CREATE TABLE IF NOT EXISTS league_fix_runs (date TEXT PRIMARY KEY, ran_at TEXT NOT NULL, report TEXT NOT NULL, under50 TEXT, ms INTEGER)`);
 
 /* ---------- inputs ---------- */
 
-function countries(): Map<string, string> {
-  const m = new Map<string, string>();
-  try { for (const r of db.prepare(`SELECT league_id, country FROM af_extra_leagues`).all() as any[]) m.set(`AF${r.league_id}`, String(r.country || '')); } catch { /* table not there yet */ }
+function extraLeagues(): Map<string, { name: string; country: string }> {
+  const m = new Map<string, { name: string; country: string }>();
+  try { for (const r of db.prepare(`SELECT league_id, name, country FROM af_extra_leagues`).all() as any[]) m.set(`AF${r.league_id}`, { name: String(r.name || ''), country: String(r.country || '') }); } catch { /* table not there yet */ }
   return m;
 }
 /** the history division of a competition code (index-aligned in GROUPS), or null */
@@ -48,79 +50,117 @@ export function divisionOf(code: string): string | null {
   const i = cfg.competitions.indexOf(code);
   return i >= 0 && i < cfg.divisions.length ? cfg.divisions[i] : null;
 }
-function historyFor(codes: string[]): Map<string, Hist> {
-  const seasons = seasonCodes(3);
-  const st = db.prepare(`SELECT date, hg, ag FROM history_matches WHERE division = ? AND season IN (${seasons.map(() => '?').join(',')})`);
-  const out = new Map<string, Hist>();
-  for (const code of codes) {
-    const div = divisionOf(code);
-    if (!div) continue;
-    const games = (st.all(div, ...seasons) as any[]).map(r => ({
-      // a history day counts from the end of that day (a same-day game never sees its own result)
-      t: Date.parse(`${r.date}T00:00:00Z`) + DAY, y: r.hg > r.ag ? 0 : r.hg === r.ag ? 1 : 2
-    })).filter(g => Number.isFinite(g.t));
-    if (games.length) out.set(code, makeHist(games));
-  }
-  return out;
+/** the competition code of a history division (the inverse of divisionOf) */
+export function codeOfDivision(div: string): string | null {
+  for (const cfg of Object.values(GROUPS)) { const i = cfg.divisions.indexOf(div); if (i >= 0 && i < cfg.competitions.length) return cfg.competitions[i]; }
+  return null;
 }
 const marketOf = (r: any): P3 | null =>
   r.odds_home && r.odds_draw && r.odds_away ? norm([1 / r.odds_home, 1 / r.odds_draw, 1 / r.odds_away]) : null;
+const yOf = (o: string) => (o === 'H' ? 0 : o === 'D' ? 1 : 2);
+const parse3 = (s: string | null): P3 | null => { try { const v = s ? JSON.parse(s) : null; return Array.isArray(v) && v.length === 3 && v.every(Number.isFinite) ? (v as P3) : null; } catch { return null; } };
 
-async function loadRows(now: number): Promise<Row[]> {
-  const days = LF_RULES.windowDays + PRIOR_DAYS;
-  await preloadSettled(days);
-  const main = mainSettledRows(days);
-  const raw = new Map<string, P3>();
-  for (const r of db.prepare(`SELECT match_id, model, layer_raw FROM predictions WHERE layer_raw IS NOT NULL AND utc_date >= ?`).all(new Date(now - days * DAY).toISOString()) as any[]) {
-    try { const v = JSON.parse(r.layer_raw); if (Array.isArray(v) && v.length === 3) raw.set(`${r.match_id}|${r.model}`, v as P3); } catch { /* skip */ }
+export async function loadRecord(now: number): Promise<Game[]> {
+  await preloadSettled(RECORD_DAYS);
+  const main = mainSettledRows(RECORD_DAYS);
+  // the model's own numbers: before this layer (layer_raw), else before fix254's recent calibration (p_pre)
+  const own = new Map<string, P3>();
+  for (const r of db.prepare(`SELECT match_id, model, layer_raw, p_pre FROM predictions WHERE (layer_raw IS NOT NULL OR p_pre IS NOT NULL) AND utc_date >= ?`).all(new Date(now - RECORD_DAYS * DAY).toISOString()) as any[]) {
+    const v = parse3(r.layer_raw) || parse3(r.p_pre);
+    if (v) own.set(`${r.match_id}|${r.model}`, v);
   }
-  const cty = countries();
-  const out: Row[] = [];
+  const ex = extraLeagues();
+  const out: Game[] = [];
   for (const r of main) {
     const t = Date.parse(r.utc_date);
     if (!Number.isFinite(t) || t > now) continue;
     const code = r.competition_code || '?';
-    const p = raw.get(`${r.match_id}|${r.model}`) || [Number(r.p_home), Number(r.p_draw), Number(r.p_away)];
+    const p = own.get(`${r.match_id}|${r.model}`) || [Number(r.p_home), Number(r.p_draw), Number(r.p_away)];
     if (!(p[0] + p[1] + p[2] > 0)) continue;
-    out.push({
-      id: r.match_id, comp: code, name: r.competition_name || code, group: groupOf(code, r.competition_name, cty.get(code)),
-      t, p: norm(p), mkt: marketOf(r), y: r.outcome === 'H' ? 0 : r.outcome === 'D' ? 1 : 2
-    });
+    out.push({ id: r.match_id, comp: code, name: r.competition_name || code, group: groupOf(code, r.competition_name, ex.get(code)?.country), t, p: norm(p), mkt: marketOf(r), y: yOf(r.outcome), src: 'record' });
+  }
+  return out;
+}
+
+/** the grid-v3 backtest (latest run per season and group) for games before each league's first record game */
+async function loadBacktest(record: Game[]): Promise<Game[]> {
+  const first = new Map<string, number>();
+  const names = new Map<string, string>();
+  for (const g of record) { if (!first.has(g.comp) || g.t < first.get(g.comp)!) first.set(g.comp, g.t); names.set(g.comp, g.name); }
+  const ex = extraLeagues();
+  const out: Game[] = [];
+  let runs: any[] = [];
+  try {
+    const seasons = seasonCodes(3);
+    runs = db.prepare(`SELECT MAX(id) AS id, season FROM backtest_runs WHERE model = 'grid-v3' AND finished_at IS NOT NULL AND season IN (${seasons.map(() => '?').join(',')}) GROUP BY season, grp`).all(...seasons) as any[];
+  } catch { return out; } // no backtest tables yet
+  const st = db.prepare(`SELECT division, date, outcome, p_home, p_draw, p_away, odds_home, odds_draw, odds_away FROM backtest_predictions WHERE run_id = ?`);
+  let id = -1;
+  for (const run of runs) {
+    for (const r of st.all(run.id) as any[]) {
+      const code = codeOfDivision(r.division) || r.division;
+      const t = Date.parse(`${r.date}T15:00:00Z`);
+      if (!Number.isFinite(t) || !['H', 'D', 'A'].includes(r.outcome)) continue;
+      if (first.has(code) && t >= first.get(code)! - DAY) continue; // the record has it (or the days around its start)
+      const p: P3 = [Number(r.p_home), Number(r.p_draw), Number(r.p_away)];
+      if (!(p[0] + p[1] + p[2] > 0)) continue;
+      const name = names.get(code) || ex.get(code)?.name || code;
+      out.push({ id: id--, comp: code, name, group: groupOf(code, name, ex.get(code)?.country), t, p: norm(p), mkt: marketOf(r), y: yOf(r.outcome), src: 'backtest', season: String(run.season) });
+    }
+    await yieldLoop();
   }
   return out;
 }
 
 /* ---------- the run ---------- */
 
+interface Totals { n: number; hit: number; logLoss: number; drawPicks: number; drawPickHit: number | null; leaguesAbove: number; gamesAbove: number }
+type Verdict = Omit<CandResult, 'probs'>;
+export interface UnitReport {
+  key: string; name: string; n: number; nBacktest: number; verdicts: Verdict[]; best: { cand: Cand; variant: Variant } | null;
+  applied: { cand: Cand; variant: Variant } | null; action: string; before: Totals; after: Totals
+}
 export interface FixReport {
-  builtAt: string; from: string; mid: string; to: string; rules: typeof LF_RULES; ms: number;
-  totals: { before: Totals; after: Totals; movedAbove: number; gamesAbove: number; under: number; underGames: number };
-  note: string;
-  leagues: (ReturnType<typeof leagueStats> & { own: boolean; verdicts: CandResult[]; pickRules: CandResult[]; best: Cand | null; applied: Cand | null; appliedVia: 'league' | 'group' | null; action: string; after: { hit: number; logLoss: number } })[];
-  groups: { group: LGroup; name: string; n: number; verdicts: CandResult[]; pickRules: CandResult[]; best: Cand | null }[];
-  table: { comp: string; name: string; n: number; before: { hit: number; logLoss: number }; after: { hit: number; logLoss: number }; applied: string | null; why: string }[];
-  rolledBack: { comp: string; name: string; cand: Cand; why: string }[];
+  builtAt: string; from: string; to: string; blocks: string[]; rules: typeof LF_RULES; ms: number; note: string;
+  totals: { before: Totals; after: Totals; under: number; underGames: number; movedAbove: number; movedAboveGames: number; record: number; backtest: number };
+  groups: (UnitReport & { group: LGroup })[];
+  leagues: (ReturnType<typeof leagueStats> & { own: UnitReport | null; applied: string | null; via: 'league' | 'group' | null; after: Totals })[];
+  table: { comp: string; name: string; group: string; n: number; before: { hit: number; logLoss: number; drawPicks: number }; after: { hit: number; logLoss: number; drawPicks: number }; applied: string | null }[];
+  rolledBack: { unit: string; name: string; cand: Cand; why: string }[];
   under50: { comp: string; name: string; n: number; hit: number; worst: number; best: number }[];
-  live: Record<string, { cand: Cand; unit: 'league' | 'group'; since: string; h: number; d: number }>;
+  live: Record<string, { cand: Cand; variant: Variant; since: string; P: LeagueSetting['P'] }>;
 }
-interface Totals { n: number; hit: number; logLoss: number }
-const tot = (rows: WRow[], f: (w: WRow) => P3): Totals => {
-  const n = rows.length;
-  if (!n) return { n: 0, hit: 0, logLoss: 0 };
-  let h = 0, l = 0;
-  for (const w of rows) { const p = f(w); if (argmax(p) === w.y) h++; l += ll(p, w.y); }
-  return { n, hit: Math.round((1000 * h) / n) / 10, logLoss: Math.round((1000 * l) / n) / 1000 };
-};
+const r1 = (x: number) => Math.round(x * 10) / 10;
+function totals(games: Game[], f: (g: Game) => P3): Totals {
+  const n = games.length;
+  let h = 0, l = 0, dp = 0, dph = 0;
+  const by = new Map<string, { n: number; h: number }>();
+  for (const g of games) {
+    const p = f(g), a = argmax(p), hit = a === g.y;
+    if (hit) h++;
+    l += ll(p, g.y);
+    if (a === 1) { dp++; if (hit) dph++; }
+    const e = by.get(g.comp) || { n: 0, h: 0 };
+    e.n++; if (hit) e.h++;
+    by.set(g.comp, e);
+  }
+  const above = [...by.values()].filter(e => (100 * e.h) / e.n >= LF_RULES.under);
+  return {
+    n, hit: n ? r1((100 * h) / n) : 0, logLoss: n ? Math.round((1000 * l) / n) / 1000 : 0, drawPicks: dp, drawPickHit: dp ? r1((100 * dph) / dp) : null,
+    leaguesAbove: above.length, gamesAbove: above.reduce((a, e) => a + e.n, 0)
+  };
+}
+const strip = (x: CandResult): Verdict => { const { probs: _p, ...rest } = x; return rest; };
 
-/** every candidate and pick rule on a unit (utils judgeUnit), giving the thread back between them */
-async function judgeUnitAsync(rows: WRow[], mid: number) {
+/** every candidate × variant on a unit, giving the thread back between them */
+async function judgeUnitAsync(games: Game[], from: number, to: number) {
   const results: CandResult[] = [];
-  for (const c of CANDS) { results.push(judgeCand(rows, c, mid)); await yieldLoop(); }
-  const picks = [judgePick(rows, 'pick-draw', mid), judgePick(rows, 'pick-dc', mid)];
-  await yieldLoop();
+  const variants: Variant[] = games.some(g => g.src === 'backtest') ? ['record', 'extended'] : ['record'];
+  for (const c of CANDS) for (const v of variants) { results.push(await runAsync(crossSteps(games, c, v, from, to), yieldLoop)); await yieldLoop(); }
   const best = results.filter(x => x.pass).sort((a, b) => a.dAll - b.dAll)[0] || null;
-  return { results, picks, best: best ? (best.cand as Cand) : null };
+  return { results, best };
 }
+const label = (s: { cand: Cand; variant: Variant }) => `${CAND_LABEL[s.cand]}${s.variant === 'extended' ? ' (fitted with 2 past seasons)' : ''}`;
 
 let running = false;
 export const leagueFixRunning = () => running;
@@ -132,122 +172,113 @@ export async function runLeagueFix(now = Date.now(), apply = true): Promise<FixR
   const t0 = Date.now();
   try {
     const R = LF_RULES;
-    const from = now - R.windowDays * DAY, mid = now - R.halfDays * DAY;
-    const rows = await loadRows(now);
-    const inWin = rows.filter(r => r.t >= from);
-    const counts = new Map<string, number>();
-    for (const r of inWin) counts.set(r.comp, (counts.get(r.comp) || 0) + 1);
-    const own = new Set([...counts].filter(([, n]) => n >= R.minOwn).map(([c]) => c));
-    const hist = historyFor([...counts.keys()]);
-    await yieldLoop();
-    // one extra row per league "now": its settings are the ones applied live from today (never scored)
-    const synth: Row[] = [...counts.keys()].map((comp, i) => {
-      const any = inWin.find(r => r.comp === comp)!;
-      return { id: -1 - i, comp, name: any.name, group: any.group, t: now + R.settleMs, p: [1 / 3, 1 / 3, 1 / 3], mkt: null, y: 0 };
-    });
-    const all = walkForward([...rows, ...synth], hist, own, from, Infinity, R);
-    const win = all.filter(w => w.id >= 0), nowRows = new Map(all.filter(w => w.id < 0).map(w => [w.comp, w]));
-    await yieldLoop();
-
-    // groups (every game of the group) and leagues with their own settings
-    const groups: FixReport['groups'] = [];
-    const groupBest = new Map<LGroup, Cand | null>();
-    const groupRes = new Map<LGroup, Awaited<ReturnType<typeof judgeUnitAsync>>>();
-    for (const g of Object.keys(GROUP_NAMES) as LGroup[]) {
-      const gr = win.filter(w => w.group === g);
-      if (!gr.length) continue;
-      const j = await judgeUnitAsync(gr, mid);
-      groupRes.set(g, j);
-      groupBest.set(g, gr.length >= R.minOwn ? j.best : null);
-      groups.push({ group: g, name: GROUP_NAMES[g], n: gr.length, verdicts: j.results, pickRules: j.picks, best: gr.length >= R.minOwn ? j.best : null });
-      await yieldLoop();
-    }
+    const from = now - R.windowDays * DAY, to = now + 1;
+    const record = await loadRecord(now);
+    const backtest = await loadBacktest(record);
+    const all = [...record, ...backtest];
+    const win = record.filter(g => g.t >= from);
     const prev = liveLayer();
-    const live: LiveLayer = { since: {}, settings: {} };
-    const leagues: FixReport['leagues'] = [];
+    const live: LiveLayer = { since: {}, groups: {}, leagues: {}, compGroup: {} };
+    for (const g of all) live.compGroup[g.comp] = g.group;
     const rolledBack: FixReport['rolledBack'] = [];
-    const afterProbs = new Map<number, P3>();
-    const byComp = new Map<string, WRow[]>();
-    for (const w of win) { if (!byComp.has(w.comp)) byComp.set(w.comp, []); byComp.get(w.comp)!.push(w); }
-    for (const [comp, list] of byComp) {
-      const isOwn = own.has(comp);
-      const j = isOwn ? await judgeUnitAsync(list, mid) : null;
-      const via: 'league' | 'group' = isOwn ? 'league' : 'group';
-      const best = isOwn ? j!.best : groupBest.get(list[0].group) ?? null;
-      const was = prev.settings[comp];
-      let applied: Cand | null = best, action = best ? (was?.cand === best ? 'kept (passed again)' : was ? `changed ${was.cand} → ${best}` : 'applied (passed)') : 'nothing passed';
-      if (!best && was) {
-        // already live: kept while it is not worse on the window and on the last 45 days, else rolled back
-        const r = (isOwn ? j!.results : groupRes.get(list[0].group)?.results || []).find(x => x.cand === was.cand);
-        const mine = list.map(w => ll(w.probs[was.cand], w.y) - ll(w.probs.base, w.y));
-        const late = list.map((w, i) => (w.t >= mid ? mine[i] : NaN)).filter(x => !Number.isNaN(x));
-        const m = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
-        if (m(mine) <= 0 && m(late) <= 0) { applied = was.cand; action = `kept (live since ${prev.since[comp] || '—'}, not worse: ${m(mine).toFixed(4)} / last 45 days ${m(late).toFixed(4)})`; }
-        else { applied = null; action = `rolled back (${r?.why || 'worse'})`; rolledBack.push({ comp, name: list[0].name, cand: was.cand, why: `worse than the saved numbers: ${m(mine).toFixed(4)} over 90 days, ${m(late).toFixed(4)} in the last 45` }); }
+    const after = new Map<number, P3>();
+
+    /** decide one unit: a new pass, kept while not worse, or rolled back */
+    const decide = async (key: string, name: string, games: Game[], was: LeagueSetting | undefined) => {
+      const j = await judgeUnitAsync(games, from, to);
+      let chosen: CandResult | null = j.best, action = j.best ? (was && was.cand === j.best.cand && was.variant === j.best.variant ? 'kept (passed again)' : was ? `changed to ${label(j.best)}` : `applied: ${label(j.best)}`) : 'nothing passed';
+      if (!j.best && was) {
+        const r = j.results.find(x => x.cand === was.cand && x.variant === was.variant);
+        if (r && r.dAll <= 0 && r.blocks[0].diff <= 0 && r.blocks[2].diff <= 0) { chosen = r; action = `kept (live since ${prev.since[key] || '—'}, not worse: ${r.dAll.toFixed(4)})`; }
+        else { action = `rolled back (${r?.why || 'worse'})`; rolledBack.push({ unit: key, name, cand: was.cand, why: r ? `${r.dAll.toFixed(4)} over 90 days, ${r.blocks[0].diff.toFixed(4)} / ${r.blocks[2].diff.toFixed(4)} on the first / last 30 days` : 'no result' }); }
       }
-      if (applied) {
-        const n0 = nowRows.get(comp);
-        if (n0) {
-          live.settings[comp] = { cand: applied, h: round(n0.h), d: round(n0.d), base: n0.base.map(round) as P3, close: n0.closeYS, anchor: applied === 'calib+anchor' ? n0.aCalib : n0.a, unit: via, name: list[0].name };
-          live.since[comp] = was?.cand === applied ? prev.since[comp] || iso(now) : iso(now);
-        }
-        for (const w of list) afterProbs.set(w.id, w.probs[applied]);
+      let setting: LeagueSetting | null = null;
+      if (chosen) {
+        setting = { cand: chosen.cand, variant: chosen.variant, P: roundP(await runAsync(liveSteps(games, chosen.cand, chosen.variant), yieldLoop)) };
+        live.since[key] = was && was.cand === setting.cand && was.variant === setting.variant ? prev.since[key] || iso(now) : iso(now);
       }
-      const st = leagueStats(list, R);
-      const aft = tot(list, w => afterProbs.get(w.id) || w.probs.base);
-      leagues.push({ ...st, own: isOwn, verdicts: j?.results || [], pickRules: j?.picks || [], best, applied, appliedVia: applied ? via : null, action, after: { hit: aft.hit, logLoss: aft.logLoss } });
       await yieldLoop();
+      return { j, chosen, action, setting };
+    };
+
+    // 1. groups (pooled: every league of the group, record + backtest)
+    const groups: FixReport['groups'] = [];
+    const groupChosen = new Map<LGroup, CandResult | null>();
+    for (const g of Object.keys(GROUP_NAMES) as LGroup[]) {
+      const games = all.filter(x => x.group === g), gw = win.filter(x => x.group === g);
+      if (!gw.length) continue;
+      const d = await decide(`g:${g}`, GROUP_NAMES[g], games, prev.groups[g]);
+      if (d.setting) live.groups[g] = d.setting;
+      groupChosen.set(g, d.chosen);
+      groups.push({
+        group: g, key: `g:${g}`, name: GROUP_NAMES[g], n: gw.length, nBacktest: games.filter(x => x.src === 'backtest').length,
+        verdicts: d.j.results.map(strip), best: d.j.best ? { cand: d.j.best.cand, variant: d.j.best.variant } : null,
+        applied: d.chosen ? { cand: d.chosen.cand, variant: d.chosen.variant } : null, action: d.action,
+        before: totals(gw, x => x.p), after: totals(gw, x => d.chosen?.probs?.get(x.id) || x.p)
+      });
+    }
+    // 2. leagues with ≥ 150 games in the window: their own test, as a refinement of the group's
+    const byComp = new Map<string, Game[]>();
+    for (const g of win) { if (!byComp.has(g.comp)) byComp.set(g.comp, []); byComp.get(g.comp)!.push(g); }
+    const leagues: FixReport['leagues'] = [];
+    for (const [comp, list] of byComp) {
+      let own: UnitReport | null = null, chosen: CandResult | null = null;
+      if (list.length >= R.minLeague) {
+        const games = all.filter(x => x.comp === comp);
+        const d = await decide(`l:${comp}`, list[0].name, games, prev.leagues[comp]);
+        if (d.setting) live.leagues[comp] = d.setting;
+        chosen = d.chosen;
+        own = {
+          key: `l:${comp}`, name: list[0].name, n: list.length, nBacktest: games.filter(x => x.src === 'backtest').length, verdicts: d.j.results.map(strip),
+          best: d.j.best ? { cand: d.j.best.cand, variant: d.j.best.variant } : null, applied: d.chosen ? { cand: d.chosen.cand, variant: d.chosen.variant } : null,
+          action: d.action, before: totals(list, x => x.p), after: totals(list, x => d.chosen?.probs?.get(x.id) || x.p)
+        };
+      }
+      const via: 'league' | 'group' | null = chosen ? 'league' : groupChosen.get(list[0].group) ? 'group' : null;
+      const src = chosen || groupChosen.get(list[0].group) || null;
+      for (const g of list) { const q = src?.probs?.get(g.id); if (q) after.set(g.id, q); }
+      leagues.push({ ...leagueStats(list, R), own, applied: src ? label(src) : null, via, after: totals(list, x => after.get(x.id) || x.p) });
     }
     leagues.sort((a, b) => a.hit - b.hit);
-    const before = tot(win, w => w.probs.base), after = tot(win, w => afterProbs.get(w.id) || w.probs.base);
+    const before = totals(win, x => x.p), aft = totals(win, x => after.get(x.id) || x.p);
     const under = leagues.filter(l => l.n >= R.minReport && l.hit < R.under);
     const table = under.map(l => ({
-      comp: l.comp, name: l.name, n: l.n, before: { hit: l.hit, logLoss: l.logLoss }, after: l.after,
-      applied: l.applied ? `${CAND_LABEL[l.applied]} (${l.appliedVia})` : null, why: l.applied ? l.action : whyNot(l, groups)
+      comp: l.comp, name: l.name, group: GROUP_NAMES[l.group], n: l.n,
+      before: { hit: l.hit, logLoss: l.logLoss, drawPicks: l.picks[1] }, after: { hit: l.after.hit, logLoss: l.after.logLoss, drawPicks: l.after.drawPicks },
+      applied: l.applied ? `${l.applied} (${l.via})` : null
     }));
+    const moved = table.filter(t => t.after.hit >= R.under);
     const report: FixReport = {
-      builtAt: new Date(now).toISOString(), from: iso(from), mid: iso(mid), to: iso(now), rules: R, ms: Date.now() - t0,
-      totals: {
-        before, after, movedAbove: table.filter(t => t.after.hit >= R.under).length, gamesAbove: table.filter(t => t.after.hit >= R.under).reduce((a, t) => a + t.n, 0),
-        under: table.length, underGames: table.reduce((a, t) => a + t.n, 0)
-      },
-      note: 'Pick rules (draw rule, double-chance side) change only which result is named, not the percentages: they are tested and shown here, never applied by this job (the site names the most likely result everywhere).',
-      leagues, groups, table, rolledBack,
-      under50: leaguesUnder(rows.filter(r => r.t >= now - (R.windowDays + R.warnDays) * DAY), now, R),
-      live: Object.fromEntries(Object.entries(live.settings).map(([c, s]) => [c, { cand: s.cand, unit: s.unit, since: live.since[c], h: s.h, d: s.d }]))
+      builtAt: new Date(now).toISOString(), from: iso(from), to: iso(now), blocks: [0, 1, 2].map(k => iso(from + k * R.blockDays * DAY)), rules: R, ms: 0,
+      note: 'Each 30-day block is predicted with settings fitted on the other 60 days (and, for "fitted with 2 past seasons", the grid-v3 backtest), so every "after" number is out of sample. The pick is always the most likely result of the shown numbers: a layer that raises the draw makes draw picks.',
+      totals: { before, after: aft, under: under.length, underGames: under.reduce((a, l) => a + l.n, 0), movedAbove: moved.length, movedAboveGames: moved.reduce((a, t) => a + t.n, 0), record: win.length, backtest: backtest.length },
+      groups, leagues, table, rolledBack,
+      under50: leaguesUnder(record.filter(r => r.t >= now - (R.windowDays + R.warnDays) * DAY), now, R),
+      live: Object.fromEntries([
+        ...Object.entries(live.groups).map(([g, s]) => [`g:${g}`, { cand: s.cand, variant: s.variant, since: live.since[`g:${g}`], P: s.P }]),
+        ...Object.entries(live.leagues).map(([c, s]) => [`l:${c}`, { cand: s.cand, variant: s.variant, since: live.since[`l:${c}`], P: s.P }])
+      ])
     };
     report.ms = Date.now() - t0;
     db.prepare(`INSERT OR REPLACE INTO league_fix_runs (date, ran_at, report, under50, ms) VALUES (?, ?, ?, ?, ?)`)
       .run(iso(now), new Date().toISOString(), JSON.stringify(report), JSON.stringify(report.under50), report.ms);
     db.prepare(`DELETE FROM league_fix_runs WHERE date < ?`).run(iso(now - 120 * DAY));
     if (apply) {
-      const changed = JSON.stringify(live.settings) !== JSON.stringify(prev.settings);
+      const changed = JSON.stringify([live.groups, live.leagues]) !== JSON.stringify([prev.groups, prev.leagues]);
       setConfig(LIVE_KEY, JSON.stringify(live));
       if (changed) clearPredictionCache();
-      logger.info(`league fix: ${Object.keys(live.settings).length} league(s) adjusted, ${rolledBack.length} rolled back · 90 days ${before.hit}% / ${before.logLoss} → ${after.hit}% / ${after.logLoss}`);
+      logger.info(`league fix: ${Object.keys(live.groups).length} group(s) + ${Object.keys(live.leagues).length} league(s) adjusted, ${rolledBack.length} rolled back · 90 days ${before.hit}% / ${before.logLoss} → ${aft.hit}% / ${aft.logLoss}`);
     }
     return report;
   } finally { running = false; }
 }
-const round = (x: number) => Math.round(x * 10000) / 10000;
 const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
-function whyNot(l: FixReport['leagues'][number], groups: FixReport['groups']): string {
-  if (!l.own) {
-    const g = groups.find(x => x.group === l.group);
-    return `< ${LF_RULES.minOwn} games: group ${GROUP_NAMES[l.group]} — ${g?.best ? 'passed' : `nothing passed (closest: ${closest(g?.verdicts || [])})`}`;
-  }
-  return `nothing passed (closest: ${closest(l.verdicts)})`;
-}
-function closest(v: CandResult[]): string {
-  const c = v.slice().sort((a, b) => a.dAll - b.dAll)[0];
-  return c ? `${CAND_LABEL[c.cand as Cand] || c.cand}: ${c.why}` : '—';
-}
+const roundP = (P: LeagueSetting['P']): LeagueSetting['P'] => ({ ...P, dr: Math.round(P.dr * 10000) / 10000, base: P.base.map(x => Math.round(x * 10000) / 10000) as P3 });
 
 /** the last stored report (admin card), or null */
 export function lastLeagueFix(): FixReport | null {
   try { const r: any = db.prepare(`SELECT report FROM league_fix_runs ORDER BY date DESC LIMIT 1`).get(); return r ? JSON.parse(r.report) : null; } catch { return null; }
 }
-export { CANDS };
 
 /** worker: once ~25 min after start (when today has no run), then every day at 04:40 UTC */
 export function leagueFixDue(now = Date.now()): boolean {

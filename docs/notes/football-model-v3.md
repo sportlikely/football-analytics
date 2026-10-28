@@ -91,6 +91,28 @@ Research behind the feature model / v3-mix: `all-data-test-model-oct-2026.md`, `
     run on a made-up record: an over-rated home side fixed, a calibrated league untouched, a harmful setting rolled back).
   - Not run on real data in the session (no database copy, the server is not reachable from here): the table before →
     after is what the first server run shows on the card.
+- **fix255b (28 Oct 2026): the first server run said "no change" everywhere** — every league had 21–61 games. Not a
+  loading bug: /api/accuracy?days=90 without ?model= counts every model's row of a game (grid-v3, v3-mix, feat-v1, v2,
+  v1: MLS 275 rows = 61 games, Serie B 165 = 37, Championship 241 = 61), and most leagues are only predicted since 7 Oct.
+  Diagnosis confirmed by Yarin: 0 draw picks everywhere (draws 21–36%), home picks 61–80% vs home wins 28–45%. Now:
+  - games: the record (main model's own numbers: layer_raw → p_pre (fix254's recent calibration) → saved split, 240 days)
+    + the grid-v3 walk-forward backtest of the last 2 seasons + this one (backtest_predictions, latest run per season and
+    group) for games before each league's first record game;
+  - pooled per group (big 5 / second tiers / other European top flights / Nordic / Americas / Asia / cups & national
+    teams — the 7th, "other European top flights", holds Eredivisie, Portugal, Belgium, Turkey, Scotland, Greece, Poland,
+    Czech, Israel …); a league gets its own settings only with ≥ 150 games in the window and only when its own pass;
+  - candidates fitted on log loss (grid / coordinate search): home ratio × e^h; P(D) → (1 − w)·P(D) + w·group draw rate;
+    close games |H − A| < y → (1 − s)·p + s·base rates; home + draw; all three — each fitted on record games only and on
+    record + past seasons ("extended"); the pick is the most likely result of the shown numbers (draw picks counted);
+  - test: three 30-day blocks, each predicted with settings fitted on the other 60 days (fit first 60 → test last 30,
+    fit last 60 → test first 30, and the middle); pass = better on the first and the last block (≥ 1e-5) and ≥ 90% of
+    2,000 paired resamples over all three; past-season check (fit before the last backtest season, test on it) reported;
+    "after" numbers are out of sample on every game; ≥ 60 games per unit;
+  - live: model_config league_fix_live = { groups, leagues, compGroup, since } (fix255's per-league format dropped),
+    leagueFixLive.settingFor: own → group (by the test's map, else groupOf by name); rollback as fix255 (kept while not
+    worse overall and on the first / last block). The fit / test are generators yielding after each grid search (longest
+    step 31 ms on 8,500 games); test:fix255 (12 tests).
+  - Not run on real data in the session either: the table is the server's next run (card or ?run=1).
 - **fix254 (28 Oct 2026): churn and calibration.** The daily job promoted on −0.0001 (28 Oct). Now a candidate needs a
   gain ≥ 0.0005 log loss per game in the last 60 days (DAILY_RULES.minGain) and promotions are at most once in 7 days
   (minDaysBetween; the guardrail rollback is never held: "held" in the reason). Calibration data health failed (50–60%

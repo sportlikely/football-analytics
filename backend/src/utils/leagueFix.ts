@@ -1,52 +1,53 @@
 /**
- * fix255: leagues under 52% on 1X2 — the test and the per-league layer, pure (no database). The service is
- * services/leagueFix.ts (worker job, admin card, live settings).
+ * fix255 / fix255b: leagues under 52% on 1X2 — the test and the per-group layer, pure (no database). The service is
+ * services/leagueFix.ts (worker job, admin card, live settings), the live part services/leagueFixLive.ts.
  *
- * Input: the games of the public record (one row per game, the main model's saved pre-kick-off numbers, the stored
- * market prices, the result) and, per league, the results of the last 2 seasons + this one (history base rates).
- * Every candidate is walk-forward: a game's settings come only from games settled before its kick-off (kick-off + 3 h)
- * and from history before its date. The result of the game itself is never used.
- *
- * Candidates (each against the saved numbers):
- *   home        per-league home advantage: the home / away split moved so the league's average matches its base rates
- *               (history: 2 seasons + this one), shrunk toward the group's value (k = 60 games)
- *   draw        per-league draw-rate prior: the draw share moved the same way
- *   calib       home + draw together
- *   close       close games (|home − away| < y) shrunk toward the league's base rates by s; y, s chosen per group
- *   anchor      market anchor (fix251), weight 0.1–0.4 chosen per group; prices are never shown
- *   calib+anchor
- * Pick rules (hit rate only, log loss unchanged): "pick the draw when P(draw) ≥ max(P(H), P(A)) − x" (x per group), and
- * the double-chance side instead of the most likely outcome.
- * A league with < 60 games in the window uses its group's settings (rule e). A change passes for a league / group
- * only when its log loss is better in both halves of the window (first 45 / last 45 days), better in ≥ 90% of 2,000
- * paired bootstrap resamples (fix251's rules) and its hit rate is not down by more than 0.5 pp.
+ * fix255b: fix255 tested per league on 21–61 games each (most leagues were only predicted from 7 Oct; /api/accuracy
+ * without ?model= counts every model's row of a game, 4–5 per game) — nothing could pass. Now:
+ *  - the games: every settled game of the public record once (the main model's own numbers: layer_raw, else p_pre,
+ *    else the saved split), plus the last 2 seasons of the walk-forward grid-v3 backtest (backtest_predictions) for
+ *    games before the league's record starts;
+ *  - pooled per group first (big 5 / second tiers / other European top flights / Nordic / Americas / Asia / cups &
+ *    national teams); a league gets its own settings only with ≥ 150 games in the window, and only when its own pass;
+ *  - candidates are layers on the saved numbers, fitted on log loss:
+ *      home   the home / away ratio × e^h, renormalised
+ *      draw   P(draw) moved toward the group's draw rate: (1 − w)·P(D) + w·rate, home / away rescaled
+ *      close  |P(H) − P(A)| < y → (1 − s)·p + s·(the group's base rates)
+ *      home+draw, all (home + draw, then close)
+ *    each fitted two ways: on record games only, and on record + the 2 backtest seasons ('extended');
+ *    the pick is the most likely result of the shown numbers, so after a layer it can be the draw (counted);
+ *  - the test: the 90 days in three 30-day blocks; each block predicted with settings fitted on everything else
+ *    (fit on the first 60 → test the last 30, fit on the last 60 → test the first 30, and the middle one, so every game
+ *    of the window has an out-of-sample number); pass = log loss better (by ≥ 1e-5) on the first and on the last block
+ *    and in ≥ 90% of 2,000 paired bootstrap resamples of all three blocks (fix251's rules); hit rate is reported;
+ *  - past seasons check (reported): fit on the backtest before its last season, test on that season.
  */
 import { pairedBootstrap, type Boot } from './dailyRules';
 
 export type P3 = [number, number, number];
 export type LGroup = 'big5' | 'second' | 'europe' | 'americas' | 'asia' | 'nordic' | 'cups';
 export const GROUP_NAMES: Record<LGroup, string> = {
-  big5: 'Big 5', second: 'Second tiers', europe: 'Other European top flights', americas: 'Americas', asia: 'Asia',
+  big5: 'Big 5 top tiers', second: 'Second tiers (Europe)', europe: 'Other European top flights', americas: 'Americas', asia: 'Asia',
   nordic: 'Nordic', cups: 'Cups & national teams'
 };
-export type Cand = 'home' | 'draw' | 'calib' | 'close' | 'anchor' | 'calib+anchor';
-export const CANDS: Cand[] = ['home', 'draw', 'calib', 'close', 'anchor', 'calib+anchor'];
+export type Cand = 'home' | 'draw' | 'close' | 'home+draw' | 'all';
+export const CANDS: Cand[] = ['home', 'draw', 'close', 'home+draw', 'all'];
+export type Variant = 'record' | 'extended';
 export const CAND_LABEL: Record<Cand, string> = {
-  home: 'own home advantage', draw: 'own draw rate', calib: 'own home advantage + draw rate', close: 'close games toward base rates',
-  anchor: 'market anchor', 'calib+anchor': 'home advantage + draw rate + market anchor'
+  home: 'home advantage correction', draw: 'draw toward the group rate', close: 'close games toward base rates',
+  'home+draw': 'home advantage + draw', all: 'home advantage + draw + close games'
 };
 
 export const LF_RULES = {
-  windowDays: 90, halfDays: 45, minReport: 20, minOwn: 60, under: 52, warnUnder: 50, warnDays: 30,
-  settleMs: 3 * 3600 * 1000, shrinkK: 60, minLeaguePrior: 20, minGroupPrior: 50, minChoose: 30, histMin: 50, prior: 30,
-  clampH: 0.6, clampD: 0.4,
-  resamples: 2000, confidence: 0.9, maxHitDrop: 0.5, minGain: 1e-5,
-  drawX: [0, 0.02, 0.04, 0.06, 0.08, 0.1],
-  close: [[0, 0], [0.05, 0.2], [0.05, 0.4], [0.1, 0.2], [0.1, 0.4], [0.15, 0.2], [0.15, 0.4]] as [number, number][],
-  anchors: [0, 0.1, 0.2, 0.3, 0.4],
+  windowDays: 90, blockDays: 30, minReport: 20, minLeague: 150, minUnit: 60, under: 52, warnUnder: 50, warnDays: 30, minOwn: 60,
+  resamples: 2000, confidence: 0.9, minGain: 1e-5,
+  hGrid: Array.from({ length: 25 }, (_, i) => Math.round((-0.6 + i * 0.05) * 100) / 100),
+  wGrid: Array.from({ length: 17 }, (_, i) => Math.round(i * 0.05 * 100) / 100),
+  yGrid: [0.05, 0.1, 0.15, 0.2], sGrid: [0.1, 0.2, 0.3, 0.4, 0.5],
   // causes in the report
   drawGap: 0.2, homeBias: 1.8, marketGap: 0.02
 };
+
 const DEFAULT_BASE: P3 = [0.45, 0.26, 0.29];
 
 /* ---------- groups ---------- */
@@ -79,216 +80,170 @@ export function groupOf(code: string, name?: string | null, country?: string | n
   return 'europe';
 }
 
+
+
 /* ---------- probabilities ---------- */
 
 export const norm = (p: number[]): P3 => { const s = p[0] + p[1] + p[2] || 1; return [p[0] / s, p[1] / s, p[2] / s]; };
 export const ll = (p: P3, y: number) => -Math.log(Math.max(1e-6, norm(p)[y]));
 export const argmax = (p: P3) => (p[0] >= p[1] && p[0] >= p[2] ? 0 : p[2] >= p[1] ? 2 : 1);
-const clamp = (x: number, a: number) => Math.max(-a, Math.min(a, x));
 
-/** home advantage h and draw shift d on a split: p' ∝ (pH·e^(h/2), pD·e^d, pA·e^(−h/2)) */
-export const shift = (p: P3, h: number, d: number): P3 => norm([p[0] * Math.exp(h / 2), p[1] * Math.exp(d), p[2] * Math.exp(-h / 2)]);
-/**
- * The (h, d) that move the average prediction M to the target rates T (first order, exact for one game):
- *   h = log(T_H / T_A) − log(M_H / M_A),   d = log(T_D / √(T_H·T_A)) − log(M_D / √(M_H·M_A))
- */
-export function fitShift(T: P3, M: P3): { h: number; d: number } {
-  const L = (x: number) => Math.log(Math.max(1e-6, x));
-  return {
-    h: L(T[0]) - L(T[2]) - (L(M[0]) - L(M[2])),
-    d: L(T[1]) - 0.5 * (L(T[0]) + L(T[2])) - (L(M[1]) - 0.5 * (L(M[0]) + L(M[2])))
-  };
-}
-/** shrink a league's own value toward the group's: λ = n / (n + k) */
-export const shrink = (own: number, group: number, n: number, k = LF_RULES.shrinkK) => (n / (n + k)) * own + (k / (n + k)) * group;
-/** close games (|H − A| < y) moved toward the league's base rates by s */
-export const closeShrink = (p: P3, base: P3, y: number, s: number): P3 => {
-  const q = norm(p);
-  return y > 0 && s > 0 && Math.abs(q[0] - q[2]) < y ? norm([0, 1, 2].map(i => (1 - s) * q[i] + s * base[i])) : q;
+/* ---------- the layers ---------- */
+
+/** the settings of one unit: home h, draw weight w toward `dr`, close-game band y and weight s toward `base` */
+export interface Params { h: number; w: number; dr: number; y: number; s: number; base: P3 }
+export const NO_PARAMS: Params = { h: 0, w: 0, dr: 0.26, y: 0, s: 0, base: DEFAULT_BASE };
+/** home / away ratio × e^h */
+export const homeAdj = (q: P3, h: number): P3 => (h ? norm([q[0] * Math.exp(h / 2), q[1], q[2] * Math.exp(-h / 2)]) : q);
+/** P(draw) → (1 − w)·P(D) + w·rate; home and away keep their ratio */
+export const drawAdj = (q: P3, w: number, rate: number): P3 => {
+  if (!w) return q;
+  const d = (1 - w) * q[1] + w * rate, k = (1 - d) / Math.max(1e-9, q[0] + q[2]);
+  return [q[0] * k, d, q[2] * k];
 };
-export const anchor = (p: P3, mkt: P3 | null, a: number): P3 => (mkt && a > 0 ? norm([0, 1, 2].map(i => (1 - a) * norm(p)[i] + a * norm(mkt)[i])) : norm(p));
-/** the draw-pick rule: the draw when P(draw) ≥ max(P(H), P(A)) − x, else the most likely of home / away (or the draw when it leads) */
-export const drawRulePick = (p: P3, x: number) => (p[1] >= Math.max(p[0], p[2]) - x ? 1 : argmax(p));
-/** the double-chance side: the result of the two most likely that is not the draw (home / away), the draw only when both sides tie below it */
-export const dcSidePick = (p: P3) => (p[0] >= p[2] ? 0 : 2);
+/** close games (|H − A| < y) toward the base rates by s */
+export const closeAdj = (q: P3, y: number, s: number, base: P3): P3 =>
+  y > 0 && s > 0 && Math.abs(q[0] - q[2]) < y ? [0, 1, 2].map(i => (1 - s) * q[i] + s * base[i]) as P3 : q;
+const uses = (c: Cand) => ({ h: c === 'home' || c === 'home+draw' || c === 'all', w: c === 'draw' || c === 'home+draw' || c === 'all', c: c === 'close' || c === 'all' });
+/** a candidate's numbers for one game (fractions in, fractions out) */
+export function applyCand(p: P3, c: Cand, P: Params): P3 {
+  const u = uses(c);
+  let q = norm(p);
+  if (u.h) q = homeAdj(q, P.h);
+  if (u.w) q = drawAdj(q, P.w, P.dr);
+  if (u.c) q = closeAdj(q, P.y, P.s, P.base);
+  return q;
+}
 
-/** settings of one league, as applied live */
-export interface LeagueSetting { cand: Cand; h: number; d: number; base: P3; close: [number, number]; anchor: number; unit: 'league' | 'group' }
-/** the live layer: saved numbers (fractions) → shown numbers; `mkt` = margin-free market split or null */
-export function applySetting(p: P3, mkt: P3 | null, s: LeagueSetting): P3 {
-  const q = norm(p);
-  switch (s.cand) {
-    case 'home': return shift(q, s.h, 0);
-    case 'draw': return shift(q, 0, s.d);
-    case 'calib': return shift(q, s.h, s.d);
-    case 'close': return closeShrink(q, s.base, s.close[0], s.close[1]);
-    case 'anchor': return anchor(q, mkt, s.anchor);
-    case 'calib+anchor': return anchor(shift(q, s.h, s.d), mkt, s.anchor);
+/* ---------- fitting ---------- */
+
+export interface Game { id: number; comp: string; name: string; group: LGroup; t: number; p: P3; mkt: P3 | null; y: number; src: 'record' | 'backtest'; season?: string }
+
+/** the group's base rates (with a light prior) from the fit games */
+export function baseRates(games: { y: number }[]): P3 {
+  const c = [0, 0, 0];
+  for (const g of games) c[g.y]++;
+  return norm([c[0] + 30 * DEFAULT_BASE[0], c[1] + 30 * DEFAULT_BASE[1], c[2] + 30 * DEFAULT_BASE[2]]);
+}
+const lossOf = (games: Game[], c: Cand, P: Params) => { let s = 0; for (const g of games) s += ll(applyCand(g.p, c, P), g.y); return s; };
+/** the grid value with the lowest loss (ties: the one closest to "no change", listed first by `order`) */
+function best<T>(vals: T[], f: (v: T) => number): T {
+  let b = vals[0], bl = f(b);
+  for (const v of vals.slice(1)) { const l = f(v); if (l < bl - 1e-9) { b = v; bl = l; } }
+  return b;
+}
+const byZero = (xs: number[]) => xs.slice().sort((a, b) => Math.abs(a) - Math.abs(b));
+/** fit a candidate on games (coordinate search on the grids, log loss); draw rate and base rates from the games */
+export function fitCand(games: Game[], c: Cand, R = LF_RULES): Params { return run(fitSteps(games, c, R)); }
+/** the same, as steps: it yields after each grid search (the worker gives the thread back there) */
+export function* fitSteps(games: Game[], c: Cand, R = LF_RULES): Generator<void, Params> {
+  const base = baseRates(games);
+  const P: Params = { ...NO_PARAMS, dr: base[1], base };
+  if (!games.length) return P;
+  const u = uses(c);
+  for (let round = 0; round < (u.h && u.w ? 3 : 1); round++) {
+    if (u.h) { P.h = best(byZero(R.hGrid), h => lossOf(games, c === 'all' ? 'home+draw' : c, { ...P, h })); yield; }
+    if (u.w) { P.w = best(R.wGrid, w => lossOf(games, c === 'all' ? 'home+draw' : c, { ...P, w })); yield; }
   }
-}
-
-/* ---------- walk-forward ---------- */
-
-export interface Row { id: number; comp: string; name: string; group: LGroup; t: number; p: P3; mkt: P3 | null; y: number }
-/** results history per competition: kick-off times (sorted) and cumulative H / D / A counts (`c[i]` = counts of the first i games) */
-export interface Hist { t: number[]; c: P3[] }
-export function makeHist(games: { t: number; y: number }[]): Hist {
-  const s = games.slice().sort((a, b) => a.t - b.t);
-  const c: P3[] = [[0, 0, 0]];
-  for (const g of s) { const l = c[c.length - 1]; const n: P3 = [l[0], l[1], l[2]]; n[g.y]++; c.push(n); }
-  return { t: s.map(g => g.t), c };
-}
-/** history counts before time t */
-export function histBefore(h: Hist | undefined, t: number): P3 | null {
-  if (!h || !h.t.length) return null;
-  let lo = 0, hi = h.t.length;
-  while (lo < hi) { const m = (lo + hi) >> 1; if (h.t[m] < t) lo = m + 1; else hi = m; }
-  return h.c[lo];
-}
-
-/** per-row walk-forward output */
-export interface WRow extends Row {
-  own: boolean;                 // the league has ≥ minOwn games in the window (own settings) — else the group's
-  h: number; d: number; base: P3;
-  closeYS: [number, number]; a: number; aCalib: number; x: number;
-  probs: Record<Cand | 'base', P3>;
-  pickDraw: number; pickDc: number;
-}
-
-interface Acc { n: number; sp: [number, number, number]; cnt: [number, number, number] }
-const acc = (): Acc => ({ n: 0, sp: [0, 0, 0], cnt: [0, 0, 0] });
-const addAcc = (a: Acc, r: Row) => { const q = norm(r.p); a.n++; for (let i = 0; i < 3; i++) a.sp[i] += q[i]; a.cnt[r.y]++; };
-const meanOf = (a: Acc): P3 => [a.sp[0] / a.n, a.sp[1] / a.n, a.sp[2] / a.n];
-
-/** grid choice per group from the rows settled so far: running loss sums per grid value */
-class GridChooser {
-  private sums = new Map<string, { n: number; s: number[] }>();
-  constructor(private size: number) {}
-  add(key: string, losses: number[] | null) {
-    if (!losses) return;
-    let e = this.sums.get(key);
-    if (!e) this.sums.set(key, (e = { n: 0, s: new Array(this.size).fill(0) }));
-    e.n++;
-    for (let i = 0; i < this.size; i++) e.s[i] += losses[i];
+  if (u.c) {
+    const pairs = [[0, 0], ...R.yGrid.flatMap(y => R.sGrid.map(s => [y, s]))];
+    const [y, s] = best(pairs, ([y, s]) => lossOf(games, c, { ...P, y, s }));
+    P.y = y; P.s = s;
+    yield;
   }
-  /** index of the lowest sum (ties: the lower index = the milder setting); 0 until minChoose rows */
-  pick(key: string): number {
-    const e = this.sums.get(key);
-    if (!e || e.n < LF_RULES.minChoose) return 0;
-    let b = 0;
-    for (let i = 1; i < this.size; i++) if (e.s[i] < e.s[b] - 1e-12) b = i;
-    return b;
-  }
+  return P;
 }
+/** drive a generator to its end (sync) */
+export function run<T>(g: Generator<void, T>): T { for (;;) { const r = g.next(); if (r.done) return r.value; } }
+/** drive it giving the thread back at every step (the worker's job) */
+export async function runAsync<T>(g: Generator<void, T>, pause: () => Promise<void>): Promise<T> { for (;;) { const r = g.next(); if (r.done) return r.value; await pause(); } }
 
-/**
- * Walk forward over every row (sorted by kick-off; rows before the window only feed the fits). `ownComps` = leagues with
- * ≥ minOwn games in the window. Returns one WRow per row in [from, to).
- */
-export function walkForward(rowsIn: Row[], hist: Map<string, Hist>, ownComps: Set<string>, from: number, to: number, R = LF_RULES): WRow[] {
-  const rows = rowsIn.slice().sort((a, b) => a.t - b.t || a.id - b.id);
-  const lg = new Map<string, Acc>(), gr = new Map<string, Acc>();
-  const closeCh = new GridChooser(R.close.length), ancCh = new GridChooser(R.anchors.length), ancCalibCh = new GridChooser(R.anchors.length), drawCh = new GridChooser(R.drawX.length);
-  const pre: { close: number[]; anc: number[] | null; ancC: number[] | null; draw: number[] }[] = [];
-  const out: WRow[] = [];
-  let j = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    // settle every game finished before this kick-off
-    while (j < i && rows[j].t + R.settleMs <= r.t) {
-      const s = rows[j];
-      if (!lg.has(s.comp)) lg.set(s.comp, acc());
-      if (!gr.has(s.group)) gr.set(s.group, acc());
-      addAcc(lg.get(s.comp)!, s); addAcc(gr.get(s.group)!, s);
-      const pp = pre[j];
-      closeCh.add(s.group, pp.close); ancCh.add(s.group, pp.anc); ancCalibCh.add(s.group, pp.ancC); drawCh.add(s.group, pp.draw);
-      j++;
-    }
-    const G = gr.get(r.group), L = lg.get(r.comp);
-    const gBase: P3 = G && G.n >= R.minGroupPrior ? norm(G.cnt) : DEFAULT_BASE;
-    // the league's base rates: history (2 seasons + this one) before the game, else the record so far, with a group prior
-    const hc = histBefore(hist.get(r.comp), r.t);
-    const hn = hc ? hc[0] + hc[1] + hc[2] : 0;
-    const cnt: P3 = hc && hn >= R.histMin ? hc : L ? L.cnt : [0, 0, 0];
-    const cn = cnt[0] + cnt[1] + cnt[2];
-    const base = norm([0, 1, 2].map(k => cnt[k] + R.prior * gBase[k]));
-    // group shift: the group's record so far (outcomes vs average prediction)
-    const gs = G && G.n >= R.minGroupPrior ? fitShift(norm([0, 1, 2].map(k => G.cnt[k] + R.prior * DEFAULT_BASE[k])), meanOf(G)) : { h: 0, d: 0 };
-    const own = ownComps.has(r.comp);
-    let h = gs.h, d = gs.d;
-    if (own && L && L.n >= R.minLeaguePrior && cn > 0) {
-      const ls = fitShift(base, meanOf(L));
-      h = shrink(ls.h, gs.h, L.n); d = shrink(ls.d, gs.d, L.n);
-    }
-    h = clamp(h, R.clampH); d = clamp(d, R.clampD);
-    // grid choices from the group's settled rows
-    const ci = closeCh.pick(r.group), ai = ancCh.pick(r.group), aci = ancCalibCh.pick(r.group), xi = drawCh.pick(r.group);
-    const closeYS = R.close[ci], a = R.anchors[ai], aCalib = R.anchors[aci], x = R.drawX[xi];
-    const q = norm(r.p);
-    const calib = shift(q, h, d);
-    const probs: WRow['probs'] = {
-      base: q, home: shift(q, h, 0), draw: shift(q, 0, d), calib,
-      close: closeShrink(q, base, closeYS[0], closeYS[1]), anchor: anchor(q, r.mkt, a), 'calib+anchor': anchor(calib, r.mkt, aCalib)
-    };
-    // this row's losses for every grid value (used once it is settled, for later games)
-    pre.push({
-      close: R.close.map(([y, s]) => ll(closeShrink(q, base, y, s), r.y)),
-      anc: r.mkt ? R.anchors.map(v => ll(anchor(q, r.mkt, v), r.y)) : null,
-      ancC: r.mkt ? R.anchors.map(v => ll(anchor(calib, r.mkt, v), r.y)) : null,
-      draw: R.drawX.map(v => (drawRulePick(q, v) === r.y ? 0 : 1))
-    });
-    const w: WRow = { ...r, own, h, d, base, closeYS, a, aCalib, x, probs, pickDraw: drawRulePick(q, x), pickDc: dcSidePick(q) };
-    if (r.t >= from && r.t < to) out.push(w);
-  }
-  return out;
-}
+/* ---------- the cross test ---------- */
 
-/* ---------- the verdict ---------- */
-
+export interface BlockRes { from: string; n: number; diff: number; hitBase: number; hitCand: number }
 export interface CandResult {
-  cand: Cand | 'pick-draw' | 'pick-dc'; n: number; dAll: number; d1: number; d2: number;
-  hitBase: number; hitCand: number; boot: Boot | null; pass: boolean; why: string;
+  cand: Cand; variant: Variant; n: number; dAll: number; blocks: BlockRes[]; hitBase: number; hitCand: number;
+  drawPicks: number; drawPickHits: number; past: { n: number; diff: number } | null; boot: Boot | null; pass: boolean; why: string;
+  /** out-of-sample numbers of every window game (id → split), for the table */
+  probs?: Map<number, P3>;
 }
 const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 const r5 = (x: number) => Math.round(x * 1e5) / 1e5;
 const r1 = (x: number) => Math.round(x * 10) / 10;
-const pctHit = (rows: WRow[], f: (w: WRow) => number) => (rows.length ? r1((100 * rows.filter(w => f(w) === w.y).length) / rows.length) : 0);
+const DAY = 86400000;
+const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10);
 
-/** one candidate on a set of games: both halves better, ≥ 90% of resamples, hit rate not down by more than 0.5 pp */
-export function judgeCand(rows: WRow[], cand: Cand, mid: number, R = LF_RULES, seed = 255): CandResult {
-  const d = rows.map(w => ll(w.probs[cand], w.y) - ll(w.probs.base, w.y));
-  const d1 = d.filter((_, i) => rows[i].t < mid), d2 = d.filter((_, i) => rows[i].t >= mid);
-  const hitBase = pctHit(rows, w => argmax(w.probs.base)), hitCand = pctHit(rows, w => argmax(w.probs[cand]));
-  const res: CandResult = { cand, n: rows.length, dAll: r5(mean(d)), d1: r5(mean(d1)), d2: r5(mean(d2)), hitBase, hitCand, boot: null, pass: false, why: '' };
-  if (!d1.length || !d2.length) return { ...res, why: 'games in one half only' };
-  // a real gain in each half (an unchanged candidate differs from the saved numbers by float noise only)
-  if (mean(d1) > -R.minGain || mean(d2) > -R.minGain) return { ...res, why: `not better in both halves (${res.d1 >= 0 ? '+' : ''}${res.d1.toFixed(4)} / ${res.d2 >= 0 ? '+' : ''}${res.d2.toFixed(4)})` };
+/** the three test blocks of the window: [from, from + 30d), [+30, +60), [+60, to) */
+export const blocksOf = (from: number, to: number, R = LF_RULES) => [0, 1, 2].map(k => ({ from: from + k * R.blockDays * DAY, to: k === 2 ? to : from + (k + 1) * R.blockDays * DAY }));
+
+/**
+ * One candidate on one unit: `games` = every game of the unit (record, in and before the window, and backtest).
+ * Each block's games get the candidate fitted on the others (record only, or + backtest for 'extended').
+ */
+export function crossTest(games: Game[], c: Cand, v: Variant, from: number, to: number, R = LF_RULES, seed = 255): CandResult { return run(crossSteps(games, c, v, from, to, R, seed)); }
+export function* crossSteps(games: Game[], c: Cand, v: Variant, from: number, to: number, R = LF_RULES, seed = 255): Generator<void, CandResult> {
+  const blocks = blocksOf(from, to, R);
+  const inBlock = (g: Game, b: { from: number; to: number }) => g.src === 'record' && g.t >= b.from && g.t < b.to;
+  const probs = new Map<number, P3>();
+  const d: number[] = [];
+  const res: BlockRes[] = [];
+  let hb = 0, hc = 0, n = 0, dp = 0, dph = 0;
+  for (const b of blocks) {
+    const test = games.filter(g => inBlock(g, b));
+    const fit = games.filter(g => !inBlock(g, b) && (v === 'extended' || g.src === 'record'));
+    const P = yield* fitSteps(fit, c, R);
+    const bd: number[] = [];
+    let bhb = 0, bhc = 0;
+    for (const g of test) {
+      const q = applyCand(g.p, c, P), base = norm(g.p);
+      probs.set(g.id, q);
+      bd.push(ll(q, g.y) - ll(base, g.y));
+      if (argmax(base) === g.y) bhb++;
+      if (argmax(q) === g.y) bhc++;
+      if (argmax(q) === 1) { dp++; if (g.y === 1) dph++; }
+    }
+    d.push(...bd); hb += bhb; hc += bhc; n += test.length;
+    res.push({ from: isoDay(b.from), n: test.length, diff: r5(mean(bd)), hitBase: test.length ? r1((100 * bhb) / test.length) : 0, hitCand: test.length ? r1((100 * bhc) / test.length) : 0 });
+  }
+  // past seasons check (reported only): fit on the backtest before its last season, test on that season
+  let past: CandResult['past'] = null;
+  const bt = games.filter(g => g.src === 'backtest' && g.season);
+  const seasons = [...new Set(bt.map(g => g.season!))].sort();
+  if (seasons.length >= 2) {
+    const last = seasons[seasons.length - 1];
+    const tst = bt.filter(g => g.season === last), P = yield* fitSteps(bt.filter(g => g.season! < last), c, R);
+    if (tst.length) past = { n: tst.length, diff: r5(mean(tst.map(g => ll(applyCand(g.p, c, P), g.y) - ll(norm(g.p), g.y)))) };
+  }
+  const out: CandResult = {
+    cand: c, variant: v, n, dAll: r5(mean(d)), blocks: res, hitBase: n ? r1((100 * hb) / n) : 0, hitCand: n ? r1((100 * hc) / n) : 0,
+    drawPicks: dp, drawPickHits: dph, past, boot: null, pass: false, why: '', probs
+  };
+  const first = mean(d.slice(0, res[0].n)), lastB = mean(d.slice(n - res[2].n));
+  if (n < R.minUnit) return { ...out, why: `${n} games in the window (< ${R.minUnit})` };
+  if (!res[0].n || !res[2].n) return { ...out, why: 'no games in the first or the last 30 days' };
+  if (first > -R.minGain || lastB > -R.minGain) return { ...out, why: `not better on both the first and the last 30 days (${sg(res[0].diff)} / ${sg(res[2].diff)})` };
+  yield;
   const boot = pairedBootstrap(d, R.resamples, seed);
-  res.boot = boot;
-  if (boot.pBetter < R.confidence) return { ...res, why: `better in both halves but only in ${Math.round(boot.pBetter * 100)}% of resamples (needs ${Math.round(R.confidence * 100)}%)` };
-  if (hitBase - hitCand > R.maxHitDrop) return { ...res, why: `hit rate down ${r1(hitBase - hitCand)} pp` };
-  return { ...res, pass: true, why: `better in both halves, ${Math.round(boot.pBetter * 100)}% of resamples` };
+  out.boot = boot;
+  if (boot.pBetter < R.confidence) return { ...out, why: `better on the first and last 30 days but only in ${Math.round(boot.pBetter * 100)}% of resamples (needs ${Math.round(R.confidence * 100)}%)` };
+  return { ...out, pass: true, why: `better on the first and last 30 days (${sg(res[0].diff)} / ${sg(res[2].diff)}), ${Math.round(boot.pBetter * 100)}% of resamples` };
 }
-/** a pick rule (hit rate only): more hits in both halves and in ≥ 90% of resamples of the per-game hit differences */
-export function judgePick(rows: WRow[], which: 'pick-draw' | 'pick-dc', mid: number, R = LF_RULES, seed = 255): CandResult {
-  const f = (w: WRow) => (which === 'pick-draw' ? w.pickDraw : w.pickDc);
-  const d = rows.map(w => (argmax(w.probs.base) === w.y ? 1 : 0) - (f(w) === w.y ? 1 : 0)); // negative = the rule hits more
-  const d1 = d.filter((_, i) => rows[i].t < mid), d2 = d.filter((_, i) => rows[i].t >= mid);
-  const res: CandResult = { cand: which, n: rows.length, dAll: 0, d1: 0, d2: 0, hitBase: pctHit(rows, w => argmax(w.probs.base)), hitCand: pctHit(rows, f), boot: null, pass: false, why: '' };
-  if (!d1.length || !d2.length) return { ...res, why: 'games in one half only' };
-  if (mean(d1) >= 0 || mean(d2) >= 0) return { ...res, why: `not more hits in both halves (${r1(-100 * mean(d1))} / ${r1(-100 * mean(d2))} pp)` };
-  const boot = pairedBootstrap(d, R.resamples, seed);
-  res.boot = boot;
-  if (boot.pBetter < R.confidence) return { ...res, why: `more hits in both halves but only in ${Math.round(boot.pBetter * 100)}% of resamples` };
-  return { ...res, pass: true, why: `more hits in both halves, ${Math.round(boot.pBetter * 100)}% of resamples` };
-}
-/** every candidate on a unit; `best` = the passing one with the lowest log loss */
-export function judgeUnit(rows: WRow[], mid: number, R = LF_RULES) {
-  const results = CANDS.map(c => judgeCand(rows, c, mid, R));
-  const picks = [judgePick(rows, 'pick-draw', mid, R), judgePick(rows, 'pick-dc', mid, R)];
+const sg = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(4)}`;
+
+/** every candidate × variant on a unit; `best` = the passing one with the lowest log loss */
+export function judgeUnit(games: Game[], from: number, to: number, R = LF_RULES) {
+  const results: CandResult[] = [];
+  const hasBt = games.some(g => g.src === 'backtest');
+  for (const c of CANDS) for (const v of (hasBt ? ['record', 'extended'] : ['record']) as Variant[]) results.push(crossTest(games, c, v, from, to, R));
   const best = results.filter(x => x.pass).sort((a, b) => a.dAll - b.dAll)[0] || null;
-  return { results, picks, best: best ? (best.cand as Cand) : null };
+  return { results, best };
 }
+/** the settings applied live: the candidate fitted on every game of the unit (record, + backtest for 'extended') */
+export const liveSteps = (games: Game[], c: Cand, v: Variant, R = LF_RULES) => fitSteps(games.filter(g => v === 'extended' || g.src === 'record'), c, R);
+
+/** the live setting of a group or league */
+export interface LeagueSetting { cand: Cand; variant: Variant; P: Params }
+export const applySetting = (p: P3, s: LeagueSetting): P3 => applyCand(p, s.cand, s.P);
 
 /* ---------- report numbers ---------- */
 
