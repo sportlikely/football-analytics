@@ -37,6 +37,7 @@ import { basketballScorers } from '../../lib/scorers'
 import PlayerPhoto from '../../components/sport/PlayerPhoto'
 import KeyPlayers, { type KeyPlayerRow, type KeyTone } from '../../components/sport/game/KeyPlayers'
 import { teamHref, playerHref, leagueHref } from '../../lib/links'
+import { injuryPart } from '../../lib/genText'
 
 export interface Avg {
   games: number; won: number; lost: number; pointsFor: number; pointsAgainst: number
@@ -294,7 +295,7 @@ function bbWhy(d: Detail): WhyRow[] {
       : r.status === 'questionable' ? t('{0} is questionable', { 0: r.name }) : r.status === 'reported-out' ? t('{0} is reported out', { 0: r.name })
       : r.status === 'may-rest' ? t('{0} may rest (he often sits games like this)', { 0: r.name }) : t('{0} has missed the last games', { 0: r.name })
     const pts = Math.abs(r.points).toFixed(1)
-    return { tone: r.side === 'H' ? 'A' as const : 'H' as const, text: t('{0}: {1} −{2} points', { 0: r.note ? `${who} (${r.note})` : who, 1: r.team, 2: pts }), points: `+${pts} ${t('pts')}` }
+    return { tone: r.side === 'H' ? 'A' as const : 'H' as const, text: t('{0}: {1} −{2} points', { 0: r.note ? `${who} (${injuryPart(r.note)})` : who, 1: r.team, 2: pts }), points: `+${pts} ${t('pts')}` }
   })
   return [...fresh, ...keyed, ...d.why.map(w => {
     const team = w.side === 'H' ? g.home : g.away
@@ -355,7 +356,7 @@ function bbKeySide(s: KeySide | null): { name: string; players: KeyPlayerRow[] }
     name: s.team,
     players: s.players.map(p => ({
       id: p.id, name: p.name, href: href.bbPlayer(p.id, p.name), photo: p.photo,
-      detail: [t('{0} pts a game', { 0: `${p.perGame > 0 ? '+' : ''}${p.perGame.toFixed(1)}` }), t('{0} min', { 0: Math.round(p.minutes) }), p.noteKind === 'injury' ? p.note : null].filter(Boolean).join(' · '),
+      detail: [t('{0} pts a game', { 0: `${p.perGame > 0 ? '+' : ''}${p.perGame.toFixed(1)}` }), t('{0} min', { 0: Math.round(p.minutes) }), p.noteKind === 'injury' ? injuryPart(p.note) : null].filter(Boolean).join(' · '),
       status: { tone: tone[p.status], label: label(p), title: why(p), link: p.link },
       without: p.without
     }))

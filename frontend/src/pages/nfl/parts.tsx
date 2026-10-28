@@ -9,6 +9,7 @@ import { SectionTitle, TeamLogo, dayTitle, BbPickBlock, LockIcon } from '../bb/p
 import { useReveal, justRevealed } from '../../lib/reveal'
 import { ScorersToggle, RowScorersLine, useScorersOpen } from '../../components/sport/RowScorers'
 import { teamHref, leagueHref, matchHref } from '../../lib/links'
+import { tg } from '../../lib/genText'
 
 /** Shared pieces of the NFL pages (fix137) — the same look as basketball's and football's. */
 
@@ -247,7 +248,7 @@ export function StandingsBlock({ data, compact = false, highlight }: { data: Sta
     <div className="grid gap-6 lg:grid-cols-2">
       {data.conferences.map(c => (
         <section key={c.name} className="space-y-4 min-w-0">
-          <h3 className="font-display text-base font-bold text-ink flex items-center gap-2">{c.name}{c.level && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface2 text-faint">{c.level}</span>}</h3>
+          <h3 className="font-display text-base font-bold text-ink flex items-center gap-2">{tg(c.name)}{c.level && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface2 text-faint">{c.level}</span>}</h3>
           {c.divisions.map(d => <StandTable key={d.name} title={d.name !== c.name ? d.name : undefined} rows={d.rows} compact={compact} highlight={highlight} league={data.league || 1} />)}
         </section>
       ))}
@@ -290,7 +291,7 @@ export function NflLeaguePanel({ league }: { league: NflLeague }) {
       <section className="card p-3 max-h-[70vh] overflow-y-auto overscroll-contain">
         {d === undefined ? <div className="space-y-2">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-6 rounded-lg bg-surface2/60 animate-pulse" />)}</div>
           : !d || !d.conferences.length ? <p className="text-xs text-faint p-2">{t('Standings appear once the season has started.')}</p>
-          : <div className="space-y-4">{d.conferences.flatMap(c => c.divisions.map(dv => <StandTable key={`${c.name}|${dv.name}`} title={dv.name !== c.name ? `${c.name} · ${dv.name}` : c.name} rows={dv.rows} compact league={league} />))}</div>}
+          : <div className="space-y-4">{d.conferences.flatMap(c => c.divisions.map(dv => <StandTable key={`${c.name}|${dv.name}`} title={dv.name !== c.name ? `${tg(c.name)} · ${dv.name}` : tg(c.name)} rows={dv.rows} compact league={league} />))}</div>}
       </section>
       <Link to={leagueHref('american-football', league === 2 ? '2' : '1')!} className="block text-center text-xs font-bold text-accent">{t('Full table →')}</Link>
     </aside>

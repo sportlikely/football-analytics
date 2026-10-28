@@ -6,6 +6,7 @@ import { errorText } from '../lib/auth'
 import { t as tt, LOCALE } from '../lib/i18n'
 import { matchHref } from '../lib/links'
 import { groupByDay } from '../lib/upsetDays'
+import { tgParts } from '../lib/genText'
 
 /*
  * Upset watch (Pro, model only, no bookmakers): favourites our model thinks are less safe than they look.
@@ -63,7 +64,7 @@ function WatchRow({ w, sport }: { w: Watch; sport: UpsetSport }) {
       <Link to={GAME_OF(sport, w)} className="flex flex-col sm:flex-row sm:items-center gap-x-3 gap-y-0.5 px-4 sm:px-5 py-2.5 hover:bg-surface2/50 min-w-0">
         <span className="flex items-center gap-2 text-[11px] text-faint shrink-0 sm:w-44 min-w-0">
           <span className="num text-muted">{time(w.date)}</span>
-          <span className="truncate">{w.league}</span>
+          <span className="truncate">{tgParts(w.league)}</span>
         </span>
         <span className="text-sm min-w-0 sm:truncate">
           <span className="text-muted">{w.favourite.name} <span className="num">({pct(w.favourite.p)})</span></span>

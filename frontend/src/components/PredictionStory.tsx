@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import { score10, type Prediction } from '../lib/predict'
 import { explainPrediction } from '../lib/explain'
 import { t as tt } from '../lib/i18n'
+import { tg } from '../lib/genText'
+import { nm } from '../lib/names'
 
 /*
  * "Why we think so" for a revealed prediction, in plain language:
@@ -30,24 +32,26 @@ const LABEL: Record<string, string> = {
   '#7': tt('Head-to-head'),
   '#21': tt("Recent form")
 }
+/** fix261: a list of names from a row note ("A, B"; "none") in the page language and script */
+const listNames = (s: string) => s.split(', ').map(x => (x === 'none' ? tt("none") : nm(x))).join(', ')
 const HINT: Record<string, string> = {
-  '#1': 'what the best players are worth on the market',
-  '#1e': 'a rating built from every result, bigger wins count more',
-  '#12': 'usual starters missing from the published lineup',
-  '#13': 'injured and suspended regulars',
-  '#19': 'goals scored, adjusted for the opponents faced',
-  '#14': 'goals conceded, adjusted for the opponents faced',
-  '#10': 'games played in the last 8 days',
-  '#23': "the home side's home games vs the away side's away games",
-  '#7': 'the last 10 meetings',
-  '#21': 'points from the last 6 games'
+  '#1': tt("what the best players are worth on the market"),
+  '#1e': tt("a rating built from every result, bigger wins count more"),
+  '#12': tt("usual starters missing from the published lineup"),
+  '#13': tt("injured and suspended regulars"),
+  '#19': tt("goals scored, adjusted for the opponents faced"),
+  '#14': tt("goals conceded, adjusted for the opponents faced"),
+  '#10': tt("games played in the last 8 days"),
+  '#23': tt("the home side's home games vs the away side's away games"),
+  '#7': tt("the last 10 meetings"),
+  '#21': tt("points from the last 6 games")
 }
 const labelOf = (r: Row) => (r.name.startsWith('Home advantage') || r.name.startsWith('Rest days') || r.name.startsWith('Goals:') || r.name.startsWith('Squad value (') || r.name.startsWith('Strength (rating)') || r.name.startsWith('Form, last 6 (') ? tt(r.name.replace(/\s*\(.*\)$/, '').replace('Goals: attack vs defence', 'Goals: attack and defence')) : LABEL[r.id] || tt(r.name))
 
 function strength(share: number) {
-  if (share >= 0.3) return 'big edge'
-  if (share >= 0.12) return 'clear edge'
-  return 'small edge'
+  if (share >= 0.3) return tt("big edge")
+  if (share >= 0.12) return tt("clear edge")
+  return tt("small edge")
 }
 
 function Block({ title, children, note }: { title: string; children: ReactNode; note?: string }) {
@@ -67,7 +71,7 @@ function Tug({ r, max, total, hn, an }: { r: Row; max: number; total: number; hn
   const side: Side | null = r.edge > 0 ? 'H' : r.edge < 0 ? 'A' : null
   const width = max ? (Math.abs(r.edge) / max) * 50 : 0
   const who = side === 'H' ? hn : side === 'A' ? an : null
-  const note = r.note && /\d/.test(r.note) && !/^(stands in|market value of|Elo over|regulars listed|usual starters left|how strong the clubs)/i.test(r.note) ? r.note : HINT[r.id] || r.note || ''
+  const note = r.note && /\d/.test(r.note) && !/^(stands in|market value of|Elo over|regulars listed|usual starters left|how strong the clubs)/i.test(r.note) ? tg(r.note) : HINT[r.id] || (r.note ? tg(r.note) : '')
   return (
     <li className="py-2.5">
       <div className="flex items-baseline justify-between gap-3">
@@ -99,7 +103,7 @@ const fmt = (x: number) => (Math.round(x * 10) / 10).toFixed(1)
 function safestBet(p: Prediction, home: string, away: string): { label: string; p: number } | null {
   if (p.locked || typeof p.home !== 'number') return null
   const c: { label: string; p: number }[] = []
-  const top = [{ l: tt("{0} to win", { 0: home }), v: p.home }, { l: 'Draw', v: p.draw }, { l: tt("{0} to win", { 0: away }), v: p.away }].sort((a, b) => b.v - a.v)[0]
+  const top = [{ l: tt("{0} to win", { 0: home }), v: p.home }, { l: tt("Draw"), v: p.draw }, { l: tt("{0} to win", { 0: away }), v: p.away }].sort((a, b) => b.v - a.v)[0]
   c.push({ label: top.l, p: top.v })
   const dc = [{ l: tt("{0} or draw", { 0: home }), v: p.home + p.draw }, { l: tt("{0} or draw", { 0: away }), v: p.away + p.draw }, { l: tt("{0} or {1} (no draw)", { 0: home, 1: away }), v: p.home + p.away }].sort((a, b) => b.v - a.v)[0]
   c.push({ label: dc.l, p: dc.v })
@@ -135,11 +139,11 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
   const risks: string[] = []
   // (lineups not out yet: the blue "check again 1 hour before kick-off" note above already says it)
   const xi = g.rows.find(r => r.id === '#12')
-  if (upcoming && xi && xi.note && /^usual starters out/.test(xi.note)) risks.push(tt("The lineups are in and already counted: {0} ({1}).", { 0: xi.note.replace(/^usual starters out: /, 'usual starters out ').replace(' | ', ` (${home}) · `), 1: away }))
+  if (upcoming && xi && xi.note && /^usual starters out/.test(xi.note)) { const [xh, xa] = xi.note.replace(/^usual starters out: /, '').split(' | '); risks.push(tt("The lineups are in and already counted: {0} ({1}).", { 0: `${tt("usual starters out")} ${listNames(xh || '')} (${home}) · ${listNames(xa || '')}`, 1: away })) }
   const inj = g.rows.find(r => r.id === '#13' && r.note && /^out: /.test(r.note))
   if (inj) {
     const [h, a] = inj.note!.replace(/^out: /, '').split(' | ')
-    const list = [h && h !== 'none' && h !== 'n/a' ? `${home}: ${h}` : null, a && a !== 'none' && a !== 'n/a' ? `${away}: ${a}` : null].filter(Boolean)
+    const list = [h && h !== 'none' && h !== 'n/a' ? `${home}: ${listNames(h)}` : null, a && a !== 'none' && a !== 'n/a' ? `${away}: ${listNames(a)}` : null].filter(Boolean)
     if (list.length) risks.push(tt("Missing: {0}.", { 0: list.join(' · ') }))
   }
   if (friendly || g.rows.some(r => /friendly/i.test(r.name))) risks.push(tt("It is a friendly: coaches rotate their squads, so results are harder to predict."))

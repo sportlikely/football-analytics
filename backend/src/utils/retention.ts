@@ -19,7 +19,9 @@ export const PROTECTED = new Set([
   'model_daily', 'season_forecast_history', 'season_forecast_accuracy', 'bb_live_samples', 'nfl_live_samples',
   'tennis_live_samples', 'slugs', 'slug_ids', 'app_secrets', 'admin_email_actions',
   // fix258: staff console logins (and the session's "console unlocked" flag) are never touched
-  'staff_console', 'staff_console_keep', 'sessions', 'roles'
+  'staff_console', 'staff_console_keep', 'sessions', 'roles',
+  // fix261: the names in Hebrew / Arabic (admin spellings among them)
+  'names', 'name_items'
 ]);
 
 /** how a rule's column holds time */

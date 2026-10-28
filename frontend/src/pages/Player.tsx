@@ -10,6 +10,7 @@ import PlayerHeader, { Chip } from '../components/sport/page/PlayerHeader'
 import NameLink, { href } from '../components/sport/NameLink'
 import { tNodes } from '../lib/tNodes'
 import { teamHref as footballTeamOf, playerHref, leagueHref } from '../lib/links'
+import { tg } from '../lib/genText'
 
 /**
  * Player page: /player/<API-Football id>. /player/find?name=&team=&c=&n= looks a scorer up first (Football-Data ids).
@@ -401,7 +402,7 @@ export default function Player() {
         <div className="rounded-3xl p-6 border border-home/40 bg-[linear-gradient(150deg,#1B2A55_0%,#101624_70%)] text-[#EEF1F6] flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="font-display text-lg font-bold">{tt("Every stat with Premium")}</div>
-            <p className="text-sm text-[#C9D0DB]">{data.locked.join(' · ')}</p>
+            <p className="text-sm text-[#C9D0DB]">{data.locked.map(tg).join(' · ')}</p>
           </div>
           <Link to="/premium" className="h-11 px-6 rounded-2xl bg-[#C8FF3D] text-[#07090D] font-extrabold grid place-items-center">{tt("Go Premium")}</Link>
         </div>
@@ -423,7 +424,7 @@ export default function Player() {
                     <img src={tr.to.logo} alt="" className="w-4 h-4 object-contain flex-shrink-0" />
                     <span className="truncate">{tr.to.name}</span>
                   </Link>
-                  <span className="ms-auto text-[11px] text-faint whitespace-nowrap">{tr.type}</span>
+                  <span className="ms-auto text-[11px] text-faint whitespace-nowrap">{tg(tr.type)}</span>
                 </li>
               ))}
             </ul>
@@ -435,9 +436,9 @@ export default function Player() {
             <ul className="space-y-1">
               {data.sidelined.map((s, i) => (
                 <li key={i} className="flex items-center justify-between gap-3 py-2 border-b border-line/50 last:border-0 text-sm">
-                  <span className="text-ink truncate">{s.type}</span>
+                  <span className="text-ink truncate">{tg(s.type)}</span>
                   <span className="text-[11px] text-faint whitespace-nowrap">
-                    {fmt(s.start)} – {s.end ? fmt(s.end) : 'now'}
+                    {fmt(s.start)} – {s.end ? fmt(s.end) : tt("now")}
                   </span>
                 </li>
               ))}

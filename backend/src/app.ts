@@ -96,10 +96,11 @@ import { serveEarly, needsState, currentMainScript } from './services/earlyStati
 import { deployErrorsMiddleware, noteLoading } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
 import { workerRoutes, workerRoutesStatus, sendStartupCopy } from './services/workerRoutes';
+import { namesTick, namesJson, namesAdmin, setAdminName, latinFor, viewOf, VIEW_SQL } from './services/names';
 import { deadlineStart, lateCopy, slowRequests } from './services/deadline';
 import { buildBundle, noteBundleAsked, isBundleCall, type BundleSport } from './services/gameBundle';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
-import { deferredStatus } from './services/deferredWrites';
+import { deferredStatus, deferred } from './services/deferredWrites';
 import { builder, webBuilds } from './services/builders';
 import { workerHealth, memorySizing } from './services/workerHealth';
 import { perfHours } from './services/perfHistory';
@@ -735,7 +736,7 @@ const dayPages = rateLimit('day-pages', req => (req.access === 'premium' || req.
 app.use(['/api/team-page', '/api/player-page', '/api/search', /^\/api\/matches\/\d+\/details/, /^\/api\/game-bundle\/football\//], (req, res, next) => ((req as any).verifiedCrawler || isBundleCall(req.headers) ? next() : dayPages(req, res, next)));
 app.use('/api/unlocks', (req, res, next) => (req.method === 'POST' ? rateLimit('unlock', 30, 60000, r => String(r.user?.id || ipKey(r)))(req, res, next) : next()));
 
-const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|extras\/|game-bundle\/|changelog$|hub(\/|$)|slugs\/|slug\/|slug-of\/|slug-route$|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
+const OPEN_API = /^\/api\/(health$|visit\/seen$|auth\/|waitlist$|contact$|feedback$|client-error$|picks(\/|$)|testers\/|unsubscribe$|email\/(settings|unsubscribe)$|push\/(settings|subscribe|unsubscribe)$|webhooks\/resend$|favorites(\/|$)|assistant(\/|$)|matches(\/|$)|leagues(\/|$)|teams\/|team-page\/|player-page\/|search$|news$|today$|guides(\/|$)|how-it-works\/|season-forecast\/|extras\/|game-bundle\/|names\/(he|ar)$|changelog$|hub(\/|$)|slugs\/|slug\/|slug-of\/|slug-route$|basketball\/|nfl\/|tennis\/|more\/|public\/(summary|results|record|geo-source|photo-credits)$|unlocks(\/|$)|billing\/)/;
 const PREMIUM_GET_API = /^\/api\/(accuracy(\/recent|\/status)?|history\/status|clv|draw-alerts|upset-watch)$/; // past seasons and backtests are admin only (Oct 2026)
 
 app.use('/api', (req, res, next) => {
@@ -777,6 +778,12 @@ app.use('/api', (req, res, next) => {
 // fix210: the public routes that build a page (match / team / player / game pages, news, today, more predictions … of
 // every sport) are answered by the worker; signed-out copies are kept here (services/workerRoutes.ts)
 // fix250: a public answer kept after the 900 ms cut (services/deadline.ts) is sent at once, refreshed in the background
+// fix261: a team / player page open counts for the names' admin list (most opened first; a deferred write)
+const nameView = deferred(VIEW_SQL);
+if (!isWorker) app.use('/api', (req, _res, next) => {
+  if (req.method === 'GET' && !(req as any).verifiedCrawler) { const v = viewOf('/api' + req.path); if (v) nameView.run(v.sport, v.kind, v.id); }
+  next();
+});
 app.use(lateCopy);
 app.use(workerRoutes);
 
@@ -2687,7 +2694,9 @@ app.post('/api/team-overrides', teamOverrideHandler);
 // Search: teams (every club and national team we track) + upcoming / live matches of those teams
 app.get('/api/search', async (req, res) => {
   try {
-    const q = String(req.query.q || '').trim().slice(0, 60);
+    // fix261: a query in Hebrew / Arabic letters searches the Latin names it matches (search works in both scripts)
+    const q0 = String(req.query.q || '').trim().slice(0, 60);
+    const q = latinFor(q0, 1)[0] || q0;
     if (q.length < 2) return res.json({ data: { teams: [], matches: [], competitions: [], players: [] } });
     const teams = searchTeams(q, 8);
     let players = searchPlayers(q, 6);
@@ -2882,6 +2891,23 @@ app.get('/api/extras/:sport(football|basketball|nfl|tennis)/team/:id(\\d+)', (re
   const sport = req.params.sport as 'football' | 'basketball' | 'nfl' | 'tennis';
   if (!extrasOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
   try { res.set('Cache-Control', 'public, max-age=600').json({ data: teamExtras(sport, Number(req.params.id)) }); } catch (e: any) { sendError(res, e, 'Team extras failed'); }
+});
+// fix261: names in the local script (Latin → he / ar) for the app's he / ar pages; the worker answers (WORKER_ROUTES)
+app.get('/api/names/:lang(he|ar)', (req, res) => {
+  const j = namesJson(req.params.lang);
+  if (!j) return res.status(404).json({ error: 'Not found' });
+  res.set('Cache-Control', 'public, max-age=1800').type('application/json').send(j);
+});
+// fix261 (admin): Data & feeds → "Names in Hebrew / Arabic": the most opened names, their spelling and source; edit one
+app.get('/api/admin/names', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { if (req.query.run === '1') await namesTick({ collect: true, wd: req.query.wd ? Number(req.query.wd) : undefined }); res.json({ data: namesAdmin({ q: String(req.query.q || ''), kind: String(req.query.kind || ''), limit: Number(req.query.limit) || 200 }) }); } catch (e) { sendError(res, e, 'Names failed'); }
+});
+app.post('/api/admin/names', (req, res) => {
+  const b = req.body || {};
+  const r = setAdminName(String(b.sport ?? ''), String(b.kind || ''), String(b.latin || ''), String(b.lang || ''), String(b.name ?? ''));
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json({ ok: true });
 });
 // fix231 (admin): coverage per sport, the last run, venues without coordinates; ?run=1 runs the job now
 app.get('/api/admin/game-extras', async (req, res) => {

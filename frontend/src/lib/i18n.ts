@@ -181,6 +181,9 @@ export function t(key: string, vars?: Record<string, string | number | null | un
   return fill(s ?? key, vars)
 }
 
+/** fix261: whether this language's dictionary has the key (lib/genText.ts) */
+export const hasKey = (key: string): boolean => key in dict
+
 /** Keys with no translation in this language (for a quick check in the console). */
 export const missingKeys = () => [...missing]
 

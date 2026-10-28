@@ -9,6 +9,7 @@ import { TeamLogo } from '../../../pages/bb/parts'
 import { Section } from './GamePage'
 import { ModelName } from './ModelName'
 import { slModelOf, type ModelSport } from '../../../lib/modelNames'
+import { tg } from '../../../lib/genText'
 
 /**
  * The prediction block of the sports where our pick is the winner (basketball, NFL + college; fix152c — it was
@@ -146,7 +147,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
                   {x.why.map((w, i) => (
                     <li key={i} className={`flex items-start gap-3 text-sm ${w.sub ? 'ps-5' : ''}`}>
                       <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${w.tone === 'H' ? 'bg-home' : w.tone === 'A' ? 'bg-away' : 'bg-faint'} ${w.sub ? 'opacity-60' : ''}`} />
-                      <span className={`flex-1 leading-snug ${w.sub ? 'text-muted' : 'text-ink'}`}>{w.text}</span>
+                      <span className={`flex-1 leading-snug ${w.sub ? 'text-muted' : 'text-ink'}`}>{tg(w.text)}</span>
                       {w.points && (
                         <span className={`num text-xs font-bold whitespace-nowrap ${w.tone === 'H' ? 'text-home' : w.tone === 'A' ? 'text-away' : 'text-muted'}`}>{w.points}</span>
                       )}

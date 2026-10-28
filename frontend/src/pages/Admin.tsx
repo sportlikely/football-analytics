@@ -11,6 +11,7 @@ import PushAdminCard from '../components/PushAdminCard'
 import NbaModelCheckCard from '../components/NbaModelCheckCard'
 import NewsInjuriesCard from '../components/NewsInjuriesCard'
 import GameExtrasAdminCard from '../components/GameExtrasAdminCard'
+import NamesAdminCard from '../components/NamesAdminCard'
 import BbGridCard from '../components/BbGridCard'
 import DiffViewCard from '../components/DiffViewCard'
 import LeagueFixCard from '../components/LeagueFixCard'
@@ -176,6 +177,7 @@ export default function Admin() {
           <Explained ctx={ctx} id="leagues-football"><LeaguesCard /></Explained>
           <Explained ctx={ctx} id="leagues-basketball"><LeaguesCard sport="basketball" /></Explained>
           <Explained ctx={ctx} id="game-extras"><GameExtrasAdminCard /></Explained>
+          <Explained ctx={ctx} id="names-local"><NamesAdminCard /></Explained>
           <Explained ctx={ctx} id="news-injuries"><NewsInjuriesCard /></Explained>
           <Explained ctx={ctx} id="bb-results"><BbResultsCard /></Explained>
           <TabChecks tab="data" ctx={ctx} reload={reload} extra={<button type="button" onClick={runPlayers} className="font-bold text-muted hover:text-ink">Run player check</button>} />

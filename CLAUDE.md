@@ -107,7 +107,18 @@ is model work, the matching note, in the same commit.
   `PUBLIC_LANGS` names them (backend `utils/langs.ts` = frontend `lib/i18n.ts` LANGS): no hreflang / sitemap / crawler HTML,
   /ar and /he 404 for visitors. Layout uses logical classes only (ms-/me-/ps-/pe-/start-/end-/text-start/text-end, never
   ml-/mr-/left-/text-left), a direction glyph or icon gets `.rtl-flip`, a signed number `ltr()`; numbers stay Western
-  digits, dates via LOCALE.
+  digits, dates via LOCALE. fix261: 1 · X · 2 cells and scores / ranges stay left to right on ar / he (`dir="ltr"` on the
+  cells, `lib/rtlNumbers.ts` isolates every digit–dash–digit run).
+- Server-written sentences (team analysis notes, model reasons / row notes, tennis why lines, labels inside lists,
+  form errors) are translated on the page by `tg()` (`frontend/src/lib/genText.ts`: each sentence the server can write is
+  a `g("…")` template = a dictionary key, numbers / names / months filled in). A new server sentence = a `g()` line +
+  its translations; `npm run test:fix261` (backend) fails on a generator sentence without a template and renders home /
+  team / match tabs / player / Upset watch in all 13 languages, failing on any English line (test-output/lang-audit.json).
+- Names in the local script (fix261, he / ar; ru / el / hi later): `services/names.ts` (tables `name_items` + `names`,
+  worker job "names" every 30 min: admin > press spelling > Wikidata label > letter rules `utils/nameScript.ts`), map
+  `/api/names/<lang>` loaded before the first paint (`frontend/src/lib/names.ts`: API answers' name fields swapped, socket
+  too); links / slugs / fixed Latin lists use `latinOf()`; the server's own texts `nameIn()` (crawler titles + body,
+  emails, push, calendar); search takes both scripts (`latinFor`). Admin → Data & feeds → "Names in Hebrew / Arabic".
 - Phones first: check layouts at 375 px. Bottom nav on phones; floating accessibility button bottom-left.
 - Don't add dependencies without a reason; the backend uses Node's built-in `node:sqlite`, no ORM.
 - The server can't be reached from local tests; test model changes on a database copy (admins can download one from

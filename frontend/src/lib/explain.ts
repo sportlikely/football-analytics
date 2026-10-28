@@ -1,5 +1,7 @@
 import { dcOf, type Prediction } from './predict'
 import { t } from './i18n'
+import { tg } from './genText'
+import { nm } from './names'
 
 /**
  * "Why this pick" — turns a v3 prediction (the grid rows every engine sends: leagues, national teams, European cups)
@@ -22,6 +24,8 @@ type Row = NonNullable<Prediction['grid']>['rows'][number]
 type Side = 'H' | 'A'
 
 const pctR = (x: number) => `${Math.round(x)}%`
+/** fix261: names from a row note in the page's script */
+const names_ = (s: string) => s.split(', ').map(nm).join(', ')
 
 export function rowSentence(r: Row, side: Side, names: { H: string; A: string }): string {
   const tm = names[side], o = names[side === 'H' ? 'A' : 'H']
@@ -35,30 +39,30 @@ export function rowSentence(r: Row, side: Side, names: { H: string; A: string })
       return (m ? t("{0} have the more valuable squad ({1} vs {2}).", { 0: tm, 1: side === 'H' ? m[1] : m[2], 2: side === 'H' ? m[2] : m[1] }) : t("{0} have the more valuable squad.", { 0: tm })) + (m && (m[1] + m[2]).includes('~') ? ' ' + t("(~ = estimate: the data source is incomplete for newly promoted clubs.)") : '')
     }
     case '#1e':
-      return note ? t("{0} are the stronger side on results over time ({1}).", { 0: tm, 1: note }) : t("{0} are the stronger side on results over time.", { 0: tm })
+      return note ? t("{0} are the stronger side on results over time ({1}).", { 0: tm, 1: tg(note) }) : t("{0} are the stronger side on results over time.", { 0: tm })
     case '#19':
       return r.name.startsWith('Goals')
-        ? (note ? t("{0} score more and concede less ({1}).", { 0: tm, 1: note }) : t("{0} score more and concede less.", { 0: tm }))
+        ? (note ? t("{0} score more and concede less ({1}).", { 0: tm, 1: tg(note) }) : t("{0} score more and concede less.", { 0: tm }))
         : t("{0}'s attack does better against teams of this level.", { 0: tm })
     case '#14':
       return t("{0}'s defence holds up better against teams of this level.", { 0: tm })
     case '#10':
-      return r.name.startsWith('Rest') ? t("{0} have had more rest.", { 0: tm }) : note ? t("{0} are fresher ({1}).", { 0: tm, 1: note }) : t("{0} are fresher.", { 0: tm })
+      return r.name.startsWith('Rest') ? t("{0} have had more rest.", { 0: tm }) : note ? t("{0} are fresher ({1}).", { 0: tm, 1: tg(note) }) : t("{0} are fresher.", { 0: tm })
     case '#23':
       return r.name.startsWith('Home advantage') ? t("Home advantage for {0}.", { 0: names.H }) : side === 'H' ? t("{0} are strong at home compared with {1}'s away record.", { 0: tm, 1: o }) : t("{0}'s away record is better than {1}'s home record.", { 0: tm, 1: o })
     case '#7':
-      return note ? t("{0} have had the better of recent meetings ({1}).", { 0: tm, 1: note.replace(/, home side share \d+%/, '') }) : t("{0} have had the better of recent meetings.", { 0: tm })
+      return note ? t("{0} have had the better of recent meetings ({1}).", { 0: tm, 1: tg(note.replace(/, home side share \d+%/, '')) }) : t("{0} have had the better of recent meetings.", { 0: tm })
     case '#21':
-      return note ? t("{0} are in better form ({1}).", { 0: tm, 1: note }) : t("{0} are in better form.", { 0: tm })
+      return note ? t("{0} are in better form ({1}).", { 0: tm, 1: tg(note) }) : t("{0} are in better form.", { 0: tm })
     case '#12': {
       const [h, a] = (note || '').replace(/^usual starters out: /, '').split(' | ')
       const who = side === 'H' ? a : h
-      return who && who !== 'none' && who !== 'n/a' ? t("{0} are without usual starters ({1}).", { 0: o, 1: who }) : t("{0} are without usual starters.", { 0: o })
+      return who && who !== 'none' && who !== 'n/a' ? t("{0} are without usual starters ({1}).", { 0: o, 1: names_(who) }) : t("{0} are without usual starters.", { 0: o })
     }
     case '#13': {
       const [h, a] = (note || '').replace(/^out: /, '').split(' | ')
       const who = side === 'H' ? a : h
-      return who && who !== 'none' && who !== 'n/a' ? t("{0} have key players missing ({1}).", { 0: o, 1: who }) : t("{0} have key players missing.", { 0: o })
+      return who && who !== 'none' && who !== 'n/a' ? t("{0} have key players missing ({1}).", { 0: o, 1: names_(who) }) : t("{0} have key players missing.", { 0: o })
     }
     default:
       return t("{0} favours {1}.", { 0: t(r.name), 1: tm })

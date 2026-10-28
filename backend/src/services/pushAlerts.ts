@@ -48,6 +48,7 @@ import elLang from '../locales/push/el.json';
 import ruLang from '../locales/push/ru.json';
 import ar from '../locales/push/ar.json';
 import he from '../locales/push/he.json';
+import { nameIn } from './names';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS push_prefs (
@@ -378,6 +379,9 @@ export const showPickFor = (p: Person, s: Pick<Snap, 'rid'>) => canSeeFull(p.acc
 const linkTo = (lang: PushLang, path: string) => `${lang === 'en' ? '' : `/${lang}`}${path}?utm_source=push&utm_medium=push&utm_campaign=alerts`;
 /** The notification payload for one person (the service worker shows it). */
 export function payloadFor(p: Person, e: PEvent): { title: string; body: string; url: string; tag: string; kind: PKind } {
+  // fix261: names in the person's script (he / ar)
+  const L = p.prefs.lang;
+  if (L === 'he' || L === 'ar') e = { ...e, snap: { ...e.snap, home: nameIn(L, e.snap.home), away: nameIn(L, e.snap.away), league: nameIn(L, e.snap.league) } };
   const n = noteOf(e, { tx: pushWords(p.prefs.lang), lang: p.prefs.lang, tz: p.prefs.tz, showPick: showPickFor(p, e.snap) });
   return { ...n, url: linkTo(p.prefs.lang, e.snap.path), tag: `${e.sport}-${e.gameId}`, kind: e.kind };
 }

@@ -22,6 +22,7 @@ import { sealText, openText } from './twoFactor';
 import { doubleChance, dcHit, type DC, type Outcome } from '../utils/doubleChance';
 import { slModel, type ModelSport } from '../utils/modelNames';
 import { every } from './perf';
+import { nameIn } from './names';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS calendar_tokens (
@@ -432,6 +433,8 @@ export function calendarFor(user: User, lang: CalLang, site: string, now = Date.
   if (fbIds.length) games.push(...footballGames(footballTeamIds(fbIds), from, to, fbFull));
   games.push(...basketballGames(bbIds, from, to, usFull), ...nflGames(nflIds, from, to, usFull), ...tennisGames(tnIds, from, to, usFull, admin));
   games.sort((a, b) => a.start.localeCompare(b.start) || a.id - b.id);
+  // fix261: names in the calendar's script (he / ar)
+  for (const g of games) { g.home = nameIn(lang, g.home); g.away = nameIn(lang, g.away); if (g.comp) g.comp = nameIn(lang, g.comp); }
 
   const prefix = lang === 'en' ? '' : `/${lang}`;
   const events: CalEvent[] = [];

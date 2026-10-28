@@ -6,6 +6,7 @@ import { DcTag } from '../../DcPick'
 import AccuracyDetailed from '../../../pages/Accuracy'
 import { Card, Bar, Tick, pct, StatCard, SectionHead, type AccuracyAdapter, type AccData } from '../Accuracy'
 import { leagueHref, matchHref } from '../../../lib/links'
+import { tg } from '../../../lib/genText'
 
 /** Football's Accuracy adapter (/public/record): the double chance up top, then the hard and the safer calls. */
 type Outcome = 'H' | 'D' | 'A'
@@ -83,7 +84,7 @@ export const footballAccuracy: AccuracyAdapter = {
                 {rec.safest?.n ? t("{0} of {1} right. For every match, the one pick we were most sure about.", { 0: rec.safest.hits, 1: rec.safest.n }) : none}
               </p>
               {rec.safest && rec.safest.byMarket.length > 0 && (
-                <p className="text-[11px] text-faint mt-2">{rec.safest.byMarket.map(b => `${b.market} ${b.n}× (${pct(b.hitRate)})`).join(' · ')}</p>
+                <p className="text-[11px] text-faint mt-2">{rec.safest.byMarket.map(b => `${tg(b.market)} ${b.n}× (${pct(b.hitRate)})`).join(' · ')}</p>
               )}
             </Card>
           </div>

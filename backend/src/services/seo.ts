@@ -25,6 +25,7 @@ import { pubPath, pubLinks, parseNew, parseOld, idOfSlug, internalPath } from '.
 import { isPastSeasonMatch } from './pastSeason';
 import { internalPage } from '../utils/slugRules';
 import { publicLangs, isRtl } from '../utils/langs';
+import { localNamesText, localNamesHtml } from './names';
 
 /*
  * fix175: the crawler pages' data, cached 10 minutes by function + arguments — never by language, so /it/match/1,
@@ -364,7 +365,17 @@ export function bbGamePath(rawPath: string): { id: number; lang: Lang } | null {
   return m ? { id: Number(m[2]), lang: (m[1] || 'en') as Lang } : null;
 }
 
+/** fix261: the sport's name when a match has no competition name (was English 'Football' in every language) */
+const FOOTBALL_WORD: Record<Lang, string> = { en: 'Football', es: 'Fútbol', pt: 'Futebol', de: 'Fußball', fr: 'Football', it: 'Calcio', tr: 'Futbol', id: 'Sepak bola', hi: 'फ़ुटबॉल', pl: 'Piłka nożna', el: 'Ποδόσφαιρο', ru: 'Футбол', ar: 'كرة القدم', he: 'כדורגל' };
+
+/** fix261: on he / ar pages the team, league, country and player names in the local script (titles, description, body text) */
 export function seoPage(rawPath: string): SeoInfo {
+  const info = seoPageLatin(rawPath);
+  if (info.lang !== 'he' && info.lang !== 'ar') return info;
+  return { ...info, title: localNamesText(info.lang, info.title), description: localNamesText(info.lang, info.description), body: localNamesHtml(info.lang, info.body) };
+}
+
+function seoPageLatin(rawPath: string): SeoInfo {
   let path = rawPath.split('?')[0].replace(/\/+$/, '') || '/';
   let lang: Lang = 'en';
   const m0 = path.match(/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he)(\/|$)/);
@@ -455,14 +466,14 @@ export function seoPage(rawPath: string): SeoInfo {
         const out = { home: facts?.out.home || null, away: facts?.out.away || null };
         // fix124: one full sentence of 140–155 characters, in the page's language
         const desc = fitDescription(
-          [`${name}, ${x.comp || 'Football'}, ${shortDate(x.date, lang)}`, `${name}, ${shortDate(x.date, lang)}`],
+          [`${name}, ${x.comp || FOOTBALL_WORD[lang]}, ${shortDate(x.date, lang)}`, `${name}, ${shortDate(x.date, lang)}`],
           [
             ...(fh.length >= 3 && fa.length >= 3 ? [`${pk.form} (${formLetters(fh.map(g => fbWdl(g, x.homeId!)), lang)} vs ${formLetters(fa.map(g => fbWdl(g, x.awayId!)), lang)})`] : []),
             ...(h2.length ? [`${pk.lastMeeting} ${h2[0].hg}-${h2[0].ag}`] : []),
             ...(tbl ? [`#${tbl.home} vs #${tbl.away} ${pk.table}`] : []),
             ...((out.home?.length || out.away?.length) ? [pk.absences] : [])
           ], pk.fbFill, pk.fbTails);
-        const title = lang === 'en' ? matchTitle(x.home, x.away, x.comp, x.date) : `${nameWord(lang, name, pk.previewTitle)} · ${x.comp || 'Football'} · ${titleDate(x.date, lang)} | ${BRAND}`;
+        const title = lang === 'en' ? matchTitle(x.home, x.away, x.comp, x.date) : `${nameWord(lang, name, pk.previewTitle)} · ${x.comp || FOOTBALL_WORD[lang]} · ${titleDate(x.date, lang)} | ${BRAND}`;
         const absences = (out.home?.length || out.away?.length)
           ? `<h2>${ui(lang, 'absences')}</h2><ul>${out.home?.length ? `<li>${esc(x.home)}: ${esc(out.home.join(', '))}</li>` : ''}${out.away?.length ? `<li>${esc(x.away)}: ${esc(out.away.join(', '))}</li>` : ''}</ul>` : '';
         return page(title, desc,

@@ -2,6 +2,8 @@
  * How big a team is (global recognition, not current form): 10 = the biggest clubs and nations, 1 = everyone else.
  * Used to pick the Spotlight games and the home page's featured match.
  */
+import { latinOf } from './names'
+
 // "Big club" ranking for the Spotlight — global recognition, not current form.
 const FAME: [RegExp, number][] = [
   [/real madrid|barcelona|manchester united|liverpool|manchester city|bayern|paris saint|juventus|chelsea|arsenal/i, 10],
@@ -14,7 +16,9 @@ const FAME: [RegExp, number][] = [
   [/^(poland|austria|sweden|norway|turkey|t[üu]rkiye|senegal|nigeria|egypt|ukraine|serbia|scotland|wales|czechia|czech republic|korea republic|south korea|ecuador|chile|israel)$/i, 5],
   [/girona|brighton|wolverhampton|torino|celta|wolfsburg|schalke|hamburger|werder|k[öo]ln|union berlin|nice|lens|rennes|strasbourg|crystal palace|fulham|brentford|bournemouth|getafe|osasuna|udinese|genoa|parma|freiburg|hoffenheim|mainz|augsburg|toulouse|nantes|twente|az|utrecht|vit[óo]ria|guimar/i, 3]
 ]
-export function fame(t: { name: string; shortName?: string }) {
+export function fame(t0: { name: string; shortName?: string }) {
+  // fix261: on he / ar pages the names arrive in the local script; the list is Latin
+  const t = { name: latinOf(t0.name), shortName: t0.shortName ? latinOf(t0.shortName) : undefined }
   for (const [re, score] of FAME) if (re.test(t.name) || (t.shortName && re.test(t.shortName)) || re.test(`${t.name} ${t.shortName || ''}`)) return score
   return 1
 }

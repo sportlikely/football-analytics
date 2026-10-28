@@ -100,7 +100,8 @@ export function Terms() {
       <Section title="Data from others">
         <p>
           Fixtures, scores, statistics and lineups come from third-party providers and can be late or wrong. Team names and crests
-          belong to their owners and are shown only to identify the teams.
+          belong to their owners and are shown only to identify the teams. Team, league and player names in Hebrew and Arabic come in
+          part from Wikidata (labels shared under CC0) and are otherwise written by us.
         </p>
       </Section>
       <Section title="Liability">

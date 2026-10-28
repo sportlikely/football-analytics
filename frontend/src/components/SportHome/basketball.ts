@@ -9,6 +9,7 @@ import { rid, rstatus, bbShort } from '../../pages/bb/parts'
 import { winnerPred, winnerRecordRows, upsetItems, winnerIntroStats, recordAside } from './winner'
 import type { SportAdapter, SportHomeData, HGame, HNews, HResult } from './types'
 import { teamHref, leagueHref, matchHref } from '../../lib/links'
+import { latinOf } from '../../lib/names'
 
 /** Basketball's adapter for components/SportHome (fix141): the data and labels of the basketball home. */
 
@@ -69,8 +70,8 @@ function useBasketballData(): SportHomeData {
   // the carousel shows up to 6 of that group in tip-off order
   const featured = useMemo(() => {
     const withP = notStarted.filter(g => g.prediction)
-    const fameOf = (g: BbGame) => (g.league.code === 'NBA' ? NBA_FAME : EL_BIG).filter(re => re.test(g.home.name) || re.test(g.away.name)).length
-    const bigEl = (g: BbGame) => g.league.code === 'EL' && ((EL_BIG.some(re => re.test(g.home.name)) && EL_BIG.some(re => re.test(g.away.name))) || /play|final/i.test(g.round || ''))
+    const fameOf = (g: BbGame) => (g.league.code === 'NBA' ? NBA_FAME : EL_BIG).filter(re => re.test(latinOf(g.home.name)) || re.test(latinOf(g.away.name))).length
+    const bigEl = (g: BbGame) => g.league.code === 'EL' && ((EL_BIG.some(re => re.test(latinOf(g.home.name))) && EL_BIG.some(re => re.test(latinOf(g.away.name)))) || /play|final/i.test(g.round || ''))
     const groups = [withP.filter(g => g.league.code === 'NBA' && !g.preseason), withP.filter(bigEl), withP.filter(g => g.league.code === 'NBA' && g.preseason)]
     const list = groups.find(x => x.length) || []
     return [...list].sort((a, b) => fameOf(b) - fameOf(a) || (hasPct(a) && hasPct(b) ? top(a) - top(b) : 0) || a.kickoff.localeCompare(b.kickoff))

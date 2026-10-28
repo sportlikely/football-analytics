@@ -32,6 +32,8 @@ import GameExtras from '../components/sport/game/GameExtras'
 import { footballScorers } from '../lib/scorers'
 import { playerHref, leagueHref } from '../lib/links'
 import { useTabPath } from '../lib/tabPath'
+import { latinOf } from '../lib/names'
+import { tg } from '../lib/genText'
 
 /** fix174: the match's competition code, so every team name on the page links to its team page */
 const CompCode = createContext<string | undefined>(undefined)
@@ -309,7 +311,7 @@ function GridBreakdown({ p, home, away }: { p: Prediction; home: Team; away: Tea
       {g.reasons.length > 0 && (
         <ul className="mb-3 space-y-0.5 text-xs text-muted">
           {g.reasons.map((r, i) => (
-            <li key={i}>· {r}</li>
+            <li key={i}>· {tg(r)}</li>
           ))}
         </ul>
       )}
@@ -325,7 +327,7 @@ function GridBreakdown({ p, home, away }: { p: Prediction; home: Team; away: Tea
         </thead>
         <tbody>
           {teamRows.map(r => (
-            <tr key={r.id} className="border-t border-line/40" title={r.note}>
+            <tr key={r.id} className="border-t border-line/40" title={r.note ? tg(r.note) : undefined}>
               <td className="py-1 text-muted">{tt(r.name)}</td>
               <td className="py-1 text-end num text-faint">{r.rel}</td>
               <td className="py-1 text-end num text-ink">{Math.round(score10(r.home) * 10) / 10}</td>
@@ -350,7 +352,7 @@ function GridBreakdown({ p, home, away }: { p: Prediction; home: Team; away: Tea
         <div className="mt-3 pt-2 border-t border-line/40 text-xs text-muted flex flex-wrap gap-x-4 gap-y-1">
           <span className="text-faint">{tt("Draw pot")}</span>
           {drawRows.map(r => (
-            <span key={r.id} title={r.note}>
+            <span key={r.id} title={r.note ? tg(r.note) : undefined}>
               {tt(r.name)} <span className="num text-ink">{r.home}</span>
               <span className="text-faint">×{r.rel}</span>
             </span>
@@ -409,7 +411,7 @@ function MatchDetail() {
         setDetails(prev => (prev && next?.match && prev.match.id === next.match.id ? { ...next, match: newerFootballLive(prev.match, next.match) } : next))
         setError(null)
       })
-      .catch(err => setError(err.response?.data?.message || err.message))
+      .catch(err => setError(tg(err.response?.data?.message || err.message)))
       .finally(() => setLoading(false))
   }
 
@@ -779,7 +781,7 @@ function MatchDetail() {
                       return (
                         <>
                           <div className="text-[11px] font-semibold uppercase tracking-wide text-faint mb-2">{tt("Most likely result")}</div>
-                          <div className="grid grid-cols-3 gap-3">
+                          <div className="grid grid-cols-3 gap-3" dir="ltr">
                             <OutcomeTile k="H" label={home.shortName || home.name} v={p.home} top={top === 'H'} inPick={inDc('H')} roll={justRevealed(matchId)} delay={0} />
                             <OutcomeTile k="D" label={tt("Draw")} v={p.draw} top={top === 'D'} inPick={inDc('D')} roll={justRevealed(matchId)} delay={120} />
                             <OutcomeTile k="A" label={away.shortName || away.name} v={p.away} top={top === 'A'} inPick={inDc('A')} roll={justRevealed(matchId)} delay={240} />
@@ -817,7 +819,7 @@ function MatchDetail() {
                       home={home.shortName || home.name}
                       away={away.shortName || away.name}
                       upcoming={['SCHEDULED', 'TIMED'].includes(m.status)}
-                      friendly={/friendl/i.test(m.competition.name || '')}
+                      friendly={/friendl/i.test(latinOf(m.competition.name))}
                     />
                     {guessFirstOn() && ['SCHEDULED', 'TIMED'].includes(m.status) && (
                       <div className="mt-2 text-end">
@@ -1074,7 +1076,7 @@ function MatchDetail() {
       scoreSub={showScore && ht && ht.home !== null && (done || m.status === 'PAUSED' || (m.minute ?? 0) > 45) ? (
         <div className="num text-xs text-faint mt-1">{tt("HT")}{' '}{ht.home}–{ht.away}</div>
       ) : undefined}
-      status={{ kind: live ? 'live' : halted ? 'halted' : done ? 'done' : 'upcoming', text: live ? statusLabel(m) : halted ? tt(statusLabel(m)) : done ? tt("FULL-TIME") : tt("KICK-OFF") }}
+      status={{ kind: live ? 'live' : halted ? 'halted' : done ? 'done' : 'upcoming', text: live ? tt(statusLabel(m)) : halted ? tt(statusLabel(m)) : done ? tt("FULL-TIME") : tt("KICK-OFF") }}
       statusNote={halted ? (
         <p className="mt-2 max-w-[260px] mx-auto text-[11px] text-muted">
           {m.status === 'CANCELLED'
@@ -1313,7 +1315,7 @@ function LockedPrediction({ pick, dc, home, away, matchId, status, autoUnlock = 
         )}
       </div>
       <div className="relative min-h-[190px]">
-        <div className="grid grid-cols-3 gap-3 pt-6 select-none blur-[5px] opacity-60" aria-hidden>
+        <div className="grid grid-cols-3 gap-3 pt-6 select-none blur-[5px] opacity-60" aria-hidden dir="ltr">
           {tiles.map(t => (
             <OutcomeTile key={t.k} k={t.k} label={t.label} v={33.3} dimOut={false} />
           ))}
@@ -2413,8 +2415,8 @@ function LivePitch({ m, home, away, live }: { m: Match; home: Team; away: Team; 
           const isHome = teamId === home.id
           const title = [
             chain.length ? `${chain.map(c => `${c.out} ⟶ ${c.in} (${c.minute}')`).join(', ')}` : pl.name,
-            goals ? `${goals} goal${goals > 1 ? 's' : ''}` : '', assists ? `${assists} assist${assists > 1 ? 's' : ''}` : '',
-            own ? 'own goal' : '', red ? tt("sent off {0}'", { 0: red.minute }) : yellow ? 'booked' : ''
+            goals ? tt("{n, plural, one {# goal} other {# goals}}", { n: goals }) : '', assists ? tt("{n, plural, one {# assist} other {# assists}}", { n: assists }) : '',
+            own ? tt("own goal") : '', red ? tt("sent off {0}'", { 0: red.minute }) : yellow ? tt("booked") : ''
           ].filter(Boolean).join(' · ')
           return (
             <div key={`${teamId}-${pl.id}`} className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center w-[72px] sm:w-[84px]" style={{ left: `${x}%`, top: `${y}%` }} title={title}>

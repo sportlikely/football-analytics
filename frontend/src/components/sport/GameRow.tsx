@@ -22,7 +22,8 @@ const time = (iso: string) => new Date(iso).toLocaleTimeString(LOCALE, { hour: '
 export function PredBlock({ pred, roll = false }: { pred: Extract<HPred, { kind: 'full' }>; roll?: boolean }) {
   return (
     <span className="inline-flex flex-col items-end gap-1">
-      <span className="flex items-center gap-1">
+      {/* fix261: 1 · X · 2 (and 1 · 2) left to right on Hebrew / Arabic pages too */}
+      <span className="flex items-center gap-1" dir="ltr">
         {pred.cells.map((c, i) => (
           <span key={c.key} className={`w-9 h-7 rounded-md grid place-items-center leading-none border transition-colors ${c.on ? 'border-accent/70 bg-accent/15 text-ink' : 'border-transparent bg-surface2/40 text-faint'} ${roll ? 'pop-in' : ''}`}
             style={roll ? { animationDelay: `${i * 90}ms` } : undefined} title={c.label}>
@@ -55,7 +56,7 @@ export function PredBlock({ pred, roll = false }: { pred: Extract<HPred, { kind:
 function HiddenBlock({ heads, onReveal, pick }: { heads: string[]; onReveal?: () => void; pick?: string | null }) {
   return (
     <span className="inline-flex flex-col items-end gap-1">
-      <span className="flex items-center gap-1" aria-hidden>
+      <span className="flex items-center gap-1" aria-hidden dir="ltr">
         {heads.map(h => (
           <span key={h} className="w-9 h-7 rounded-md grid place-items-center leading-none border border-transparent bg-surface2/40 text-faint">
             <span className="text-[8px] font-bold">{h}</span>

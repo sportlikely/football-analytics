@@ -10,6 +10,7 @@ import { slModel } from '../../lib/modelNames'
 import type { SportAdapter, SportHomeData, HGame, HNews, HRecordRow, HResult, HSpecialItem } from './types'
 import { footballTeamHref } from '../../lib/teamLink'
 import { leagueHref, matchHref } from '../../lib/links'
+import { latinOf } from '../../lib/names'
 
 /** Football's adapter for components/SportHome (fix141): the data and labels of the football home. */
 
@@ -40,8 +41,8 @@ const MAJOR = /champions league|world cup|euro(pean championship)?\b|nations lea
 function priority(m: Match) {
   if (m.competition.code === 'CL') return 0
   if ((m.competition.rank ?? 9) <= 1) return 1
-  if (MAJOR.test(m.competition.name) && !/qualif/i.test(m.competition.name)) return 2
-  if (MAJOR.test(m.competition.name)) return 3
+  if (MAJOR.test(latinOf(m.competition.name)) && !/qualif/i.test(latinOf(m.competition.name))) return 2
+  if (MAJOR.test(latinOf(m.competition.name))) return 3
   return 5
 }
 

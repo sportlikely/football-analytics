@@ -14,6 +14,7 @@ import TeamForecast from '../../components/sport/forecast/TeamForecast'
 import { TeamDifficulty } from '../../components/sport/game/GameExtras'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { playerHref } from '../../lib/links'
+import { tg, tgParts } from '../../lib/genText'
 
 interface Measure { id: string; label: string; better: 'high' | 'low'; value: number | null; text: string | null; rank: number | null; of: number | null; score: number | null }
 interface Analysis { season: number; measures: Measure[]; strengths: Measure[]; weaknesses: Measure[]; rankByWeek: { week: number; rank: number; of: number }[]; locked?: boolean; notesCount?: number }
@@ -94,7 +95,7 @@ export default function NflTeam() {
                 <li key={`${p.position}${p.id}`} className="flex items-center gap-3 py-1.5 text-sm min-w-0">
                   <span className="w-14 shrink-0 text-[10px] font-bold uppercase tracking-wide text-faint">{t(p.position)}</span>
                   <Link to={playerHref('american-football', p.id, p.name)!} className="min-w-0 flex-1 truncate font-semibold text-ink hover:text-accent">{p.name}</Link>
-                  {p.line && <span className="shrink-0 text-[11px] text-faint">{p.line}</span>}
+                  {p.line && <span className="shrink-0 text-[11px] text-faint">{tg(p.line)}</span>}
                 </li>
               ))}
             </ul>
@@ -126,7 +127,7 @@ export default function NflTeam() {
       right={<>
         <RecordCard d={d} />
         {d.division && d.division.rows.length > 0 && (
-          <Card title={<NameLink to={href.nflStandings(tm.league || 1)}>{d.division.name !== d.division.conference ? `${d.division.conference} · ${d.division.name}` : d.division.name}</NameLink>} action={<Link to={href.nflStandings(tm.league || 1)} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
+          <Card title={<NameLink to={href.nflStandings(tm.league || 1)}>{tgParts(d.division.name !== d.division.conference ? `${d.division.conference} · ${d.division.name}` : d.division.name)}</NameLink>} action={<Link to={href.nflStandings(tm.league || 1)} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
             <StandTable rows={d.division.rows} compact highlight={tm.id} league={tm.league || 1} />
           </Card>
         )}

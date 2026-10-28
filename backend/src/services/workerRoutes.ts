@@ -56,7 +56,8 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN },
   { re: /^\/api\/slug-route$/, freshMs: 1 * MIN }, // fix229: an address outside the web process's slug state
   { re: /^\/api\/extras\/(football|basketball|nfl|tennis)\/(game\/-?\d+|team\/\d+)$/, freshMs: 5 * MIN, shared: true }, // fix231 (the same for everyone)
-  { re: /^\/api\/game-bundle\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 20 * S } // fix250: a game page's parts in one answer
+  { re: /^\/api\/game-bundle\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 20 * S }, // fix250: a game page's parts in one answer
+  { re: /^\/api\/names\/(he|ar)$/, freshMs: 10 * MIN, shared: true } // fix261: names in the local script (the same for everyone)
 ];
 
 /**
@@ -118,6 +119,7 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   // fix231: game-page extras (weather, referee, fixture difficulty, trends) and a team's next 5 games
   { path: '/api/extras/:sport(football|basketball|nfl|tennis)/game/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/extras/football/game/1' },
   { path: '/api/extras/:sport(football|basketball|nfl|tennis)/team/:id(\\d+)', sport: 'all', by: 'worker', sample: '/api/extras/tennis/team/1' },
+  { path: '/api/names/:lang(he|ar)', sport: 'all', by: 'worker', sample: '/api/names/he' },
   // fix250: a game page in one request (the prediction, extras, season forecast, more predictions: services/gameBundle.ts)
   { path: '/api/game-bundle/:sport(football|basketball|nfl|tennis)/:id(-?\\d+)', sport: 'all', by: 'worker', sample: '/api/game-bundle/football/1' },
   // football

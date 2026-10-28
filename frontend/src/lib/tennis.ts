@@ -6,6 +6,7 @@ import { API_URL } from './socket'
 import { t, LOCALE, lang } from './i18n'
 import { useAuth } from './auth'
 import { useFavorites, type Favorite } from './favorites'
+import { latinOf } from './names'
 
 /**
  * Tennis site (fix193): types and helpers shared by the /tennis pages. Built like basketball / NFL: the two players are
@@ -100,7 +101,8 @@ const COMPOUND = new Set([
  * the server carries `short` (the API's own last name when it has one): that wins. Twin of shortName() on the server.
  */
 export function surname(x: string | { name: string; short?: string | null } | null | undefined): string {
-  if (x && typeof x === 'object') { if (x.short) return x.short; x = x.name }
+  // fix261: a name swapped to the local script (he / ar) takes its own last word, not the provider's Latin last name
+  if (x && typeof x === 'object') { if (x.short && latinOf(x.name) === x.name) return x.short; x = x.name }
   const n = String(x || '').trim()
   if (!n) return 'TBD'
   const w = n.split(/\s+/)
@@ -186,7 +188,7 @@ let byName: Map<string, string> | null = null
 /** "Austria" → "at" (tournament countries come as English names): from the browser's own country names; '' unknown */
 export function isoOfCountry(name: string | null | undefined): string {
   if (!name) return ''
-  const n = name.trim().toLowerCase()
+  const n = latinOf(name).trim().toLowerCase()
   if (/^[a-z]{2}$/.test(n)) return n
   if (/^[a-z]{3}$/.test(n)) return IOC_ISO[n] || ''
   if (!byName) {

@@ -10,6 +10,7 @@
 import { useSyncExternalStore } from 'react'
 import { API_URL } from './socket'
 import { viewHeaders } from './viewId'
+import { latinOf } from './names'
 import { teamSlug, playerSlug, leagueSlug, matchSlug, type LinkSport, type LinkKind } from './slugRules'
 
 export type { LinkSport, LinkKind }
@@ -100,12 +101,12 @@ const ok = (id: Id): id is string | number => id != null && id !== '' && id !== 
 /** the slug of a team (its exception, else the rules on its name) */
 export function teamSlugOf(sport: LinkSport, id: Id, name: string | null | undefined): string {
   load(sport)
-  return (ok(id) && ex[sport]?.t[String(id)]) || teamSlug(name || '') || 'team'
+  return (ok(id) && ex[sport]?.t[String(id)]) || teamSlug(latinOf(name)) || 'team'
 }
 /** the slug of a player */
 export function playerSlugOf(sport: LinkSport, id: Id, name: string | null | undefined): string {
   load(sport); load(sport, true)
-  return (ok(id) && exP[sport]?.[String(id)]) || playerSlug(name || '') || 'player'
+  return (ok(id) && exP[sport]?.[String(id)]) || playerSlug(latinOf(name)) || 'player'
 }
 /** a side of a match: tennis sides are players */
 const sideSlug = (sport: LinkSport, id: Id, name: string | null | undefined) => (sport === 'tennis' ? playerSlugOf(sport, id, name) : teamSlugOf(sport, id, name))
@@ -131,7 +132,7 @@ export function leagueHref(sport: LinkSport, code: Id, name?: string | null): st
   let c = String(code)
   if (sport === 'football' && /^\d+$/.test(c)) c = `AF${c}`
   if (sport === 'football' || sport === 'basketball') c = c.toUpperCase()
-  const slug = ex[sport]?.l[c] || LEAGUE_FIXED[sport]?.[c] || (sport === 'tennis' ? c : name ? leagueSlug(name) : c.toLowerCase())
+  const slug = ex[sport]?.l[c] || LEAGUE_FIXED[sport]?.[c] || (sport === 'tennis' ? c : name ? leagueSlug(latinOf(name)) : c.toLowerCase())
   return remember(sport, 'league', slug, sport === 'american-football' ? (c === 'NCAA' || c === '2' ? '2' : '1') : c)
 }
 /** a match: /<sport>/match/<home>-vs-<away>-<yyyy-mm-dd> */

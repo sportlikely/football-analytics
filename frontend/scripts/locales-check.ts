@@ -33,7 +33,7 @@ if (BACK_RTL.join() !== RTL.join()) problems.push(`backend RTL_LANGS (${BACK_RTL
 /** the t("…") / tt('…') keys written in the code */
 function codeKeys(): Set<string> {
   const keys = new Set<string>()
-  const rx = /\b(?:t|tt)\(\s*("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')/g
+  const rx = /\b(?:t|tt|g)\(\s*("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')/g
   const walk = (dir: string) => {
     for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, f.name)

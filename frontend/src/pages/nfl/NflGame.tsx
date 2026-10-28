@@ -34,6 +34,7 @@ import { nflScorers } from '../../lib/scorers'
 import type { Sched } from '../bb/BbGame'
 import { teamHref, playerHref, leagueHref, matchHref } from '../../lib/links'
 import { MaybeLink } from '../../components/MaybeLink'
+import { tg, tgParts } from '../../lib/genText'
 
 type Box = {
   firstDowns: number | null; plays: number | null; yards: number | null; yardsPerPlay: number | null; passYards: number | null; rushYards: number | null; rushAttempts: number | null
@@ -101,7 +102,7 @@ export default function NflGame() {
     if (!d) return
     const lg = d.game.league || 1
     setNflLeague(lg)
-    document.title = `${nick(d.game.home.name, lg)} vs ${nick(d.game.away.name, lg)} · ${lg === 2 ? 'College football' : 'NFL'} ${d.game.weekKey === 'post' ? (lg === 2 ? 'Bowls' : 'Playoffs') : `Week ${d.game.weekKey}`} | SportLikely`
+    document.title = `${nick(d.game.home.name, lg)} ${t('vs')} ${nick(d.game.away.name, lg)} · ${lg === 2 ? t('College football') : 'NFL'} ${d.game.weekKey === 'post' ? (lg === 2 ? t('Bowls') : t('Playoffs')) : t('Week {0}', { 0: d.game.weekKey })} | SportLikely`
   }, [d?.game.id])
 
   if (missing) return <div className="max-w-2xl mx-auto px-4 py-16 text-center text-muted">{t('Game not found.')}</div>
@@ -330,7 +331,7 @@ function Starters({ g, data }: { g: Game; data: { home: Starter[]; away: Starter
                     <span className="w-14 shrink-0 text-[10px] font-bold uppercase tracking-wide text-faint">{t(pl.position)}</span>
                     <span className="min-w-0 flex-1">
                       <NameLink to={href.nflPlayer(pl.id, pl.name)} className={`block truncate font-semibold ${pl.out ? 'line-through text-muted' : 'text-ink'}`}>{pl.name}</NameLink>
-                      {pl.line && <span className="block text-[11px] text-faint truncate">{pl.line}</span>}
+                      {pl.line && <span className="block text-[11px] text-faint truncate">{tg(pl.line)}</span>}
                     </span>
                     {pl.status && <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${pl.out ? 'bg-loss/15 text-loss' : 'bg-draw/15 text-draw'}`}>{pl.status}</span>}
                   </li>
@@ -350,7 +351,7 @@ function StandingsTab({ g, data }: { g: Game; data: NonNullable<Data['standings'
   return (
     <Card title={t('Standings')} action={<Link to={href.nflStandings(lg)} className="text-xs font-bold text-accent">{t('Full table →')}</Link>}>
       <div className="space-y-5">
-        {data.tables.map(tb => <StandTable key={`${tb.conference}|${tb.name}`} title={tb.name !== tb.conference ? `${tb.conference} · ${tb.name}` : tb.name} rows={tb.rows} highlight={[g.home.id, g.away.id]} league={lg} />)}
+        {data.tables.map(tb => <StandTable key={`${tb.conference}|${tb.name}`} title={tgParts(tb.name !== tb.conference ? `${tb.conference} · ${tb.name}` : tb.name)} rows={tb.rows} highlight={[g.home.id, g.away.id]} league={lg} />)}
       </div>
     </Card>
   )

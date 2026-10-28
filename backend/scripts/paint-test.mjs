@@ -12,7 +12,8 @@
 // loads aside), and in (c) no file of the new build requested. Passes only when both parts pass.
 //
 // fix257: then the right-to-left part — Arabic and Hebrew (admin-only languages: a test admin's session is written into
-// the database) at 375 px and 1280 px: home, matches, a match page, a team page, Premium and the admin Needs you tab.
+// the database) at 375 px and 1280 px: home, matches, a match page, a team page, a player page (fix261), Premium and the
+// admin Needs you tab.
 // Each: <html dir="rtl" lang>, the page shows content, no page errors, no sideways scroll on the page; a visitor
 // gets 404 on /he and /ar and a menu without them. Screenshots in backend/test-output/rtl/ (not committed). Without
 // LOAD_DATA_DIR a few games are written into the empty database so the pages have something to show.
@@ -35,7 +36,7 @@ const LIMIT = Number(process.env.PAINT_LIMIT_MS) || 1500;
 const log = (...a) => console.log(`[paint ${new Date().toISOString().slice(11, 19)}]`, ...a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function findChromium() {
+export function findChromium() {
   if (process.env.PLAYWRIGHT_CHROMIUM && fs.existsSync(process.env.PLAYWRIGHT_CHROMIUM)) return process.env.PLAYWRIGHT_CHROMIUM;
   const d = path.join(os.homedir(), 'AppData', 'Local', 'ms-playwright');
   for (const dir of [process.env.PLAYWRIGHT_BROWSERS_PATH, d, path.join(os.homedir(), '.cache', 'ms-playwright')].filter(Boolean)) {
@@ -79,7 +80,7 @@ let child = null;
 const RTL_ADMIN = 'paint-rtl-admin@sportlikely.test';
 const ONLY_RTL = process.env.PAINT_ONLY === 'rtl';
 const RTL_ON = process.env.PAINT_RTL !== '0';
-async function start() {
+export async function start() {
   const port = 3800 + Math.floor(Math.random() * 90);
   const env = { ...process.env, PORT: String(port), DATA_DIR: process.env.LOAD_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'sl-paint-')), NODE_ENV: 'production', LOG_LEVEL: 'warn',
     BASKETBALL_PUBLIC: '1', NFL_PUBLIC: '1', TENNIS_PUBLIC: '1', SITE_PASSWORD: '', ADMIN_EMAILS: RTL_ADMIN, STATIC_DIR: path.join(here, '../../frontend/dist'), ASSET_ARCHIVE_DIR: ARCHIVE };
@@ -189,7 +190,7 @@ async function crashChecks(browser, base, older) {
 const RTL_OUT = path.join(here, '../test-output/rtl');
 const dbOpen = dir => { const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite'); const d = new DatabaseSync(path.join(dir, 'bet-to-beat.sqlite')); d.exec('PRAGMA busy_timeout = 5000'); return d; };
 /** a test admin (verified, two-step done for this session) → the session cookie */
-async function rtlAdmin(dir) {
+export async function rtlAdmin(dir) {
   const { createHash, randomBytes } = await import('node:crypto');
   for (let i = 0; i < 200; i++) {
     try {
@@ -206,7 +207,7 @@ async function rtlAdmin(dir) {
   throw new Error('could not write the test admin');
 }
 /** an empty database: a few games and their slugs, so the pages show something (finished, live-free, to come) */
-function rtlSeed(dir) {
+export function rtlSeed(dir) {
   const d = dbOpen(dir);
   const now = Date.now(), iso = ms => new Date(ms).toISOString();
   const teams = [['Maccabi Haifa', 'maccabi-haifa'], ['Hapoel Beer Sheva', 'hapoel-beer-sheva'], ['Al Hilal', 'al-hilal'], ['Al Nassr', 'al-nassr'], ['Arsenal', 'arsenal'], ['Chelsea', 'chelsea']];
@@ -237,6 +238,19 @@ function rtlSeed(dir) {
       last: [], next: [], squad, scorers: squad.filter(x => x.goals).map(x => ({ id: x.id, name: x.name, value: x.goals })), assists: [], builtAt: iso(now) }), iso(now));
     ins(`INSERT OR REPLACE INTO slugs (sport, kind, slug, id, is_primary, at) VALUES ('football', 'team', ?, ?, 1, ?)`, slug, String(1e9 + 10 + i), iso(now));
   });
+  // fix261: a player page (the stored copy the page reads) and its link
+  {
+    const player = { id: 5041, name: 'Bukayo Saka', short: 'B. Saka', firstname: 'Bukayo', lastname: 'Saka', age: 25, birth: null, nationality: 'England', height: null, weight: null, photo: null };
+    const team = { id: 1e9 + 14, name: 'Arsenal', logo: null };
+    const row = { league: { id: 39, code: 'AF39', name: 'Premier League', logo: null, country: 'England', flag: null }, team, position: 'Attacker', number: 7, apps: 9, starts: 9, minutes: 780, rating: 7.4, goals: 5, assists: 4,
+      conceded: null, saves: null, shots: null, shotsOn: null, keyPasses: null, passAcc: null, tackles: null, interceptions: null, dribbles: null, duelsWon: null, duels: null, yellow: 1, red: 0, penScored: null, penMissed: null, afSeason: 2026 };
+    const totals = { apps: 9, starts: 9, minutes: 780, goals: 5, assists: 4, yellow: 1, red: 0 };
+    ins(`INSERT OR REPLACE INTO player_page_store (player_id, json, built_at) VALUES (?, ?, ?)`, 5041, JSON.stringify({
+      player, team, position: 'Attacker', number: 7, status: { out: false }, seasons: [{ season: 2026, label: '2026-27', rows: [row], totals }], career: { ...totals, seasons: 1, from: '2026-27' },
+      careerPartial: true, international: [], internationalTotals: [], sidelined: [], transfers: [{ date: '2019-07-01', type: 'Loan', from: { id: 1e9 + 15, name: 'Chelsea' }, to: team }], partial: false, v: 7, builtAt: iso(now) }), iso(now));
+    ins(`INSERT OR REPLACE INTO af_player_season (player_id, season, team_id, league_id, name, position, apps, minutes, goals, assists, age) VALUES (5041, 2026, 14, 39, 'B. Saka', 'Attacker', 9, 780, 5, 4, 25)`);
+    ins(`INSERT OR REPLACE INTO slugs (sport, kind, slug, id, is_primary, at) VALUES ('football', 'player', 'bukayo-saka', '5041', 1, ?)`, iso(now));
+  }
   d.close();
 }
 
@@ -251,12 +265,14 @@ async function rtlChecks(browser, base, dir) {
     cs = await fetch(`${base}/api/crm/console/setup`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `b2b_session=${token}`, origin: base },
       body: JSON.stringify({ username: 'paintadmin', password: 'paint-console-pass-1' }) }).catch(() => ({ status: 0 }));
   log(`rtl admin console setup: ${cs?.status}`);
+  // fix261: the names job once (it starts 6 min after boot), so the pages show the Hebrew / Arabic names
+  log(`rtl names job: ${(await fetch(`${base}/api/admin/names?run=1&wd=0`, { headers: { cookie: `b2b_session=${token}` } }).catch(() => ({ status: 0 }))).status}`);
   const d = dbOpen(dir);
   const pick = (kind, like) => d.prepare(`SELECT slug FROM slugs WHERE sport = 'football' AND kind = ? AND is_primary = 1 AND slug GLOB ? ORDER BY slug LIMIT 1`).get(kind, like)?.slug;
   const match = pick('match', `*-${new Date(Date.now() + 864e5).toISOString().slice(0, 10)}`) || pick('match', '*-2026-1[0-2]-*') || pick('match', '*');
   const team = pick('team', '*');
   d.close();
-  const PAGES = [['home', ''], ['matches', '/football/matches'], ['match', match && `/football/match/${match}`], ['team', team && `/football/team/${team}`], ['premium', '/premium'], ['admin-needs-you', '/admin/needs-you']].filter(x => x[1] !== undefined && x[1] !== null);
+  const PAGES = [['home', ''], ['matches', '/football/matches'], ['match', match && `/football/match/${match}`], ['team', team && `/football/team/${team}`], ['player', '/football/player/bukayo-saka'], ['premium', '/premium'], ['admin-needs-you', '/admin/needs-you']].filter(x => x[1] !== undefined && x[1] !== null);
   const fails = [], shots = [];
   // a visitor: /he and /ar answer 404, the menu has neither
   for (const l of ['he', 'ar']) {
@@ -311,7 +327,11 @@ async function rtlChecks(browser, base, dir) {
   return fails;
 }
 
-(async () => {
+/** fix261: the server this test started (scripts/lang-audit.mjs reuses start / rtlSeed / rtlAdmin) */
+export const stopServer = () => child?.kill();
+export const dataDirOf = () => start.dataDir;
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) (async () => {
   let failed = false;
   const exe = findChromium();
   if (!exe) { console.error('no Chromium (npx playwright install chromium, or PLAYWRIGHT_CHROMIUM)'); process.exit(1); }

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { t, LOCALE } from '../../../lib/i18n'
 import { useLeagueForecast, zoneLabel, tableZones, pct, rowPct, BAD_ZONE, type FcSport, type FcTeam, type FcLeague, type FcExtremes } from '../../../lib/seasonForecast'
 import { LCard, Lines } from '../page/LeaguePage'
+import { tg } from '../../../lib/genText'
 
 /**
  * fix215: the league page's "Season forecast" tab, every sport. The rest of the season played 20,000 times with our
@@ -46,7 +47,7 @@ export default function SeasonForecast({ sport, code, teamHref }: { sport: FcSpo
           const rows = data.teams.filter(x => (x.group || '') === g)
           return (
             <div key={g} className="min-w-0">
-              {groups.length > 1 && <h3 className="text-sm font-bold text-ink mb-2">{g}</h3>}
+              {groups.length > 1 && <h3 className="text-sm font-bold text-ink mb-2">{tg(g)}</h3>}
               {heat ? <HeatMap rows={rows} teamHref={teamHref} extremes={data.extremes} /> : <ChanceTable data={data} rows={rows} teamHref={teamHref} />}
             </div>
           )

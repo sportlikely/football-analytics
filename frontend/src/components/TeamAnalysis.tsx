@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { t, LOCALE, ltr } from '../lib/i18n'
+import { tg } from '../lib/genText'
 import RecordLink from './RecordLink'
 import { matchHref } from '../lib/links'
 import { MaybeLink } from './MaybeLink'
@@ -42,7 +43,8 @@ export interface Analysis {
 }
 
 const RES_BG = { W: 'bg-win', D: 'bg-draw', L: 'bg-loss' }
-const ord = (n: number) => `${n}${['th', 'st', 'nd', 'rd'][n % 10 > 3 || [11, 12, 13].includes(n % 100) ? 0 : n % 10]}`
+// fix261: the result letter in the page language (keys "W", "D (draw)", "L")
+const RES_LETTER = { W: 'W', D: 'D (draw)', L: 'L' } as const
 const shortDate = (d: string) => new Date(d).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })
 
 function Block({ title, sub, children }: { title: string; sub?: ReactNode; children: ReactNode }) {
@@ -212,7 +214,7 @@ export function TeamAnalysisCard({ a, full }: { a: Analysis | null | undefined; 
             {a.notes.map((n, i) => (
               <li key={i} className="flex gap-2.5 text-sm text-ink/90 leading-snug">
                 <NoteIcon kind={n.kind} />
-                <span>{n.text}</span>
+                <span>{tg(n.text)}</span>
               </li>
             ))}
           </ul>
@@ -222,10 +224,10 @@ export function TeamAnalysisCard({ a, full }: { a: Analysis | null | undefined; 
       {m && (
         <Block title={t("How our model rates them")} sub={t("{0} league games this season", { 0: m.played })}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <Tile k="Strength" v={`${ord(m.rank)} of ${m.teams}`} sub={t("Rating {0}", { 0: m.elo })} />
-            <Tile k="Attack" v={m.attack.toFixed(2)} sub={t("goals a game · avg {0}", { 0: m.leagueGoals.toFixed(2) })} />
-            <Tile k="Defence" v={m.defence.toFixed(2)} sub={t("conceded a game · avg {0}", { 0: m.leagueGoals.toFixed(2) })} />
-            <Tile k="Home · away" v={`${m.homePpg.toFixed(1)} · ${m.awayPpg.toFixed(1)}`} sub={t("points a game")} />
+            <Tile k={t("Strength")} v={t("#{0} of {1}", { 0: m.rank, 1: m.teams })} sub={t("Rating {0}", { 0: m.elo })} />
+            <Tile k={t("Attack")} v={m.attack.toFixed(2)} sub={t("goals a game · avg {0}", { 0: m.leagueGoals.toFixed(2) })} />
+            <Tile k={t("Defence")} v={m.defence.toFixed(2)} sub={t("conceded a game · avg {0}", { 0: m.leagueGoals.toFixed(2) })} />
+            <Tile k={t("Home · away")} v={`${m.homePpg.toFixed(1)} · ${m.awayPpg.toFixed(1)}`} sub={t("points a game")} />
           </div>
           <p className="text-[11px] text-faint">{t("Attack and defence are adjusted for the strength of the opponents faced.")}</p>
           <div className="grid gap-5 sm:grid-cols-2 items-start">
@@ -252,8 +254,8 @@ export function TeamAnalysisCard({ a, full }: { a: Analysis | null | undefined; 
       {!m && a.national && (
         <Block title={t("How our model rates them")}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            <Tile k="World rank (our rating)" v={`${ord(a.national.rank)} of ${a.national.teams}`} />
-            <Tile k="Rating" v={a.national.elo} sub={t("from {0} matches", { 0: a.national.matches })} />
+            <Tile k={t("World rank (our rating)")} v={t("#{0} of {1}", { 0: a.national.rank, 1: a.national.teams })} />
+            <Tile k={t("Rating")} v={a.national.elo} sub={t("from {0} matches", { 0: a.national.matches })} />
           </div>
         </Block>
       )}
@@ -265,10 +267,10 @@ export function TeamAnalysisCard({ a, full }: { a: Analysis | null | undefined; 
               {[...f.games].reverse().map((g, i) => (
                 <span
                   key={i}
-                  title={`${shortDate(g.date)} · ${g.home ? 'vs' : 'at'} ${g.opp} · ${g.gf}–${g.ga}${g.xgf !== null && g.xga !== null ? ` · xG ${g.xgf.toFixed(1)}–${g.xga.toFixed(1)}` : ''}`}
+                  title={`${shortDate(g.date)} · ${g.home ? t("vs") : t("at (away game)")} ${g.opp} · ${g.gf}–${g.ga}${g.xgf !== null && g.xga !== null ? ` · xG ${g.xgf.toFixed(1)}–${g.xga.toFixed(1)}` : ''}`}
                   className="flex items-center gap-1 rounded-lg bg-surface2/70 ps-1 pe-1.5 py-1"
                 >
-                  <span className={`w-5 h-5 rounded-md grid place-items-center text-[10px] font-extrabold text-bg ${RES_BG[g.res]}`}>{g.res}</span>
+                  <span className={`w-5 h-5 rounded-md grid place-items-center text-[10px] font-extrabold text-bg ${RES_BG[g.res]}`}>{t(RES_LETTER[g.res])}</span>
                   <img src={g.oppLogo} alt={g.opp} className="w-4 h-4 object-contain" loading="lazy" />
                   <span className="text-[11px] num text-ink">{g.gf}–{g.ga}</span>
                 </span>
@@ -297,19 +299,19 @@ export function TeamRecordCard({ rec, teamName, sport = 'football' }: { rec: Tea
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2.5">
-            <Tile k={bb ? t("Winner, {0} games", { 0: rec.n }) : `Result, ${rec.n} games`} v={`${rec.hitRate}%`} sub={t("{0} right", { 0: rec.hits })} />
+            <Tile k={bb ? t("Winner, {0} games", { 0: rec.n }) : t("Result, {0} games", { 0: rec.n })} v={`${rec.hitRate}%`} sub={t("{0} right", { 0: rec.hits })} />
             {bb && rec.strong && <Tile k={t("Strong picks (70%+)")} v={`${rec.strong.hitRate}%`} sub={t("{0} games", { 0: rec.strong.n })} />}
-            {rec.btts && <Tile k="Both teams score" v={`${rec.btts.hitRate}%`} sub={t("{0} games", { 0: rec.btts.n })} />}
-            {rec.over25 && <Tile k="Over / under 2.5" v={`${rec.over25.hitRate}%`} sub={t("{0} games", { 0: rec.over25.n })} />}
+            {rec.btts && <Tile k={t("Both teams score")} v={`${rec.btts.hitRate}%`} sub={t("{0} games", { 0: rec.btts.n })} />}
+            {rec.over25 && <Tile k={t("Over / under 2.5")} v={`${rec.over25.hitRate}%`} sub={t("{0} games", { 0: rec.over25.n })} />}
           </div>
           {rec.games && rec.games.length > 0 && (
             <div>
               {rec.games.map(g => (
                 <MaybeLink key={g.matchId} to={matchHref(bb ? 'basketball' : 'football', g.matchId, g.home ? { home: teamName, away: g.opp, date: g.date } : { home: g.opp, away: teamName, date: g.date })} className="flex items-center gap-3 py-2 border-b border-line/50 last:border-0 hover:bg-surface2/40 rounded-lg">
                   <span className="w-12 text-[11px] text-faint">{shortDate(g.date)}</span>
-                  <span className="flex-1 min-w-0 truncate text-sm text-muted">{g.home ? 'vs' : 'at'} <span className="text-ink font-semibold">{g.opp}</span></span>
+                  <span className="flex-1 min-w-0 truncate text-sm text-muted">{g.home ? t("vs") : t("at (away game)")} <span className="text-ink font-semibold">{g.opp}</span></span>
                   <span className="text-sm num font-bold text-ink">{g.score}</span>
-                  <span className="w-12 text-end text-[11px] text-muted">{g.pick}</span>
+                  <span className="w-12 text-end text-[11px] text-muted">{t(g.pick)}</span>
                   <span className={`w-5 h-5 rounded-full grid place-items-center text-[10px] font-extrabold ${g.hit ? 'bg-win/20 text-win' : 'bg-loss/20 text-loss'}`} aria-label={g.hit ? t("Right") : t("Wrong")}>
                     {g.hit ? '✓' : '✗'}
                   </span>
@@ -374,7 +376,7 @@ export function BbTeamAnalysisCard({ a, full }: { a: BbAnalysis | null | undefin
             {a.notes.map((n, i) => (
               <li key={i} className="flex gap-2.5 text-sm text-ink/90 leading-snug">
                 <NoteIcon kind={n.kind} />
-                <span>{n.text}</span>
+                <span>{tg(n.text)}</span>
               </li>
             ))}
           </ul>
@@ -384,7 +386,7 @@ export function BbTeamAnalysisCard({ a, full }: { a: BbAnalysis | null | undefin
       {m && (
         <Block title={t("How our model rates them")} sub={ha ? (ha.previousSeason ? t("{0} league games last season", { 0: ha.homeGames + ha.awayGames }) : t("{0} league games this season", { 0: ha.homeGames + ha.awayGames })) : undefined}>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-            <Tile k={t("Strength")} v={`${ord(m.rank)} of ${m.teams}`} sub={t("Rating {0}", { 0: signed(m.rating) })} />
+            <Tile k={t("Strength")} v={t("#{0} of {1}", { 0: m.rank, 1: m.teams })} sub={t("Rating {0}", { 0: signed(m.rating) })} />
             <Tile k={t("Attack")} v={m.attack.toFixed(1)} sub={per ? t("per 100 possessions · avg {0}", { 0: m.leagueAttack.toFixed(1) }) : t("points a game · avg {0}", { 0: m.leagueAttack.toFixed(1) })} />
             <Tile k={t("Defence")} v={m.defence.toFixed(1)} sub={per ? t("allowed per 100 possessions · avg {0}", { 0: m.leagueAttack.toFixed(1) }) : t("allowed a game · avg {0}", { 0: m.leagueAttack.toFixed(1) })} />
             {ha && ha.homeWinPct !== null && ha.awayWinPct !== null && (

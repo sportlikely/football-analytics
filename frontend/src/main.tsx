@@ -10,6 +10,8 @@ import { watchSeen } from './lib/seen'
 import { watchStartupRetry } from './lib/startupRetry'
 import { watchProxyCheck } from './lib/proxyCheck'
 import { installApiCache } from './lib/apiCache'
+import { loadNames, installNames } from './lib/names'
+import { watchRtlNumbers } from './lib/rtlNumbers'
 
 // fix227: the loader in index.html retries the app file and shows the 'Updating SportLikely…' card if it never starts
 type Boot = { started: () => void; mounted: () => void; fail: (why: string) => void }
@@ -36,6 +38,8 @@ watchSeen()
 watchStartupRetry()
 watchProxyCheck()
 installApiCache() // fix250: last known data, 4 s time-out, { pending: true } asked again — never a blank page
+watchRtlNumbers() // fix261: scores and ranges left to right on he / ar pages
+installNames() // fix261: he / ar pages: team, league, country, city and player names in the local script
 
 // The language comes from the address (/es/...). First visit without one: follow the browser's language.
 // The dictionary is loaded before the app's modules run, so labels built at module level are translated too.
@@ -43,7 +47,7 @@ if (!redirectToPreferred()) {
   // fix252: the import can come back empty (Vite's loader returns nothing once its vite:preloadError was handled) or
   // without its default export ("Cannot destructure property 'default' of 'undefined'", 26–27 Oct): a failed load —
   // one hard reload for the new version (lib/chunkReload.ts), the loader's card only when that was already tried
-  loadLocale().then(() => import('./App')).then(m => {
+  Promise.all([loadLocale(), loadNames()]).then(() => import('./App')).then(m => {
     if (isReloading()) return
     const App = moduleDefault(m)
     captureStoredHtml() // fix252c: the page's stored copy, shown under an error box (never a blank page)

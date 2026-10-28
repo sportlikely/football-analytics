@@ -17,6 +17,7 @@ import { TeamDifficulty } from '../components/sport/game/GameExtras'
 import PlayerPhoto from '../components/sport/PlayerPhoto'
 import { officialPhoto } from '../lib/photoSources'
 import { MaybeLink } from '../components/MaybeLink'
+import { tg } from '../lib/genText'
 
 interface Side { id: number; name: string; logo: string }
 interface Fixture { matchId: number | null; date: string; status: string; comp: string; compCode?: string | null; home: Side; away: Side; hg: number | null; ag: number | null }
@@ -176,7 +177,7 @@ export default function Team() {
         <>
           {(() => {
             const m = Math.max(1, Math.round((Date.now() - new Date(data.builtAt!).getTime()) / 60000))
-            return `Updated ${m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`} ago`
+            return m < 60 ? t("Updated {0} min ago", { 0: m }) : m < 1440 ? t("Updated {0} h ago", { 0: Math.round(m / 60) }) : t("Updated {0} d ago", { 0: Math.round(m / 1440) })
           })()}
           {data.stale ? t(" · live data paused (daily data limit reached), refreshes after 03:00") : t(" · results and table refresh every 15 minutes")}
         </>
@@ -205,7 +206,7 @@ export default function Team() {
           )}
 
           {/* squad */}
-          <Card title={t("Squad")} action={<span className="text-xs text-faint">{data.league ? `${data.league.season}-${String(data.league.season + 1).slice(2)} · official games, friendlies excluded` : ''}</span>}>
+          <Card title={t("Squad")} action={<span className="text-xs text-faint">{data.league ? t("{0} · official games, friendlies excluded", { 0: `${data.league.season}-${String(data.league.season + 1).slice(2)}` }) : ''}</span>}>
             {groups.length === 0 && <p className="text-sm text-faint">{t("No squad list available.")}</p>}
             <div className="space-y-5">
               {groups.map(([pos, players]) => (
@@ -255,7 +256,7 @@ export default function Team() {
             </div>
             {!full && data.locked && (
               <div className="mt-5 rounded-2xl bg-surface2/60 p-4 text-sm text-muted">
-                <span className="font-semibold text-ink">{t("Premium adds:")}</span> {data.locked.join(' · ')}. <Link to="/premium" className="font-bold text-accent">{t("Go Premium →")}</Link>
+                <span className="font-semibold text-ink">{t("Premium adds:")}</span> {data.locked.map(tg).join(' · ')}. <Link to="/premium" className="font-bold text-accent">{t("Go Premium →")}</Link>
               </div>
             )}
           </Card>

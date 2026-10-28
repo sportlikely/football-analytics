@@ -58,6 +58,7 @@ import ruLang from '../locales/email/ru.json';
 import ar from '../locales/email/ar.json';
 import he from '../locales/email/he.json';
 import { LANG_LOCALE, isRtl } from '../utils/langs';
+import { nameIn } from './names';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS email_prefs (
@@ -651,7 +652,9 @@ const crestImg = (src: string | null) => {
   return u ? `<img src="${esc(u)}" width="22" height="22" alt="" style="display:block;width:22px;height:22px;border:0;object-fit:contain">` : `<span style="display:inline-block;width:22px"></span>`;
 };
 
-function rowHtml(tx: ReturnType<typeof words>, lang: EmailLang, tz: string, r: Row, campaign: string, withDay: boolean) {
+function rowHtml(tx: ReturnType<typeof words>, lang: EmailLang, tz: string, r0: Row, campaign: string, withDay: boolean) {
+  // fix261: names in the reader's script (he / ar)
+  const r: Row = lang === 'he' || lang === 'ar' ? { ...r0, home: nameIn(lang, r0.home), away: nameIn(lang, r0.away), league: nameIn(lang, r0.league) } : r0;
   const href = linkTo(lang, r.path, campaign);
   const meta = `${esc(tx(SPORT_NAME[r.sport]))} · ${esc(r.league)} · ${esc(timeLabel(lang, tz, r.start, withDay))}${r.fav ? ` · <span style="color:${MUTED}">★ ${esc(tx('Your team'))}</span>` : ''}`;
   const pick = r.shown

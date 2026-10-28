@@ -9,6 +9,7 @@ import { ModelName } from './game/ModelName'
 import type { ModelSport } from '../../lib/modelNames'
 import MoreRecord from './accuracy/MoreRecord'
 import type { MoreSport } from './game/MorePredictions'
+import { tg } from '../../lib/genText'
 
 /**
  * Accuracy / "Our record" (football's record page, shared by every sport since fix152b): period chips, the headline
@@ -213,7 +214,7 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
                       {rec.byConfidence.filter(b => b.n > 0).map(b => (
                         <div key={b.id} className="grid grid-cols-[110px_1fr_auto] sm:grid-cols-[140px_1fr_auto] items-center gap-3">
                           <div>
-                            <div className="text-sm font-semibold text-ink">{t("We said")}{' '}{b.label}</div>
+                            <div className="text-sm font-semibold text-ink">{t("We said")}{' '}{tg(b.label)}</div>
                             <div className="text-[11px] text-faint num">{b.n} {t("games · average")}{' '}{b.said}%</div>
                           </div>
                           <div className="relative h-3 rounded-full bg-surface2 overflow-hidden">

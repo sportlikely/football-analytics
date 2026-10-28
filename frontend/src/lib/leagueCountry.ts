@@ -1,3 +1,4 @@
+import { latinOf } from './names'
 /** Country of a football competition, for the Countries menu (flag codes as API-Sports uses them). */
 const FD: Record<string, string> = {
   PL: 'gb-eng', ELC: 'gb-eng', BL1: 'de', SA: 'it', PD: 'es', FL1: 'fr', DED: 'nl', PPL: 'pt', BSA: 'br',
@@ -25,14 +26,14 @@ const MORE: Record<string, string> = {
   'new zealand': 'nz', 'hong kong': 'hk', 'chinese taipei': 'tw', taiwan: 'tw', philippines: 'ph', 'dominican republic': 'do'
 }
 const countryCode = (name: string) => {
-  const k = name.toLowerCase().trim()
+  const k = latinOf(name).toLowerCase().trim()
   const sp = k.replace(/-/g, ' ')
   return BY_NAME[k] || BY_NAME[sp] || MORE[k] || MORE[sp] || null
 }
 export function footballCountry(c: { code: string; name: string; type?: string; rank?: number }) {
   if (FD[c.code]) return FD[c.code]
   if (c.rank === 3) return 'world' // national teams
-  if (c.rank === 1 || /^uefa/i.test(c.name)) return 'eu'
+  if (c.rank === 1 || /^uefa/i.test(latinOf(c.name))) return 'eu'
   const m = c.name.match(/\(([^)]+)\)\s*$/)
   if (m) return countryCode(m[1]) || 'world'
   return 'world'

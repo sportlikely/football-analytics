@@ -86,7 +86,8 @@ export function DcBlock({ p, home, away, roll = false, className = '' }: { p: Pr
   const cells: ['H' | 'D' | 'A', string, number][] = [['H', '1', p.home], ['D', 'X', p.draw], ['A', '2', p.away]]
   return (
     <span className={`inline-flex flex-col items-end gap-1 ${className}`} title={t("Double chance: two of the three results. Right if either happens.")}>
-      <span className="flex items-center gap-1">
+      {/* fix261: 1 · X · 2 left to right on Hebrew / Arabic pages too (how Israeli sites show them) */}
+      <span className="flex items-center gap-1" dir="ltr">
         {cells.map(([k, label, v], i) => {
           const on = dc.sides.includes(k)
           return (

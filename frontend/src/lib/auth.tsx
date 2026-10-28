@@ -4,6 +4,7 @@ import { API_URL, socket } from './socket'
 import { t, noteLangs, initialMenuLangs, type Lang } from './i18n'
 import { setLinkAdmin } from './links'
 import { resetApiCache } from './apiCache'
+import { tg } from './genText'
 
 // Same-origin cookies are sent by default; this also covers a separate API host
 axios.defaults.withCredentials = true
@@ -85,7 +86,9 @@ const AuthContext = createContext<AuthState | null>(null)
 
 /** Readable message from an axios error. */
 export function errorText(e: any, fallback = t("Something went wrong. Please try again.")) {
-  return e?.response?.data?.error || e?.response?.data?.message || fallback
+  // fix261: the server's message in the page language when it is in the dictionary (lib/genText.ts)
+  const m = e?.response?.data?.error || e?.response?.data?.message
+  return m ? tg(String(m)) : fallback
 }
 
 // Socket rooms are chosen at connect time from the session cookie — reconnect after sign-in / sign-out

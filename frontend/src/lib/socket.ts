@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client'
+import { localizeNames, namesOn } from './names'
 
 // Empty = same origin (goes through the Vite dev proxy, like /api does).
 // Set VITE_SOCKET_URL only if the backend lives on a different host.
@@ -16,6 +17,8 @@ const options = {
 
 // One shared socket for the whole app
 export const socket: Socket = SOCKET_URL ? io(SOCKET_URL, options) : io(options)
+// fix261: live updates carry names too (he / ar pages: swapped before the page's own handlers run)
+if (namesOn) socket.onAny((_event: string, ...args: unknown[]) => { for (const a of args) if (a && typeof a === 'object') localizeNames(a) })
 
 socket.on('connect', () => {
   console.log('Socket connected via', socket.io.engine.transport.name)

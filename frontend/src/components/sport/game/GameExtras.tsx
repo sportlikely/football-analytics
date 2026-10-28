@@ -5,6 +5,7 @@ import { t, LOCALE } from '../../../lib/i18n'
 import { Section } from './GamePage'
 import NameLink from '../NameLink'
 import { matchHref, teamHref as teamLink, playerHref, LINK_SPORT } from '../../../lib/links'
+import { placeText } from '../../../lib/genText'
 
 /**
  * fix231: the game-page extras, every sport where they apply (backend services/gameExtras.ts) — Trends (true facts from
@@ -162,7 +163,7 @@ function WeatherCard({ w, sport }: { w: NonNullable<Extras['weather']>; sport: E
     { label: t('Wind'), value: n(w.windKmh, ' km/h') }
   ]
   return (
-    <Section title={sport === 'tennis' ? t('Weather at the start') : t('Weather at kick-off')} note={[w.venue, when].filter(Boolean).join(' · ')}>
+    <Section title={sport === 'tennis' ? t('Weather at the start') : t('Weather at kick-off')} note={[w.venue ? placeText(w.venue) : null, when].filter(Boolean).join(' · ')}>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {tiles.map(x => (
           <div key={x.label} className="rounded-lg bg-surface2 px-3 py-2">

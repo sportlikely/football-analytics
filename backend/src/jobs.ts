@@ -63,6 +63,7 @@ import { startKeyPlayersScheduler } from './services/keyPlayers';
 import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
 import { pushAlertsTick } from './services/pushAlerts';
 import { buildSlugs } from './services/slugs';
+import { namesTick } from './services/names';
 import { startGameExtrasScheduler } from './services/gameExtras';
 import { fillFromFinals } from './services/history';
 import { checkOtherResults, voidStaleReviews } from './services/resultChecks';
@@ -123,6 +124,8 @@ export function startJobs() {
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the
   // first run waits for the leagues and the team index to load (a league's country decides a shared name's slug)
   after('slugs', () => buildSlugs().then(() => every('slugs', () => buildSlugs(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();
+  // fix261: names in Hebrew / Arabic (press spelling, Wikidata labels, letter rules), then the maps the he / ar pages load
+  after('names', () => namesTick({ collect: true }).then(() => every('names', () => namesTick(), 30 * 60 * 1000).unref()), 6 * 60 * 1000).unref();
   // fix169: the weekly prediction hubs are rebuilt in the background (visitors and crawlers get the cached copy)
   every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
   // fix175: indexes for the crawler pages, built off the main thread
