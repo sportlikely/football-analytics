@@ -89,6 +89,18 @@ export async function startSite({ log = console.log } = {}) {
     if (Date.now() - t0 > 180_000) throw new Error(`server not ready after 3 min — log ${logPath}`);
     await sleep(500);
   }
+  // fix260d: ready as the live site is when Railway switches over — /health says ready and the worker answers (an admin
+  // read goes to it); a cold worker seconds after start made single first opens slow on 2-core CI runners
+  const t1 = Date.now();
+  for (;;) {
+    let ready = false, worker = false;
+    try { ready = (await (await fetch(`${base}/health`, { signal: AbortSignal.timeout(3000) })).json()).ready === true; } catch { /* not yet */ }
+    try { worker = (await fetch(`${base}/api/admin/summary`, { headers: { cookie: `b2b_session=${TEST_USERS.admin.tokens.unlocked}` }, signal: AbortSignal.timeout(5000) })).status === 200; } catch { /* not yet */ }
+    if (ready && worker) break;
+    if (exited !== null) throw new Error(`server exited (${exited}) — log ${logPath}`);
+    if (Date.now() - t1 > 120_000) { log('note: /health not ready or the worker not answering after 2 min — testing anyway'); break; }
+    await sleep(500);
+  }
   log(`site up at ${base} after ${((Date.now() - t0) / 1000).toFixed(1)} s (server log ${logPath})`);
   const stop = async () => { if (exited === null) { child.kill('SIGTERM'); for (let i = 0; i < 40 && exited === null; i++) await sleep(100); if (exited === null) child.kill('SIGKILL'); } try { fs.rmSync(data.dir, { recursive: true, force: true }); } catch { /* fine */ } };
   return { base, port, dataDir: data.dir, copy: data.copy, logPath, stop };

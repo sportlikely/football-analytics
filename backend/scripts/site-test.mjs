@@ -225,14 +225,21 @@ function testedTree() {
       // once — only a route still being built waits for it
       const warm = [...new Set(todo.filter(j => j.role === 'out' || j.role === 'admin').map(j => j.url.replace(/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he)(?=\/|$)/, '') || '/'))];
       let w = 0, built = 0;
-      await Promise.all(Array.from({ length: CONC }, async () => {
+      const jobsW = warm.flatMap(url => [{ url, admin: false }, { url, admin: true }]);
+      await Promise.all(Array.from({ length: CONC }, async (_, wi) => {
+        // half the workers warm the visitors' copies, half the admin's (fix266: admins have their own stored copies)
+        const asAdmin = wi % 2 === 1;
         const ctx = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `2001:db8:263::${(++visitor).toString(16)}` } });
+        if (asAdmin) await ctx.addCookies([{ name: 'b2b_session', value: TEST_USERS.admin.tokens.unlocked, url: site.base }]);
         const page = await ctx.newPage();
         await page.route(u => new URL(u.href).host !== new URL(site.base).host, r => r.abort('blockedbyclient'));
         let pend = 0;
         page.on('response', r => { if (r.status() === 202 && r.url().includes('/api/')) pend++; });
-        while (w < warm.length) {
-          const url = warm[w++];
+        for (;;) {
+          const i = jobsW.findIndex(j => !j.done && j.admin === asAdmin);
+          if (i < 0) break;
+          jobsW[i].done = true; w++;
+          const url = jobsW[i].url;
           pend = 0;
           await page.goto(site.base + url, { waitUntil: 'load', timeout: 30_000 }).catch(() => undefined);
           await sleep(300);
@@ -240,14 +247,23 @@ function testedTree() {
         }
         await ctx.close();
       }));
-      log(`warm-up: ${warm.length} routes, ${built} were still being built`);
+      log(`warm-up: ${warm.length} routes as a visitor and as the admin, ${built} were still being built`);
     }
     const results = [];
+    const slowFirst = [];
     let next = 0, done = 0;
     await Promise.all(Array.from({ length: CONC }, async () => {
       while (next < todo.length) {
         const job = todo[next++];
-        const r = await check(browser, site.base, job).catch(e => ({ ...job, why: [`test error: ${e.message}`] }));
+        let r = await check(browser, site.base, job).catch(e => ({ ...job, why: [`test error: ${e.message}`] }));
+        // a page that failed ONLY on time (Updating… / skeleton after 3 s) is opened once more: slow again = a failure;
+        // fine the second time = listed as a slow first open (report), not a failure. Errors never get a second try.
+        if (r.why.length && r.why.every(w => /still shown \d+ s after load/.test(w))) {
+          await sleep(1500);
+          const again = await check(browser, site.base, job).catch(e => ({ ...job, why: [`test error: ${e.message}`] }));
+          if (!again.why.length) { slowFirst.push({ url: job.url, role: job.role, width: job.width, why: r.why }); log(`slow first open (fine the second time) ${job.role} ${job.width}px ${job.url}: ${r.why.join(' | ')}`); }
+          r = again.why.length ? { ...again, why: [...new Set([...r.why, ...again.why.map(w => `again: ${w}`)])] } : again;
+        }
         results.push(r);
         if (r.why.length) log(`FAIL ${r.role} ${r.width}px ${r.url}: ${r.why.join(' | ')}`);
         if (++done % 100 === 0) log(`${done} / ${todo.length}`);
@@ -264,7 +280,7 @@ function testedTree() {
       byPage.set(key, e);
     }
     const pages = [...byPage.values()].map(e => ({ page: e.page, opens: e.opens, roles: [...e.roles], widths: [...e.widths], languages: [...e.langs], why: [...e.why].slice(0, 8) }));
-    fs.writeFileSync(REPORT, JSON.stringify({ test: 'test:site', at: new Date().toISOString(), tree, mode: MODE, full: !process.env.SITE_SHARD && !process.env.SITE_ONLY && !process.env.SITE_LANGS && !process.env.SITE_WIDTHS && !process.env.SITE_ROLES, shard: process.env.SITE_SHARD || null, opened: results.length, failed: failed.length, database: site.copy ? 'copy' : 'seeded', seconds: Math.round((Date.now() - t0) / 1000), pages }, null, 1));
+    fs.writeFileSync(REPORT, JSON.stringify({ test: 'test:site', at: new Date().toISOString(), tree, mode: MODE, full: !process.env.SITE_SHARD && !process.env.SITE_ONLY && !process.env.SITE_LANGS && !process.env.SITE_WIDTHS && !process.env.SITE_ROLES, shard: process.env.SITE_SHARD || null, opened: results.length, failed: failed.length, slowFirstOpens: slowFirst, database: site.copy ? 'copy' : 'seeded', seconds: Math.round((Date.now() - t0) / 1000), pages }, null, 1));
     log(`${results.length} page opens in ${Math.round((Date.now() - t0) / 1000)} s: ${failed.length ? `${failed.length} FAILED on ${pages.length} pages` : 'all passed'} (report ${REPORT})`);
     for (const p of pages) log(`  ✗ ${p.page} — ${p.why.join(' | ')} [${p.roles.join('/')} · ${p.widths.join('/')}px · ${p.languages.length} languages]`);
   } finally {

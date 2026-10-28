@@ -38,7 +38,11 @@ the run's summary page lists the pages in plain words.
    4xx / 5xx (except the intended 401 / 423 of a locked console and the 404 page's own 404), no "Something went wrong" /
    card error, no "Updating…" or skeleton still there 3 s after the page loaded, content painted. Outside addresses are
    blocked (hermetic). A warm-up round opens each route once first (one page per worker, reused); a route whose
-   answers were all stored copies is done at once, only a route still being built is waited for (`SITE_WARM=0` skips it).
+   answers were all stored copies is done at once, only a route still being built is waited for (`SITE_WARM=0` skips it);
+   it warms the visitors' and the admin's copies (fix266). The server counts as up when `/health` says ready and the
+   worker answers. A page that fails only on time ("Updating…" / skeleton after 3 s) is opened once more: slow again =
+   a failure, fine the second time = listed under `slowFirstOpens` in the report (not a failure) — errors, 4xx / 5xx and
+   error boxes never get a second try.
 4. **Report** (only when something failed) — `backend/scripts/ci-report.mjs`: the failing pages in plain words on
    the run's summary and by email.
 
