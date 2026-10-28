@@ -13,6 +13,8 @@ branch this chat is on (claude/*, a worktree, anything):
   hash on main and the first line of the commit message.
 - Never force-push main. Never push to main with a failing typecheck.
 - Payments changes are the only exception: they go on a branch and Yarin merges (existing rule).
+- A failed Railway deploy (fix265): GitHub Actions "Docker build (Railway check)" (`.github/workflows/docker-build.yml`)
+  runs the same Dockerfile + a /health start on every push to main — read its log for the failing line.
 - The Stop hook (`.claude/settings.json` → `.claude/hooks/check-on-main.mjs`) asks once at the end of a task when HEAD is
   not on origin/main, then warns.
 

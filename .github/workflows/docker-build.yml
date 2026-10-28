@@ -1,0 +1,41 @@
+# fix265: the Railway build, readable from GitHub. Railway's own build log needs a Railway login; this job runs the same
+# Dockerfile (same base image, same steps) on every push to main and on demand, then starts the image on an empty
+# database and waits for /health — so a failed deploy's cause can be read from the GitHub Actions log.
+name: Docker build (Railway check)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker build (the Dockerfile Railway uses)
+        run: docker build --progress=plain -t sportlikely:ci . 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+
+      - name: start the image and wait for /health (empty database, no provider keys)
+        run: |
+          docker run -d --name sl -p 3001:3001 -e DATA_DIR=/data sportlikely:ci
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/health || true)
+            if [ "$code" = "200" ]; then echo "/health 200 after $((i * 2)) s"; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' sl)" != "true" ]; then echo "the container stopped"; docker logs sl 2>&1 | tail -200; exit 1; fi
+            sleep 2
+          done
+          [ "$code" = "200" ] || { echo "/health never answered 200 (last: $code)"; docker logs sl 2>&1 | tail -200; exit 1; }
+          sleep 20
+          docker inspect -f '{{.State.Running}}' sl | grep -q true || { echo "the container stopped after start"; docker logs sl 2>&1 | tail -200; exit 1; }
+          docker logs sl 2>&1 | grep -iE '"level":"error"|Error:|uncaught|unhandled' | grep -viE 'status code 40[13]|API_FOOTBALL_KEY|key is not set|fetch failed' | head -40 || true
+
+      - name: the failing lines
+        if: failure()
+        run: grep -nE -i 'error|failed|ERR!|exit code' build.log | tail -60 || true
