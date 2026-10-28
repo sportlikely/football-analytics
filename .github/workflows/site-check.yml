@@ -157,7 +157,7 @@ jobs:
       - name: Write the report and email it
         run: node backend/scripts/ci-report.mjs reports/*.json
         env:
-          FAILED_STEPS: ${{ needs.build.result != 'success' && 'typecheck / parity / build (open the run: nothing was deployed)' || '' }}
+          FAILED_STEPS: "${{ needs.build.result != 'success' && 'typecheck / parity / build (open the run - nothing was deployed)' || '' }}"
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}

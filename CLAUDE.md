@@ -21,7 +21,7 @@ branch this chat is on (claude/*, a worktree, anything):
   the Site check (`.github/workflows/site-check.yml`: typecheck, parity, test:links, test:site in 8 parts) must pass —
   Railway deploys only then ("Wait for CI", docs/notes/deploy.md). A red run = not deployed: fix it, push again.
 - The Stop hook (`.claude/settings.json` → `.claude/hooks/check-on-main.mjs`) asks once at the end of a task when HEAD is
-  not on origin/main, or when `backend/site-report.json` is missing / red / partial / from other code than HEAD; then warns.
+  not on origin/main, or when `backend/site-report.json` is missing / red / partial / from other backend / frontend code than HEAD; then warns.
 
 SportLikely (sportlikely.com) is a sports-prediction site: football live, basketball launching ~18 Oct 2026, more sports later.
 Owner: Yarin. One repo, one Railway service (`railway.json`, Dockerfile) serving the API and the built site. SQLite on a

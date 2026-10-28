@@ -26,7 +26,8 @@ try {
   if (!rep) siteMsg = 'test:site has not run on this machine (npm run test:site in backend).';
   else if (!rep.full) siteMsg = 'the last test:site run was a partial one (SITE_LANGS / SITE_ONLY / SITE_SHARD set) — run the full npm run test:site.';
   else if (rep.failed) siteMsg = `the last test:site run failed (${rep.failed} page opens on ${rep.pages?.length ?? '?'} pages, backend/site-report.json) — fix them and run it again.`;
-  else if (rep.tree !== tree) siteMsg = `test:site was green on other code (report ${rep.at}) — run npm run test:site again on HEAD ${head}.`;
+  // the site is built from backend/ and frontend/ only: a workflow / notes edit after the run needs no new run
+  else if (!['backend', 'frontend'].every(d => { try { return git('rev-parse', `${rep.tree}:${d}`) === git('rev-parse', `${tree}:${d}`); } catch { return false; } })) siteMsg = `test:site was green on other code (report ${rep.at}) — run npm run test:site again on HEAD ${head}.`;
 } catch { /* no git */ }
 if (onMain && !siteMsg) process.exit(0);
 if (onMain) {
