@@ -16,10 +16,11 @@ branch this chat is on (claude/*, a worktree, anything):
 - A failed Railway deploy (fix265): GitHub Actions "Docker build (Railway check)" (`.github/workflows/docker-build.yml`)
   runs the same Dockerfile + a /health start on every push to main — read its log for the failing line.
 - **A fix is done only when `npm run test:site` is green locally AND the "Site check" run on GitHub is green** (fix260,
-  Yarin 28 Oct: every page checked before every deploy). Before pushing: `cd backend && npm run test:site` and
-  `npm run test:links` (full runs; `SITE_LANGS=en SITE_WIDTHS=1280` only for a quick pass while working). After pushing:
-  the Site check (`.github/workflows/site-check.yml`: typecheck, parity, test:links, test:site in 8 parts) must pass —
-  Railway deploys only then ("Wait for CI", docs/notes/deploy.md). A red run = not deployed: fix it, push again.
+  Yarin 28 Oct: every page checked before every deploy). Before pushing: `cd backend && npm run test:site` (the gate,
+  ~4 min) and `npm run test:links`. After pushing: the Site check (`.github/workflows/site-check.yml`: typecheck, parity,
+  test:links, test:site gate in 8 parts, ~10 min, 15-min cap per job) must pass — Railway deploys only then ("Wait for
+  CI", docs/notes/deploy.md). A red run = not deployed: fix it, push again. The full matrix (every language × width ×
+  role, `SITE_MODE=full`) runs nightly (`site-nightly.yml`) and emails failures — fix those like any bug.
 - The Stop hook (`.claude/settings.json` → `.claude/hooks/check-on-main.mjs`) asks once at the end of a task when HEAD is
   not on origin/main, or when `backend/site-report.json` is missing / red / partial / from other backend / frontend code than HEAD; then warns.
 

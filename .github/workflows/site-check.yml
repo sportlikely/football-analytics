@@ -2,6 +2,9 @@
 # (Railway → service → Settings → Source → "Wait for CI": docs/notes/deploy.md). A red run blocks the deploy and the
 # "Report" job writes the failing pages in plain words (run summary + email to Yarin when the RESEND_API_KEY and
 # REPORT_EMAIL_TO secrets are set).
+# fix260d: on a push it is the GATE (~10 min, every job capped at 15): English everywhere at 375 + 1280 px as a visitor
+# and the admin + every Admin / CRM tab, one page per type in every other language. The FULL matrix (every language ×
+# width × role) runs nightly from site-nightly.yml (mode: full) and reports by email — not a gate.
 name: Site check
 
 on:
@@ -9,9 +12,19 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: gate (default) or full
+        default: gate
+        type: string
+  workflow_call:
+    inputs:
+      mode:
+        default: gate
+        type: string
 
 concurrency:
-  group: site-check-${{ github.ref }}
+  group: site-check-${{ github.ref }}-${{ inputs.mode || 'gate' }}
   cancel-in-progress: true
 
 env:
@@ -22,7 +35,7 @@ jobs:
   build:
     name: Typecheck, parity, build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,7 +78,7 @@ jobs:
     name: test:links
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -101,7 +114,7 @@ jobs:
     name: test:site (part ${{ matrix.shard }})
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.mode == 'full' && 90 || 15 }}
     strategy:
       fail-fast: false
       matrix:
@@ -130,6 +143,7 @@ jobs:
         run: node --no-warnings scripts/site-test.mjs
         env:
           SITE_SHARD: ${{ matrix.shard }}/${{ env.SITE_SHARDS }}
+          SITE_MODE: ${{ inputs.mode || 'gate' }}
           SITE_CONCURRENCY: '4'
           SITE_REPORT: ${{ github.workspace }}/site-report-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
@@ -144,6 +158,7 @@ jobs:
     needs: [build, links, site]
     if: failure()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

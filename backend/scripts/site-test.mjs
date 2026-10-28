@@ -1,4 +1,6 @@
-// fix260 — npm run test:site: every page checked before every deploy.
+// fix260 — npm run test:site: every page checked before every deploy. fix260d: by default the deploy GATE (every route
+// in English at 375 + 1280 px as visitor + admin, Admin / CRM tabs, one page per type in every other language at 375 px);
+// SITE_MODE=full = the nightly matrix described below.
 //
 // Chromium (playwright-core) opens EVERY route of the site — each public page type of every sport (home, matches, today,
 // weekly hub, match + each tab, team, player, league, upset watch, draw alerts, favorites, my picks, accuracy, how it
@@ -14,6 +16,7 @@
 //   npm run test:site          (after `npx tsc` here and `npx vite build` in frontend)
 //   SITE_DATA_DIR=<folder with bet-to-beat.sqlite>   a production-size copy (else the seeded test data)
 //   SITE_LANGS=en,es · SITE_WIDTHS=375 · SITE_ROLES=out,free,admin · SITE_ONLY=<substring> · SITE_CONCURRENCY (6)
+//   SITE_MODE=full (nightly: everything; default 'gate': English everywhere + one page per type per language) ·
 //   SITE_STALE_MS (3000) · SITE_WARM=0 (no warm-up round) · SITE_SHARD=k/n (one of n parts, CI) · SITE_REPORT=<file> (default backend/site-report.json; the CI email reads it)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +28,8 @@ import os from 'node:os';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STALE = Number(process.env.SITE_STALE_MS) || 3000;
+// fix260d: 'gate' (default: the deploy check, ~600 opens) or 'full' (nightly: every route × language × width × role)
+const MODE = process.env.SITE_MODE === 'full' ? 'full' : 'gate';
 const CONC = Number(process.env.SITE_CONCURRENCY) || 6;
 const REPORT = process.env.SITE_REPORT || path.join(here, '../site-report.json');
 const log = (...a) => console.log(`[site ${new Date().toISOString().slice(11, 19)}]`, ...a);
@@ -61,6 +66,14 @@ function routes(sample) {
   }
   const admin = [...ADMIN_TABS.map(t => `/admin/${t}`), ...CRM_TABS.map(t => `/crm?tab=${t}`)];
   return { pub, admin };
+}
+
+/** fix260d: one page of each type (the gate's other languages) */
+function typeSample(sample) {
+  const f = sample.football || {}, b = sample.basketball || {};
+  return ['/', '/football', '/football/matches', '/football/today', f.matchDone && `/football/match/${f.matchDone}`, f.matchDone && `/football/match/${f.matchDone}/stats`,
+    f.team && `/football/team/${f.team}`, f.player && `/football/player/${f.player}`, f.league && `/football/league/${f.league}`,
+    b.matchNext && `/basketball/match/${b.matchNext}`, '/premium', '/search?q=arsenal', NOT_FOUND].filter(Boolean);
 }
 
 /* ---------- one page ---------- */
@@ -176,31 +189,58 @@ function testedTree() {
     const roles = list(process.env.SITE_ROLES, ['out', 'free', 'admin']);
     const only = process.env.SITE_ONLY || '';
     const jobs = [];
-    for (const role of roles) for (const width of widths) {
-      for (const lang of langsOf(role)) for (const p of pub) jobs.push({ url: `${lang ? `/${lang}` : ''}${p === '/' && lang ? '' : p}` || '/', width, role });
-      if (role === 'admin') for (const p of admin) { jobs.push({ url: p, width, role: 'admin' }); jobs.push({ url: p, width, role: 'admin-locked' }); }
+    const lp = (lang, p) => `${lang ? `/${lang}` : ''}${p === '/' && lang ? '' : p}` || '/';
+    if (MODE === 'full') {
+      // nightly: every route × every language × both widths × every role
+      for (const role of roles) for (const width of widths) {
+        for (const lang of langsOf(role)) for (const p of pub) jobs.push({ url: lp(lang, p), width, role });
+        if (role === 'admin') for (const p of admin) { jobs.push({ url: p, width, role: 'admin' }); jobs.push({ url: p, width, role: 'admin-locked' }); }
+      }
+    } else {
+      // fix260d — the deploy gate (≈ 10 min in CI): every route in English at 375 + 1280 px as a visitor and the admin
+      // (+ every Admin / CRM tab, console signed in and locked), and one page of each type in every other language at
+      // 375 px as a visitor (the admin-only languages as the admin)
+      const gateRoles = list(process.env.SITE_ROLES, ['out', 'admin']);
+      for (const role of gateRoles) for (const width of widths) {
+        for (const p of pub) jobs.push({ url: p, width, role });
+        if (role === 'admin') for (const p of admin) { jobs.push({ url: p, width, role: 'admin' }); jobs.push({ url: p, width, role: 'admin-locked' }); }
+      }
+      const one = typeSample(sample);
+      for (const lang of sl.all.filter(Boolean)) {
+        if (process.env.SITE_LANGS && !pick(sl.all).includes(lang)) continue;
+        const role = sl.public.includes(lang) ? 'out' : 'admin';
+        for (const p of one) jobs.push({ url: lp(lang, p), width: 375, role });
+      }
     }
     // SITE_SHARD=k/n: the k-th of n equal parts (CI runs the parts side by side)
     const [k, nShards] = (process.env.SITE_SHARD || '1/1').split('/').map(Number);
     const todo = jobs.filter(j => !only || j.url.includes(only)).filter((_, i) => i % nShards === k - 1);
-    log(`${todo.length} page opens: ${pub.length} public routes × ${langsOf('out').length} languages (admin ${langsOf('admin').length}) × ${widths.length} widths × ${roles.length} roles + ${admin.length} admin / CRM routes (console signed in and locked)`);
+    log(MODE === 'full'
+      ? `${todo.length} page opens (full): ${pub.length} public routes × ${langsOf('out').length} languages (admin ${langsOf('admin').length}) × ${widths.length} widths × ${roles.length} roles + ${admin.length} admin / CRM routes (console signed in and locked)`
+      : `${todo.length} page opens (gate${nShards > 1 ? `, part ${k}/${nShards}` : ''}): ${pub.length} routes in English × ${widths.length} widths × visitor + admin, ${admin.length} admin / CRM routes, ${typeSample(sample).length} page types × ${sl.all.length - 1} other languages at 375 px`);
     // warm-up (not measured): each public route opened once, as the live site's worker has its stored pages built
     // before visitors come — a first-ever build is not what a visitor waits for after a deploy (SITE_WARM=0 skips it)
     if (process.env.SITE_WARM !== '0') {
+      // fix260d: one page per worker, reused; a route whose answers were all stored copies (no 202 "pending") is done at
+      // once — only a route still being built waits for it
       const warm = [...new Set(todo.filter(j => j.role === 'out' || j.role === 'admin').map(j => j.url.replace(/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he)(?=\/|$)/, '') || '/'))];
-      let w = 0;
+      let w = 0, built = 0;
       await Promise.all(Array.from({ length: CONC }, async () => {
+        const ctx = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `2001:db8:263::${(++visitor).toString(16)}` } });
+        const page = await ctx.newPage();
+        await page.route(u => new URL(u.href).host !== new URL(site.base).host, r => r.abort('blockedbyclient'));
+        let pend = 0;
+        page.on('response', r => { if (r.status() === 202 && r.url().includes('/api/')) pend++; });
         while (w < warm.length) {
           const url = warm[w++];
-          const ctx = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `2001:db8:263::${w.toString(16)}` } });
-          const page = await ctx.newPage();
-          await page.route(u => new URL(u.href).host !== new URL(site.base).host, r => r.abort('blockedbyclient'));
+          pend = 0;
           await page.goto(site.base + url, { waitUntil: 'load', timeout: 30_000 }).catch(() => undefined);
-          await sleep(1500);
-          await ctx.close();
+          await sleep(300);
+          if (pend) { built++; await sleep(2500); }
         }
+        await ctx.close();
       }));
-      log(`warmed ${warm.length} routes`);
+      log(`warm-up: ${warm.length} routes, ${built} were still being built`);
     }
     const results = [];
     let next = 0, done = 0;
@@ -224,7 +264,7 @@ function testedTree() {
       byPage.set(key, e);
     }
     const pages = [...byPage.values()].map(e => ({ page: e.page, opens: e.opens, roles: [...e.roles], widths: [...e.widths], languages: [...e.langs], why: [...e.why].slice(0, 8) }));
-    fs.writeFileSync(REPORT, JSON.stringify({ test: 'test:site', at: new Date().toISOString(), tree, full: !process.env.SITE_SHARD && !process.env.SITE_ONLY && !process.env.SITE_LANGS && !process.env.SITE_WIDTHS && !process.env.SITE_ROLES, shard: process.env.SITE_SHARD || null, opened: results.length, failed: failed.length, database: site.copy ? 'copy' : 'seeded', seconds: Math.round((Date.now() - t0) / 1000), pages }, null, 1));
+    fs.writeFileSync(REPORT, JSON.stringify({ test: 'test:site', at: new Date().toISOString(), tree, mode: MODE, full: !process.env.SITE_SHARD && !process.env.SITE_ONLY && !process.env.SITE_LANGS && !process.env.SITE_WIDTHS && !process.env.SITE_ROLES, shard: process.env.SITE_SHARD || null, opened: results.length, failed: failed.length, database: site.copy ? 'copy' : 'seeded', seconds: Math.round((Date.now() - t0) / 1000), pages }, null, 1));
     log(`${results.length} page opens in ${Math.round((Date.now() - t0) / 1000)} s: ${failed.length ? `${failed.length} FAILED on ${pages.length} pages` : 'all passed'} (report ${REPORT})`);
     for (const p of pages) log(`  ✗ ${p.page} — ${p.why.join(' | ')} [${p.roles.join('/')} · ${p.widths.join('/')}px · ${p.languages.length} languages]`);
   } finally {

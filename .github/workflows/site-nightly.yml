@@ -1,0 +1,16 @@
+# fix260d: the FULL site matrix every night — every route × every language × 375 / 1280 px × visitor / free user /
+# admin (+ every Admin / CRM tab, console signed in and locked) and test:links. Not a deploy gate (the push gate is
+# site-check.yml in its default mode): a failure is emailed (RESEND_API_KEY + REPORT_EMAIL_TO secrets) and shown on the run.
+name: Site check (nightly, full)
+
+on:
+  schedule:
+    - cron: '17 1 * * *' # 01:17 UTC = 03:17 Israel
+  workflow_dispatch:
+
+jobs:
+  full:
+    uses: ./.github/workflows/site-check.yml
+    with:
+      mode: full
+    secrets: inherit
