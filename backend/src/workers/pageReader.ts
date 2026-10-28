@@ -16,7 +16,9 @@ import { tuneDb } from '../utils/dbTune';
 const db = new sqlite.DatabaseSync(String(workerData.file), { readOnly: true });
 try { db.exec('PRAGMA busy_timeout = 5000'); } catch { /* read-only: the default */ }
 // fix254: 256 MB page cache + the file memory-mapped (the hot index pages stay in memory: no 1.8-s one-row reads)
-tuneDb(db, 'reader');
+// fix263: the small pool's threads read index pages and small rows: a smaller cache (services/pageReader.ts pools)
+if (workerData.pool === 'small') tuneDb(db, 'readerSmall', workerData.readers);
+else tuneDb(db, 'reader', workerData.readers);
 // (prepared on first use: a fresh database may not have page_cache yet)
 let oneSt: any = null;
 const one = () => (oneSt ||= db.prepare(`SELECT json, etag, gz FROM page_cache WHERE key = ? AND built_at = ?`));

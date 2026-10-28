@@ -31,7 +31,7 @@ function latestOf(name: string, sql: string): Map<string, string | number> {
   return m;
 }
 /** tests: forget the cached latest seasons */
-export const _forgetSeasons = () => { for (const k of Object.keys(latest)) delete latest[k]; };
+export const _forgetSeasons = () => { for (const k of Object.keys(latest)) delete latest[k]; pastCache.clear(); };
 
 /** the European season running on `now`: from 1 July */
 export const fdSeasonStart = (now = new Date()) => `${now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1}-07-01`;
@@ -75,6 +75,58 @@ export function isPastSeasonMatch(sport: LinkSport, id: string | number, now = n
   if (!r?.scheduled_at) return false;
   const top = latestOf('tn', `SELECT 'all' AS k, MAX(substr(scheduled_at, 1, 4)) AS s FROM tennis_matches WHERE scheduled_at <= '${new Date(Date.now() + 365 * 86400000).toISOString()}'`).get('all');
   return top != null && String(r.scheduled_at).slice(0, 4) < String(top);
+}
+
+/**
+ * fix263: every past-season match id of a sport in one go (the same rules as isPastSeasonMatch, read in bulk) — the slug
+ * job flags them in the id index, so the web answers a match of any season (out of the 60-day window too) itself.
+ */
+const pastCache = new Map<string, { at: number; ids: Set<number> }>();
+export function pastSeasonIds(sport: LinkSport, now = new Date()): Set<number> {
+  // (whole-table reads: kept 3 hours — a season ends rarely, and a match unknown to the set is not past anyway)
+  const c = pastCache.get(sport);
+  if (c && Date.now() - c.at < 3 * 3600 * 1000) return c.ids;
+  const out = new Set<number>();
+  pastCache.set(sport, { at: Date.now(), ids: out });
+  const rows = (sql: string, ...a: any[]) => { try { return db.prepare(sql).all(...a) as any[]; } catch { return []; } };
+  if (sport === 'football') {
+    const top = latestOf('af', `SELECT league_id AS k, MAX(season) AS s FROM af_fixtures GROUP BY league_id`);
+    for (const r of rows(`SELECT fixture_id, league_id, season FROM af_fixtures`)) {
+      const t = top.get(String(r.league_id));
+      if (t != null && Number(r.season) < Number(t)) out.add(AF + Number(r.fixture_id));
+    }
+    const fdTop = latestOf('fd', `SELECT competition_code AS k, MAX(substr(utc_date, 1, 4)) AS s FROM predictions WHERE competition_code IN ('CLI','BSA','WC','EC') GROUP BY competition_code`);
+    const start = fdSeasonStart(now);
+    // (the first row per match, as isPastSeasonMatch's LIMIT 1 reads it: every row of a match has the same date and code)
+    for (const r of rows(`SELECT match_id, MIN(utc_date) AS utc_date, MIN(competition_code) AS competition_code FROM predictions WHERE match_id < ? GROUP BY match_id`, AF)) {
+      if (!r.utc_date) continue;
+      if (FD_BY_YEAR.has(r.competition_code)) {
+        const t = fdTop.get(r.competition_code);
+        if (t != null && String(r.utc_date).slice(0, 4) < String(t)) out.add(Number(r.match_id));
+      } else if (String(r.utc_date).slice(0, 10) < start) out.add(Number(r.match_id));
+    }
+  } else if (sport === 'basketball') {
+    const top = latestOf('bb', `SELECT code AS k, MAX(season) AS s FROM bb_games GROUP BY code`);
+    for (const r of rows(`SELECT game_id, code, season FROM bb_games`)) {
+      const t = top.get(String(r.code));
+      if (t != null && String(r.season) < String(t)) out.add(Number(r.game_id));
+    }
+  } else if (sport === 'american-football') {
+    const top = latestOf('nfl', `SELECT league AS k, MAX(season) AS s FROM nfl_games GROUP BY league`);
+    const seasonOf = new Map<string, number>();
+    for (const lg of top.keys()) {
+      const cur = one(`SELECT detail FROM nfl_sync WHERE key = ?`, Number(lg) === 1 ? 'current' : `current|${lg}`)?.detail;
+      seasonOf.set(lg, Number.isFinite(Number(cur)) && cur != null ? Number(cur) : Number(top.get(lg)));
+    }
+    for (const r of rows(`SELECT game_id, league, season FROM nfl_games`)) {
+      const season = seasonOf.get(String(r.league));
+      if (season != null && Number.isFinite(season) && Number(r.season) < season) out.add(Number(r.game_id));
+    }
+  } else {
+    const top = latestOf('tn', `SELECT 'all' AS k, MAX(substr(scheduled_at, 1, 4)) AS s FROM tennis_matches WHERE scheduled_at <= '${new Date(Date.now() + 365 * 86400000).toISOString()}'`).get('all');
+    if (top != null) for (const r of rows(`SELECT id FROM tennis_matches WHERE substr(scheduled_at, 1, 4) < ?`, String(top))) out.add(Number(r.id));
+  }
+  return out;
 }
 
 /**

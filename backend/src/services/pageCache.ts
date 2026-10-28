@@ -18,7 +18,7 @@ import { stringifyAsync } from '../utils/jsonAsync';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import { readStored, readSql, pageReaderOn, SPLIT_CHARS, partKey, partsMarker, partsCount } from './pageReader';
+import { readStored, readSql, pageReaderOn, SPLIT_CHARS, partKey, partsMarker, partsCount, poolForBytes } from './pageReader';
 
 db.exec(`CREATE TABLE IF NOT EXISTS page_cache (key TEXT PRIMARY KEY, json TEXT NOT NULL, built_at INTEGER NOT NULL, ms INTEGER NOT NULL DEFAULT 0)`);
 // fix221: each stored view carries its ETag and a gzip copy made by the worker (the web process only sends them)
@@ -171,17 +171,34 @@ let indexedOff = true;
  * caught). A key is read from the disk once per web process — "SELECT built_at … WHERE key = ?" took 1.7–1.9 s on the
  * volume (28 Oct) — and never again after: its later builds come by message.
  */
-type Hot = { at: number; etags?: Record<string, string | null> };
+/*
+ * fix263: the whole list. The worker sends every stored key (its time and each view's size in KB, read from the
+ * covering index idx_page_cache_meta, + the ETags of what it built since its start) at its start and after each
+ * clean-up ('page-meta-all', 5,000 keys a message); once the list is in, a key the web does not hold has no copy —
+ * the web reads nothing from the disk for a page's time any more ("SELECT built_at FROM page_cache …" 1.2–1.3 s for
+ * one row, 28 Oct), and an unknown ETag is not read either (the build's own time stands in).
+ */
+type Hot = { at: number; etags?: Record<string, string | null>; kb?: Record<string, number> };
 const hot = new Map<string, Hot>();
-const HOT_MAX = 20_000;
+const HOT_MAX = Number(process.env.PAGE_HOT_MAX) || 300_000;
+let hotComplete = false;
 function hotSet(key: string, h: Hot) {
   const cur = hot.get(key);
   if (cur && cur.at > h.at) return;
-  if (cur && cur.at === h.at && !h.etags) return;
+  if (cur && cur.at === h.at) {
+    if (!h.etags && !h.kb) return;
+    h = { at: h.at, etags: h.etags || cur.etags, kb: h.kb || cur.kb };
+  }
   hot.delete(key); hot.set(key, h);
-  if (hot.size > HOT_MAX) hot.delete(hot.keys().next().value as string);
+  if (hot.size > HOT_MAX) { hot.delete(hot.keys().next().value as string); hotComplete = false; }
 }
-const hotStats = { hits: 0, misses: 0, messages: 0 };
+const hotStats = { hits: 0, misses: 0, messages: 0, absent: 0, lists: 0, etagsUnread: 0 };
+/** web: a view's size in bytes as the worker stored it (undefined = not known here) */
+const viewBytes = (key: string, v: string, builtAt: number): number | undefined => {
+  const h = hot.get(key);
+  const kb = h && h.at === builtAt ? h.kb?.[v] : undefined;
+  return kb == null ? undefined : kb * 1024;
+};
 /** web: a view's ETag from memory ('' = the default ETag, null = no such view, undefined = not known here) */
 function hotEtag(key: string, v: string, builtAt: number): string | null | undefined {
   const h = hot.get(key);
@@ -192,7 +209,13 @@ function hotEtag(key: string, v: string, builtAt: number): string | null | undef
 const HOT_MAX_AGE = 6 * 86400000;
 const keepOf = (key: string) => Math.min(HOT_MAX_AGE, defs.get(parseKey(key).name)?.keepMs ?? HOT_MAX_AGE);
 async function builtAtAsync(key: string): Promise<number> {
-  if (isWeb) { const h = hot.get(key); if (h && Date.now() - h.at < keepOf(key)) { hotStats.hits++; return h.at; } hotStats.misses++; }
+  if (isWeb) {
+    const h = hot.get(key);
+    // fix263: with the worker's whole list in, memory is the answer (a key not in it has no copy yet)
+    if (h && (hotComplete || Date.now() - h.at < keepOf(key))) { hotStats.hits++; return h.at; }
+    if (hotComplete) { hotStats.absent++; return 0; }
+    hotStats.misses++;
+  }
   if (!isWeb || !pageReaderOn()) return remember(key, builtAtOf(key));
   try {
     if (indexedOff) { try { return remember(key, (await readSql<any>(BUILT_AT_INDEXED, [key]))?.built_at || 0); } catch { indexedOff = false; setTimeout(() => { indexedOff = true; }, 60_000).unref(); } }
@@ -201,8 +224,8 @@ async function builtAtAsync(key: string): Promise<number> {
 }
 /** a time read from the disk is kept (0 = no copy yet: not kept, the worker's message will bring it) */
 const remember = (key: string, at: number) => { if (isWeb && at) hotSet(key, { at }); return at; };
-/** /api/perf: the in-memory times */
-export const pageHotStatus = () => ({ keys: hot.size, ...hotStats });
+/** /api/perf: the in-memory times (complete = the worker's whole list is in: no page time is read from the disk) */
+export const pageHotStatus = () => ({ keys: hot.size, complete: hotComplete, ...hotStats });
 async function readRowAsync(key: string): Promise<Mem | null> {
   if (!isWeb) return readRow(key);
   const at = await builtAtAsync(key);
@@ -257,6 +280,8 @@ function stored(key: string, m: Mem, staleS = 0): Stored {
       if (m.etags?.has(v)) { const e = m.etags.get(v); return e === null ? undefined : e || `"${m.builtAt.toString(36)}-${v}"`; }
       const he = hotEtag(key, v, m.builtAt);
       if (he !== undefined) return he === null ? undefined : he || `"${m.builtAt.toString(36)}-${v}"`;
+      // fix263: never read on the web once the list is in (the ETag is only the base of a joined copy's own ETag)
+      if (isWeb && hotComplete) { hotStats.etagsUnread++; return `"${m.builtAt.toString(36)}-${v}"`; }
       const r: any = qEtag().get(`${key}#${v}`, m.builtAt);
       return r ? r.etag || `"${m.builtAt.toString(36)}-${v}"` : undefined;
     },
@@ -346,8 +371,9 @@ function buildNow(key: string): Promise<void> {
     const st = statOf(key);
     st.builtAt = at; st.ms = at - t0; st.kb = Math.round(json.length / 1024); st.builds++;
     const etags = Object.fromEntries(variants.filter(([v]) => v !== 'rows').map(([v, x]) => [v, x.etag]));
-    noteRecentBuild(key, at, etags);
-    sendIpc({ t: 'page', key, builtAt: at, etags });
+    const kb = Object.fromEntries(variants.map(([v, x]) => [v, Math.round(x.text.length / 1024)]));
+    noteRecentBuild(key, at, etags, kb);
+    sendIpc({ t: 'page', key, builtAt: at, etags, kb });
   }).catch(e => {
     logger.warn(`page ${key}: ${e?.message || e}`);
     sendIpc({ t: 'page', key, builtAt: 0 }); // a request waiting for a first copy answers now (503) instead of after 10 s
@@ -372,29 +398,101 @@ export function rebuildPage(name: string, q: Query = {}) {
   if (runsJobs) void buildQueued(key); else askWorker(key);
 }
 // fix254 (worker): the builds of the last 3 minutes, sent again every 30 s (a lost 'page' message is caught)
-const recentBuilds = new Map<string, { at: number; etags: Record<string, string> }>();
-function noteRecentBuild(key: string, at: number, etags: Record<string, string>) {
+type Built = { at: number; etags: Record<string, string>; kb: Record<string, number> };
+const recentBuilds = new Map<string, Built>();
+// fix263 (worker): the ETags of every build since this worker started (they go with the whole list)
+const builtEtags = new Map<string, { at: number; etags: Record<string, string> }>();
+function noteRecentBuild(key: string, at: number, etags: Record<string, string>, kb: Record<string, number>) {
   if (!isWorker) return;
-  recentBuilds.delete(key); recentBuilds.set(key, { at, etags });
+  recentBuilds.delete(key); recentBuilds.set(key, { at, etags, kb });
   if (recentBuilds.size > 2000) recentBuilds.delete(recentBuilds.keys().next().value as string);
+  builtEtags.delete(key); builtEtags.set(key, { at, etags });
+  if (builtEtags.size > 100_000) builtEtags.delete(builtEtags.keys().next().value as string);
 }
 if (isWorker) setInterval(() => {
   const cut = Date.now() - 3 * 60_000;
   for (const [k, b] of recentBuilds) if (b.at < cut) recentBuilds.delete(k);
-  if (recentBuilds.size) sendIpc({ t: 'page-meta', builds: [...recentBuilds].map(([k, b]) => [k, b.at, b.etags]) });
+  if (recentBuilds.size) sendIpc({ t: 'page-meta', builds: [...recentBuilds].map(([k, b]) => [k, b.at, b.etags, b.kb]) });
 }, 30_000).unref();
 if (isWeb) onIpc('page-meta', m => {
   if (!Array.isArray(m.builds)) return;
   hotStats.messages++;
-  for (const [key, at, etags] of m.builds as [string, number, Record<string, string>][]) {
-    hotSet(key, { at, etags });
+  for (const [key, at, etags, kb] of m.builds as [string, number, Record<string, string>, Record<string, number> | undefined][]) {
+    hotSet(key, { at, etags, kb });
     const cur = mem.get(key);
     if (cur && cur.builtAt < at) memDel(key);
   }
 });
+
+/*
+ * fix263 (worker): every stored key → the web ('page-meta-all'). Read from the covering index (key, built_at, kb: the
+ * rows themselves are never visited), 5,000 keys a page with a yield between, sent 5,000 keys a message. `since` =
+ * when the read began: the web drops a key it holds from before then that is not in the list (cleaned up).
+ */
+const META_SQL = `SELECT key, built_at, kb FROM page_cache INDEXED BY idx_page_cache_meta WHERE key > ? ORDER BY key LIMIT 5000`;
+let listGen = 0, listing = false;
+export async function sendPageList(): Promise<number> {
+  if (!isWorker || listing) return 0;
+  listing = true;
+  const gen = ++listGen, since = Date.now();
+  let n = 0, part = 0;
+  try {
+    let st: any;
+    try { st = db.prepare(META_SQL); } catch { return 0; } // the index is not built yet (dbIndexes.ts): the next clean-up
+    let batch: [string, number, Record<string, number>, Record<string, string> | undefined][] = [];
+    let cur: (typeof batch)[number] | null = null;
+    const flush = (last: boolean) => { sendIpc({ t: 'page-meta-all', gen, part: part++, since, last, rows: batch }); batch = []; };
+    for (let after = ''; ;) {
+      const rows = st.all(after) as { key: string; built_at: number; kb: number | null }[];
+      if (!rows.length) break;
+      for (const r of rows) {
+        const hashAt = r.key.indexOf('#');
+        if (hashAt < 0) {
+          if (cur) batch.push(cur);
+          if (batch.length >= 5000) flush(false);
+          const e = builtEtags.get(r.key);
+          cur = [r.key, r.built_at, {}, e && e.at === r.built_at ? e.etags : undefined];
+          n++;
+        } else if (cur && cur[0] === r.key.slice(0, hashAt) && cur[1] === r.built_at) {
+          const v = r.key.slice(hashAt + 1);
+          if (!v.includes('~')) cur[2][v] = r.kb ?? 0; // (the parts of a split view are not views)
+        }
+      }
+      after = rows[rows.length - 1].key;
+      await yieldLoop();
+    }
+    if (cur) batch.push(cur);
+    flush(true);
+    return n;
+  } catch (e: any) { logger.warn(`page list: ${e?.message || e}`); return 0; } finally { listing = false; }
+}
+// web: the list being received (one generation at a time; a newer one starts over)
+let incoming: { gen: number; since: number; parts: number; keys: Set<string> } | null = null;
+if (isWeb) onIpc('page-meta-all', m => {
+  const gen = Number(m.gen);
+  if (Number(m.part) === 0 || !incoming || incoming.gen !== gen) incoming = { gen, since: Number(m.since), parts: 0, keys: new Set() };
+  if (incoming.parts !== Number(m.part)) { incoming = null; return; } // a lost part: wait for the next whole list
+  incoming.parts++;
+  for (const [key, at, kb, etags] of (m.rows as [string, number, Record<string, number>, Record<string, string> | undefined][]) || []) {
+    incoming.keys.add(key);
+    hotSet(key, { at, kb, etags });
+    const cur = mem.get(key);
+    if (cur && cur.builtAt < at) memDel(key);
+  }
+  if (!m.last) return;
+  // keys cleaned up since the last list (held from before this list began, not in it) are gone
+  for (const [k, h] of hot) if (!incoming.keys.has(k) && h.at < incoming.since) { hot.delete(k); memDel(k); }
+  hotStats.lists++;
+  hotComplete = hot.size < HOT_MAX;
+  logger.info(`stored pages: the worker's list is in (${incoming.keys.size} keys) — page times from memory only`);
+  incoming = null;
+});
+// a worker start (or restart) sends its list a few seconds in; then after every clean-up (cleanPageCache, sweepCopies)
+if (isWorker) setTimeout(() => { void sendPageList(); }, Number(process.env.PAGE_LIST_DELAY_MS) || 3000).unref();
+
 if (isWeb) onIpc('page', m => {
   const key = String(m.key);
-  if (Number(m.builtAt) > 0) { hotStats.messages++; hotSet(key, { at: Number(m.builtAt), etags: (m.etags as Record<string, string>) || undefined }); }
+  if (Number(m.builtAt) > 0) { hotStats.messages++; hotSet(key, { at: Number(m.builtAt), etags: (m.etags as Record<string, string>) || undefined, kb: (m.kb as Record<string, number>) || undefined }); }
   const cur = mem.get(key);
   if (cur && cur.builtAt < Number(m.builtAt)) memDel(key);
   for (const w of waiters.get(key) || []) w();
@@ -424,13 +522,15 @@ async function prefetch(key: string, m: Mem, views: string[] | undefined, etags?
     if (m.variants.has(v) || m.etags?.has(v)) continue;
     const he = hotEtag(key, v, m.builtAt);
     if (he !== undefined) { (m.etags ||= new Map()).set(v, he); continue; }
+    if (hotComplete) continue; // fix263: etagOf stands in with the build's time
     try { const r = await readSql<any>(ETAG_SQL, [`${key}#${v}`, m.builtAt]); (m.etags ||= new Map()).set(v, r ? r.etag || '' : null); } catch { break; }
   }
   if (!views?.length) return;
   for (const v of views) {
     if (v === 'rows' ? m.rows !== undefined : m.variants.has(v)) continue;
     let r: Awaited<ReturnType<typeof readStored>>;
-    try { r = await readStored(`${key}#${v}`, m.builtAt); } catch { return; } // the synchronous read, as before
+    // fix263: a view under 64 KB (its size from the worker's list) in the small reader pool, else the big one
+    try { r = await readStored(`${key}#${v}`, m.builtAt, poolForBytes(viewBytes(key, v, m.builtAt))); } catch { return; } // the synchronous read, as before
     if (v === 'rows') { m.rows = r ? parseRows(r.text) : null; grow(key, m, r ? r.text.length * 2 : 0); continue; }
     const x: View | null = r ? { text: r.text, etag: r.etag || `"${m.builtAt.toString(36)}-${v}"`, gz: r.gz } : null;
     if (!m.variants.has(v)) { m.variants.set(v, x); grow(key, m, x ? x.text.length * 2 + (x.gz?.length || 0) : 0); }
@@ -507,7 +607,7 @@ export async function startPageWarmer(): Promise<void> {
     markPagesFirstDone();
     logger.info(`stored pages: first round done in ${Math.round((Date.now() - t0) / 1000)} s — the model jobs may start`);
   }
-  setInterval(cleanPageCache, 3600 * 1000).unref();
+  setInterval(() => { cleanPageCache(); void sendPageList(); }, 3600 * 1000).unref(); // fix263: the web's list after each clean-up
   let running = false;
   setInterval(() => {
     if (running) return;
@@ -539,13 +639,14 @@ export function fallbackQuery(name: string, q: Query = {}): Query | null {
 /**
  * fix258 (worker): stored HTML copies of these pages that `bad` rejects (made for an older build, or without their
  * page's lang / hreflang set) — a kept-fresh page is built again now, an on-demand one dropped (built on its next
- * request). Reads the first 16 KB of each copy's html view, 200 rows a slice with a yield between.
+ * request). Reads the first 32 KB of each copy's html view, 200 rows a slice with a yield between.
  */
 export async function sweepCopies(names: string[], bad: (q: Record<string, string>, head: string) => boolean): Promise<{ checked: number; rebuilt: number; dropped: number }> {
   const out = { checked: 0, rebuilt: 0, dropped: 0 };
   if (!runsJobs) return out;
   const warm = new Set([...defs.values()].flatMap(d => (d.warm || []).map(q => pageKey(d.name, q))));
-  const sel = db.prepare(`SELECT key, substr(json, 1, 16384) AS head FROM page_cache WHERE key > ? AND key < ? AND key LIKE '%#html' ORDER BY key LIMIT 200`);
+  // fix263: 32 KB (the page's <head> is ~15 KB with the loader and shell, + the hreflang links: 16 KB cut them off)
+  const sel = db.prepare(`SELECT key, substr(json, 1, 32768) AS head FROM page_cache WHERE key > ? AND key < ? AND key LIKE '%#html' ORDER BY key LIMIT 200`);
   const drop = db.prepare(`DELETE FROM page_cache WHERE key = ? OR (key > ? AND key < ?)`);
   for (const name of names) {
     let after = `${name}?`;
@@ -567,6 +668,7 @@ export async function sweepCopies(names: string[], bad: (q: Record<string, strin
       await new Promise<void>(r => setImmediate(r));
     }
   }
+  if (out.dropped) void sendPageList(); // fix263: the web drops them from its list
   return out;
 }
 
@@ -611,3 +713,5 @@ export const _forgetPageMemory = () => { mem.clear(); memBytes = 0; };
 export const _pageDef = (name: string) => defs.get(name);
 /** /api/perf: this process's in-memory copies (fix210: capped) */
 export const pageMemStatus = () => ({ copies: mem.size, mb: Math.round(memBytes / 1048576), maxCopies: MEM_MAX, maxMb: Math.round(MEM_MAX_BYTES / 1048576) });
+/** tests (fix263): every warm key */
+export const _warmKeys = () => [...defs.values()].flatMap(d => (d.warm || []).map(q => pageKey(d.name, q)));

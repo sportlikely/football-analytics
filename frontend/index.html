@@ -44,12 +44,27 @@
         if (t === 'dark') document.documentElement.classList.add('dark');
       } catch (e) {}
     </script>
-    <style>.js .sl-seo{display:none}.js .sl-stored .sl-seo{display:block}</style>
+    <style>.js .sl-seo{display:none}.js .sl-stored .sl-seo{display:block}
+      /* fix263: the shell — painted from this file before any script arrives (a slow phone network: never a blank page) */
+      #sl-shell{display:none}.js #sl-shell{display:block;min-height:100vh;background:#f6f7f9;color:#10141c;font-family:Manrope,system-ui,sans-serif}
+      .dark #sl-shell{background:#07090d;color:#e8ebf1}
+      #sl-shell .h{display:flex;align-items:center;gap:10px;height:56px;padding-inline:16px;border-bottom:1px solid rgba(138,147,166,.25);font-weight:800;font-size:17px}
+      #sl-shell .b{max-width:960px;margin-inline:auto;padding:16px}
+      #sl-shell .s{height:84px;border-radius:14px;margin-bottom:12px;background:rgba(138,147,166,.14);animation:sl-p 1.4s ease-in-out infinite}
+      #sl-shell .s.t{height:22px;width:55%}
+      @keyframes sl-p{50%{opacity:.45}}@media (prefers-reduced-motion:reduce){#sl-shell .s{animation:none}}
+    </style>
     <script>
       // fix227: never a raw text page. The crawler text inside #root is for crawlers and browsers without JavaScript
       // (hidden here until the app replaces it: same HTML for everyone). If the app file fails (a 502 / 503 while
-      // the server restarts) or hasn't started within 6 s, the page is reloaded (2 tries, 2 s apart, a fresh
-      // address; fix252c); then a "Updating SportLikely…" card with a Reload button, reloading itself every 10 s (6 times).
+      // the server restarts) the page is reloaded (fix252c: a fresh address; fix263: 3 tries, 2 / 4 / 8 s apart); then
+      // a "Updating SportLikely…" card with a Reload button, reloading itself every 10 s (6 times).
+      // fix263: a slow connection is not a failure (iPhone, 28 Oct: "app file not started after 6 s (3 tries)" — each
+      // reload threw away the half-downloaded app file and started over). While the app file is still arriving (no
+      // Resource Timing entry for it yet) or the phone is offline, the loader waits (checks 6 → 12 → 24 → 48 s …, never a
+      // reload); only an app file that arrived and did not start within 6 s, or an error, counts. The same for "started,
+      // not shown": no card while files keep arriving (a resource finished in the last 15 s), at most 3 min; the card
+      // reloads itself only when nothing arrived for 20 s. The shell (#sl-shell, above) is painted first.
       // main.tsx calls __slBoot.started() / mounted() / fail(). The card's words follow the address's language.
       // fix252: before the card, one hard reload per build per session (hardReload).
       (function () {
@@ -57,6 +72,23 @@
         de.classList.add('js');
         var TRIES = 'sl-boot-tries', failed = false, started = false, mounted = false, card = null;
         var main = function () { return d.querySelector('script[type=module][src*="/assets/"]'); };
+        // fix263: what the network did — the app file arrived (when, ms since the page began), the last file that arrived
+        var perf = w.performance, timing = !!(perf && perf.getEntriesByName && perf.getEntriesByType && perf.now);
+        try { if (timing && perf.setResourceTimingBufferSize) perf.setResourceTimingBufferSize(1000); } catch (e) {}
+        var arrivedAt = function () {
+          var s = main();
+          if (!s || !timing) return -1;
+          var e = perf.getEntriesByName(s.src);
+          return e && e.length ? e[e.length - 1].responseEnd || 1 : -1;
+        };
+        var lastArrival = function () {
+          if (!timing) return -1;
+          var t = 0, all = perf.getEntriesByType('resource');
+          for (var i = 0; i < all.length; i++) if (all[i].responseEnd > t) t = all[i].responseEnd;
+          return t;
+        };
+        var busy = function (ms) { var t = lastArrival(); return t > 0 && perf.now() - t < ms; };
+        var offline = function () { return navigator.onLine === false; };
         var store = function (v) { try { if (v === undefined) return Number(sessionStorage.getItem(KEY)) || 0; if (v) sessionStorage.setItem(KEY, String(v)); else sessionStorage.removeItem(KEY); } catch (e) { return 0; } };
         var WORDS = {
           en: ['Updating SportLikely…', 'Back in a moment.', 'Reload'],
@@ -108,7 +140,9 @@
           (d.body || de).appendChild(card);
           report(why);
           var n = store();
-          if (n < 6) setTimeout(function () { if (!mounted) { store(n + 1); location.reload(); } }, 10000);
+          // fix263: never while files are still arriving or the phone is offline (a reload would start them over)
+          var again = function () { if (mounted) return; if (busy(20000) || offline()) return setTimeout(again, 10000); store(n + 1); location.reload(); };
+          if (n < 6) setTimeout(again, 10000);
         };
         // fix252c: a retry reloads the page (a fresh address), never a second copy of the app file: index-<hash>.js?r=
         // is another module than the index-<hash>.js every page file imports, so the page ran two Reacts ("Cannot read
@@ -119,31 +153,56 @@
           if (failed || started || mounted) return;
           failed = true;
           var n = tries();
-          if (n < 0 || n >= 2 || tries(n + 1) < 0) return showCard(why + ' (' + (n + 1) + ' tries)');
-          setTimeout(function () {
+          if (n < 0 || n >= 3 || tries(n + 1) < 0) return showCard(why + ' (' + (n + 1) + ' tries)');
+          var retry = function () {
             if (started || mounted) return;
+            if (offline()) return w.addEventListener('online', retry, { once: true }); // fix263: back online first
             try { var u = new URL(location.href); u.searchParams.set('sl_v', String(Date.now())); location.replace(u.toString()); } catch (e) { location.reload(); }
-          }, 2000);
+          };
+          setTimeout(retry, 2000 * Math.pow(2, n)); // fix263: 2, 4, 8 s
         };
-        // the page's own app file: an error (404 / 502 / 503) or no start within 6 s
+        // the page's own app file: an error (404 / 502 / 503)
         w.addEventListener('error', function (e) {
           var el = e.target;
           if (el && el.tagName === 'SCRIPT' && el === main()) fail('app file failed');
         }, true);
-        setTimeout(function () { fail('app file not started after 6 s'); }, 6000);
+        // fix263: … or it arrived and did not start within 6 s. Still arriving / offline / no timing: check again later
+        var waitStart = function (ms) {
+          setTimeout(function () {
+            if (started || mounted || failed) return;
+            var at = arrivedAt();
+            if (at > 0 && perf.now() - at >= 6000) return fail('app file loaded, not started after 6 s');
+            if (perf && perf.now && perf.now() > 300000) return fail('app file not started after 5 min');
+            waitStart(at > 0 ? 6000 : Math.min(ms * 2, 60000));
+          }, ms);
+        };
+        waitStart(6000);
         w.__slBoot = {
           started: function () {
             started = true;
-            // started but never on screen (a page file or the language file kept failing): the card after 20 s
-            setTimeout(function () { if (!mounted) showCard('app started, not shown after 20 s'); }, 20000);
+            // started but never on screen (a page file or the language file kept failing): the card after 20 s with
+            // nothing arriving (fix263: a slow network keeps it waiting while files arrive, 3 min at most)
+            var t0 = Date.now();
+            var check = function () {
+              if (mounted) return;
+              if ((busy(15000) || offline()) && Date.now() - t0 < 180000) return setTimeout(check, 5000);
+              showCard('app started, not shown after ' + Math.round((Date.now() - t0) / 1000) + ' s');
+            };
+            setTimeout(check, 20000);
           },
-          mounted: function () { mounted = true; store(0); tries(0); if (card) { card.remove(); card = null; } },
+          mounted: function () {
+            mounted = true; store(0); tries(0); if (card) { card.remove(); card = null; }
+            // fix263: the shell goes once the app's first frame is on screen
+            var sh = d.getElementById('sl-shell');
+            if (sh) (w.requestAnimationFrame || setTimeout)(function () { (w.requestAnimationFrame || setTimeout)(function () { sh.remove(); }); });
+          },
           fail: function (why) { showCard(String(why || 'start failed')); }
         };
       })();
     </script>
   </head>
   <body>
+    <div id="sl-shell" aria-hidden="true"><div class="h"><img src="/favicon.svg" alt="" width="28" height="28" />SportLikely</div><div class="b"><div class="s t"></div><div class="s"></div><div class="s"></div><div class="s"></div></div></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

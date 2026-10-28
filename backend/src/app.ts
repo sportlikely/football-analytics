@@ -70,7 +70,7 @@ import { unlockStatus, unlockMatch, unlockedIds, isFinished, testCheckout, PLANS
 import { goalsCalibration } from './services/goalsCalibration';
 import { runDataAudit, lastDataAudit } from './services/dataAudit';
 import { newsFor as newsForB, newsStatus, bbTeamNames, footballTeamNames, nflTeamNamesById } from './services/news';
-import { bbGet, bbStatus, bbSyncNow } from './services/basketball';
+import { bbGet, bbStatus, bbSyncNow, BB_LEAGUES } from './services/basketball';
 import { adminResult, resultChecksList, checkResults, openCheck, resultFix, ResultError } from './services/bbResults';
 import { decideReview, openReviews, ReviewError } from './services/resultChecks';
 import { actionInfo, runAction } from './services/adminMail';
@@ -89,13 +89,13 @@ import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
 import { rebuildPlayerQuality, playerQualityTable } from './services/playerQuality';
 import { db } from './db';
-import { liveList, liveAt } from './services/liveState';
+import { liveList, liveListText, liveAt } from './services/liveState';
 import { isWeb, isWorker, ROLE } from './services/role';
 import { isReady, readiness } from './services/readiness';
 import { serveEarly, needsState, currentMainScript } from './services/earlyStatic';
 import { deployErrorsMiddleware, noteLoading } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
-import { workerRoutes, workerRoutesStatus, sendStartupCopy } from './services/workerRoutes';
+import { workerRoutes, workerRoutesStatus, sendStartupCopy, newsIsStored } from './services/workerRoutes';
 import { namesTick, namesJson, namesAdmin, setAdminName, latinFor, viewOf, VIEW_SQL } from './services/names';
 import { deadlineStart, lateCopy, slowRequests } from './services/deadline';
 import { buildBundle, noteBundleAsked, isBundleCall, type BundleSport } from './services/gameBundle';
@@ -106,7 +106,7 @@ import { workerHealth, memorySizing } from './services/workerHealth';
 import { perfHours } from './services/perfHistory';
 import { sharedStatus } from './services/shared';
 import { forwardToWorker, fetchFromWorker } from './services/forward';
-import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, pastMatch, type LinkAnswer } from './services/slugs';
+import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, pastMatch, webKnowsAll, webKnowsSlug, type LinkAnswer } from './services/slugs';
 import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
 import { archivedAsset } from './services/assetArchive';
 import { definePage, getPage, fallbackQuery, refreshPages, rebuildPage, pageCacheStatus, pageMemStatus, pageHotStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
@@ -123,7 +123,7 @@ import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent
 import { geoCredit, countryOf } from './services/geo';
 import { bbGameFacts as bbGameFactsB, bbGameSeo, bbGamePath, bbFactsFreshMs } from './services/seo';
 import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, todayGroups as todayGroupsB, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
-import { listGuides, getGuide } from './services/guides';
+import { listGuides, getGuide, guideSlugs } from './services/guides';
 import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
 import { hubBySlug, hubByOld, hubOpen, buildHub, HUBS } from './services/hubs';
 import { refreshFromDetails } from './services/matchPreview';
@@ -641,6 +641,7 @@ const byWorker = (req: express.Request, res: express.Response, here: () => unkno
  * A stored page. `view`: the stored string to send (null = the page through res.json: admins). `keep` (fix221): a
  * member's unlocked ids (row ids) — the list joined from its rows, those games in full, the rest teased.
  */
+const STORED_OR_WORKER = new Set(['guides', 'guide', 'news', 'bb-config']);
 const STORED_WAIT_MS = Number(process.env.STORED_WAIT_MS) || Math.min(600, Number(process.env.PAGE_WAIT_MS) || 600);
 async function sendStored(req: express.Request, res: express.Response, name: string, q: Query, view: string | null, keep?: Set<number>) {
   // fix222: each phase is its own perf entry ("stored bb-games: read / pick / send"), so a stall names the phase
@@ -654,6 +655,9 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
   // fix245: a verified search engine never gets this 503: the worker builds the page now and answers
   if (!s && isWeb && isVerifiedCrawler(req)) return forwardToWorker(req, res);
+  // fix263: the pages fix263 made stored (guides, news, basketball config) had a worker / web answer before: until their
+  // first copy is stored (the first deploy) the worker builds it now — never "Loading"
+  if (!s && isWeb && STORED_OR_WORKER.has(name)) return forwardToWorker(req, res);
   // fix252: a query with no copy yet (2 × /api/public/results after the 12:21 deploy on 27 Oct): the page's stand-in copy
   // (PageDef.fallback: a warm query, always stored) while the worker builds this one — never "Loading" when one exists
   if (!s) {
@@ -2103,6 +2107,9 @@ app.get('/api/matches/upcoming', async (req, res) => {
 app.get('/api/matches/live', async (_req, res) => {
   try {
     // fix202: the web process sends the worker's last live list (the same list the socket pushes)
+    // fix263: the web sends the list as the worker wrote it (one string, nothing serialised here)
+    const text = isWeb ? liveListText('football') : null;
+    if (text) return res.type('application/json').send(text);
     const matches = isWeb ? liveList('football')
       : [...footballDataAPI.withPredictions((await footballDataAPI.getLiveMatches()).map(withLiveScore)), ...afWithPredictions(afLive())].map(slimForList);
     res.json({ data: matches, count: matches.length, timestamp: new Date().toISOString() });
@@ -2777,6 +2784,11 @@ app.get('/api/slug/:sport/:kind/:slug', (req, res) => {
   const hit = idOfSlug(sport, kind, slug);
   if (hit && kind === 'match' && req.access !== 'admin' && pastMatch(sport, hit.id)) return pastGone(res);
   if (hit) return res.set('Cache-Control', req.access === 'admin' && kind === 'match' ? 'private, no-store' : 'public, max-age=300').json({ data: { id: hit.id, slug: hit.canonical } });
+  // fix263: the web holds every slug once its state + id index are in: an unknown one is answered here (the search)
+  if (isWeb && kind !== 'match' && webKnowsSlug(sport, kind)) {
+    const a = linkAnswer(`/${sport}/${kind}/${slug}`);
+    return res.status(404).set('Cache-Control', 'public, max-age=60').json({ error: 'Not found', search: a && 'search' in a ? a.search : null });
+  }
   if (isWeb) return forwardToWorker(req, res);
   const a = linkAnswer(`/${sport}/${kind}/${slug}`);
   if (a && 'to' in a) return res.json({ data: { slug: a.to.split('/').pop() } });
@@ -2787,6 +2799,8 @@ app.get('/api/slug-of/:sport/:kind/:id', (req, res) => {
   if (!linkSport(sport) || !linkKind(kind) || !/^-?[A-Za-z0-9-]{1,40}$/.test(id)) return res.status(404).json({ error: 'Not found' });
   const s = slugOf(sport, kind, id);
   if (s) return res.set('Cache-Control', 'public, max-age=300').json({ data: { slug: s } });
+  // fix263: the web holds every id once its state (+ the id index) is in — no slug = none yet; no worker round trip
+  if (isWeb && webKnowsAll(sport, kind, id)) return res.status(404).set('Cache-Control', 'public, max-age=60').json({ error: 'Not found' });
   if (isWeb) return forwardToWorker(req, res);
   // the old address's own lookup (a Football-Data.org team id with its league + name)
   const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
@@ -2936,15 +2950,25 @@ app.get('/api/changelog', (req, res) => {
 });
 
 // Guides (fix125): plain-English explainers, rendered on the server (same text as the crawler HTML)
-app.get('/api/guides', (_req, res) => {
-  try { res.set('Cache-Control', 'public, max-age=600').json({ data: listGuides().map(({ slug, title, description }) => ({ slug, title, description })) }); }
+// fix263: stored pages built by the worker (a guide's live numbers read the whole record: "/api/guides/double-chance"
+// 3.2 s on the web thread, 28 Oct); the web only sends the stored strings
+const GUIDE_SLUGS = new Set(guideSlugs());
+const VIEWS_JSON = { full: (b: any) => jsonText(b) };
+definePage({ name: 'guides', freshMs: 30 * 60 * 1000, variants: VIEWS_JSON, warm: [{}], build: () => ({ data: listGuides().map(({ slug, title, description }) => ({ slug, title, description })) }) });
+definePage({
+  name: 'guide', freshMs: 30 * 60 * 1000, variants: VIEWS_JSON, warm: [...GUIDE_SLUGS].map(slug => ({ slug })),
+  build: q => { const g = getGuide(q.slug); return { data: g ? { slug: g.slug, title: g.title, description: g.description, h1: g.h1, html: g.html, related: g.relatedGuides, updated: g.updated } : null }; }
+});
+app.get('/api/guides', async (req, res) => {
+  try { res.set('Cache-Control', 'public, max-age=600'); await sendStored(req, res, 'guides', {}, 'full'); }
   catch (e: any) { sendError(res, e, 'Guides failed'); }
 });
-app.get('/api/guides/:slug', (req, res) => {
+app.get('/api/guides/:slug', async (req, res) => {
   try {
-    const g = getGuide(String(req.params.slug));
-    if (!g) return res.status(404).json({ error: 'Guide not found' });
-    res.set('Cache-Control', 'public, max-age=600').json({ data: { slug: g.slug, title: g.title, description: g.description, h1: g.h1, html: g.html, related: g.relatedGuides, updated: g.updated } });
+    const slug = String(req.params.slug);
+    if (!GUIDE_SLUGS.has(slug)) return res.status(404).json({ error: 'Guide not found' });
+    res.set('Cache-Control', 'public, max-age=600');
+    await sendStored(req, res, 'guide', { slug }, 'full');
   } catch (e: any) { sendError(res, e, 'Guide failed'); }
 });
 
@@ -2963,6 +2987,19 @@ app.get('/api/today', (req, res) => {
   } catch (e: any) { sendError(res, e, 'Today failed'); }
 });
 
+/*
+ * fix263: the news a sport's home / a league page lists (no team) is a stored page per sport, league and length, built
+ * by the worker (the home ones warm); a team's news stays a worker route (services/workerRoutes.ts newsIsStored)
+ */
+type NewsSport = 'football' | 'basketball' | 'american-football' | 'tennis';
+definePage({
+  name: 'news', freshMs: 2 * 60 * 1000, variants: VIEWS_JSON,
+  warm: [{ sport: 'football', limit: 10 }, { sport: 'basketball', limit: 10 }, { sport: 'tennis', limit: 10 }, { sport: 'american-football', limit: 10 },
+    { sport: 'american-football', league: 'NFL', limit: 10 }, { sport: 'american-football', league: 'NCAA', limit: 10 }],
+  // a league's own news, first time asked: the sport's news while it is built
+  fallback: q => (q.league && q.sport !== 'american-football' ? { sport: q.sport, limit: 10 } : null),
+  build: async q => ({ data: await newsFor({ sport: q.sport as NewsSport, league: q.league || undefined, limit: Number(q.limit) || 12 }), timestamp: new Date().toISOString() })
+});
 app.get('/api/news', async (req, res) => {
   try {
     // ?league=PL → that league's news; no league → every league combined (home page)
@@ -2973,6 +3010,10 @@ app.get('/api/news', async (req, res) => {
     if (sport === 'tennis' && !(tennisPublic() || req.access === 'admin')) return res.json({ data: [], timestamp: new Date().toISOString() });
     let league = typeof req.query.league === 'string' && /^[A-Z0-9]{2,8}$/i.test(req.query.league) ? req.query.league : undefined;
     const limit = Math.min(30, parseInt(String(req.query.limit || '12'), 10) || 12);
+    if (newsIsStored(req)) {
+      res.set('Cache-Control', 'public, max-age=120');
+      return await sendStored(req, res, 'news', { sport, league: league?.toUpperCase(), limit }, 'full');
+    }
     let team: string[] | undefined;
     if (sport === 'american-football' && /^\d+$/.test(String(req.query.teamId || ''))) {
       const tid = parseInt(String(req.query.teamId), 10);
@@ -3355,7 +3396,12 @@ app.get('/api/nfl/config', async (req, res) => {
 /** ?league= as one stored key: '' both leagues, '1' NFL, '2' college */
 const nflLgKey = (req: express.Request) => { const l = nflLgs(req); return l.length === 1 ? String(l[0]) : ''; };
 // fix202: a stored page per access (paid / not), built in the worker every 30 s; members with unlocked games get it built here
-definePage({ name: 'nfl-home', freshMs: 30 * 1000, variants: VIEWS_PLAIN, warm: [{ full: 0 }, { full: 1 }], build: q => nflHomeBody(asLeagues(q.league), q.full === '1') });
+// fix263: both leagues and each one alone (the college pages ask ?league=2): every key the app asks is warm — a deploy
+// never answers "Loading" (the 60-s check); a key never stored yet stands in with both leagues while it is built
+definePage({
+  name: 'nfl-home', freshMs: 30 * 1000, variants: VIEWS_PLAIN, warm: ['', '1', '2'].flatMap(league => [{ league, full: 0 }, { league, full: 1 }]),
+  fallback: q => (q.league ? { full: q.full } : null), build: q => nflHomeBody(asLeagues(q.league), q.full === '1')
+});
 app.get('/api/nfl/home', async (req, res) => {
   try {
     const f = fullFor(req, nflRid);
@@ -3573,7 +3619,8 @@ app.get('/api/tennis/config', (req, res) => {
 });
 // fix202: a stored page per tour and access (paid / not), built in the worker every 30 s (admins and members with
 // unlocked matches get it built here)
-definePage({ name: 'tennis-home', freshMs: 30 * 1000, variants: VIEWS_PLAIN, warm: tennisPublic() ? [{ tour: 'all', full: 0 }, { tour: 'all', full: 1 }] : [], build: q => tennisHomeBody(q.tour || 'all', q.full === '1', false) });
+// fix263: every public tour is warm (a tour's own page asks ?tour=atp …), all tours stand in for one not stored yet
+definePage({ name: 'tennis-home', freshMs: 30 * 1000, variants: VIEWS_PLAIN, warm: tennisPublic() ? ['all', 'atp', 'wta', 'challenger'].flatMap(tour => [{ tour, full: 0 }, { tour, full: 1 }]) : [], fallback: q => (q.tour !== 'all' ? { tour: 'all', full: q.full } : null), build: q => tennisHomeBody(q.tour || 'all', q.full === '1', false) });
 app.get('/api/tennis/home', async (req, res) => {
   try {
     const f = fullFor(req, tennisRid), admin = tnAdmin(req);
@@ -3686,8 +3733,13 @@ app.use('/api/basketball', (req, res, next) => {
   if (req.path === '/config' || bbPublic() || req.access === 'admin') return next();
   res.status(404).json({ error: 'Not found' });
 });
-app.get('/api/basketball/config', (req, res) => {
-  res.json({ data: { public: bbPublic(), open: bbPublic() || req.access === 'admin', leagues: bbLeagues() } });
+// fix263: a stored page (the league list was a database read on the web on every page open); admins: their own view
+definePage({
+  name: 'bb-config', freshMs: 60 * 1000, warm: [{}], build: () => ({ data: { public: bbPublic(), open: bbPublic(), leagues: bbLeagues() } }),
+  variants: { full: (b: any) => jsonText(b), admin: (b: any) => jsonText({ ...b, data: { ...b.data, open: true } }) }
+});
+app.get('/api/basketball/config', async (req, res) => {
+  try { await sendStored(req, res, 'bb-config', {}, req.access === 'admin' ? 'admin' : 'full'); } catch (e) { sendError(res, e, 'Failed to load the basketball settings'); }
 });
 /*
  * fix202: the lists the basketball home opens (next 7 days, last 30 days' results; a league's too) are stored pages per
@@ -3837,7 +3889,8 @@ app.post('/api/admin/bb/game/:id(\\d+)/result', jsonOnly, (req, res) => {
 });
 // fix202: stored pages (the top leagues built on start; any league kept fresh while visitors open it)
 definePage({
-  name: 'bb-standings', freshMs: 10 * 60 * 1000, variants: VIEWS_PLAIN, warm: ['NBA', 'EL', 'ACB', 'LBA', 'BSL', 'EC'].map(code => ({ code })),
+  // fix263: every league's table is warm (was 6: another league's first open after a deploy waited for API-Basketball)
+  name: 'bb-standings', freshMs: 10 * 60 * 1000, variants: VIEWS_PLAIN, warm: BB_LEAGUES.map(l => ({ code: l.code })),
   build: async q => ({ data: await bbStandings(q.code), timestamp: new Date().toISOString() })
 });
 app.get('/api/basketball/standings/:code([A-Za-z0-9]{2,8})', async (req, res) => {

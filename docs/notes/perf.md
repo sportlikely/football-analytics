@@ -551,6 +551,60 @@ thread's maxMs 1,755, /api/basketball/game/:id avg 2.3 s / max 11.6 s, ~900 /bas
 - The cluster (step 6) is not built: nothing blocks the web thread any more (Yarin, 27 Oct).
 - **Profiler off by default** (CPU_PROFILE=1 turns it on): its 5-min swap was the remaining block (321 ms in the load test; the live short blocks of 160–220 ms every ~5 min, mostly (program)). **Load test** (27 Oct, 10 Oct copy, 1,000 visitors × 5 min): 296,628 requests, 980 req/s, p50 2 ms · p95 8 ms · p99 15 ms, 0 × 5xx, 0 network errors, longest web block 97 ms → PASS. Once in the run every route's max reached ~4 s at the same moment while the web thread was free (97 ms): suspected this PC (load client, web and the worker's model builds on one machine) — the live route max tells.
 
+## fix263 — small reads never wait behind big ones (28 Oct)
+
+Site health 28 Oct 15:07: Slow requests 37 / h (/api/matches/upcoming 12× over 1 s, /api/slug-of/football/league/AF143
+14.2 s, /api/slug/basketball/match/… 9.0 s, /api/guides/double-chance 3.3 s, /api/news 2.5 s, /api/public/results 2.7 s),
+slow reads 67 / 3 h ("SELECT built_at FROM page_cache …" 1.2–1.3 s for one row, a 9 KB shared_state row 1.47 s,
+feat:state 5.7 MB 0.97 s) while the volume answered in 31.7 ms (p95): small reads queued behind big ones in the same
+reader threads. /api/nfl/home answered "Loading" 60 s+ after a start; a web stall of 3.2 s on /api/guides/double-chance.
+
+- **Two reader pools** (services/pageReader.ts): "small" (READER_THREADS / READER_SMALL, 2: one-row lookups, rows known
+  under 64 KB) and "big" (READER_BIG, 2: shared states and parts, views / route copies of 64 KB+ or unknown size, paged
+  reads). One read per thread at a time; the rest wait in the pool's queue, a request's read ('req') before any
+  background load ('bg': state loads), so a request waits for at most the read already running. Views go by their size
+  from the worker's list (below); route copies by the size last seen (workerRoutes `sizes`). A read over 500 ms is
+  logged with its pool, its queue wait and its time in the thread ("slow read 812 ms [small, waited 20 ms] …"); a small
+  read that returned 64 KB+ is counted (`smallOver64`) and logged once an hour. /api/perf → pageReader.pools (size,
+  threads, busy, queued, reads, over500, maxMs, maxWaitMs, queuedMax). Cache: small threads 64 MB, big 256 MB (dbTune
+  `readerSmall`; every reader counted when scaling to the container).
+- **The page list in memory** (pageCache.ts): the worker sends every stored key — its time and each view's size (from
+  the covering index idx_page_cache_meta: the rows are never visited) and the ETags of its own builds — 3 s after it
+  starts and after every clean-up ('page-meta-all', 5,000 keys a message). Once in (`pageHot.complete` in /api/perf), a
+  key the web does not hold has no copy (`absent`), a page's time is never read from the disk, and an unknown ETag is
+  not read either (`etagsUnread`: the build's time stands in as the base of a joined copy's ETag). Each build's message
+  carries its views' sizes (`kb`).
+- **Slugs from memory**: the id index (`slugs-ids:<sport>`) now also answers slug → id for every match and player of
+  every season (`orders`: the primary entries' positions sorted by slug, 4 bytes each) and flags past-season matches
+  (`past`, from pastSeason.pastSeasonIds: the same rules as isPastSeasonMatch, read in bulk). /api/slug and /api/slug-of
+  answer misses on the web (404, or the search for a team / league / player slug) when the sport's state is loaded
+  (webKnowsAll / webKnowsSlug); only an old Football-Data.org team id, the American football league ids and a match
+  slug we never gave (matched by names on the day) still ask the worker.
+- **Stored strings**: /api/guides, /api/guides/:slug ('guides', 'guide': the live numbers read the record — that was the
+  3.2 s web stall), /api/news without a team ('news' per sport, league and length; the home ones warm; a team's news
+  stays a worker route: workerRoutes `stored`), /api/basketball/config ('bb-config', an admin view), /api/matches/live
+  (the worker's games' JSON comes with its 'live' message; the web joins the answer once per change, reads no
+  live_state row). Until a new page's first copy is stored (the first deploy) the worker answers it (STORED_OR_WORKER),
+  never "Loading". /api/public/summary and /api/nfl/config were stored already.
+- **Warm set**: nfl-home for both leagues and each alone × full / not (the college pages ask ?league=2: the "Loading"
+  of 28 Oct), tennis-home for every public tour, bb-standings for every league (was 6), guides, news, bb-config; a
+  league / tour key never stored stands in with the both-leagues / all-tours copy (`fallback`).
+- **Stale-copy sweep** (fix258) reads the first 32 KB of a copy (the <head> grew to ~15 KB with the loader + shell).
+- **The loader** (frontend/index.html): a slow connection is not a failure. While the app file is still arriving (no
+  Resource Timing entry for it) or the phone is offline it waits (checks at 6 → 12 → 24 → 48 → 60 s, 5 min at most);
+  only an app file that arrived and did not start in 6 s, or an error, reloads (3 tries, 2 / 4 / 8 s apart, after
+  'online'). "Started, not shown": no card while files keep arriving (one finished in the last 15 s), 3 min at most;
+  the card reloads itself only when nothing arrived for 20 s. The shell (#sl-shell: brand bar + skeleton, theme
+  colours) is painted from index.html before any script and removed after the app's first frame.
+  `node scripts/slow-loader.mjs` (after the frontend build; also in test:fix263): the built site behind a server that
+  answers like a slow phone network (600 ms + one shared 40 KB/s pipe), phone size, iPhone user agent. Chromium only in
+  this container (no WebKit; SLOW_BROWSER=webkit where playwright has it). Result 28 Oct: **old loader** "app file not
+  started after 6 s (3 tries)" — 4 page loads, then the card (at 15 KB/s: 10 page loads, never on screen); **new**:
+  shell at 1.1 s, app on screen at 17 s, 1 page load, no card (15 KB/s: 43 s, no card).
+- Test: npm run test:fix263 (pools: 20 small reads in 5 ms while the big pool ran 4 slow reads, the request before the
+  queued loads; the list: two views read and nothing else; slug answers 3–10 ms with no worker, a past season 410;
+  pastSeasonIds = isPastSeasonMatch; the live string; the warm keys; the slow loader).
+
 ## fix254 — disk-bound reads (28 Oct)
 
 - Indexed one-row lookups took 1.7–1.9 s (page_cache built_at by idx_page_cache_meta, shared_state versions): SQLite's

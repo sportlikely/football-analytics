@@ -111,4 +111,6 @@ function build() {
 }
 
 export const listGuides = (): GuideMeta[] => build().list;
+/** fix263: the guides' slugs from the file names alone (no rendering, no record read): the web's 404 check */
+export const guideSlugs = (): string[] => readAll().map(g => g.meta.slug);
 export const getGuide = (slug: string): Guide | null => build().pages.get(slug) || null;

@@ -90,7 +90,8 @@ const partReader = (key: string, ver: number) => {
 };
 /** fix248 (web): the same, read in the reader thread (services/pageReader.ts): no SQLite read of a big row on the web thread */
 const partReaderOff = (key: string, ver: number) => async (i: number) => {
-  const r = await readSql<{ data: Uint8Array } | null>(PART_SQL, [key, i, ver]);
+  // fix263: state loads are the big pool's background reads (a request's read never waits behind them)
+  const r = await readSql<{ data: Uint8Array } | null>(PART_SQL, [key, i, ver], false, 'big', 'bg');
   return r ? asBuffer(r.data) : null;
 };
 
@@ -212,7 +213,7 @@ const versSql = () => {
 async function loadNow(key: string) {
   let off = pageReaderOn();
   let row: any;
-  if (off) { try { row = await readSql(ROW_SQL, [key]); } catch { off = false; } }
+  if (off) { try { row = await readSql(ROW_SQL, [key], false, 'big', 'bg'); } catch { off = false; } }
   if (!off) row = db.prepare(ROW_SQL).get(key);
   if (!row || (applied.get(key)?.ver || 0) >= row.ver) return;
   const t0 = Date.now();
@@ -259,7 +260,7 @@ export async function loadNewerStates(force = false): Promise<void> {
   if (!force && versFromWorker()) return chain;
   let rows: { key: string; ver: number }[];
   const sql = versSql();
-  try { rows = pageReaderOn() ? await readSql(sql, [], true) : (db.prepare(sql).all() as any[]); } catch { rows = db.prepare(sql).all() as any[]; }
+  try { rows = pageReaderOn() ? await readSql(sql, [], true, 'small', 'bg') : (db.prepare(sql).all() as any[]); } catch { rows = db.prepare(sql).all() as any[]; }
   for (const r of rows) queueLoad(r.key, r.ver);
   return chain;
 }

@@ -146,6 +146,10 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   fix232: stored-page builds run in their own lane (perf.pageLane), never behind a heavy job; model rebuilds / fits of
   every sport (perf.MODEL_JOBS — add a new model job there) start after the first page round; warm lists are never
   dropped from page_cache (a restart serves the last copy, X-SL-Built-At). /api/perf = summary (?full=1, ?shared=1).
+  fix263: two reader pools (services/pageReader.ts: `readSql(sql, args, all, pool, prio)` — 'small' for one-row lookups and
+  rows under 64 KB, 'big' for states / parts / big views; 'bg' for loads no request waits on); the web holds the worker's
+  whole page list (no page time read from disk) and slug ↔ id for every season (slugs-ids index). A static or
+  near-static public answer is a stored page (definePage + warm), never computed on the web.
 - Football data: `footballDataAPI.ts` (Football-Data.org: top leagues + Champions League), `afMatches.ts` +
   `apiFootball.ts` (API-Football: extra leagues, cups, national teams, lineups, injuries, match stats, player data),
   `unsettled.ts` + `utils/voidRules.ts` (fix200: games past kick-off + 48 h without a final → settled / moved / void with a

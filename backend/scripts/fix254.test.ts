@@ -207,14 +207,15 @@ test('(2) page cache: 256 MB readers, 64 MB web, scaled down in a small containe
   const p = tunePragmas('reader', null);
   assert.ok(p.includes('PRAGMA cache_size = -262144'));
   assert.ok(p.some((x: string) => /mmap_size = 1073741824/.test(x)) && p.includes('PRAGMA temp_store = MEMORY'));
-  assert.match(read('src/workers/pageReader.ts'), /tuneDb\(db, 'reader'\)/);
+  assert.match(read('src/workers/pageReader.ts'), /tuneDb\(db, 'reader'[,)]/);
   assert.match(read('src/db/index.ts'), /tuneDb\(db,/);
 });
 
 test('(2) hot keys: page times / ETags and state versions come from the worker in memory', () => {
   const pc = read('src/services/pageCache.ts');
-  assert.match(pc, /const h = hot\.get\(key\); if \(h && Date\.now\(\) - h\.at < keepOf\(key\)\) \{ hotStats\.hits\+\+; return h\.at; \}/);
-  assert.match(pc, /sendIpc\(\{ t: 'page', key, builtAt: at, etags \}\)/);
+  // (fix263: the whole list from the worker; memory answers for a key held while the list is in, or younger than its keep time)
+  assert.match(pc, /if \(h && \(hotComplete \|\| Date\.now\(\) - h\.at < keepOf\(key\)\)\) \{ hotStats\.hits\+\+; return h\.at; \}/);
+  assert.match(pc, /sendIpc\(\{ t: 'page', key, builtAt: at, etags, kb \}\)/);
   assert.match(pc, /onIpc\('page-meta'/);
   const sh = read('src/services/shared.ts');
   assert.match(sh, /sendIpc\(\{ t: 'state-vers', vers: workerVers\(\) \}\)/);

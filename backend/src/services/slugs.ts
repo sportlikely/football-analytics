@@ -17,7 +17,7 @@ import logger from '../utils/logger';
 import { isWeb, runsJobs } from './role';
 import { onState, applyState } from './shared';
 import { yieldEvery } from './perf';
-import { isPastSeasonMatch, seasonStarts } from './pastSeason';
+import { isPastSeasonMatch, seasonStarts, pastSeasonIds } from './pastSeason';
 import { assignSlugs, assignMatchSlugs, baseOf, type SlugEntity, type SlugRow, type MatchEntity } from '../utils/slugAssign';
 import { teamSlug, slugify, playerSlug, matchSlug, parseMatchSlug, isSlug, splitTab, movedPage, LINK_SPORTS, ALLOWED_QUERY, type LinkSport, type LinkKind } from '../utils/slugRules';
 
@@ -107,11 +107,19 @@ function canonicalId(sport: LinkSport, kind: LinkKind, id: string): string {
  * the worker (3–4.7 s web stalls, 25 Oct); now the web answers them from memory. Chunks of sorted ids (binary search,
  * microseconds): ids = Float64Array (sorted), off = Uint32Array (slug i = text.slice(off[i], off[i + 1])).
  */
-export type IdChunk = { kind: LinkKind; ids: Float64Array; off: Uint32Array; text: string };
-export interface IdIndex { sport: LinkSport; builtAt: number; entries: number; chunks: IdChunk[] }
+/*
+ * fix263: the same index answers the other way too, and knows past seasons — /api/slug/basketball/match/… (9.0 s) and
+ * /api/slug-of/football/league/AF143 (14.2 s) were asked of a busy worker (28 Oct). Per kind, `bySlug` = the positions
+ * of the primary entries sorted by slug (4 bytes each, the slugs stay in the chunks: position p = chunk first + p >> 12,
+ * row p & 4095); `past` (matches) = 1 per entry of a past-season match (pastSeason.pastSeasonIds, the same rules).
+ */
+export type IdChunk = { kind: LinkKind; ids: Float64Array; off: Uint32Array; text: string; past?: Uint8Array };
+export type SlugOrder = { kind: LinkKind; first: number; bySlug: Uint32Array };
+/** `alias` (fix263): `<kind>/<old slug>` → id for renamed matches / players (their old slugs 301 to the new) */
+export interface IdIndex { sport: LinkSport; builtAt: number; entries: number; chunks: IdChunk[]; orders?: SlugOrder[]; alias?: Map<string, string> }
 const idIndexes = new Map<LinkSport, IdIndex>();
 onState('slugs-ids:', (_key, v: IdIndex) => { if (v?.sport) idIndexes.set(v.sport, v); });
-const ID_CHUNK = 4096;
+const ID_CHUNK = 4096, ID_SHIFT = 12; // (ID_CHUNK = 1 << ID_SHIFT)
 /** sorted (id, slug) pairs of one kind → chunks */
 export function idChunks(kind: LinkKind, pairs: [number, string][]): IdChunk[] {
   pairs.sort((a, b) => a[0] - b[0]);
@@ -143,6 +151,41 @@ export function indexedSlug(ix: IdIndex | null | undefined, kind: LinkKind, id: 
   return null;
 }
 export const idIndexOf = (sport: LinkSport) => idIndexes.get(sport) || null;
+/** fix263: an id's entry in the index (its chunk and row), null = not there */
+function indexedAt(ix: IdIndex | null | undefined, kind: LinkKind, id: string): { c: IdChunk; i: number } | null {
+  if (!ix || !/^-?\d+$/.test(id)) return null;
+  const n = Number(id);
+  for (const c of ix.chunks) {
+    if (c.kind !== kind || !c.ids.length || n < c.ids[0] || n > c.ids[c.ids.length - 1]) continue;
+    let lo = 0, hi = c.ids.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1, v = c.ids[mid];
+      if (v === n) return { c, i: mid };
+      if (v < n) lo = mid + 1; else hi = mid - 1;
+    }
+    return null;
+  }
+  return null;
+}
+/** fix263: a primary slug's id in the index (null = not there, or the index has no slug order) */
+export function indexedId(ix: IdIndex | null | undefined, kind: LinkKind, slug: string): string | null {
+  const o = ix?.orders?.find(x => x.kind === kind);
+  if (!ix || !o) return null;
+  const at = (p: number) => { const c = ix.chunks[o.first + (p >> ID_SHIFT)], i = p & (ID_CHUNK - 1); return c ? { c, i, s: c.text.slice(c.off[i], c.off[i + 1]) } : null; };
+  let lo = 0, hi = o.bySlug.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1, e = at(o.bySlug[mid]);
+    if (!e) return null;
+    if (e.s === slug) return String(e.c.ids[e.i]);
+    if (e.s < slug) lo = mid + 1; else hi = mid - 1;
+  }
+  return null;
+}
+/** fix263: a match of a past season, from the index's flags (undefined = the index does not say) */
+function indexedPast(ix: IdIndex | null | undefined, id: string): boolean | undefined {
+  const e = indexedAt(ix, 'match', id);
+  return e?.c.past ? e.c.past[e.i] === 1 : undefined;
+}
 
 /** id → the item's slug (null = no slug yet). The web process reads its state only. */
 export function slugOf(sport: LinkSport, kind: LinkKind, id: string | number | null | undefined): string | null {
@@ -162,6 +205,13 @@ export function idOfSlug(sport: LinkSport, kind: LinkKind, slug: string): { id: 
   const st = states.get(sport);
   const hit = st?.map.get(`s:${kind}/${slug}`);
   if (hit) { const sp = hit.indexOf(' '); return sp < 0 ? { id: hit, canonical: slug } : { id: hit.slice(0, sp), canonical: hit.slice(sp + 1) }; }
+  // fix263: every match and player of every season, from the id index (no worker round trip)
+  if (kind === 'match' || kind === 'player') {
+    const ix = idIndexes.get(sport), id = indexedId(ix, kind, slug);
+    if (id) return { id, canonical: slug };
+    const old = ix?.alias?.get(`${kind}/${slug}`), now = old ? indexedSlug(ix, kind, old) : null;
+    if (old && now) return { id: old, canonical: now };
+  }
   if (isWeb) return null;
   try {
     const r: any = qSlug().get(sport, kind, slug);
@@ -176,7 +226,8 @@ export function idOfSlug(sport: LinkSport, kind: LinkKind, slug: string): { id: 
 export function pastMatch(sport: LinkSport, id: string): boolean {
   const st = states.get(sport);
   if (st?.map.has(`p:match/${id}`)) return true;
-  if (isWeb || !runsJobs) return false;
+  // fix263: a match outside the window: the id index's flag (the web holds every season's)
+  if (isWeb || !runsJobs) return indexedPast(idIndexes.get(sport), id) === true;
   return isPastSeasonMatch(sport, id);
 }
 
@@ -248,8 +299,10 @@ export function linkAnswer(path: string, query = ''): LinkAnswer {
       if (hit.canonical !== nw.slug) return { to: `${lang}/${nw.sport}/${nw.kind}/${hit.canonical}${sub}${kept}` };
       return { page: { sport: nw.sport, kind: nw.kind, id: hit.id, slug: nw.slug, ...(nw.kind === 'match' && pastMatch(nw.sport, hit.id) ? { past: true as const } : {}) } };
     }
-    if (isWeb) return { ask: true };
-    const m = nw.kind === 'match' ? matchBySlugParts(nw.sport, nw.slug) : null;
+    // fix263: a team / league / player the web's state does not hold has no page: the search, no worker round trip
+    // (a match slug we never gave still asks: the worker matches the day's games by their names)
+    if (isWeb && (nw.kind === 'match' || !webKnowsSlug(nw.sport, nw.kind))) return { ask: true };
+    const m = nw.kind === 'match' && !isWeb ? matchBySlugParts(nw.sport, nw.slug) : null;
     if (m) return { to: `${lang}/${nw.sport}/match/${m}${sub}${kept}` };
     return { search: `${lang}/search?q=${encodeURIComponent(nw.slug.replace(/-vs-/, ' ').replace(/-\d{4}-\d{2}-\d{2}(-\d)?$/, '').replace(/-/g, ' '))}` };
   }
@@ -267,6 +320,24 @@ export function linkAnswer(path: string, query = ''): LinkAnswer {
   // no worker round trip (old football team links with a Football-Data.org id still ask: the worker matches the name)
   if (isWeb && states.has(old.sport) && (old.kind === 'team' || old.kind === 'league' || idIndexes.has(old.sport)) && !(old.sport === 'football' && old.kind === 'team')) return null;
   return isWeb ? { ask: true } : null;
+}
+/**
+ * fix263: can the web process answer "no slug" for this id itself? Yes once the sport's state (+ the id index for
+ * matches / players) is loaded — except an old football team id (Football-Data.org: the worker matches the name) and
+ * the American football league ids (their own addresses).
+ */
+export function webKnowsAll(sport: LinkSport, kind: LinkKind, id: string): boolean {
+  if (!states.has(sport)) return false;
+  if (sport === 'football' && kind === 'team' && /^\d+$/.test(id) && Number(id) < AF) return false;
+  if (sport === 'american-football' && kind === 'league') return false;
+  if (kind === 'match' || kind === 'player') return idIndexes.has(sport) && /^-?\d+$/.test(id);
+  return true;
+}
+/** fix263: … and "no item" for this slug (a match / player needs the index's slug order; aliases of those are rare) */
+export function webKnowsSlug(sport: LinkSport, kind: LinkKind): boolean {
+  if (!states.has(sport)) return false;
+  if (kind === 'match' || kind === 'player') return !!idIndexes.get(sport)?.orders?.some(o => o.kind === kind);
+  return true;
 }
 /** fix238: an old (id) address of any sport, any language — the page route never builds one before answering */
 export function isOldAddress(path: string): boolean {
@@ -688,21 +759,42 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   await step();
   // fix238: every match and player (all seasons) + their old / twin ids → the id index the web answers old links from
   const chunks: IdChunk[] = [];
-  let entries = 0;
+  const orders: SlugOrder[] = [];
+  const alias = new Map<string, string>();
+  let entries = 0, pastN = 0;
+  // fix263: every past-season match (flags in the index: the web answers a match of any season itself)
+  const past = pastSeasonIds(sport);
+  await step();
   for (const kind of ['match', 'player'] as const) {
     const prim = new Map<string, string>();
-    for (const r of all(`SELECT id, slug FROM slugs WHERE sport = ? AND kind = ? AND is_primary = 1`, sport, kind)) prim.set(String(r.id), r.slug);
+    // (sorted by slug: SQLite's order = JS string order for the ASCII slugs; the slug order below keeps it)
+    const primRows = all(`SELECT id, slug FROM slugs WHERE sport = ? AND kind = ? AND is_primary = 1 ORDER BY slug`, sport, kind);
+    for (const r of primRows) prim.set(String(r.id), r.slug);
     await step();
     for (const r of all(`SELECT old_id, id FROM slug_ids WHERE sport = ? AND kind = ?`, sport, kind)) { const s = prim.get(String(r.id)); if (s && !prim.has(String(r.old_id))) prim.set(String(r.old_id), s); }
     const pairs: [number, string][] = [];
     for (const [id, s] of prim) if (/^-?\d+$/.test(id)) pairs.push([Number(id), s]);
     entries += pairs.length;
-    chunks.push(...idChunks(kind, pairs));
+    const first = chunks.length;
+    const kc = idChunks(kind, pairs); // (sorts pairs by id: position i = chunk i >> 12, row i & 4095)
+    if (kind === 'match') for (const c of kc) { c.past = new Uint8Array(c.ids.length); for (let i = 0; i < c.ids.length; i++) if (past.has(c.ids[i])) { c.past[i] = 1; pastN++; } }
+    chunks.push(...kc);
+    await step();
+    const posOf = new Map<number, number>();
+    pairs.forEach(([id], i) => posOf.set(id, i));
+    const bySlug: number[] = [];
+    for (const r of primRows) { const p = /^-?\d+$/.test(String(r.id)) ? posOf.get(Number(r.id)) : undefined; if (p !== undefined) bySlug.push(p); }
+    // the slug order must hold for the binary search (a non-ASCII slug from an old row would break SQLite's = JS order)
+    let sorted = true;
+    for (let i = 1; i < bySlug.length && sorted; i++) if (pairs[bySlug[i - 1]][1] > pairs[bySlug[i]][1]) sorted = false;
+    if (!sorted) bySlug.sort((a, b) => (pairs[a][1] < pairs[b][1] ? -1 : pairs[a][1] > pairs[b][1] ? 1 : 0));
+    orders.push({ kind, first, bySlug: Uint32Array.from(bySlug) });
+    for (const r of all(`SELECT slug, id FROM slugs WHERE sport = ? AND kind = ? AND is_primary = 0`, sport, kind)) if (prim.has(String(r.id))) alias.set(`${kind}/${r.slug}`, String(r.id));
     await step();
   }
-  const ix: IdIndex = { sport, builtAt: Date.now(), entries, chunks };
+  const ix: IdIndex = { sport, builtAt: Date.now(), entries, chunks, orders, alias };
   idIndexes.set(sport, ix);
-  publishIfChanged(`slugs-ids:${sport}`, ix, await contentSig(chunkStrings(chunks), step));
+  publishIfChanged(`slugs-ids:${sport}`, ix, `${await contentSig(chunkStrings(chunks), step)}|o2|p${pastN}|a${alias.size}`);
 }
 function recentPlayers(sport: LinkSport): Set<string> | null {
   if (sport === 'football') { const s = all(`SELECT MAX(season) AS s FROM af_player_season`)[0]?.s; return s ? new Set(all(`SELECT DISTINCT player_id AS id FROM af_player_season WHERE season >= ?`, s - 1).map(r => String(r.id))) : new Set(); }

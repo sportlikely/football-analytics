@@ -20,12 +20,15 @@ import { isWeb } from './role';
 import { fetchFromWorker, forwardToWorker, waiting, type WorkerAnswer } from './forward';
 import { isWorker } from './role';
 import { deferred } from './deferredWrites';
-import { readSql, asBuffer, pageReaderOn } from './pageReader';
+import { readSql, asBuffer, pageReaderOn, poolForBytes } from './pageReader';
 import { keepsOwnCopies } from './deadline';
 import { partsOf } from './gameBundle';
 
 /** shared: the same answer for everyone (fix250: a signed-in visitor gets the signed-out copy too) */
-type RouteDef = { re: RegExp; freshMs: number; shared?: boolean };
+/** fix263: `stored` = this request is answered by the web from a stored page (pageCache.ts), not by the worker */
+type RouteDef = { re: RegExp; freshMs: number; shared?: boolean; stored?: (req: express.Request) => boolean };
+/** fix263: /api/news without a team (a sport's or a league's news) is a stored page; a team's news stays here */
+export const newsIsStored = (req: express.Request) => req.path === '/api/news' && !['team', 'short', 'teamId', 'playerId'].some(k => req.query[k] != null && req.query[k] !== '');
 const S = 1000, MIN = 60 * S;
 /**
  * The public routes the worker answers (GET). Every sport: football match / team / player pages, leagues, today, news,
@@ -39,7 +42,7 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/leagues\/[^/]+\/(standings|results|scorers)$/, freshMs: 2 * MIN },
   { re: /^\/api\/(teams|team-page)\/\d+$/, freshMs: 10 * MIN },
   { re: /^\/api\/player-page\/(\d+|find)$/, freshMs: 30 * MIN },
-  { re: /^\/api\/(today|news|search)$/, freshMs: 2 * MIN },
+  { re: /^\/api\/(today|news|search)$/, freshMs: 2 * MIN, stored: newsIsStored },
   { re: /^\/api\/how-it-works\/[a-z-]+$/, freshMs: 10 * MIN },
   { re: /^\/api\/upset-watch$/, freshMs: 5 * MIN }, // fix242: football's upset watch (Pro) is built by the worker like the other sports'
   { re: /^\/api\/more\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 1 * MIN },
@@ -208,23 +211,30 @@ const COPY_SQL = `SELECT at, status, type, cache, body FROM route_cache WHERE ke
  * fix248: a copy not in memory is read in the reader thread (services/pageReader.ts): the CPU profile of 26 Oct showed
  * the web thread blocked in this read (774 ms, /basketball/* + /de/* + /it/*). The synchronous read only without it.
  */
+/*
+ * fix263: each copy's size, as this process last saw it (saved or read): a copy under 64 KB is read in the small reader
+ * pool, a bigger or unknown one in the big pool (services/pageReader.ts) — either way before any background state load
+ */
+const sizes = new Map<string, number>();
+const noteSize = (k: string, n: number) => { sizes.delete(k); sizes.set(k, n); if (sizes.size > 50_000) sizes.delete(sizes.keys().next().value as string); };
 async function readCopy(k: string): Promise<Copy | null> {
   const m = mem.get(k);
   if (m) { mem.delete(k); mem.set(k, m); return m; }
   try {
     let r: any;
     let off = pageReaderOn();
-    if (off) { try { r = await readSql(COPY_SQL, [k]); } catch { off = false; } }
+    if (off) { try { r = await readSql(COPY_SQL, [k], false, poolForBytes(sizes.get(k))); } catch { off = false; } }
     if (!off) r = db.prepare(COPY_SQL).get(k);
     if (!r) return null;
     const c: Copy = { at: r.at, status: r.status, type: r.type, cache: r.cache, body: off ? asBuffer(r.body) : Buffer.from(r.body) };
+    noteSize(k, c.body.length);
     memSet(k, c);
     return c;
   } catch { return null; }
 }
 function saveCopy(k: string, a: WorkerAnswer): Copy {
   const c: Copy = { at: Date.now(), status: a.status, type: String(a.headers['content-type'] || 'application/json; charset=utf-8'), cache: a.headers['cache-control'] ? String(a.headers['cache-control']) : null, body: a.body };
-  memSet(k, c);
+  memSet(k, c); noteSize(k, c.body.length);
   try { saveRow.run(k, c.at, c.status, c.type, c.cache, c.body); } catch (e: any) { logger.warn(`route cache: ${e?.message || e}`); }
   // fix250: a game bundle's parts become the parts' own copies (byte ranges from the worker: nothing parsed here)
   if (a.status === 200 && a.headers['x-sl-parts']) {
@@ -232,7 +242,7 @@ function saveCopy(k: string, a: WorkerAnswer): Copy {
     for (const p of partsOf(String(a.headers['x-sl-parts']))) {
       const pk = `${p.path}?|${flags}`, body = a.body.subarray(p.start, p.end);
       const pc: Copy = { at: c.at, status: 200, type: 'application/json; charset=utf-8', cache: 'no-store', body };
-      memSet(pk, pc);
+      memSet(pk, pc); noteSize(pk, body.length);
       try { saveRow.run(pk, pc.at, 200, pc.type, pc.cache, body); } catch { /* the next bundle */ }
     }
   }
@@ -278,7 +288,7 @@ const isCopy = (x: Copy | WorkerAnswer): x is Copy => typeof (x as Copy).at === 
 export async function workerRoutes(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (!isWeb || req.method !== 'GET') return next();
   const route = workerRouteOf(req.path);
-  if (!route) return next();
+  if (!route || route.stored?.(req)) return next();
   // signed in: the plan and the unlocks change the page — the worker's fresh answer, streamed (fix250: cut at 900 ms by
   // services/deadline.ts, the answer kept for the person's next request); a route that is the same for everyone: the copy
   const signedIn = !!(req.user || req.access === 'admin');

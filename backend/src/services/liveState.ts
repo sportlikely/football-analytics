@@ -29,6 +29,13 @@ const emit = (sport: string, changed: any[], gone: number[]) => {
 export const liveList = (sport: string): any[] => [...(lists.get(sport) || new Map()).values()];
 /** when the live list of a sport was last written (worker) / received (web); 0 = never */
 export const liveAt = (sport: string) => listAt.get(sport) || 0;
+/*
+ * fix263 (web): the list as the answer of /api/matches/live, one string per sport made from the games' JSON the worker
+ * sent (string joins only: nothing is serialised on the web thread); null = not known yet (the caller builds it)
+ */
+const listText = new Map<string, string>();
+export const liveListText = (sport: string): string | null => listText.get(sport) ?? null;
+const answerText = (games: string[]) => `{"data":[${games.join(',')}],"count":${games.length},"timestamp":"${new Date().toISOString()}"}`;
 
 /** worker / one process: the tick's full list of live games of a sport (each with a numeric id) */
 export function writeLive(sport: string, games: any[]) {
@@ -60,7 +67,9 @@ export function writeLive(sport: string, games: any[]) {
       } catch (e) { db.exec('ROLLBACK'); throw e; }
     }
     // the order of the list can change without a game changing: the id list goes with every message
-    sendIpc({ t: 'live', sport, ids: games.map(g => Number(g.id)).filter(Number.isFinite), changed: changed.map(g => Number(g.id)), gone });
+    // fix263: the changed games' JSON goes with the message (the web reads no live_state row), and the order (ids)
+    const ids = games.map(g => Number(g.id)).filter(Number.isFinite);
+    sendIpc({ t: 'live', sport, ids, changed: changed.map(g => Number(g.id)), gone, rows: changed.map(g => [Number(g.id), next.get(Number(g.id))]) });
     return;
   }
   if (changed.length || gone.length || !isWeb) emit(sport, changed, gone);
@@ -86,13 +95,26 @@ if (isWeb) {
     const sport = String(m.sport);
     const ids = (m.ids as number[]) || [], changedIds = (m.changed as number[]) || [], gone = (m.gone as number[]) || [];
     const cur = lists.get(sport) || new Map<number, any>();
-    const fresh = readRows(sport, changedIds);
+    const curJson = lastJson.get(sport) || new Map<number, string>();
+    // fix263: the games' JSON from the message (one game each: small); live_state only for a game it does not carry
+    const fresh = new Map<number, any>(), freshJson = new Map<number, string>();
+    for (const [id, json] of (m.rows as [number, string][] | undefined) || []) { try { fresh.set(Number(id), JSON.parse(json)); freshJson.set(Number(id), json); } catch { /* read below */ } }
+    const unread = changedIds.filter(id => !fresh.has(id));
+    if (unread.length) for (const [id, g] of readRows(sport, unread)) { fresh.set(id, g); freshJson.set(id, JSON.stringify(g)); }
     // keep the worker's order; a game we have no row for (missed message) is read now
     const missing = ids.filter(id => !fresh.has(id) && !cur.has(id));
-    for (const [id, g] of readRows(sport, missing)) fresh.set(id, g);
-    const list = new Map<number, any>();
-    for (const id of ids) { const g = fresh.get(id) ?? cur.get(id); if (g) list.set(id, g); }
+    for (const [id, g] of readRows(sport, missing)) { fresh.set(id, g); freshJson.set(id, JSON.stringify(g)); }
+    const list = new Map<number, any>(), json = new Map<number, string>();
+    for (const id of ids) {
+      const g = fresh.get(id) ?? cur.get(id);
+      if (!g) continue;
+      list.set(id, g);
+      const j = freshJson.get(id) ?? curJson.get(id);
+      if (j) json.set(id, j);
+    }
     lists.set(sport, list);
+    lastJson.set(sport, json);
+    if (json.size === list.size) listText.set(sport, answerText([...json.values()])); else listText.delete(sport);
     listAt.set(sport, Date.now());
     const changed = [...fresh.values()];
     if (changed.length || gone.length) emit(sport, changed, gone);
@@ -106,6 +128,10 @@ export function loadLiveRows() {
   for (const r of rows) {
     let l = lists.get(r.sport);
     if (!l) lists.set(r.sport, (l = new Map()));
-    try { l.set(r.id, JSON.parse(r.json)); } catch { /* skipped */ }
+    try { l.set(r.id, JSON.parse(r.json)); } catch { continue; }
+    let j = lastJson.get(r.sport);
+    if (!j) lastJson.set(r.sport, (j = new Map()));
+    j.set(r.id, r.json);
   }
+  for (const [sport, j] of lastJson) listText.set(sport, answerText([...j.values()]));
 }

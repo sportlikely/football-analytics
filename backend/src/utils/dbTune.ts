@@ -10,27 +10,29 @@
  */
 import { containerLimitMb } from './memLimit';
 
-export type DbUse = 'reader' | 'worker' | 'web' | 'thread' | 'all';
-const WANT_MB: Record<DbUse, number> = { reader: 256, worker: 128, web: 64, thread: 64, all: 256 };
+// fix263: readerSmall = the small reader pool (index pages and rows under 64 KB)
+export type DbUse = 'reader' | 'readerSmall' | 'worker' | 'web' | 'thread' | 'all';
+const WANT_MB: Record<DbUse, number> = { reader: 256, readerSmall: 64, worker: 128, web: 64, thread: 64, all: 256 };
 export const MMAP_BYTES = 1024 * 1048576;
 
 /** cache MB for this connection: the wanted size, scaled down when the container limit can't hold them all */
 export function cacheMbFor(use: DbUse, limitMb: number | null = containerLimitMb(), readers = 2): number {
   const want = WANT_MB[use];
   if (!limitMb) return want;
+  // fix263: `readers` = every reader thread (small + big pools), counted at the big pool's size (the upper bound)
   const total = WANT_MB.reader * readers + WANT_MB.worker + WANT_MB.web + WANT_MB.thread;
   const room = Math.floor(limitMb / 4);
   return total <= room ? want : Math.max(16, Math.floor((want * room) / total));
 }
 
 /** the PRAGMA statements for a connection (negative cache_size = KiB) */
-export function tunePragmas(use: DbUse, limitMb: number | null = containerLimitMb()): string[] {
-  return [`PRAGMA cache_size = ${-cacheMbFor(use, limitMb) * 1024}`, `PRAGMA mmap_size = ${MMAP_BYTES}`, 'PRAGMA temp_store = MEMORY'];
+export function tunePragmas(use: DbUse, limitMb: number | null = containerLimitMb(), readers = 2): string[] {
+  return [`PRAGMA cache_size = ${-cacheMbFor(use, limitMb, readers) * 1024}`, `PRAGMA mmap_size = ${MMAP_BYTES}`, 'PRAGMA temp_store = MEMORY'];
 }
 
 /** apply them (a failing one — an old SQLite build without mmap — is skipped) */
-export function tuneDb(db: { exec(sql: string): void }, use: DbUse): string[] {
+export function tuneDb(db: { exec(sql: string): void }, use: DbUse, readers?: number): string[] {
   const done: string[] = [];
-  for (const p of tunePragmas(use)) { try { db.exec(p); done.push(p); } catch { /* not supported here */ } }
+  for (const p of tunePragmas(use, containerLimitMb(), readers || 2)) { try { db.exec(p); done.push(p); } catch { /* not supported here */ } }
   return done;
 }

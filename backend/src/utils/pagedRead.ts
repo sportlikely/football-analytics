@@ -15,7 +15,7 @@ export async function eachRowPaged(table: string, cols: string, onRow: (r: any) 
   const st = off ? null : db.prepare(sql);
   for (let after = 0; ;) {
     let rows: any[];
-    if (off) { try { rows = await readSql<any[]>(sql, [after], true); } catch { off = false; rows = db.prepare(sql).all(after) as any[]; } }
+    if (off) { try { rows = await readSql<any[]>(sql, [after], true, 'big'); /* fix263: the big pool */ } catch { off = false; rows = db.prepare(sql).all(after) as any[]; } }
     else rows = (st ?? db.prepare(sql)).all(after) as any[];
     if (!rows.length) return;
     for (const r of rows) onRow(r);
