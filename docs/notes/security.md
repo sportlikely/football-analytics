@@ -31,6 +31,17 @@ Visitor counting is unchanged (bot reason `datacentre`).
 
 ### Quick check (fix244, 26 Oct 2026)
 
+> **Correction (fix262 / fix262b, 28 Oct 2026): the 26 Oct "Datacamp scraper" was Railway's edge, not a scraper.**
+> Railway's new Hikari edge (headers `x-railway-edge` / `x-hikari-trace`) runs on Datacamp (AS60068 / AS212238: e.g.
+> 89.222.103.0/24, 152.233.x.0/24, 84.17.44.0/24) and appends its own address(es) to X-Forwarded-For; fix254's rule
+> took that edge address as `req.ip`, so every visitor (the friend on the VPN included) and real Googlebot looked like
+> "Datacamp" and shared the network cap. Since fix262b `req.ip` skips every consecutive edge hop (learned /24 ranges,
+> plus hops in the same AS as a learned range — such a request is never verified as a search engine), so the proxy
+> limits, the Quick check and the data-centre check apply to the real client address. Data health "Search engines
+> verified" → "client networks" should show Datacamp ≈ 0 (only real VPN users on it); each Googlebot-UA sample lists
+> every hop and which one was taken. The 20–21 Oct episode (fix199, fake browser user-agents, ~25 addresses) predates
+> the Hikari edge and is not affected by this correction as far as we know.
+
 **What happened:** a friend in Israel on a VPN got "Failed to load matches: Request failed with status code 429", then a
 bare white page. A scraper on Datacamp (AS60068: 47,028 requests, 257 addresses, 34,558 refused; AS212238: 17,442 /
 15,735 refused) used up the 600-an-hour network cap, so every person on that VPN network was refused on the first page.

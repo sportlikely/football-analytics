@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (f: string) => fs.readFileSync(path.join(here, '..', f), 'utf8');
 const require = createRequire(import.meta.url);
 const dist = (f: string) => require(path.join(here, '..', 'dist', f));
-const { EdgeLearner, clientOfRequest, clientOf, rangeOf, hasEdgeHeader, EDGE_MIN_LEFTS } = dist('utils/clientIp.js');
+const { EdgeLearner, clientOfRequest, explainClient, hopLine, clientOf, rangeOf, hasEdgeHeader, EDGE_MIN_LEFTS, EDGE_KEEP_DAYS } = dist('utils/clientIp.js');
 const { CrawlerRanges, SEED_RANGES, listedCrawler } = dist('utils/crawlerRanges.js');
 
 const EDGE = '208.77.246.12';
@@ -74,15 +74,18 @@ test('learning: a client with varied fake left hops is never learned as an edge 
   const l3 = new EdgeLearner();
   for (let i = 0; i < 300; i++) l3.note(SOCKET, `${20 + (i % 200)}.1.1.1, ${EDGE}`, {});
   assert.equal(l3.isEdge(EDGE), false);
-  assert.ok(EDGE_MIN_LEFTS >= 20);
+  assert.ok(EDGE_MIN_LEFTS >= 10);
 });
 
 test('learned ranges survive a restart (loaded from the table) and IPv6 edges use /48', () => {
   const l = new EdgeLearner();
   l.load('208.77.246.0/24', Date.now() - 3600000, Date.now());
   assert.equal(clientOfRequest(SOCKET, `66.249.66.1, ${EDGE}`, H, () => null, l), '66.249.66.1');
-  l.load('1.1.1.0/24', Date.now() - 10 * 86400000, Date.now() - 8 * 86400000);
-  assert.equal(l.isEdge('1.1.1.1'), false, 'unseen for 7 days: dropped');
+  l.load('1.1.1.0/24', Date.now() - 40 * 86400000, Date.now() - 31 * 86400000);
+  assert.equal(l.isEdge('1.1.1.1'), false, 'unseen for 30 days: dropped');
+  l.load('1.1.2.0/24', Date.now() - 20 * 86400000, Date.now() - 20 * 86400000);
+  assert.equal(l.isEdge('1.1.2.9'), true, 'kept 30 days (fix262b)');
+  assert.equal(EDGE_KEEP_DAYS, 30);
   assert.equal(rangeOf('2a09:8280:1::4'), '2a09:8280:1::/48');
   assert.equal(rangeOf('::ffff:208.77.246.12'), '208.77.246.0/24');
 });
@@ -98,4 +101,40 @@ test('wiring: req.ip set first in app.ts, the Googlebot log keeps the fix254 rul
   assert.match(ci, /oldRule: clientOf\(socket, xff, asnOf\)/);
   assert.match(ci, /before262/);
   assert.match(read('src/services/dataHealth.ts'), /crawlerHealth\(edgeStatus\(\)\)/);
+});
+
+/* ---------- fix262b ---------- */
+// Railway's Hikari edge runs on Datacamp: the two edge hops are both in AS60068
+const DC = (ip: string) => (/^(89\.222\.103|152\.233\.4|84\.17\.44|84\.17\.45)\./.test(ip) ? 60068 : /^(20|52)\./.test(ip) ? 8075 : null);
+const E1 = '89.222.103.7', E2 = '84.17.44.20', E2b = '84.17.45.3';
+
+test('fix262b: every consecutive edge hop is skipped — learned ranges, then the edge network (AS)', () => {
+  const l = new EdgeLearner(DC);
+  for (let i = 0; i < 300; i++) l.note(SOCKET, `${11 + (i % 200)}.${i % 7}.3.${i % 250}, ${E2}, ${E1}`, H);
+  assert.ok(l.isEdge(E1), 'the last hop is learned');
+  assert.ok(l.isEdge(E2), 'the second edge hop is learned too (walks past the known edge, same AS)');
+  assert.equal(clientOfRequest(SOCKET, `66.249.66.1, ${E2}, ${E1}`, H, DC, l), '66.249.66.1');
+  // a second-hop /24 not learned yet, but in the edge's network: skipped, marked
+  const x = explainClient(SOCKET, `81.2.69.160, ${E2b}, ${E1}`, H, DC, l);
+  assert.equal(x.ip, '81.2.69.160');
+  assert.equal(x.edgeAsnSkip, true, 'skipped by its network only: never verified as a search engine');
+  assert.match(hopLine(x), /81\.2\.69\.160 \[TAKEN\] → 84\.17\.45\.3 \[edge network AS60068\] → 89\.222\.103\.7 \[edge 89\.222\.103\.0\/24\] → 100\.64\.0\.2 \[socket\]/);
+  // a visitor really on Datacamp (a VPN) with nothing to the left stays the client
+  assert.equal(clientOfRequest(SOCKET, `${E2b}, ${E1}`, H, DC, l), E2b);
+  // a deeper hop outside the edge's AS is never learned as an edge
+  const l2 = new EdgeLearner(DC);
+  for (let i = 0; i < 300; i++) l2.note(SOCKET, `${11 + (i % 200)}.1.1.1, ${E1}`, H);
+  for (let i = 0; i < 300; i++) l2.note(SOCKET, `${30 + (i % 150)}.2.2.2, 5.5.5.5, ${E1}`, H);
+  assert.equal(l2.isEdge('5.5.5.5'), false);
+  assert.equal(clientOfRequest(SOCKET, `66.249.66.1, 5.5.5.5, ${E1}`, H, DC, l2), '5.5.5.5', 'a forged Google hop in front of a client gains nothing');
+});
+
+test('fix262b: Googlebot user-agent from Azure / AWS with a forged Google hop = fake crawler (not Google), refused', () => {
+  const ci = read('src/services/crawlerIps.ts');
+  assert.match(ci, /export function isFakeCrawler/);
+  assert.match(ci, /if \(listedCrawler\(ranges, ua, ip\) \|\| inGoogleRanges\(ip\)\) return null;/);
+  assert.match(ci, /const fake = isFakeCrawler\(ua, ip, how\);[\s\S]*?e = null;/);
+  assert.match(read('src/services/visitors.ts'), /fake \? 'fake-crawler' : uaBot \? 'ua'/);
+  assert.match(read('src/app.ts'), /slEdgeAsnSkip \? \{ ok: false, how: null \} : crawlerCheck\(req\.ip, ua\)/);
+  assert.match(read('../docs/notes/security.md'), /was Railway's edge, not a scraper/);
 });

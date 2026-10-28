@@ -6,6 +6,7 @@ import { deferred } from './deferredWrites';
 import { countryOf, geoStatus } from './geo';
 import { dataCentreOf, asnStatus } from './asn';
 import { every } from './perf';
+import { isFakeCrawler } from './crawlerIps';
 
 /**
  * Visitor counts for the admin page (Oct 2026): who is on the site now, and unique visitors per day / 7 / 30 days.
@@ -101,7 +102,10 @@ export function trackVisit(req: express.Request, _res: express.Response, next: e
       written.set(k, now);
       const iso = new Date(now).toISOString();
       const dc = uaBot ? null : dataCentreOf(ip);
-      upsert.run(day, vid, signedIn ? 1 : 0, iso, iso, countryOf(ip), signedIn ? 1 : 0, uaBot ? 'ua' : dc ? 'datacentre' : null, uaBot ? 1 : 0);
+      // fix262b: a search-engine user-agent from a data-centre network, not verified = a fake crawler (not Google)
+      const sl = (req as any).slCrawler;
+      const fake = isFakeCrawler(ua, ip, sl?.ok ? sl.how : null);
+      upsert.run(day, vid, signedIn ? 1 : 0, iso, iso, countryOf(ip), signedIn ? 1 : 0, fake ? 'fake-crawler' : uaBot ? 'ua' : dc ? 'datacentre' : null, uaBot ? 1 : 0);
     }
     const lp = uaBot ? null : leaguePageOf(req.path);
     if (lp) {

@@ -250,7 +250,9 @@ app.use((req, res, next) => {
 if (!isWorker) app.use((req, res, next) => {
   const ua = req.get('user-agent') || '';
   if (claimsCrawler(ua)) {
-    const c = crawlerCheck(req.ip, ua);
+    // fix262b: a hop skipped only because it is in the edge's network → never verified (a scraper there could put a
+    // Google address in front of its own)
+    const c = (req as any).slEdgeAsnSkip ? { ok: false, how: null } : crawlerCheck(req.ip, ua);
     (req as any).slCrawler = c;
     if (c.ok) (req as any).verifiedCrawler = true;
   }
