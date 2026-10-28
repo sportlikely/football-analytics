@@ -53,12 +53,7 @@ function Verdicts({ v }: { v: Verdict[] }) {
   )
 }
 
-/**
- * fix255 / fix255b (admin only): "Leagues under 52%" — tested per group (pooled) and per league with 150+ games: each
- * 30-day block predicted with settings fitted on the other 60 days (+ the 2 past seasons of the backtest), before → after
- * per group and per league (hit rate, log loss, draw picks), what is applied live. Market numbers stay admin-only.
- */
-/** fix259: one league for Claude (every number of its row and its test verdicts) */
+/** fix259: one league for Claude (every number of its row, before → after, and its test verdicts) */
 const leagueReq = (l: League): ForClaudeReq => ({
   place: `Admin → Predictions & models → Leagues under 52% → ${l.name}`, scope: 'item',
   checks: [{ id: 'league-fix' }],
@@ -67,13 +62,19 @@ const leagueReq = (l: League): ForClaudeReq => ({
     text: [
       `Games ${l.n} · hit rate ${l.hit}% · log loss ${l.logLoss}${l.marketLogLoss != null ? ` · market ${l.marketLogLoss} vs ours ${l.oursOnMarket} on ${l.marketN} games` : ''}`,
       `Results H/D/A ${l.outcomes.join(' / ')} · our picks H/D/A ${l.picks.join(' / ')} · home bias ${l.homeBias ?? '—'} · draw gap ${Math.round(l.drawGap * 100)} pts`,
-      `Likely causes: ${l.causes.join(', ') || 'none named'} · own settings: ${l.own ? 'yes' : 'no (group)'}`,
-      `Action: ${l.action}${l.applied ? ` · applied ${l.applied} (${l.appliedVia})` : ' · nothing applied'}`,
-      ...[...l.verdicts, ...l.pickRules].map(v => `Test ${v.cand}: ${v.n} games, Δ ${v.dAll} (halves ${v.d1} / ${v.d2}), hit ${v.hitBase}% → ${v.hitCand}%${v.boot ? `, better in ${Math.round(v.boot.pBetter * 100)}% of resamples` : ''} → ${v.pass ? 'passed' : `kept out: ${v.why}`}`)
+      `Likely causes: ${l.causes.join(', ') || 'none named'} · applied: ${l.applied ? `${l.applied} (${l.via} setting)` : 'nothing'} · after: hit ${l.after.hit}%, log loss ${l.after.logLoss}`,
+      ...(l.own ? [`Own test (${l.own.n} games, ${l.own.nBacktest} past-season games): ${l.own.action}`,
+        ...l.own.verdicts.map(v => `Test ${v.cand} (${v.variant}): ${v.n} games, Δ ${v.dAll} (blocks ${v.blocks.map(x => `${x.from} ${x.diff}`).join(', ')}), hit ${v.hitBase}% → ${v.hitCand}%${v.boot ? `, better in ${Math.round(v.boot.pBetter * 100)}% of resamples` : ''} → ${v.pass ? 'passed' : `kept out: ${v.why}`}`)]
+        : ['No own test (under the games needed): uses its group.'])
     ].join('\n')
   }]
 })
 
+/**
+ * fix255 / fix255b (admin only): "Leagues under 52%" — tested per group (pooled) and per league with 150+ games: each
+ * 30-day block predicted with settings fitted on the other 60 days (+ the 2 past seasons of the backtest), before → after
+ * per group and per league (hit rate, log loss, draw picks), what is applied live. Market numbers stay admin-only.
+ */
 export default function LeagueFixCard() {
   const [d, setD] = useState<Report | null>(null)
   const [msg, setMsg] = useState('')
