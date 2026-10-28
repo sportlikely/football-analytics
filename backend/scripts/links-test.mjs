@@ -28,13 +28,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const NO_RENDER = /^\/(api|admin|crm|socket\.io|assets)(\/|$)|\.(xml|txt|ics|csv|png|jpg|svg|webp|json|pdf)$/;
 const PUBLIC_SITE = /^https?:\/\/(www\.)?sportlikely\.com/;
 
+let httpN = 0;
 /** one address over HTTP, redirects followed by hand: the final status and every hop */
 async function http(base, url) {
   const hops = [];
   let u = url;
   for (let i = 0; i < 6; i++) {
     let r;
-    try { r = await fetch(base + u, { redirect: 'manual', headers: { 'X-Forwarded-For': '192.0.2.200', accept: 'text/html,application/json' }, signal: AbortSignal.timeout(30_000) }); }
+    try { r = await fetch(base + u, { redirect: 'manual', headers: { 'X-Forwarded-For': `2001:db8:262::${(++httpN).toString(16)}`, accept: 'text/html,application/json' }, signal: AbortSignal.timeout(30_000) }); }
     catch (e) { return { status: 0, hops, error: e.message }; }
     if (r.status >= 300 && r.status < 400 && r.headers.get('location')) {
       const loc = new URL(r.headers.get('location'), base + u);
@@ -106,7 +107,7 @@ async function http(base, url) {
       const final = h.hops.length ? h.hops[h.hops.length - 1] : url;
       if (h.outside || NO_RENDER.test(final.split('?')[0])) return;
       // open it as a visitor: the app's own 404 / search, and the links it draws
-      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `198.51.100.${1 + (checked % 250)}` } });
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `2001:db8:261::${checked.toString(16)}` } });
       const page = await ctx.newPage();
       await page.route(u => new URL(u.href).host !== host, r => r.abort('blockedbyclient'));
       try {

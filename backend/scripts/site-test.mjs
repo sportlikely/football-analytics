@@ -70,7 +70,7 @@ async function check(browser, base, job) {
   // each page is its own visitor (an address from the documentation ranges, behind the local "proxy"): the per-address
   // limits apply as they do to real visitors, not to one address opening thousands of pages
   const n = ++visitor;
-  const ip = `${['192.0.2', '198.51.100', '203.0.113'][n % 3]}.${1 + (Math.floor(n / 3) % 254)}`;
+  const ip = `2001:db8:260::${n.toString(16)}`; // the IPv6 documentation range: a new address for every page open
   const ctx = await browser.newContext({ viewport: { width, height: width < 500 ? 812 : 900 }, deviceScaleFactor: 1, locale: 'en-GB', serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': ip } });
   const token = role === 'free' ? TEST_USERS.free.token : role === 'admin' ? TEST_USERS.admin.tokens.unlocked : role === 'admin-locked' ? TEST_USERS.admin.tokens.locked : null;
   if (token) await ctx.addCookies([{ name: 'b2b_session', value: token, url: base }]);
@@ -192,7 +192,7 @@ function testedTree() {
       await Promise.all(Array.from({ length: CONC }, async () => {
         while (w < warm.length) {
           const url = warm[w++];
-          const ctx = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': '192.0.2.250' } });
+          const ctx = await browser.newContext({ serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `2001:db8:263::${w.toString(16)}` } });
           const page = await ctx.newPage();
           await page.route(u => new URL(u.href).host !== new URL(site.base).host, r => r.abort('blockedbyclient'));
           await page.goto(site.base + url, { waitUntil: 'load', timeout: 30_000 }).catch(() => undefined);
