@@ -7,6 +7,7 @@
  * Budget (Pro 7,500/day): fixture window every 30 min (~15 leagues), live scores every 60 s only while one of
  * these matches is in play, match details / tables / scorers / odds on demand with caching.
  */
+import { applyLeagueFix } from './leagueFixLive';
 import { withLive } from './liveChance';
 import { cachedPredictions, mainPrediction } from './predCache';
 import logger from '../utils/logger';
@@ -751,7 +752,8 @@ function computeAfPredictions(m: any): Prediction[] {
   if (v3 && m.competition?.type !== 'NATIONAL' && m.competition?.type !== 'CUP') {
     try { out.push(...mixPredictions(m, v3)); } catch { /* feature model not ready */ }
   }
-  return out;
+  // fix255: the per-league layer (only leagues where a tested change passed)
+  return applyLeagueFix(m, out);
 }
 
 export function afWithPredictions(matches: any[]) {

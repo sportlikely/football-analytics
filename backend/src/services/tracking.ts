@@ -22,6 +22,10 @@ if (!(db.prepare(`PRAGMA table_info(predictions)`).all() as any[]).some(c => c.n
 // exactly what we said — not a recalculation made after the result moved the ratings
 if (!(db.prepare(`PRAGMA table_info(predictions)`).all() as any[]).some(c => c.name === 'payload'))
   db.exec(`ALTER TABLE predictions ADD COLUMN payload TEXT`);
+// fix255: the model's own numbers ("h,d,a" JSON) when the per-league layer (services/leagueFixLive.ts) moved the saved
+// ones — the nightly league test starts from these
+if (!(db.prepare(`PRAGMA table_info(predictions)`).all() as any[]).some(c => c.name === 'layer_raw'))
+  db.exec(`ALTER TABLE predictions ADD COLUMN layer_raw TEXT`);
 
 const upsertStmt = db.prepare(`
   INSERT INTO predictions (
@@ -29,8 +33,8 @@ const upsertStmt = db.prepare(`
     home_team_id, home_team, away_team_id, away_team,
     p_home, p_draw, p_away, xg_home, xg_away, over25, btts, confidence,
     games_home, games_away, odds_home, odds_draw, odds_away,
-    locked, settled, created_at, updated_at, draw_streak, payload
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+    locked, settled, created_at, updated_at, draw_streak, payload, layer_raw
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
   ON CONFLICT(match_id, model) DO UPDATE SET
     utc_date = excluded.utc_date,
     p_home = excluded.p_home, p_draw = excluded.p_draw, p_away = excluded.p_away,
@@ -39,6 +43,7 @@ const upsertStmt = db.prepare(`
     games_home = excluded.games_home, games_away = excluded.games_away,
     draw_streak = excluded.draw_streak,
     payload = excluded.payload,
+    layer_raw = excluded.layer_raw,
     odds_home = COALESCE(excluded.odds_home, predictions.odds_home),
     odds_draw = COALESCE(excluded.odds_draw, predictions.odds_draw),
     odds_away = COALESCE(excluded.odds_away, predictions.odds_away),
@@ -111,7 +116,8 @@ function recordPredictionsTx(matches: any[]) {
       now,
       now,
       p.drawStreak ? Math.min(p.drawStreak.home, p.drawStreak.away) : null,
-      JSON.stringify(p)
+      JSON.stringify(p),
+      (p as any).league?.raw ? JSON.stringify((p as any).league.raw) : null
     );
     if (Number(res.changes) > 0) saved++;
     }

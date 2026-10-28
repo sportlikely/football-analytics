@@ -68,6 +68,7 @@ import { pruneDone } from './services/doneForYou';
 import { dailySummaryTick } from './services/adminMail';
 import { diffViewFreezeTick } from './services/diffView';
 import { startDbSpaceScheduler } from './services/dbSpace';
+import { runLeagueFix, leagueFixDue } from './services/leagueFix';
 
 let started = false;
 
@@ -108,6 +109,11 @@ export function startJobs() {
   // 72 h by the result checks); every decision in Done for you. Then the log is kept 90 days.
   after('fix253 backlog', () => { try { clearBacklogOnce(); } catch (e: any) { logger.warn(`fix253 backlog: ${e?.message || e}`); } }, 3 * 60 * 1000).unref();
   every('done for you prune', () => pruneDone(), 24 * 3600 * 1000).unref();
+  // fix255: leagues under 52% — the walk-forward test on the public record, applied only where it passed, re-checked
+  // (and rolled back) every night at 04:40 UTC after the 04:00 champion / challenger job; first run 25 min after start
+  const leagueFix = () => { if (leagueFixDue() && process.env.LEAGUE_FIX !== 'off') heavy('league fix', () => timed('league fix', () => runLeagueFix())).catch(e => logger.warn(`league fix: ${e?.message || e}`)); };
+  after('league fix', leagueFix, 25 * 60 * 1000).unref();
+  every('league fix', leagueFix, 10 * 60 * 1000).unref();
   // fix246: "Our different view" (admin only) — games with a 5+ point gap to the market written once after kick-off
   every('different view', () => { diffViewFreezeTick(); }, 5 * 60 * 1000).unref();
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the

@@ -61,6 +61,36 @@ Research behind the feature model / v3-mix: `all-data-test-model-oct-2026.md`, `
     Data health "Football model still learning" (`model-daily-learning`): warn after 30 days without a promotion while
     the best candidate is better in both windows. Tests: `npm run test:fix251` (bootstrap, verdict, candidate list).
   - Not run on real data in the session (no database copy): the first table is what the server's run shows.
+- **fix255 (28 Oct 2026): leagues under 52% on 1X2** (Yarin: 90 days, 6,100 games, 37 of 72 leagues under 52% = 3,269
+  games; draws picked 59× while 1,476 happened; home bias Serie B 121 home picks / 49 home wins, Liga MX 101 / 46; market
+  far better in Scotland Championship, China, Belgium Challenger, Qatar, PL, Nations League, J1). Test on the games of
+  the public record only (the saved pre-kick-off main prediction, stored prices, the result), no new data —
+  `utils/leagueFix.ts` (pure) + `services/leagueFix.ts` (worker job "league fix", 04:40 UTC nightly and 25 min after a
+  start; `/api/admin/league-fix`, ?run=1; card "Leagues under 52%"):
+  - walk-forward: a game's settings come only from games settled before its kick-off (+3 h) and history of the days
+    before (last 2 seasons + this one, `history_matches` of the league's division); 150 days before the window feed the
+    fits. Groups: big 5 / second tiers / Americas / Asia / Nordic / cups & national teams / other European top flights
+    (`groupOf`: fixed codes, then the name, then the admin league's country).
+  - candidates: (a) own home advantage — p ∝ (pH·e^(h/2), pD, pA·e^(−h/2)) with h moving the league's average saved
+    split onto its history base rates, shrunk toward the group's (λ = n / (n + 60)); (b) own draw rate (pD·e^d, same
+    fit) and both together; the draw pick rule "draw when P(D) ≥ max(H, A) − x" (x 0–0.10 per group) and the
+    double-chance side as the pick (hit rate only); (c) close games (|H − A| < y) toward the base rates by s (y 0.05–0.15,
+    s 0.2 / 0.4 per group); (d) market anchor 0.1–0.4 per group (fix251's anchor, prices never shown) and (a+b)+(d);
+    (e) < 60 games in the window → the group's settings and the group's verdict.
+  - bar: log loss better in both halves (first 45 / last 45 days, by a real margin ≥ 1e-5 — an unchanged candidate
+    "passed" on float noise in the first test run), paired bootstrap (fix251, 2,000 resamples) ≥ 90%, hit rate not down
+    > 0.5 pp; per league the passing candidate with the lowest log loss. Pick rules are tested and shown, never applied
+    (the site names the most likely result everywhere; applying one = a display change, ask Yarin first).
+  - applied live through `model_config` 'league_fix_live' (the fix251 config store): `services/leagueFixLive.ts`
+    `applyLeagueFix` at the end of both prediction builders (afMatches / footballDataAPI) on every model of the game but
+    feat-v1; the model's own numbers ride along (`league.raw` → `predictions.layer_raw`) and the nightly test reads
+    them back, so it always starts from what the model said. Nightly: a new pass is added; a league already applied
+    stays while its candidate is not worse on the 90 days and the last 45, else it is rolled back (report `rolledBack`).
+  - data health "Leagues under 50%" (`leagues-under-50`): a league with ≥ 60 games under 50% on each of the last 30 days
+    (rolling 90-day windows). Tests: `npm run test:fix255` (draw rule, home / draw refit, no leakage, verdict, a whole
+    run on a made-up record: an over-rated home side fixed, a calibrated league untouched, a harmful setting rolled back).
+  - Not run on real data in the session (no database copy, the server is not reachable from here): the table before →
+    after is what the first server run shows on the card.
 - **Morning report**: 07:00 Asia/Jerusalem (Intl time zone, DST-aware; waits for the job until 09:00) to ADMIN_EMAILS,
   plain text: champion, today's change or "No change", yesterday and last 30 days (games, picks right, log loss v3-mix /
   v3 / feature / bookmakers, 60%+ hit rate), data health + unsettled games, next 3 challengers. Stored in `model_daily`.

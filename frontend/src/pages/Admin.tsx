@@ -13,6 +13,7 @@ import NewsInjuriesCard from '../components/NewsInjuriesCard'
 import GameExtrasAdminCard from '../components/GameExtrasAdminCard'
 import BbGridCard from '../components/BbGridCard'
 import DiffViewCard from '../components/DiffViewCard'
+import LeagueFixCard from '../components/LeagueFixCard'
 import { ChecksCard, DoneForYouCard, Explained, ForClaudeCard, NeedsYouCard, ResultsToCheck, SpeedCard, TabChecks, Tiles, type Ctx, type TileDef } from '../components/admin/AdminParts'
 import { ADMIN_TABS, adminPath, adminTabOf, healthTab, waitingCount, type AdminSummary, type AdminTab, type HealthCheck } from '../lib/adminTabs'
 import { PARITY_REPORT } from '../lib/sportParity.report'
@@ -148,6 +149,7 @@ export default function Admin() {
           <Explained ctx={ctx} id="model-daily"><ModelDailyCard /></Explained>
           <Explained ctx={ctx} id="bb-engine"><BbGridCard /></Explained>
           <Explained ctx={ctx} id="nba-check"><NbaModelCheckCard /></Explained>
+          <Explained ctx={ctx} id="league-fix"><LeagueFixCard /></Explained>
           <Explained ctx={ctx} id="diff-view"><DiffViewCard /></Explained>
           <Explained ctx={ctx} id="season-forecast"><SeasonForecastAdminCard /></Explained>
           <Explained ctx={ctx} id="calibration"><ChecksCard id="calibration" ctx={ctx} title="Do our percentages come true? (football, basketball)" /></Explained>

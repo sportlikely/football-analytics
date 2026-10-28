@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { applyLeagueFix } from './leagueFixLive';
 import { withLive } from './liveChance';
 import { cachedPredictions, clearPredictionCache, mainPrediction } from './predCache';
 import { timed, setJob, yieldLoop, yielder, every, after } from './perf';
@@ -384,7 +385,8 @@ class FootballDataAPI {
         logger.warn('Prediction elo-euro failed', { matchId: match.id, message: error.message });
       }
     }
-    return out;
+    // fix255: the per-league layer (only leagues where a tested change passed)
+    return applyLeagueFix(match, out);
   }
 
   /** The prediction shown on the site: v2 (history model) when available, else v1. */

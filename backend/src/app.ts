@@ -83,6 +83,7 @@ import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
 import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit, storedLeagues, storedMiss, storedImpact, regateImpact } from './services/bbTuner';
 import { startAdminJob, adminJobAnswer } from './services/adminJobs';
+import { runLeagueFix, lastLeagueFix } from './services/leagueFix';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
@@ -3849,6 +3850,16 @@ app.get('/api/admin/nba-model-check', (req, res) => {
 app.get('/api/admin/diff-view', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: await diffViewReport(Date.now(), req.query.fresh === '1') }); } catch (e) { sendError(res, e, 'Different view test failed'); }
+});
+// fix255 (admin only, not in OPEN_API): "Leagues under 52%" — the per-league report, the walk-forward test of the
+// candidates (per league / group), the table before → after and what is applied live. ?run=1 runs it now (heavy queue);
+// the worker runs it every night at 04:40 UTC. Market numbers stay admin-only.
+app.get('/api/admin/league-fix', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (req.query.run === '1') startAdminJob('league fix', null, () => runLeagueFix());
+    res.json({ data: adminJobAnswer('league fix', lastLeagueFix(), () => lastLeagueFix()) });
+  } catch (e) { sendError(res, e, 'League test failed'); }
 });
 // fix224 (admin): basketball injuries read from news ("reported out"): the review list, dismiss (never applied again) / ok
 app.get('/api/admin/bb/news-injuries', (_req, res) => {
