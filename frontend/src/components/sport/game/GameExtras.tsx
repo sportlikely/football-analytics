@@ -15,16 +15,23 @@ import { placeText } from '../../../lib/genText'
  */
 export type ExtrasSport = 'football' | 'basketball' | 'nfl' | 'tennis'
 type Band = 'easy' | 'medium' | 'hard' | 'unknown'
-interface NextGame { id: number; date: string; opp: string; oppId: number | null; home: boolean | null; band: Band; sides: { home: string; away: string; homeId: number | null; awayId: number | null } }
-interface TrendT { side: 'home' | 'away'; team: string; pattern: string; split: 'all' | 'home' | 'away' | 'surface'; k: number; n: number; line: number | null }
+interface NextGame { id: number; date: string | null; opp: string | null; oppId: number | null; home: boolean | null; band: Band; sides: { home: string | null; away: string | null; homeId: number | null; awayId: number | null } | null }
+interface TrendT { side: 'home' | 'away'; team: string | null; pattern: string; split: 'all' | 'home' | 'away' | 'surface'; k: number | null; n: number | null; line: number | null }
+interface Side { id: number | null; name: string | null; next: NextGame[] | null }
 interface Extras {
   indoor: boolean
   surface: string | null
-  weather: { tempC: number | null; rainPct: number | null; rainMm: number | null; windKmh: number | null; notes: ('wind' | 'rain' | 'heat')[]; venue: string | null; city: string | null; start: string; at: string } | null
-  referee: { name: string; games: number; show: boolean; homeWin?: number | null; leagueHomeWin?: number; cards?: number | null; leagueCards?: number | null; pens?: number | null; leaguePens?: number | null } | null
-  trends: TrendT[]
-  difficulty: { home: { id: number; name: string; next: NextGame[] }; away: { id: number; name: string; next: NextGame[] } } | null
+  weather: { tempC: number | null; rainPct: number | null; rainMm: number | null; windKmh: number | null; notes: ('wind' | 'rain' | 'heat')[] | null; venue: string | null; city: string | null; start: string | null; at: string } | null
+  referee: { name: string | null; games: number | null; show: boolean; homeWin?: number | null; leagueHomeWin?: number; cards?: number | null; leagueCards?: number | null; pens?: number | null; leaguePens?: number | null } | null
+  trends: TrendT[] | null
+  difficulty: { home: Side | null; away: Side | null } | null
 }
+
+/* fix271: the API may leave any field null (a college team with no next game, a game whose opponent is not known yet:
+   "reading 'length' of null" on /american-football/team/…): every list goes through arr(), every game list through
+   games(), every text is read with ?? '', so no card reads .length / .map / .toFixed of null */
+const arr = <T,>(x: T[] | null | undefined): T[] => (Array.isArray(x) ? x.filter(v => v != null) : [])
+const games = (x: NextGame[] | null | undefined): NextGame[] => arr(x).filter(g => typeof g === 'object' && g.id != null)
 
 function useExtras<T>(path: string | null): T | null {
   const [d, setD] = useState<T | null>(null)
@@ -32,15 +39,15 @@ function useExtras<T>(path: string | null): T | null {
     setD(null)
     if (!path) return
     let off = false
-    axios.get(`${API_URL}/extras/${path}`).then(r => { if (!off) setD(r.data.data ?? null) }).catch(() => undefined)
+    axios.get(`${API_URL}/extras/${path}`).then(r => { if (!off) setD(r.data?.data ?? null) }).catch(() => undefined)
     return () => { off = true }
   }, [path])
   return d
 }
 
 // fix229: slug links from lib/links (names + date), never a hand-built path
-const gameHref = (sport: ExtrasSport, g: NextGame) => matchHref(LINK_SPORT[sport], g.id, { home: g.sides.home, away: g.sides.away, date: g.date, homeId: g.sides.homeId, awayId: g.sides.awayId })
-const teamHref = (sport: ExtrasSport, id: number | null, name: string) => sport === 'tennis' ? playerHref('tennis', id, name) : teamLink(LINK_SPORT[sport], id, name)
+const gameHref = (sport: ExtrasSport, g: NextGame) => matchHref(LINK_SPORT[sport], g.id, { home: g.sides?.home, away: g.sides?.away, date: g.date, homeId: g.sides?.homeId, awayId: g.sides?.awayId })
+const teamHref = (sport: ExtrasSport, id: number | null, name: string | null) => sport === 'tennis' ? playerHref('tennis', id, name) : teamLink(LINK_SPORT[sport], id, name)
 
 /* ---------- trends ---------- */
 
@@ -51,7 +58,7 @@ function gamesWord(sport: ExtrasSport, split: TrendT['split'], surface: string |
 }
 /** one trend → its sentence (the numbers are the counted games; the backend checks every one before it is sent) */
 export function trendText(sport: ExtrasSport, x: TrendT, surface: string | null = null): string {
-  const v = { team: x.team, k: x.k, n: x.n, games: gamesWord(sport, x.split, surface), line: x.line ?? '' }
+  const v = { team: x.team ?? '', k: x.k ?? 0, n: x.n ?? 0, games: gamesWord(sport, x.split, surface), line: x.line ?? '' }
   if (sport === 'tennis') return x.pattern === 'win' ? t('{team} has won {k} of their last {n} {games}', v) : t('{team} has lost {k} of their last {n} {games}', v)
   switch (x.pattern) {
     case 'win': return t('{team} have won {k} of their last {n} {games}', v)
@@ -68,16 +75,20 @@ export function trendText(sport: ExtrasSport, x: TrendT, surface: string | null 
 }
 
 function Trends({ sport, list, surface }: { sport: ExtrasSport; list: TrendT[]; surface: string | null }) {
-  if (!list.length) return null
+  const shown = list.map(x => trendText(sport, x, surface)).filter(Boolean)
+  if (!shown.length) return null
   return (
     <Section title={t('Trends')}>
       <ul className="space-y-2">
-        {list.map((x, i) => (
-          <li key={i} className="flex gap-2 text-sm text-ink">
-            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${x.side === 'home' ? 'bg-home' : 'bg-away'}`} aria-hidden />
-            <span>{trendText(sport, x, surface)}</span>
-          </li>
-        ))}
+        {list.map((x, i) => {
+          const text = trendText(sport, x, surface)
+          return text ? (
+            <li key={i} className="flex gap-2 text-sm text-ink">
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${x.side === 'home' ? 'bg-home' : 'bg-away'}`} aria-hidden />
+              <span>{text}</span>
+            </li>
+          ) : null
+        })}
       </ul>
       <p className="mt-3 text-[11px] text-faint">{t('From our own results: the most unusual next to the league, at least 6 games.')}</p>
     </Section>
@@ -90,19 +101,19 @@ const BAND_CLS: Record<Band, string> = {
   easy: 'bg-win/15 text-win border-win/30', medium: 'bg-draw/15 text-draw border-draw/30', hard: 'bg-loss/15 text-loss border-loss/30', unknown: 'bg-surface2 text-faint border-line'
 }
 const bandLabel = (b: Band) => b === 'easy' ? t('Easy') : b === 'medium' ? t('Medium') : b === 'hard' ? t('Tough') : t('No prediction yet')
-const day = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })
-const short = (s: string) => (s.length > 14 ? `${s.slice(0, 13)}…` : s)
+const day = (iso: string | null) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d.getTime()) ? d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }) : '' }
+const short = (s: string | null) => { const x = s ?? ''; return x.length > 14 ? `${x.slice(0, 13)}…` : x }
 
 function Strip({ sport, list }: { sport: ExtrasSport; list: NextGame[] }) {
   if (!list.length) return <p className="text-xs text-faint">{t('No games scheduled yet')}</p>
   return (
     <div className="grid grid-cols-5 gap-1.5">
       {list.map(g => (
-        <NameLink key={g.id} to={gameHref(sport, g)} className={`block rounded-lg border px-1.5 py-1.5 text-center min-w-0 ${BAND_CLS[g.band]}`}>
-          <span title={`${bandLabel(g.band)} · ${g.opp}`} className="block">
+        <NameLink key={g.id} to={gameHref(sport, g)} className={`block rounded-lg border px-1.5 py-1.5 text-center min-w-0 ${BAND_CLS[g.band] ?? BAND_CLS.unknown}`}>
+          <span title={`${bandLabel(g.band)} · ${g.opp ?? ''}`} className="block">
             <span className="block text-[10px] num opacity-80">{day(g.date)}</span>
             <span className="block text-[11px] font-semibold truncate">{short(g.opp)}</span>
-            {g.home !== null && <span className="block text-[10px] opacity-80">{g.home ? t('H') : t('A')}</span>}
+            {g.home != null && <span className="block text-[10px] opacity-80">{g.home ? t('H') : t('A')}</span>}
           </span>
         </NameLink>
       ))}
@@ -118,11 +129,12 @@ function Legend() {
   )
 }
 function Difficulty({ sport, d }: { sport: ExtrasSport; d: NonNullable<Extras['difficulty']> }) {
-  if (!d.home.next.length && !d.away.next.length) return null
+  const sides = [d.home, d.away].map(s => ({ id: s?.id ?? null, name: s?.name ?? '', next: games(s?.next) }))
+  if (!sides.some(s => s.next.length)) return null
   return (
     <Section title={t('Next games')}>
       <div className="space-y-4">
-        {[d.home, d.away].map((s, i) => (
+        {sides.map((s, i) => (
           <div key={i}>
             <NameLink to={teamHref(sport, s.id, s.name)} className={`label block pb-1.5 ${i === 0 ? 'text-home' : 'text-away'}`}>{s.name}</NameLink>
             <Strip sport={sport} list={s.next} />
@@ -136,11 +148,12 @@ function Difficulty({ sport, d }: { sport: ExtrasSport; d: NonNullable<Extras['d
 
 /** a team's (tennis: a player's) next 5 games on its page, coloured by our win chance */
 export function TeamDifficulty({ sport, id }: { sport: ExtrasSport; id: number }) {
-  const d = useExtras<{ next: NextGame[] }>(`${sport}/team/${id}`)
-  if (!d?.next?.length) return null
+  const d = useExtras<{ next: NextGame[] | null }>(`${sport}/team/${id}`)
+  const next = games(d?.next)
+  if (!next.length) return null
   return (
     <Section title={sport === 'tennis' ? t('Next matches') : t('Next games')}>
-      <Strip sport={sport} list={d.next} />
+      <Strip sport={sport} list={next} />
       <Legend />
     </Section>
   )
@@ -153,9 +166,12 @@ const NOTE: Record<'wind' | 'rain' | 'heat', string> = {
   rain: 'Heavy rain expected: a slower, heavier game.',
   heat: 'Hot (30 °C or more): the pace usually drops.'
 }
+const fx = (x: number | null | undefined, d: number) => (typeof x !== 'number' ? '–' : x.toFixed(d))
 function WeatherCard({ w, sport }: { w: NonNullable<Extras['weather']>; sport: ExtrasSport }) {
-  const n = (x: number | null, unit: string, d = 0) => (x == null ? '–' : `${x.toFixed(d)}${unit}`)
-  const when = new Date(w.start).toLocaleString(LOCALE, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+  const n = (x: number | null, unit: string, d = 0) => (typeof x !== 'number' ? '–' : `${x.toFixed(d)}${unit}`)
+  const start = w.start ? new Date(w.start) : null
+  const when = start && !isNaN(start.getTime()) ? start.toLocaleString(LOCALE, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : null
+  const notes = arr(w.notes).filter(k => NOTE[k])
   const tiles = [
     { label: t('Temperature'), value: n(w.tempC, ' °C') },
     { label: t('Chance of rain'), value: n(w.rainPct, '%') },
@@ -172,9 +188,9 @@ function WeatherCard({ w, sport }: { w: NonNullable<Extras['weather']>; sport: E
           </div>
         ))}
       </div>
-      {w.notes.length > 0 && (
+      {notes.length > 0 && (
         <ul className="mt-3 space-y-1">
-          {w.notes.map(k => <li key={k} className="text-sm text-draw">{t(NOTE[k])}</li>)}
+          {notes.map(k => <li key={k} className="text-sm text-draw">{t(NOTE[k])}</li>)}
         </ul>
       )}
       <p className="mt-3 text-[11px] text-faint">{t('Forecast for the venue at the start time (Open-Meteo), updated every 3 hours.')}</p>
@@ -184,15 +200,15 @@ function WeatherCard({ w, sport }: { w: NonNullable<Extras['weather']>; sport: E
 
 /* ---------- referee ---------- */
 
-const pc = (x: number | null | undefined) => (x == null ? '–' : `${Math.round(x * 100)}%`)
+const pc = (x: number | null | undefined) => (typeof x !== 'number' ? '–' : `${Math.round(x * 100)}%`)
 function RefereeCard({ r }: { r: NonNullable<Extras['referee']> }) {
   const rows = r.show ? [
-    { label: t('Cards a game'), his: r.cards == null ? '–' : r.cards.toFixed(1), lg: r.leagueCards == null ? '–' : r.leagueCards.toFixed(1) },
-    { label: t('Penalties a game'), his: r.pens == null ? '–' : r.pens.toFixed(2), lg: r.leaguePens == null ? '–' : r.leaguePens.toFixed(2) },
+    { label: t('Cards a game'), his: fx(r.cards, 1), lg: fx(r.leagueCards, 1) },
+    { label: t('Penalties a game'), his: fx(r.pens, 2), lg: fx(r.leaguePens, 2) },
     { label: t('Home wins'), his: pc(r.homeWin), lg: pc(r.leagueHomeWin) }
   ] : []
   return (
-    <Section title={t('Referee')} note={t('{0} games this season', { 0: r.games })}>
+    <Section title={t('Referee')} note={t('{0} games this season', { 0: r.games ?? 0 })}>
       <div className="font-semibold text-ink">{r.name}</div>
       {r.show ? (
         <table className="mt-3 w-full text-sm num">
@@ -210,13 +226,13 @@ function RefereeCard({ r }: { r: NonNullable<Extras['referee']> }) {
 /** every extra of one game page */
 export default function GameExtras({ sport, id }: { sport: ExtrasSport; id: number }) {
   const d = useExtras<Extras>(`${sport}/game/${id}`)
-  if (!d) return null
+  if (!d || typeof d !== 'object') return null
   return (
     <>
-      <Trends sport={sport} list={d.trends || []} surface={d.surface} />
+      <Trends sport={sport} list={arr(d.trends)} surface={d.surface ?? null} />
       {d.difficulty && <Difficulty sport={sport} d={d.difficulty} />}
       {d.weather && !d.indoor && <WeatherCard w={d.weather} sport={sport} />}
-      {d.referee && <RefereeCard r={d.referee} />}
+      {d.referee?.name && <RefereeCard r={d.referee} />}
     </>
   )
 }

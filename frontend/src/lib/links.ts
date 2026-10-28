@@ -145,7 +145,12 @@ export function matchHref(sport: LinkSport, id: Id, m: { home: string | null | u
   // fix243: a past season's match is admin-only: no link (null) for anyone else, also while that is not known yet
   if (!linkAdmin && isPastSeasonGame(sport, m.date, m.homeId, m.awayId) !== false) return null
   load(sport)
-  const slug = ex[sport]?.m[String(id)] || matchSlug(sideSlug(sport, m.homeId, m.home), sideSlug(sport, m.awayId, m.away), m.date)
+  const known = ex[sport]?.m[String(id)]
+  // fix271: a game with a side not known yet (college: no name, shown as "TBD" by fix151) has no slug on the server
+  // (slugs.ts skips it): no link
+  const unknown = (n: string | null | undefined) => !n?.trim() || n.trim().toUpperCase() === 'TBD'
+  if (!known && (unknown(m.home) || unknown(m.away))) return null
+  const slug = known || matchSlug(sideSlug(sport, m.homeId, m.home), sideSlug(sport, m.awayId, m.away), m.date)
   return remember(sport, 'match', slug, id)
 }
 

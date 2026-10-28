@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startSite, samplePages, siteLanguages, findChromium, playwright } from './site-server.mjs';
+import { startSite, samplePages, edgePages, EDGE_PAGES, siteLanguages, findChromium, playwright } from './site-server.mjs';
 import { TEST_USERS } from './site-seed.mjs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
@@ -54,8 +54,8 @@ const NOT_FOUND = '/this-page-does-not-exist-260';
 const ADMIN_TABS = ['needs-you', 'users', 'models', 'data', 'site', 'messages', 'security'];
 const CRM_TABS = ['inbox', 'customers', 'testers', 'campaigns', 'revenue', 'security', 'activity', 'team'];
 
-function routes(sample) {
-  const pub = [...SITE_PAGES, NOT_FOUND];
+function routes(sample, edge = []) {
+  const pub = [...SITE_PAGES, NOT_FOUND, ...edge];
   for (const [sport, s] of Object.entries(sample)) {
     for (const p of SPORT_PAGES[sport]) pub.push(`/${sport}${p}`);
     for (const m of [s.matchNext, s.matchDone].filter(Boolean)) pub.push(`/${sport}/match/${m}`);
@@ -180,7 +180,12 @@ function testedTree() {
   try {
     const sample = samplePages(site.dataDir);
     for (const [sp, s] of Object.entries(sample)) for (const [k, v] of Object.entries(s)) if (!v && !(sp === 'tennis' && k === 'team')) log(`note: no ${k} for ${sp} in this database — that page type is not opened`);
-    const { pub, admin } = routes(sample);
+    // fix271: the pages with missing data (no next game, no current season, college teams)
+    const edge = edgePages(site.dataDir);
+    const missing = EDGE_PAGES.filter(p => !edge.includes(p));
+    if (missing.length && !site.copy) throw new Error(`the seeded data has no slug for ${missing.join(', ')} (site-seed.mjs seedEdge)`);
+    if (missing.length) log(`note: not in this database (not opened): ${missing.join(', ')}`);
+    const { pub, admin } = routes(sample, edge);
     // visitors and free users: the public languages; the admin: every language (fix257: ar / he are admin-only until PUBLIC_LANGS names them)
     const sl = siteLanguages();
     const pick = all => list(process.env.SITE_LANGS, all).map(l => (l === 'en' ? '' : l)).filter(l => all.includes(l));

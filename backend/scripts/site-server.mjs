@@ -126,3 +126,22 @@ export function samplePages(dataDir) {
   db.close();
   return out;
 }
+
+// fix271: pages with missing data, opened on every run (the 28 Oct crash: Game extras on college team pages with no next
+// game) — three college teams, an NFL team without a next game, and in every sport a team with no upcoming game and a
+// player with no current season (site-seed.mjs seedEdge; on a production copy the ones whose slug exists there)
+export const EDGE_PAGES = [
+  '/american-football/team/colorado-state', '/american-football/team/alabama-state', '/american-football/team/utah-state',
+  '/american-football/team/new-york-jets', '/american-football/player/aaron-rodgers',
+  '/basketball/team/utah-jazz', '/basketball/player/lauri-markkanen',
+  '/football/team/burnley', '/football/player/jay-rodriguez',
+  '/tennis/player/dominic-thiem'
+];
+export function edgePages(dataDir) {
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
+  const db = new DatabaseSync(path.join(dataDir, 'bet-to-beat.sqlite'), { readOnly: true });
+  const has = db.prepare(`SELECT 1 FROM slugs WHERE sport = ? AND kind = ? AND slug = ?`);
+  const out = EDGE_PAGES.filter(p => { const [, sport, kind, slug] = p.split('/'); return !!has.get(sport, kind, slug); });
+  db.close();
+  return out;
+}

@@ -173,6 +173,38 @@ function seedFootballData(db) {
   });
 }
 
+// fix271: the pages that crashed on null (28 Oct: the Game extras box on college team pages with no next game) — in every
+// sport a team with no upcoming game and a player with no current season; college teams with no game at all and one
+// whose only next game has no opponent yet (the provider's TBD: null name and id). EDGE_PAGES (site-server.mjs) opens them.
+function seedEdge(db) {
+  const now = iso(T0);
+  // American football: three college teams (league 2) and an NFL team whose last game is behind it
+  const college = [[9211, 'Colorado State', 'Mountain West'], [9212, 'Alabama State', 'SWAC'], [9213, 'Utah State', 'Mountain West']];
+  for (const [tid, name, conf] of college)
+    db.prepare(`INSERT OR REPLACE INTO nfl_teams (team_id, name, code, city, conference, division, updated_at, league, level) VALUES (?, ?, NULL, NULL, ?, NULL, ?, 2, ?)`)
+      .run(tid, name, conf, now, conf === 'SWAC' ? 'FCS' : 'FBS');
+  db.prepare(`INSERT OR REPLACE INTO nfl_games (game_id, season, week, stage, kickoff, home_id, home_name, away_id, away_name, status, home_pts, away_pts, updated_at, league) VALUES (990191, 2026, 'Week 10', 'Regular Season', ?, 9213, 'Utah State', NULL, NULL, 'NS', NULL, NULL, ?, 2)`)
+    .run(at(5, 18), now);
+  db.prepare(`INSERT OR REPLACE INTO nfl_teams (team_id, name, code, city, conference, division, updated_at, league, level) VALUES (9205, 'New York Jets', 'NYJ', 'New York', 'American Football Conference', 'AFC East', ?, 1, NULL)`).run(now);
+  db.prepare(`INSERT OR REPLACE INTO nfl_games (game_id, season, week, stage, kickoff, home_id, home_name, away_id, away_name, status, home_pts, away_pts, updated_at, league) VALUES (990192, 2026, 'Week 7', 'Regular Season', ?, 9205, 'New York Jets', 9201, 'Kansas City Chiefs', 'FT', 17, 24, ?, 1)`)
+    .run(at(-12, 18), now);
+  db.prepare(`INSERT OR REPLACE INTO nfl_players (player_id, team_id, name, position, grp, number, age, season, updated_at) VALUES (92051, 9205, 'Aaron Rodgers', 'QB', 'Offense', 8, 42, 2025, ?)`).run(now);
+  // basketball: a team whose only game was last season, and its player (no current-season games)
+  const gid = 990091;
+  db.prepare(`INSERT OR REPLACE INTO bb_games (game_id, code, league_id, season, stage, kickoff, status, home_id, home_name, away_id, away_name, hs, as_, quarters, updated_at, stats) VALUES (?, 'NBA', 12, '2025-2026', 'NBA - Regular Season', ?, 'FT', 9105, 'Utah Jazz', 9101, 'Boston Celtics', 101, 112, NULL, ?, 1)`)
+    .run(gid, at(-200, 0), now);
+  db.prepare(`INSERT OR REPLACE INTO bb_player_stats (game_id, team_id, player_id, name, starter, minutes, pts, fgm, fga, tpm, tpa, ftm, fta, reb, ast) VALUES (?, 9105, 91051, 'Markkanen Lauri', 1, 33, 24, 8, 17, 3, 8, 5, 6, 8, 2)`).run(gid);
+  // football: a club with only a past fixture, and a player whose last season is the one before
+  db.prepare(`INSERT OR REPLACE INTO af_teams (grp, team_id, name, fd_name, score) VALUES ('AF39', 9405, 'Burnley', 'Burnley FC', 60)`).run();
+  db.prepare(`INSERT OR REPLACE INTO af_fixtures (fixture_id, league_id, season, grp, division, kickoff, date, home_id, away_id, home_name, away_name, status, hg, ag, lineups, stats) VALUES (990391, 39, 2026, 'AF39', 'Premier League', ?, ?, 9405, 9401, 'Burnley', 'Arsenal', 'FT', 0, 2, 0, 0)`)
+    .run(at(-30, 15), at(-30, 15).slice(0, 10));
+  db.prepare(`INSERT OR REPLACE INTO af_player_season (player_id, season, team_id, league_id, name, age, position, apps, starts, minutes, rating, goals, assists) VALUES (94051, 2025, 9405, 39, 'Jay Rodriguez', 36, 'Attacker', 20, 8, 900, '6.8', 3, 1)`).run();
+  // tennis: a player whose only match is from last season
+  db.prepare(`INSERT OR REPLACE INTO tennis_players (id, name, country, tour, hand, dob, ranking, ranking_points, updated_at, seen_at, first_name, last_name) VALUES (9305, 'Dominic Thiem', 'AUT', 'atp', 'R', '1993-09-03', NULL, NULL, ?, ?, 'Dominic', 'Thiem')`).run(now, now);
+  db.prepare(`INSERT OR REPLACE INTO tennis_matches (id, tournament_id, tournament, tour, tier, surface, indoor, draw, round, round_code, is_qualifying, best_of, scheduled_at, status, p1_id, p1_name, p2_id, p2_name, sets, winner, retired, source, updated_at) VALUES (990291, 9390, 'Paris Masters', 'atp', 'atp_1000', 'hard', 1, 'singles', 'Round of 32', 'R32', 0, 3, ?, 'finished', 9305, 'Dominic Thiem', 9304, 'Taylor Fritz', ?, 2, 0, 'live', ?)`)
+    .run(at(-360, 13), JSON.stringify([[4, 6], [3, 6]]), now);
+}
+
 export async function seedSite(dataDir, { usersOnly = false } = {}) {
   fs.mkdirSync(dataDir, { recursive: true });
   process.env.DATA_DIR = dataDir;
@@ -190,7 +222,7 @@ export async function seedSite(dataDir, { usersOnly = false } = {}) {
   seedUsers(db);
   if (!usersOnly) {
     const has = (db.prepare(`SELECT COUNT(*) AS n FROM bb_games`).get()).n;
-    if (!has) { seedBasketball(db); seedNfl(db); seedTennis(db); seedFootball(db); seedFootballData(db); }
+    if (!has) { seedBasketball(db); seedNfl(db); seedTennis(db); seedFootball(db); seedFootballData(db); seedEdge(db); }
     const { buildSlugs } = require(dist('services/slugs.js'));
     await buildSlugs({ full: true });
   }
