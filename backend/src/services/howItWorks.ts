@@ -8,7 +8,7 @@
  *    model's code by scripts/how-it-works.test.ts, so the page can't drift from the code;
  *  - the accuracy table is the sport's record (the same functions as the Accuracy pages: publicRecord, bbRecord,
  *    nflAccuracy, tennisAccuracy), last 365 days, competitions with 20+ finished games only;
- *  - the changelog is docs/changelog.json (newest first, every entry in the seven languages).
+ *  - the changelog is docs/changelog.json (newest first, every entry in the twelve languages).
  * No odds, no market prices, no betting words. Tennis stays admin-only until TENNIS_PUBLIC=1 (basketball and American
  * football follow their own switches).
  */
@@ -31,8 +31,8 @@ import { MODEL_INPUTS as NFL_INPUTS } from './nflModel.inputs';
 import { MODEL_INPUTS as TENNIS_INPUTS } from './tennisModel.inputs';
 export { HIW_TEXT, HIW_SPORTS, type HiwSport } from './howItWorks.text';
 
-export type HiwLang = 'en' | 'es' | 'pt' | 'de' | 'fr' | 'it' | 'tr';
-export const HIW_LANGS: HiwLang[] = ['en', 'es', 'pt', 'de', 'fr', 'it', 'tr'];
+export type HiwLang = 'en' | 'es' | 'pt' | 'de' | 'fr' | 'it' | 'tr' | 'id' | 'hi' | 'pl' | 'el' | 'ru';
+export const HIW_LANGS: HiwLang[] = ['en', 'es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'];
 /** Competitions with fewer finished games are left out of the table (too few to judge). */
 export const HIW_MIN_GAMES = 20;
 const DAYS = 365;
@@ -77,7 +77,7 @@ export function tr(lang: HiwLang, key: string, vars: Record<string, string | num
   return s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 }
 
-const LOCALE: Record<HiwLang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-BR', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR' };
+const LOCALE: Record<HiwLang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-BR', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
 export const hiwDate = (iso: string, lang: HiwLang) => new Date(`${iso}T12:00:00Z`).toLocaleDateString(LOCALE[lang], { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 /* ---------- accuracy by competition: the sport's record, last 365 days ---------- */

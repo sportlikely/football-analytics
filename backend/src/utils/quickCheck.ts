@@ -5,7 +5,7 @@
  * the page the app was on). Without Turnstile keys: the plain "try again later, or sign in" line. Pure: no imports.
  */
 
-export const QC_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr'] as const;
+export const QC_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'] as const;
 export type QcLang = (typeof QC_LANGS)[number];
 
 type Words = { title: string; vpn: string; why: string; checking: string; done: string; failed: string; signin: string; signinWhy: string; later: string; footer: string };
@@ -66,11 +66,51 @@ export const QC_WORDS: Record<QcLang, Words> = {
     signin: 'Giriş yap', signinWhy: 'Onaylı e-postayla giriş yaptığınızda size hiç sorulmaz.',
     later: 'Bu ağdan çok fazla sayfa açıldı. Lütfen daha sonra tekrar deneyin veya giriş yapın.',
     footer: 'Spor tahminleri · olasılıklar, vaat değil · 18+'
+  },
+  id: {
+    title: 'Pemeriksaan singkat', vpn: 'Anda menggunakan jaringan VPN atau proxy.',
+    why: 'Banyak halaman dibuka dari jaringan ini, jadi kami memeriksa bahwa Anda manusia. Hanya butuh sedetik.',
+    checking: 'Memeriksa…', done: 'Selesai. Membuka halaman…', failed: 'Tidak berhasil. Silakan coba lagi.',
+    signin: 'Masuk', signinWhy: 'Jika masuk dengan email yang sudah dikonfirmasi, Anda tidak pernah ditanya.',
+    later: 'Terlalu banyak halaman dibuka dari jaringan ini. Silakan coba lagi nanti, atau masuk.',
+    footer: 'Prediksi olahraga · probabilitas, bukan janji · 18+'
+  },
+  hi: {
+    title: 'त्वरित जाँच', vpn: 'आप VPN या प्रॉक्सी नेटवर्क पर हैं।',
+    why: 'इस नेटवर्क से कई पेज खोले जाते हैं, इसलिए हम जाँचते हैं कि आप इंसान हैं। इसमें एक सेकंड लगता है।',
+    checking: 'जाँच हो रही है…', done: 'हो गया। पेज खुल रहा है…', failed: 'यह काम नहीं किया। कृपया फिर से कोशिश करें।',
+    signin: 'साइन इन करें', signinWhy: 'पुष्टि किए गए ईमेल से साइन इन होने पर आपसे कभी नहीं पूछा जाता।',
+    later: 'इस नेटवर्क से बहुत ज़्यादा पेज खोले गए। कृपया बाद में फिर कोशिश करें, या साइन इन करें।',
+    footer: 'खेल भविष्यवाणियाँ · संभावनाएँ, वादे नहीं · 18+'
+  },
+  pl: {
+    title: 'Szybkie sprawdzenie', vpn: 'Korzystasz z sieci VPN lub proxy.',
+    why: 'Z tej sieci otwiera się wiele stron, więc sprawdzamy, czy jesteś człowiekiem. To potrwa sekundę.',
+    checking: 'Sprawdzanie…', done: 'Gotowe. Otwieramy stronę…', failed: 'Nie udało się. Spróbuj ponownie.',
+    signin: 'Zaloguj się', signinWhy: 'Po zalogowaniu z potwierdzonym e-mailem nigdy nie pytamy.',
+    later: 'Z tej sieci otwarto zbyt wiele stron. Spróbuj ponownie później albo zaloguj się.',
+    footer: 'Prognozy sportowe · prawdopodobieństwa, nie obietnice · 18+'
+  },
+  el: {
+    title: 'Γρήγορος έλεγχος', vpn: 'Είσαι σε δίκτυο VPN ή proxy.',
+    why: 'Από αυτό το δίκτυο ανοίγουν πολλές σελίδες, οπότε ελέγχουμε ότι είσαι άνθρωπος. Παίρνει ένα δευτερόλεπτο.',
+    checking: 'Έλεγχος…', done: 'Έτοιμο. Ανοίγει η σελίδα…', failed: 'Δεν πέτυχε. Δοκίμασε ξανά.',
+    signin: 'Σύνδεση', signinWhy: 'Αν συνδεθείς με επιβεβαιωμένο email, δεν σε ρωτάμε ποτέ.',
+    later: 'Άνοιξαν πάρα πολλές σελίδες από αυτό το δίκτυο. Δοκίμασε ξανά αργότερα ή συνδέσου.',
+    footer: 'Αθλητικές προβλέψεις · πιθανότητες, όχι υποσχέσεις · 18+'
+  },
+  ru: {
+    title: 'Быстрая проверка', vpn: 'Вы в сети VPN или прокси.',
+    why: 'Из этой сети открывают много страниц, поэтому мы проверяем, что вы человек. Это займёт секунду.',
+    checking: 'Проверяем…', done: 'Готово. Открываем страницу…', failed: 'Не получилось. Попробуйте ещё раз.',
+    signin: 'Войти', signinWhy: 'Если вы вошли с подтверждённым email, мы никогда не спрашиваем.',
+    later: 'Из этой сети открыто слишком много страниц. Попробуйте позже или войдите.',
+    footer: 'Спортивные прогнозы · вероятности, а не обещания · 18+'
   }
 };
 
 /** The language of an address (/es/…), else English. */
-export const qcLangOf = (path: string): QcLang => ((/^\/(de|es|fr|it|pt|tr)(\/|$)/.exec(path)?.[1] as QcLang) || 'en');
+export const qcLangOf = (path: string): QcLang => ((/^\/(de|es|fr|it|pt|tr|id|hi|pl|el|ru)(\/|$)/.exec(path)?.[1] as QcLang) || 'en');
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const js = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');

@@ -226,7 +226,7 @@ test('the sitemaps list slug addresses only (never an id address)', () => {
   for (const [file, build] of Object.entries(SITEMAPS)) {
     const xml = build();
     for (const m of xml.matchAll(/<loc>https:\/\/sportlikely\.com([^<]*)<\/loc>|href="https:\/\/sportlikely\.com([^"]*)"/g)) {
-      const p = (m[1] ?? m[2]).replace(/^\/(es|pt|de|fr|it|tr)(?=\/|$)/, '') || '/';
+      const p = (m[1] ?? m[2]).replace(/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(?=\/|$)/, '') || '/';
       assert.equal(slugs.parseOld(p), null, `${file}: old address ${p}`);
       assert.ok(!/[?&]/.test(p), `${file}: query string in ${p}`);
       locs++;

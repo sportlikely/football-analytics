@@ -43,7 +43,7 @@ export function groupIn(name: string | null): string {
   return name
 }
 
-/** 7 → "7th" (en), "7." (de, tr), "7.º" (es, pt), "7e" (fr), "7°" (it) */
+/** 7 → "7th" (en), "7." (de, tr, pl), "7.º" (es, pt), "7e" (fr), "7°" (it), "7-й" (ru), "7ος" (el), "7वाँ" (hi), "ke-7" (id) */
 export function ordinal(n: number): string {
   if (lang === 'en') {
     const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] || 'th'
@@ -52,5 +52,9 @@ export function ordinal(n: number): string {
   if (lang === 'fr') return n === 1 ? '1er' : `${n}e`
   if (lang === 'it') return `${n}°`
   if (lang === 'es' || lang === 'pt') return `${n}.º`
+  if (lang === 'ru') return `${n}-й`
+  if (lang === 'el') return `${n}ος`
+  if (lang === 'hi') return n === 1 ? '1ला' : n === 2 ? '2रा' : n === 3 ? '3रा' : n === 4 ? '4था' : n === 6 ? '6ठा' : `${n}वाँ`
+  if (lang === 'id') return `ke-${n}`
   return `${n}.`
 }

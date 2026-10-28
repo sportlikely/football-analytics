@@ -50,6 +50,11 @@ import fr from '../locales/email/fr.json';
 import it from '../locales/email/it.json';
 import pt from '../locales/email/pt.json';
 import trLang from '../locales/email/tr.json';
+import idLang from '../locales/email/id.json';
+import hiLang from '../locales/email/hi.json';
+import plLang from '../locales/email/pl.json';
+import elLang from '../locales/email/el.json';
+import ruLang from '../locales/email/ru.json';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS email_prefs (
@@ -95,11 +100,11 @@ const nowIso = () => new Date().toISOString();
 
 /* ---------- words ---------- */
 
-export const EMAIL_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr'] as const;
+export const EMAIL_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'] as const;
 export type EmailLang = (typeof EMAIL_LANGS)[number];
 export const asEmailLang = (x: unknown): EmailLang => ((EMAIL_LANGS as readonly string[]).includes(String(x)) ? (x as EmailLang) : 'en');
-export const EMAIL_PACKS: Record<EmailLang, Record<string, string>> = { en: {}, de, es, fr, it, pt, tr: trLang };
-const LOCALES: Record<EmailLang, string> = { en: 'en-GB', de: 'de-DE', es: 'es-ES', fr: 'fr-FR', it: 'it-IT', pt: 'pt-BR', tr: 'tr-TR' };
+export const EMAIL_PACKS: Record<EmailLang, Record<string, string>> = { en: {}, de, es, fr, it, pt, tr: trLang, id: idLang, hi: hiLang, pl: plLang, el: elLang, ru: ruLang };
+const LOCALES: Record<EmailLang, string> = { en: 'en-GB', de: 'de-DE', es: 'es-ES', fr: 'fr-FR', it: 'it-IT', pt: 'pt-BR', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
 /** `tx(key, a, b)`: the language's words for an English key, {0}, {1} filled (English is the key, like the site) */
 export function words(lang: EmailLang) {
   const pack = EMAIL_PACKS[lang];

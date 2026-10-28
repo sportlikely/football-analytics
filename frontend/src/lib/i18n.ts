@@ -14,7 +14,12 @@ export const LANGS = {
   de: { name: 'Deutsch', locale: 'de-DE' },
   fr: { name: 'Français', locale: 'fr-FR' },
   it: { name: 'Italiano', locale: 'it-IT' },
-  tr: { name: 'Türkçe', locale: 'tr-TR' }
+  tr: { name: 'Türkçe', locale: 'tr-TR' },
+  id: { name: 'Bahasa Indonesia', locale: 'id-ID' },
+  hi: { name: 'हिन्दी', locale: 'hi-IN' },
+  pl: { name: 'Polski', locale: 'pl-PL' },
+  el: { name: 'Ελληνικά', locale: 'el-GR' },
+  ru: { name: 'Русский', locale: 'ru-RU' }
 } as const
 export type Lang = keyof typeof LANGS
 const CODES = Object.keys(LANGS) as Lang[]

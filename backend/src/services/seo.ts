@@ -67,19 +67,19 @@ export const SOCIAL_URLS = ['https://instagram.com/sportlikely', 'https://x.com/
  */
 export const MERGED_LEAGUES: Record<string, string> = { BSA: 'AF71' };
 export function leagueRedirect(rawPath: string): string | null {
-  const m = rawPath.match(/^(\/(?:es|pt|de|fr|it|tr))?\/league\/([A-Za-z0-9]+)\/?$/);
+  const m = rawPath.match(/^(\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru))?\/league\/([A-Za-z0-9]+)\/?$/);
   const to = m ? MERGED_LEAGUES[m[2].toUpperCase()] : undefined;
   return to ? `${m![1] || ''}/league/${to}` : null;
 }
 
 export function hubRedirect(rawPath: string): string | null {
-  const m = rawPath.match(/^(\/(?:es|pt|de|fr|it|tr))?\/predictions\/([A-Za-z0-9-]+)\/?$/);
+  const m = rawPath.match(/^(\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru))?\/predictions\/([A-Za-z0-9-]+)\/?$/);
   if (!m) return null;
   const h = hubByOld(m[2]);
   // exact case: 'nba' / 'euroleague' are the new slugs of the old 'NBA' / 'EUROLEAGUE' (no loop)
   return h && m[2] !== h.slug ? `${m[1] || ''}/predictions/${h.slug}` : null;
 }
-const LANGS: readonly Lang[] = ['en', 'es', 'pt', 'de', 'fr', 'it', 'tr'];
+const LANGS: readonly Lang[] = ['en', 'es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'];
 const BRAND = 'SportLikely';
 
 export interface SeoInfo {
@@ -282,7 +282,7 @@ function buildToday(sport: TodaySport, lang: Lang, dayIso: string, leagues: 1 | 
 
 const NAV = (lang: Lang) => `<nav><a href="${link(lang, '/')}">${BRAND}</a> · <a href="${link(lang, '/matches')}">${ui(lang, 'matches')}</a> · <a href="${link(lang, '/predictions/today')}">${ui(lang, 'today')}</a> · <a href="${link(lang, '/premium')}">Premium</a>${bbPublic() ? ` · <a href="${link(lang, '/basketball')}">${ui(lang, 'basketball')}</a>` : ''}${nflPublic() ? ` · <a href="/american-football">American football</a>` : ''}${tennisPublic() ? ` · <a href="${link(lang, '/tennis')}">${TENNIS_WORD[lang]}</a>` : ''}</nav>`;
 /** fix193c: "Tennis" in the nav of the crawler pages */
-const TENNIS_WORD: Record<Lang, string> = { en: 'Tennis', es: 'Tenis', pt: 'Ténis', de: 'Tennis', fr: 'Tennis', it: 'Tennis', tr: 'Tenis' };
+const TENNIS_WORD: Record<Lang, string> = { en: 'Tennis', es: 'Tenis', pt: 'Ténis', de: 'Tennis', fr: 'Tennis', it: 'Tennis', tr: 'Tenis', id: 'Tenis', hi: 'टेनिस', pl: 'Tenis', el: 'Τένις', ru: 'Теннис' };
 const PRIVATE = /^\/(admin|account|verify|forgot|login|signup|favorites|my-picks|join|crm|search)(\/|$)|^\/(football|basketball|american-football|tennis)\/(favorites|my-picks|past)(\/|$)|^\/past(\/|$)/;
 
 /*
@@ -356,14 +356,14 @@ export function bbGameSeo(f: BbGameFacts, lang: Lang, slug?: string): SeoInfo {
 }
 /** /basketball/game/:id or /<lang>/basketball/game/:id → { id, lang } (the web process renders these from facts) */
 export function bbGamePath(rawPath: string): { id: number; lang: Lang } | null {
-  const m = /^(?:\/(es|pt|de|fr|it|tr))?\/basketball\/game\/(\d+)\/?$/.exec(rawPath);
+  const m = /^(?:\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru))?\/basketball\/game\/(\d+)\/?$/.exec(rawPath);
   return m ? { id: Number(m[2]), lang: (m[1] || 'en') as Lang } : null;
 }
 
 export function seoPage(rawPath: string): SeoInfo {
   let path = rawPath.split('?')[0].replace(/\/+$/, '') || '/';
   let lang: Lang = 'en';
-  const m0 = path.match(/^\/(es|pt|de|fr|it|tr)(\/|$)/);
+  const m0 = path.match(/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(\/|$)/);
   if (m0) { lang = m0[1] as Lang; path = path.slice(3) || '/'; }
   const pk = pack(lang);
   // fix229: a slug address shows its item's page (built from the id inside); the page's own address stays the slug one
@@ -728,7 +728,7 @@ export function renderIndex(html: string, s: SeoInfo): string {
  * Links here are still old id addresses (pubLinks turns them into slugs afterwards).
  */
 export function unlinkPast(html: string): string {
-  return html.replace(/<a href="((?:\/(?:es|pt|de|fr|it|tr))?(\/(?:match|basketball\/game|american-football\/game|tennis\/match)\/-?\d+))(?:[?#][^"]*)?"[^>]*>([\s\S]*?)<\/a>/g,
+  return html.replace(/<a href="((?:\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru))?(\/(?:match|basketball\/game|american-football\/game|tennis\/match)\/-?\d+))(?:[?#][^"]*)?"[^>]*>([\s\S]*?)<\/a>/g,
     (all, _href: string, p: string, inner: string) => { const o = parseOld(p); return o && o.kind === 'match' && isPastSeasonMatch(o.sport, o.id) ? inner : all; });
 }
 

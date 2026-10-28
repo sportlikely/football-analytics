@@ -12,7 +12,7 @@ import type { Lang } from './seoText';
 
 const BRAND = 'SportLikely';
 const SITE = 'https://sportlikely.com';
-const LOC: Record<Lang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-PT', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR' };
+const LOC: Record<Lang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-PT', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
 const link = (lang: Lang, p: string) => (lang === 'en' ? p : `/${lang}${p === '/' ? '' : p}`);
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const fill = (s: string, ...a: (string | number)[]) => s.replace(/\{(\d)\}/g, (_, i) => String(a[Number(i)] ?? ''));
@@ -107,6 +107,61 @@ const W: Record<Lang, Words> = {
     playerTitle: '{0}: sıralama, sonuçlar ve sonraki maç', playerDesc: '{0}{1}: son sonuçlar, form, servis ve karşılama, şampiyonluklar ve sonraki maç, tahminimizle birlikte.',
     tourTitle: '{0} {1}: kura, sonuçlar ve tahminler', tourDesc: '{0} {1}: kura, sonuçlar, önceki şampiyonlar ve turnuvadaki her maç için tahminimiz.',
     next: 'Sonraki maçlar', results: 'Sonuçlar', meetings: 'Son karşılaşmalar', form: 'Son form', champions: 'Önceki şampiyonlar', draw: 'Kura', preview: 'Maç önizlemesi', noMatches: 'Planlanmış maç yok.', rank: 'Sıra', points: 'Puan', tournaments: 'Turnuvalar', firstMeeting: 'Verilerimizde ilk karşılaşma.'
+  },
+  id: {
+    soonTitle: 'Prediksi tenis · segera hadir', soonDesc: 'Prediksi tenis untuk setiap pertandingan ATP, WTA dan Challenger segera hadir di SportLikely.',
+    homeTitle: 'Prediksi tenis: ATP, WTA dan Challenger', homeDesc: 'Prediksi tenis untuk setiap pertandingan ATP, WTA dan Challenger: peluang tiap pemain, skor set yang paling mungkin dan total game, disimpan sebelum servis pertama.',
+    homeH1: 'Prediksi tenis', homeIntro: 'Siapa yang menang di setiap pertandingan ATP, WTA dan Challenger, dengan peluang tiap pemain, skor set yang paling mungkin dan alasan di balik setiap pilihan. Setiap prediksi disimpan sebelum servis pertama dan diperiksa secara terbuka.',
+    todayTitle: 'Prediksi tenis hari ini', todayDesc: 'Pertandingan ATP, WTA dan Challenger hari ini per turnamen, dengan peringkat pemain, performa terakhir dan pertemuan terakhir. Diperbarui setiap hari.', todayH1: 'Prediksi tenis hari ini',
+    rankTitle: 'Peringkat ATP dan WTA', rankDesc: 'Peringkat tunggal ATP dan WTA: pemain teratas dengan poin mereka dan seberapa jauh mereka bergerak sejak pembaruan terakhir, dengan tautan ke setiap pemain.', rankH1: 'Peringkat ATP dan WTA',
+    matchTitle: 'Prediksi {0} vs {1} · {2}', matchDesc: '{0} vs {1}, {2}, {3}: peringkat, performa terakhir, angka servis dan return serta head-to-head. Pratinjau gratis dan pilihan kami.', matchH1: 'Prediksi {0} vs {1}',
+    playerTitle: '{0}: peringkat, hasil dan pertandingan berikutnya', playerDesc: '{0}{1}: hasil terakhir, performa, angka servis dan return, gelar dan pertandingan berikutnya, dengan prediksi kami.',
+    tourTitle: '{0} {1}: undian, hasil dan prediksi', tourDesc: '{0} {1}: undian, hasil, juara sebelumnya dan prediksi kami untuk setiap pertandingan di turnamen ini.',
+    next: 'Pertandingan berikutnya', results: 'Hasil', meetings: 'Pertemuan terakhir', form: 'Performa terakhir', champions: 'Juara sebelumnya', draw: 'Undian', preview: 'Pratinjau pertandingan', noMatches: 'Tidak ada pertandingan terjadwal.', rank: 'Peringkat', points: 'Poin', tournaments: 'Turnamen', firstMeeting: 'Pertemuan pertama dalam data kami.'
+  },
+  hi: {
+    soonTitle: 'टेनिस भविष्यवाणियाँ · जल्द आ रही हैं', soonDesc: 'हर ATP, WTA और Challenger मैच की टेनिस भविष्यवाणियाँ जल्द ही SportLikely पर।',
+    homeTitle: 'टेनिस भविष्यवाणियाँ: ATP, WTA और Challenger', homeDesc: 'हर ATP, WTA और Challenger मैच की टेनिस भविष्यवाणियाँ: हर खिलाड़ी का मौका, संभावित सेट स्कोर और कुल गेम, पहली सर्व से पहले सहेजे गए।',
+    homeH1: 'टेनिस भविष्यवाणियाँ', homeIntro: 'हर ATP, WTA और Challenger मैच कौन जीतेगा, हर खिलाड़ी के मौके, संभावित सेट स्कोर और हर पिक के कारणों के साथ। हर भविष्यवाणी पहली सर्व से पहले सहेजी जाती है और सबके सामने जाँची जाती है।',
+    todayTitle: 'आज की टेनिस भविष्यवाणियाँ', todayDesc: 'आज के ATP, WTA और Challenger मैच टूर्नामेंट के अनुसार, खिलाड़ियों की रैंक, हाल की फ़ॉर्म और पिछली भिड़ंत के साथ। हर दिन अपडेट।', todayH1: 'आज की टेनिस भविष्यवाणियाँ',
+    rankTitle: 'ATP और WTA रैंकिंग', rankDesc: 'ATP और WTA सिंगल्स रैंकिंग: शीर्ष खिलाड़ी, उनके अंक और पिछले अपडेट के बाद वे कितना ऊपर-नीचे हुए, हर खिलाड़ी के लिंक के साथ।', rankH1: 'ATP और WTA रैंकिंग',
+    matchTitle: '{0} बनाम {1} भविष्यवाणी · {2}', matchDesc: '{0} बनाम {1}, {2}, {3}: रैंक, हाल की फ़ॉर्म, सर्व और रिटर्न के आँकड़े और आमने-सामने। मुफ़्त प्रीव्यू और हमारा पिक।', matchH1: '{0} बनाम {1} भविष्यवाणी',
+    playerTitle: '{0}: रैंकिंग, नतीजे और अगला मैच', playerDesc: '{0}{1}: हाल के नतीजे, फ़ॉर्म, सर्व और रिटर्न के आँकड़े, खिताब और अगला मैच, उसके लिए हमारी भविष्यवाणी के साथ।',
+    tourTitle: '{0} {1}: ड्रॉ, नतीजे और भविष्यवाणियाँ', tourDesc: '{0} {1}: ड्रॉ, नतीजे, पिछले चैंपियन और टूर्नामेंट के हर मैच के लिए हमारी भविष्यवाणी।',
+    next: 'अगले मैच', results: 'नतीजे', meetings: 'पिछली भिड़ंतें', form: 'हाल की फ़ॉर्म', champions: 'पिछले चैंपियन', draw: 'ड्रॉ', preview: 'मैच प्रीव्यू', noMatches: 'कोई मैच तय नहीं है।', rank: 'रैंक', points: 'अंक', tournaments: 'टूर्नामेंट', firstMeeting: 'हमारे डेटा में पहली भिड़ंत।'
+  },
+  pl: {
+    soonTitle: 'Prognozy tenisowe · wkrótce', soonDesc: 'Prognozy tenisowe na każdy mecz ATP, WTA i Challenger już wkrótce w SportLikely.',
+    homeTitle: 'Prognozy tenisowe: ATP, WTA i Challenger', homeDesc: 'Prognozy tenisowe na każdy mecz ATP, WTA i Challenger: szanse każdego zawodnika, najbardziej prawdopodobny wynik w setach i liczba gemów, zapisane przed pierwszym serwisem.',
+    homeH1: 'Prognozy tenisowe', homeIntro: 'Kto wygra każdy mecz ATP, WTA i Challenger, z szansami każdego zawodnika, najbardziej prawdopodobnym wynikiem w setach i powodami każdego typu. Każda prognoza jest zapisywana przed pierwszym serwisem i sprawdzana publicznie.',
+    todayTitle: 'Prognozy tenisowe na dziś', todayDesc: 'Dzisiejsze mecze ATP, WTA i Challenger według turniejów, z rankingiem zawodników, ostatnią formą i ostatnim spotkaniem. Aktualizowane codziennie.', todayH1: 'Prognozy tenisowe na dziś',
+    rankTitle: 'Rankingi ATP i WTA', rankDesc: 'Rankingi singlowe ATP i WTA: najlepsi zawodnicy z punktami i zmianą od ostatniej aktualizacji, z linkami do każdego zawodnika.', rankH1: 'Rankingi ATP i WTA',
+    matchTitle: '{0} – {1}: prognoza · {2}', matchDesc: '{0} – {1}, {2}, {3}: ranking, ostatnia forma, liczby serwisu i returnu oraz bezpośrednie mecze. Darmowa zapowiedź i nasz typ.', matchH1: '{0} – {1}: prognoza',
+    playerTitle: '{0}: ranking, wyniki i następny mecz', playerDesc: '{0}{1}: ostatnie wyniki, forma, liczby serwisu i returnu, tytuły i następny mecz, z naszą prognozą.',
+    tourTitle: '{0} {1}: drabinka, wyniki i prognozy', tourDesc: '{0} {1}: drabinka, wyniki, dawni mistrzowie i nasza prognoza na każdy mecz turnieju.',
+    next: 'Następne mecze', results: 'Wyniki', meetings: 'Ostatnie spotkania', form: 'Ostatnia forma', champions: 'Dawni mistrzowie', draw: 'Drabinka', preview: 'Zapowiedź meczu', noMatches: 'Brak zaplanowanych meczów.', rank: 'Miejsce', points: 'Punkty', tournaments: 'Turnieje', firstMeeting: 'Pierwsze spotkanie w naszych danych.'
+  },
+  el: {
+    soonTitle: 'Προβλέψεις τένις · έρχονται σύντομα', soonDesc: 'Προβλέψεις τένις για κάθε αγώνα ATP, WTA και Challenger έρχονται σύντομα στο SportLikely.',
+    homeTitle: 'Προβλέψεις τένις: ATP, WTA και Challenger', homeDesc: 'Προβλέψεις τένις για κάθε αγώνα ATP, WTA και Challenger: η πιθανότητα κάθε παίκτη, το πιθανό σκορ σετ και τα συνολικά γκέιμ, αποθηκευμένα πριν από το πρώτο σερβίς.',
+    homeH1: 'Προβλέψεις τένις', homeIntro: 'Ποιος κερδίζει κάθε αγώνα ATP, WTA και Challenger, με την πιθανότητα κάθε παίκτη, το πιθανό σκορ σετ και τους λόγους πίσω από κάθε επιλογή. Κάθε πρόβλεψη αποθηκεύεται πριν από το πρώτο σερβίς και ελέγχεται δημόσια.',
+    todayTitle: 'Προβλέψεις τένις σήμερα', todayDesc: 'Οι σημερινοί αγώνες ATP, WTA και Challenger ανά τουρνουά, με την κατάταξη των παικτών, την πρόσφατη φόρμα και την τελευταία αναμέτρηση. Ενημερώνεται καθημερινά.', todayH1: 'Προβλέψεις τένις σήμερα',
+    rankTitle: 'Κατατάξεις ATP και WTA', rankDesc: 'Οι κατατάξεις μονού ATP και WTA: οι κορυφαίοι παίκτες με τους πόντους τους και πόσο κινήθηκαν από την τελευταία ενημέρωση, με συνδέσμους για κάθε παίκτη.', rankH1: 'Κατατάξεις ATP και WTA',
+    matchTitle: '{0} - {1}: πρόβλεψη · {2}', matchDesc: '{0} - {1}, {2}, {3}: κατάταξη, πρόσφατη φόρμα, αριθμοί σερβίς και επιστροφής και αναμετρήσεις. Δωρεάν προεπισκόπηση και η επιλογή μας.', matchH1: '{0} - {1}: πρόβλεψη',
+    playerTitle: '{0}: κατάταξη, αποτελέσματα και επόμενος αγώνας', playerDesc: '{0}{1}: πρόσφατα αποτελέσματα, φόρμα, αριθμοί σερβίς και επιστροφής, τίτλοι και ο επόμενος αγώνας, με την πρόβλεψή μας.',
+    tourTitle: '{0} {1}: ταμπλό, αποτελέσματα και προβλέψεις', tourDesc: '{0} {1}: το ταμπλό, τα αποτελέσματα, οι παλιοί πρωταθλητές και η πρόβλεψή μας για κάθε αγώνα του τουρνουά.',
+    next: 'Επόμενοι αγώνες', results: 'Αποτελέσματα', meetings: 'Τελευταίες αναμετρήσεις', form: 'Πρόσφατη φόρμα', champions: 'Παλιοί πρωταθλητές', draw: 'Ταμπλό', preview: 'Προεπισκόπηση αγώνα', noMatches: 'Δεν υπάρχουν προγραμματισμένοι αγώνες.', rank: 'Κατάταξη', points: 'Πόντοι', tournaments: 'Τουρνουά', firstMeeting: 'Πρώτη αναμέτρηση στα δεδομένα μας.'
+  },
+  ru: {
+    soonTitle: 'Прогнозы на теннис · скоро', soonDesc: 'Прогнозы на каждый матч ATP, WTA и Challenger скоро появятся на SportLikely.',
+    homeTitle: 'Прогнозы на теннис: ATP, WTA и Challenger', homeDesc: 'Прогнозы на каждый матч ATP, WTA и Challenger: шансы каждого игрока, вероятный счёт по сетам и тотал геймов, сохранённые до первой подачи.',
+    homeH1: 'Прогнозы на теннис', homeIntro: 'Кто выиграет каждый матч ATP, WTA и Challenger: шансы каждого игрока, вероятный счёт по сетам и причины каждого выбора. Каждый прогноз сохраняется до первой подачи и проверяется публично.',
+    todayTitle: 'Прогнозы на теннис сегодня', todayDesc: 'Сегодняшние матчи ATP, WTA и Challenger по турнирам, с рейтингом игроков, последней формой и последней встречей. Обновляется каждый день.', todayH1: 'Прогнозы на теннис сегодня',
+    rankTitle: 'Рейтинги ATP и WTA', rankDesc: 'Одиночные рейтинги ATP и WTA: лучшие игроки, их очки и изменение с последнего обновления, со ссылками на каждого игрока.', rankH1: 'Рейтинги ATP и WTA',
+    matchTitle: '{0} – {1}: прогноз · {2}', matchDesc: '{0} – {1}, {2}, {3}: рейтинг, последняя форма, цифры подачи и приёма и личные встречи. Бесплатный обзор и наш выбор.', matchH1: '{0} – {1}: прогноз',
+    playerTitle: '{0}: рейтинг, результаты и следующий матч', playerDesc: '{0}{1}: последние результаты, форма, цифры подачи и приёма, титулы и следующий матч с нашим прогнозом.',
+    tourTitle: '{0} {1}: сетка, результаты и прогнозы', tourDesc: '{0} {1}: сетка, результаты, прошлые чемпионы и наш прогноз на каждый матч турнира.',
+    next: 'Следующие матчи', results: 'Результаты', meetings: 'Последние встречи', form: 'Последняя форма', champions: 'Прошлые чемпионы', draw: 'Сетка', preview: 'Обзор матча', noMatches: 'Матчей не запланировано.', rank: 'Место', points: 'Очки', tournaments: 'Турниры', firstMeeting: 'Первая встреча в наших данных.'
   }
 };
 

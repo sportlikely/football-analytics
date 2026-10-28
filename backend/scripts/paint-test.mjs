@@ -40,7 +40,7 @@ function findChromium() {
 }
 
 function pages() {
-  const LANGS = ['', '/es', '/de', '/fr', '/it', '/pt', '/tr'];
+  const LANGS = ['', '/es', '/de', '/fr', '/it', '/pt', '/tr', '/id', '/hi', '/pl', '/el', '/ru'];
   const list = ['/', '/football', '/basketball', '/american-football', '/tennis', '/es/football/matches', '/de/basketball/matches', '/fr/football/today'];
   if (process.env.LOAD_DATA_DIR) {
     const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');

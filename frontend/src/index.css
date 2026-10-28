@@ -240,3 +240,6 @@ html.a11y-contrast :focus-visible { outline-color: #ff0; }
   input.text-sm, input.text-xs, textarea.text-sm, textarea.text-xs, select.text-sm, select.text-xs,
   input[class*="text-["], textarea[class*="text-["], select[class*="text-["] { font-size: 16px; }
 }
+
+/* fix256: Devanagari letters join — letter-spacing (labels, uppercase tracking) pulls them apart */
+html:lang(hi) * { letter-spacing: 0 !important; }

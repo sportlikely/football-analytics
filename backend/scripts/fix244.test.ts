@@ -92,7 +92,7 @@ test('sign-in pages are never counted', () => {
 });
 
 test('the Quick check page: 7 locales, Turnstile, VPN line, sign in', () => {
-  assert.deepEqual([...QC_LANGS], ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr']);
+  assert.deepEqual([...QC_LANGS], ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru']);
   const keys = Object.keys(QC_WORDS.en).sort();
   for (const l of QC_LANGS) {
     assert.deepEqual(Object.keys(QC_WORDS[l]).sort(), keys, l);
@@ -120,7 +120,7 @@ test('the app: no "status code 429", the Quick check on a proxy 429, strings in 
   assert.match(pc, /data\.proxy && data\.check\) openQuickCheck\(\)/);
   assert.match(pc, /\/quick-check`/);
   assert.match(fs.readFileSync(path.join(fe, 'main.tsx'), 'utf8'), /watchProxyCheck\(\)/);
-  for (const l of ['de', 'es', 'fr', 'it', 'pt', 'tr']) {
+  for (const l of ['de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru']) {
     const j = JSON.parse(fs.readFileSync(path.join(fe, `locales/${l}.json`), 'utf8'));
     for (const k of ['Too many requests, try again in a minute', 'Too many pages opened from this network. Please try again later, or sign in.'])
       assert.ok(j[k] && j[k] !== k, `${l}: ${k}`);

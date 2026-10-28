@@ -205,7 +205,7 @@ test('crawler pages with a stored copy: served from page_cache, no build, under 
   assert.deepEqual(res.builds, {}, 'a page builder ran in the web process');
   const bad = [];
   for (const x of res.out) {
-    const lang = (/^\/(es|pt|de|fr|it|tr)\//.exec(x.u) || [])[1] || 'en';
+    const lang = (/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)\//.exec(x.u) || [])[1] || 'en';
     for (const k of ['first', 'second']) {
       if (x[k].status !== 200) bad.push(`${x.u} (${k}): ${x[k].status}`);
       if (x[k].ms > LIMIT_MS) bad.push(`${x.u} (${k}): ${x[k].ms} ms — over ${LIMIT_MS} ms`);

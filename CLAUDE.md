@@ -100,8 +100,9 @@ is model work, the matching note, in the same commit.
 - Before pushing: `cd frontend && npm run parity` must pass (also part of `npm run type-check` / `npm run build`). A new
   football block means a parity key in `frontend/src/lib/sportParity.ts` + the basketball and NFL versions in the same
   commit (listed in their `*.parity.ts` files), or an 'na: <reason>' Yarin approved (`docs/notes/sport-parity.md`).
-- Copy: short, plain English, no jargon. Six locales in `frontend/src/locales/*.json` (de, es, fr, it, pt, tr; English
-  is the key). A new UI string needs the key used through `t("...")` and a translation in all six files
+- Copy: short, plain English, no jargon. Eleven locales in `frontend/src/locales/*.json` (de, es, fr, it, pt, tr, id, hi, pl, el, ru;
+  English is the key; fix256). A new UI string needs the key used through `t("...")` and a translation in all eleven files
+  (`npm run parity` fails on a missing key — scripts/locales-check.ts)
   (`json.dumps(..., ensure_ascii=False, indent=1)` keeps the file format).
 - Phones first: check layouts at 375 px. Bottom nav on phones; floating accessibility button bottom-left.
 - Don't add dependencies without a reason; the backend uses Node's built-in `node:sqlite`, no ORM.

@@ -73,7 +73,8 @@ function TeamHero({ s, align }: { s: HeroSide; align: 'left' | 'right' }) {
         <div className="font-sans font-extrabold text-[15px] sm:font-display sm:text-2xl text-ink leading-tight break-words sm:truncate">{s.name}</div>
         {s.sub && <div className="hidden sm:block text-xs text-faint mt-0.5 truncate">{s.sub}</div>}
         <div className={`flex items-center justify-center gap-1 mt-1 sm:mt-0.5 ${align === 'right' ? 'sm:justify-end' : 'sm:justify-start'}`}>
-          <span className="text-[11px] text-accent font-semibold whitespace-nowrap">{s.linkLabel}</span>
+          {/* fix256: long words (ru "Страница команды →") wrap on phones instead of running out of the hero */}
+          <span className="min-w-0 text-[11px] leading-tight text-accent font-semibold sm:whitespace-nowrap">{s.linkLabel}</span>
           {s.star}
         </div>
       </div>

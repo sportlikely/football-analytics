@@ -38,7 +38,7 @@ const clean = (v: unknown, n: number) => String(v ?? '').replace(/[\u0000-\u001f
 
 /** "/es/match/575346" → "/match/:id" so the same problem on different games is one row */
 export function pageKind(path: string) {
-  const p = path.replace(/^\/(es|pt|de|fr|it|tr)(?=\/|$)/, '') || '/';
+  const p = path.replace(/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(?=\/|$)/, '') || '/';
   return p.replace(/\/\d+(?=\/|$)/g, '/:id').replace(/\/(join)\/[^/]+/, '/$1/:code').slice(0, 80) || '/';
 }
 

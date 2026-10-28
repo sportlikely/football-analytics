@@ -144,7 +144,7 @@ export function quietEnd(q: { from: number; to: number; tz: string }, t: number)
 /* ---------- words ---------- */
 
 export type Tx = (key: string, ...a: (string | number)[]) => string;
-const LOCALES: Record<string, string> = { en: 'en-GB', de: 'de-DE', es: 'es-ES', fr: 'fr-FR', it: 'it-IT', pt: 'pt-BR', tr: 'tr-TR' };
+const LOCALES: Record<string, string> = { en: 'en-GB', de: 'de-DE', es: 'es-ES', fr: 'fr-FR', it: 'it-IT', pt: 'pt-BR', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
 export function timeIn(lang: string, tz: string, iso: string): string {
   try { return new Intl.DateTimeFormat(LOCALES[lang] || 'en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(new Date(iso)); } catch { return iso.slice(11, 16); }
 }

@@ -1301,29 +1301,37 @@ export function moreForGame(sport: MoreSport, id: number, o: { full: boolean; ad
 /* H. One sentence for the crawler preview                              */
 /* ------------------------------------------------------------------ */
 
-type Lang = 'en' | 'es' | 'pt' | 'de' | 'fr' | 'it' | 'tr';
+type Lang = 'en' | 'es' | 'pt' | 'de' | 'fr' | 'it' | 'tr' | 'id' | 'hi' | 'pl' | 'el' | 'ru';
 const SENT: Record<'score' | 'expected' | 'sets', Record<Lang, string>> = {
   score: {
     en: 'Most likely score in our prediction: {0} ({1}%).', es: 'Resultado más probable en nuestro pronóstico: {0} ({1}%).',
     pt: 'Resultado mais provável no nosso palpite: {0} ({1}%).', de: 'Wahrscheinlichstes Ergebnis in unserer Prognose: {0} ({1} %).',
     fr: 'Score le plus probable de notre pronostic : {0} ({1} %).', it: 'Risultato più probabile nel nostro pronostico: {0} ({1}%).',
-    tr: 'Tahminimizde en olası skor: {0} (%{1}).'
+    tr: 'Tahminimizde en olası skor: {0} (%{1}).',
+    id: 'Skor paling mungkin dalam prediksi kami: {0} ({1}%).', hi: 'हमारी भविष्यवाणी में सबसे संभावित स्कोर: {0} ({1}%).',
+    pl: 'Najbardziej prawdopodobny wynik w naszej prognozie: {0} ({1}%).', el: 'Πιθανότερο σκορ στην πρόβλεψή μας: {0} ({1}%).',
+    ru: 'Самый вероятный счёт в нашем прогнозе: {0} ({1}%).'
   },
   expected: {
     en: 'Expected score in our prediction: {0}.', es: 'Marcador esperado en nuestro pronóstico: {0}.', pt: 'Resultado esperado no nosso palpite: {0}.',
     de: 'Erwartetes Ergebnis in unserer Prognose: {0}.', fr: 'Score attendu de notre pronostic : {0}.', it: 'Punteggio atteso nel nostro pronostico: {0}.',
-    tr: 'Tahminimizde beklenen skor: {0}.'
+    tr: 'Tahminimizde beklenen skor: {0}.',
+    id: 'Skor yang diharapkan dalam prediksi kami: {0}.', hi: 'हमारी भविष्यवाणी में अपेक्षित स्कोर: {0}.', pl: 'Oczekiwany wynik w naszej prognozie: {0}.',
+    el: 'Αναμενόμενο σκορ στην πρόβλεψή μας: {0}.', ru: 'Ожидаемый счёт в нашем прогнозе: {0}.'
   },
   sets: {
     en: 'Most likely set score in our prediction: {0} ({1}%).', es: 'Resultado en sets más probable en nuestro pronóstico: {0} ({1}%).',
     pt: 'Resultado em sets mais provável no nosso palpite: {0} ({1}%).', de: 'Wahrscheinlichstes Satzergebnis in unserer Prognose: {0} ({1} %).',
     fr: 'Score en sets le plus probable de notre pronostic : {0} ({1} %).', it: 'Risultato in set più probabile nel nostro pronostico: {0} ({1}%).',
-    tr: 'Tahminimizde en olası set skoru: {0} (%{1}).'
+    tr: 'Tahminimizde en olası set skoru: {0} (%{1}).',
+    id: 'Skor set paling mungkin dalam prediksi kami: {0} ({1}%).', hi: 'हमारी भविष्यवाणी में सबसे संभावित सेट स्कोर: {0} ({1}%).',
+    pl: 'Najbardziej prawdopodobny wynik w setach w naszej prognozie: {0} ({1}%).', el: 'Πιθανότερο σκορ σετ στην πρόβλεψή μας: {0} ({1}%).',
+    ru: 'Самый вероятный счёт по сетам в нашем прогнозе: {0} ({1}%).'
   }
 };
 /** "Most likely score in our prediction: 1–1 (12%)." — only when that output is public */
 export function moreSentence(sport: MoreSport, id: number, lang: string): string | null {
-  const L = (['en', 'es', 'pt', 'de', 'fr', 'it', 'tr'].includes(lang) ? lang : 'en') as Lang;
+  const L = (['en', 'es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'].includes(lang) ? lang : 'en') as Lang;
   const r = db.prepare(`SELECT json FROM prediction_extras WHERE sport = ? AND game_id = ? AND admin_only = 0`).get(sport, id) as any;
   if (!r) return null;
   let x: Extras | null = null;

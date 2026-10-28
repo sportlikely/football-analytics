@@ -5,8 +5,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        display: ['Unbounded', 'Manrope', 'system-ui', 'sans-serif'],
-        sans: ['Manrope', 'system-ui', 'sans-serif'],
+        display: ['Unbounded', 'Manrope', '"Noto Sans Devanagari"', 'system-ui', 'sans-serif'],
+        sans: ['Manrope', '"Noto Sans Devanagari"', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       colors: {

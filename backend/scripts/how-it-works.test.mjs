@@ -21,7 +21,7 @@ const { db } = require('../dist/db/index.js');
 const hiw = require('../dist/services/howItWorks.js');
 const { renderIndex, seoPage, sitemapXml, SITEMAPS } = require('../dist/services/seo.js');
 
-const LANGS = ['de', 'es', 'fr', 'it', 'pt', 'tr'];
+const LANGS = ['de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'];
 const INPUT_FILES = { football: 'gridModel', basketball: 'bbModel', 'american-football': 'nflModel', tennis: 'tennisModel' };
 const inputs = {};
 for (const [s, f] of Object.entries(INPUT_FILES)) inputs[s] = (await import(pathToFileURL(path.join(SRC, `${f}.inputs.ts`)).href)).MODEL_INPUTS;

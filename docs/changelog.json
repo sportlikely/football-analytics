@@ -1,5 +1,5 @@
 {
- "_about": "fix206: the public changelog at /changelog (backend/src/services/howItWorks.ts). Newest first. One or two plain sentences for visitors (no internal fixes, no odds, no betting words), in all seven languages. sport: football | basketball | american-football | tennis | all. kind: model | site. version: the sport's model version at the time (shown as 'SL Basketball 3.0'), null for 'all'. Entries of a sport before its launch are shown to admins only.",
+ "_about": "fix206: the public changelog at /changelog (backend/src/services/howItWorks.ts). Newest first. One or two plain sentences for visitors (no internal fixes, no odds, no betting words), in all twelve languages. sport: football | basketball | american-football | tennis | all. kind: model | site. version: the sport's model version at the time (shown as 'SL Basketball 3.0'), null for 'all'. Entries of a sport before its launch are shown to admins only.",
  "entries": [
   {
    "date": "2026-10-25",
@@ -13,7 +13,12 @@
     "de": "Basketball: ehrliche Prozentzahlen. Die Wahrscheinlichkeiten jeder Liga werden jetzt mit dem abgeglichen, was in früheren Saisons wirklich passiert ist, und dort angepasst, wo sie zu sicher (oder zu unsicher) waren, also heißt 70 % etwa 7 von 10. Ein starker Tipp wird jetzt pro Liga festgelegt.",
     "fr": "Basket : des pourcentages honnêtes. Les probabilités de chaque championnat sont maintenant comparées à ce qui s’est vraiment passé lors des saisons précédentes et corrigées là où elles étaient trop sûres (ou pas assez), donc 70 % veut dire environ 7 sur 10. Le pronostic fort est maintenant fixé par championnat.",
     "it": "Basket: percentuali oneste. Le probabilità di ogni campionato ora sono confrontate con quello che è successo davvero nelle stagioni passate e corrette dove erano troppo sicure (o troppo poco), quindi 70% vuol dire circa 7 su 10. Il pronostico forte ora è fissato per campionato.",
-    "tr": "Basketbol: dürüst yüzdeler. Her ligin olasılıkları artık geçmiş sezonlarda gerçekten olanlarla karşılaştırılıyor ve fazla emin (ya da yeterince emin olmayan) oldukları yerde düzeltiliyor; yani %70, 10 maçta yaklaşık 7 demek. Güçlü tahmin artık her lig için ayrı belirleniyor."
+    "tr": "Basketbol: dürüst yüzdeler. Her ligin olasılıkları artık geçmiş sezonlarda gerçekten olanlarla karşılaştırılıyor ve fazla emin (ya da yeterince emin olmayan) oldukları yerde düzeltiliyor; yani %70, 10 maçta yaklaşık 7 demek. Güçlü tahmin artık her lig için ayrı belirleniyor.",
+    "id": "Bola basket: persentase yang jujur. Peluang setiap liga kini dicek terhadap apa yang benar-benar terjadi di musim-musim sebelumnya dan disesuaikan jika terlalu yakin (atau kurang yakin), jadi 70% berarti sekitar 7 dari 10. Batas pilihan kuat kini ditetapkan per liga.",
+    "hi": "बास्केटबॉल: ईमानदार प्रतिशत। हर लीग के मौके अब पिछले सीज़न में असल में हुए नतीजों से जाँचे जाते हैं और जहाँ वे ज़्यादा पक्के (या कम पक्के) थे वहाँ ठीक किए जाते हैं, इसलिए 70% का मतलब लगभग 10 में से 7 है। मज़बूत पिक की सीमा अब हर लीग के लिए अलग तय होती है।",
+    "pl": "Koszykówka: uczciwe procenty. Szanse w każdej lidze są teraz porównywane z tym, co naprawdę wydarzyło się w poprzednich sezonach, i poprawiane tam, gdzie były zbyt pewne (lub zbyt mało pewne), więc 70% oznacza mniej więcej 7 na 10. Próg mocnego typu jest teraz ustalany dla każdej ligi.",
+    "el": "Μπάσκετ: ειλικρινή ποσοστά. Οι πιθανότητες κάθε λίγκας συγκρίνονται πλέον με ό,τι πραγματικά έγινε σε προηγούμενες σεζόν και διορθώνονται όπου ήταν υπερβολικά σίγουρες (ή όχι αρκετά σίγουρες), έτσι το 70% σημαίνει περίπου 7 στα 10. Το όριο της δυνατής επιλογής ορίζεται πλέον ανά λίγκα.",
+    "ru": "Баскетбол: честные проценты. Шансы в каждой лиге теперь сверяются с тем, что действительно происходило в прошлых сезонах, и поправляются там, где они были слишком уверенными (или недостаточно уверенными), так что 70% означает примерно 7 из 10. Порог сильного выбора теперь задаётся для каждой лиги."
    }
   },
   {
@@ -28,7 +33,12 @@
     "de": "Tennis: ehrliche Prozentzahlen. Die Wahrscheinlichkeiten jeder Tour (ATP, WTA, Challenger, Grand Slams) werden jetzt mit dem abgeglichen, was in früheren Matches wirklich passiert ist, und dort angepasst, wo sie zu sicher (oder zu unsicher) waren, also heißt 70 % etwa 7 von 10.",
     "fr": "Tennis : des pourcentages honnêtes. Les probabilités de chaque circuit (ATP, WTA, Challenger, Grand Chelem) sont maintenant comparées à ce qui s’est vraiment passé lors des matchs précédents et corrigées là où elles étaient trop sûres (ou pas assez), donc 70 % veut dire environ 7 sur 10.",
     "it": "Tennis: percentuali oneste. Le probabilità di ogni circuito (ATP, WTA, Challenger, Slam) ora sono confrontate con quello che è successo davvero nelle partite passate e corrette dove erano troppo sicure (o troppo poco), quindi 70% vuol dire circa 7 su 10.",
-    "tr": "Tenis: dürüst yüzdeler. Her turun (ATP, WTA, Challenger, Grand Slam) olasılıkları artık geçmiş maçlarda gerçekten olanlarla karşılaştırılıyor ve fazla emin (ya da yeterince emin olmayan) oldukları yerde düzeltiliyor; yani %70, 10 maçta yaklaşık 7 demek."
+    "tr": "Tenis: dürüst yüzdeler. Her turun (ATP, WTA, Challenger, Grand Slam) olasılıkları artık geçmiş maçlarda gerçekten olanlarla karşılaştırılıyor ve fazla emin (ya da yeterince emin olmayan) oldukları yerde düzeltiliyor; yani %70, 10 maçta yaklaşık 7 demek.",
+    "id": "Tenis: persentase yang jujur. Peluang setiap tur (ATP, WTA, Challenger, Grand Slam) kini dicek terhadap apa yang benar-benar terjadi di pertandingan sebelumnya dan disesuaikan jika terlalu yakin (atau kurang yakin), jadi 70% berarti sekitar 7 dari 10.",
+    "hi": "टेनिस: ईमानदार प्रतिशत। हर टूर (ATP, WTA, Challenger, ग्रैंड स्लैम) के मौके अब पिछले मैचों में असल में हुए नतीजों से जाँचे जाते हैं और जहाँ वे ज़्यादा पक्के (या कम पक्के) थे वहाँ ठीक किए जाते हैं, इसलिए 70% का मतलब लगभग 10 में से 7 है।",
+    "pl": "Tenis: uczciwe procenty. Szanse w każdym cyklu (ATP, WTA, Challenger, Wielki Szlem) są teraz porównywane z tym, co naprawdę wydarzyło się w poprzednich meczach, i poprawiane tam, gdzie były zbyt pewne (lub zbyt mało pewne), więc 70% oznacza mniej więcej 7 na 10.",
+    "el": "Τένις: ειλικρινή ποσοστά. Οι πιθανότητες κάθε περιοδείας (ATP, WTA, Challenger, Grand Slam) συγκρίνονται πλέον με ό,τι πραγματικά έγινε σε προηγούμενους αγώνες και διορθώνονται όπου ήταν υπερβολικά σίγουρες (ή όχι αρκετά σίγουρες), έτσι το 70% σημαίνει περίπου 7 στα 10.",
+    "ru": "Теннис: честные проценты. Шансы в каждом туре (ATP, WTA, Challenger, турниры Большого шлема) теперь сверяются с тем, что действительно происходило в прошлых матчах, и поправляются там, где они были слишком уверенными (или недостаточно уверенными), так что 70% означает примерно 7 из 10."
    }
   },
   {
@@ -43,7 +53,12 @@
     "de": "American Football: ehrliche Prozentzahlen und ein stärkeres College-Modell. Jede Wahrscheinlichkeit wird jetzt mit dem abgeglichen, was in früheren Saisons wirklich passiert ist, also heißt 70 % etwa 7 von 10.",
     "fr": "Football américain : des pourcentages honnêtes et un modèle universitaire plus solide. Chaque probabilité est maintenant comparée à ce qui s’est vraiment passé lors des saisons précédentes, donc 70 % veut dire environ 7 sur 10.",
     "it": "Football americano: percentuali oneste e un modello universitario più forte. Ogni probabilità ora è confrontata con quello che è successo davvero nelle stagioni passate, quindi 70% vuol dire circa 7 su 10.",
-    "tr": "Amerikan futbolu: dürüst yüzdeler ve daha güçlü bir kolej modeli. Her olasılık artık geçmiş sezonlarda gerçekten olanlarla karşılaştırılıyor; yani %70, 10 maçta yaklaşık 7 demek."
+    "tr": "Amerikan futbolu: dürüst yüzdeler ve daha güçlü bir kolej modeli. Her olasılık artık geçmiş sezonlarda gerçekten olanlarla karşılaştırılıyor; yani %70, 10 maçta yaklaşık 7 demek.",
+    "id": "Sepak bola Amerika: persentase yang jujur dan model kampus yang lebih kuat. Setiap peluang kini dicek terhadap apa yang benar-benar terjadi di musim-musim sebelumnya, jadi 70% berarti sekitar 7 dari 10.",
+    "hi": "अमेरिकन फ़ुटबॉल: ईमानदार प्रतिशत और कॉलेज के लिए बेहतर मॉडल। हर मौका अब पिछले सीज़न में असल में हुए नतीजों से जाँचा जाता है, इसलिए 70% का मतलब लगभग 10 में से 7 है।",
+    "pl": "Futbol amerykański: uczciwe procenty i mocniejszy model dla rozgrywek uniwersyteckich. Każda szansa jest teraz porównywana z tym, co naprawdę wydarzyło się w poprzednich sezonach, więc 70% oznacza mniej więcej 7 na 10.",
+    "el": "Αμερικανικό ποδόσφαιρο: ειλικρινή ποσοστά και πιο δυνατό μοντέλο για το κολεγιακό. Κάθε πιθανότητα συγκρίνεται πλέον με ό,τι πραγματικά έγινε σε προηγούμενες σεζόν, έτσι το 70% σημαίνει περίπου 7 στα 10.",
+    "ru": "Американский футбол: честные проценты и более сильная модель для студенческих матчей. Каждый шанс теперь сверяется с тем, что действительно происходило в прошлых сезонах, так что 70% означает примерно 7 из 10."
    }
   },
   {
@@ -58,7 +73,12 @@
     "de": "Basketball-Modell 4.0: bewertet jeden Spieler, Verletzungen, Pausen und Duelle — 13 Faktoren, Gewichte an drei Saisons angepasst.",
     "fr": "Modèle de basket 4.0 : il note chaque joueur, les blessures, le repos et les confrontations — 13 facteurs, pondérés sur trois saisons.",
     "it": "Modello di basket 4.0: valuta ogni giocatore, gli infortuni, il riposo e gli accoppiamenti — 13 fattori, con pesi adattati su tre stagioni.",
-    "tr": "Basketbol modeli 4.0: her oyuncuyu, sakatlıkları, dinlenmeyi ve eşleşmeleri değerlendirir — 13 faktör, ağırlıklar üç sezona göre ayarlandı."
+    "tr": "Basketbol modeli 4.0: her oyuncuyu, sakatlıkları, dinlenmeyi ve eşleşmeleri değerlendirir — 13 faktör, ağırlıklar üç sezona göre ayarlandı.",
+    "id": "Model bola basket 4.0: menilai setiap pemain, cedera, istirahat dan duel — 13 faktor, bobotnya disesuaikan pada tiga musim.",
+    "hi": "बास्केटबॉल मॉडल 4.0: हर खिलाड़ी, चोटें, आराम और मुकाबले को आँकता है — 13 कारक, जिनके वज़न तीन सीज़न पर तय किए गए।",
+    "pl": "Model koszykówki 4.0: ocenia każdego zawodnika, kontuzje, odpoczynek i pojedynki — 13 czynników, wagi dopasowane na trzech sezonach.",
+    "el": "Μοντέλο μπάσκετ 4.0: αξιολογεί κάθε παίκτη, τραυματισμούς, ξεκούραση και μονομαχίες — 13 παράγοντες, με βάρη προσαρμοσμένα σε τρεις σεζόν.",
+    "ru": "Модель баскетбола 4.0: оценивает каждого игрока, травмы, отдых и противостояния — 13 факторов, веса подобраны на трёх сезонах."
    }
   },
   {
@@ -73,7 +93,12 @@
     "de": "Neu: die Saisonprognose. Jede Ligaseite hat einen Tab \"Saisonprognose\": der Rest der Saison 20.000-mal mit unserem Spielmodell durchgespielt, mit der Chance jedes Teams auf den Titel, Europa, die Play-offs oder den Abstieg und auf jeden Endplatz. Teamseiten zeigen, wie sich diese Chancen verändert haben, Spielseiten, was ein Sieg, ein Remis oder eine Niederlage ändern würde.",
     "fr": "Nouveau : la prévision de la saison. Chaque page de championnat a un onglet « Prévision de la saison » : le reste de la saison joué 20 000 fois avec notre modèle de matchs, avec la chance de chaque équipe pour le titre, l’Europe, les play-offs ou la relégation, et pour chaque place finale. Les pages d’équipe montrent comment ces chances ont évolué, et les pages de match ce que changerait une victoire, un nul ou une défaite.",
     "it": "Novità: la previsione della stagione. Ogni pagina di campionato ha una scheda \"Previsione della stagione\": il resto della stagione giocato 20.000 volte con il nostro modello delle partite, con la probabilità di ogni squadra per il titolo, l’Europa, i play-off o la retrocessione e per ogni posizione finale. Le pagine delle squadre mostrano come sono cambiate queste probabilità, quelle delle partite cosa cambierebbe una vittoria, un pareggio o una sconfitta.",
-    "tr": "Yeni: sezon tahmini. Her lig sayfasında bir \"Sezon tahmini\" sekmesi var: sezonun kalanı maç modelimizle 20.000 kez oynanıyor; her takımın şampiyonluk, Avrupa, play-off veya küme düşme olasılığı ve her son sıra için olasılığı. Takım sayfaları bu olasılıkların nasıl değiştiğini, maç sayfaları ise galibiyet, beraberlik veya yenilginin neyi değiştireceğini gösteriyor."
+    "tr": "Yeni: sezon tahmini. Her lig sayfasında bir \"Sezon tahmini\" sekmesi var: sezonun kalanı maç modelimizle 20.000 kez oynanıyor; her takımın şampiyonluk, Avrupa, play-off veya küme düşme olasılığı ve her son sıra için olasılığı. Takım sayfaları bu olasılıkların nasıl değiştiğini, maç sayfaları ise galibiyet, beraberlik veya yenilginin neyi değiştireceğini gösteriyor.",
+    "id": "Baru: perkiraan musim. Setiap halaman liga punya tab \"Perkiraan musim\": sisa musim dimainkan 20.000 kali dengan model pertandingan kami, dengan peluang setiap tim meraih gelar, tiket Eropa, play-off atau degradasi, serta setiap posisi akhir. Halaman tim menunjukkan bagaimana peluang itu bergerak, dan halaman pertandingan apa yang berubah dengan menang, seri atau kalah.",
+    "hi": "नया: सीज़न का अनुमान। हर लीग पेज पर \"सीज़न का अनुमान\" टैब है: बाकी सीज़न हमारे मैच मॉडल से 20,000 बार खेला गया, हर टीम के खिताब, यूरोप, प्ले-ऑफ़ या रेलीगेशन और हर अंतिम स्थान के मौके के साथ। टीम पेज दिखाते हैं कि ये मौके कैसे बदले, और मैच पेज दिखाते हैं कि जीत, ड्रॉ या हार से क्या बदलेगा।",
+    "pl": "Nowość: prognoza sezonu. Każda strona ligi ma zakładkę \"Prognoza sezonu\": reszta sezonu rozegrana 20 000 razy naszym modelem meczowym, z szansą każdej drużyny na tytuł, puchary europejskie, play-offy lub spadek oraz na każde miejsce w końcowej tabeli. Strony drużyn pokazują, jak te szanse się zmieniały, a strony meczów — co zmieniłaby wygrana, remis lub porażka.",
+    "el": "Νέο: η πρόβλεψη της σεζόν. Κάθε σελίδα λίγκας έχει καρτέλα \"Πρόβλεψη σεζόν\": η υπόλοιπη σεζόν παίζεται 20.000 φορές με το μοντέλο αγώνων μας, με την πιθανότητα κάθε ομάδας για τίτλο, Ευρώπη, πλέι οφ ή υποβιβασμό και για κάθε τελική θέση. Οι σελίδες ομάδων δείχνουν πώς κινήθηκαν αυτές οι πιθανότητες και οι σελίδες αγώνων τι θα άλλαζε μια νίκη, μια ισοπαλία ή μια ήττα.",
+    "ru": "Новое: прогноз сезона. На странице каждой лиги есть вкладка \"Прогноз сезона\": оставшаяся часть сезона разыгрывается 20 000 раз нашей моделью матчей, с шансами каждой команды на титул, еврокубки, плей-офф или вылет и на каждое итоговое место. Страницы команд показывают, как менялись эти шансы, а страницы матчей — что изменит победа, ничья или поражение."
    }
   },
   {
@@ -88,7 +113,12 @@
     "de": "Die Spielseite im American Football sieht jetzt aus wie bei jeder anderen Sportart: Live-Spiele stehen in einer kompakten Box links, nach Liga gruppiert, mit Spielzeit und unserer Live-Siegchance; \"Alle zeigen\" öffnet die ganze Live-Liste.",
     "fr": "La page des matchs de football américain ressemble désormais à celle des autres sports : les matchs en direct sont dans un encadré à gauche, groupés par ligue, avec le chrono et notre chance de victoire en direct, et « Voir tout » ouvre la liste complète.",
     "it": "La pagina delle partite di football americano ora è come quella degli altri sport: le partite live sono in un riquadro a sinistra, raggruppate per lega, con il cronometro e la nostra probabilità di vittoria live, e \"Mostra tutte\" apre l’elenco completo.",
-    "tr": "Amerikan futbolu maçlar sayfası artık diğer sporlarla aynı: canlı maçlar solda, lige göre gruplanmış küçük bir kutuda, süre ve canlı kazanma şansımızla birlikte; \"Tümünü göster\" canlı listenin tamamını açar."
+    "tr": "Amerikan futbolu maçlar sayfası artık diğer sporlarla aynı: canlı maçlar solda, lige göre gruplanmış küçük bir kutuda, süre ve canlı kazanma şansımızla birlikte; \"Tümünü göster\" canlı listenin tamamını açar.",
+    "id": "Halaman pertandingan sepak bola Amerika kini tampil seperti olahraga lainnya: pertandingan live ada di kotak ringkas di kiri, dikelompokkan per liga, dengan waktu dan peluang menang live kami, dan \"Tampilkan semua\" membuka daftar live lengkap.",
+    "hi": "अमेरिकन फ़ुटबॉल का मैच पेज अब बाकी खेलों जैसा दिखता है: लाइव मैच बाईं ओर एक छोटे बॉक्स में, लीग के अनुसार, घड़ी और हमारे लाइव जीत के मौके के साथ, और \"सब दिखाएँ\" पूरी लाइव सूची खोलता है।",
+    "pl": "Strona meczów futbolu amerykańskiego wygląda teraz jak w innych sportach: mecze na żywo są w małym polu po lewej, pogrupowane według lig, z zegarem i naszą szansą na wygraną na żywo, a \"Pokaż wszystkie\" otwiera pełną listę na żywo.",
+    "el": "Η σελίδα αγώνων του αμερικανικού ποδοσφαίρου μοιάζει πλέον με κάθε άλλο άθλημα: οι ζωντανοί αγώνες βρίσκονται σε ένα μικρό πλαίσιο αριστερά, ανά λίγκα, με το ρολόι και τη ζωντανή πιθανότητα νίκης μας, και το \"Εμφάνιση όλων\" ανοίγει την πλήρη ζωντανή λίστα.",
+    "ru": "Страница матчей американского футбола теперь выглядит как в других видах спорта: матчи в прямом эфире — в компактном блоке слева, по лигам, с часами и нашим шансом на победу в реальном времени, а \"Показать все\" открывает полный список."
    }
   },
   {
@@ -103,7 +133,12 @@
     "de": "Spielerfotos auf den Basketball-Spielerseiten, im Boxscore und in der Suche, von Wikimedia Commons unter freien Lizenzen. Urheber und Lizenz stehen unter jedem Foto und auf der neuen Seite mit den Bildnachweisen.",
     "fr": "Des photos des joueurs sur les pages joueur de basket, dans la feuille de match et dans la recherche, issues de Wikimedia Commons sous licences libres. L’auteur et la licence sont indiqués sous chaque photo et sur la nouvelle page des crédits photo.",
     "it": "Foto dei giocatori nelle pagine giocatore del basket, nel tabellino e nella ricerca, da Wikimedia Commons con licenze libere. Autore e licenza sono indicati sotto ogni foto e nella nuova pagina dei crediti fotografici.",
-    "tr": "Basketbol oyuncu sayfalarında, maç istatistiklerinde ve aramada Wikimedia Commons’tan özgür lisanslı oyuncu fotoğrafları. Fotoğrafçı ve lisans her fotoğrafın altında ve yeni fotoğraf kaynakları sayfasında yazılı."
+    "tr": "Basketbol oyuncu sayfalarında, maç istatistiklerinde ve aramada Wikimedia Commons’tan özgür lisanslı oyuncu fotoğrafları. Fotoğrafçı ve lisans her fotoğrafın altında ve yeni fotoğraf kaynakları sayfasında yazılı.",
+    "id": "Foto pemain di halaman pemain bola basket, di box score dan di pencarian, dari Wikimedia Commons dengan lisensi bebas. Fotografer dan lisensinya disebut di bawah setiap foto dan di halaman baru Kredit foto.",
+    "hi": "बास्केटबॉल खिलाड़ियों के पेज, बॉक्स स्कोर और सर्च में खिलाड़ियों की फ़ोटो, Wikimedia Commons से मुक्त लाइसेंस के तहत। हर फ़ोटो के नीचे और नए फ़ोटो क्रेडिट पेज पर फ़ोटोग्राफ़र और लाइसेंस का नाम दिया गया है।",
+    "pl": "Zdjęcia zawodników na stronach koszykarzy, w statystykach meczu i w wyszukiwarce, z Wikimedia Commons na wolnych licencjach. Autor i licencja są podane pod każdym zdjęciem i na nowej stronie Źródła zdjęć.",
+    "el": "Φωτογραφίες παικτών στις σελίδες παικτών μπάσκετ, στο box score και στην αναζήτηση, από το Wikimedia Commons με ελεύθερες άδειες. Ο φωτογράφος και η άδεια αναφέρονται κάτω από κάθε φωτογραφία και στη νέα σελίδα Πηγές φωτογραφιών.",
+    "ru": "Фото игроков на страницах баскетболистов, в статистике матча и в поиске, из Wikimedia Commons по свободным лицензиям. Автор и лицензия указаны под каждым фото и на новой странице \"Источники фото\"."
    }
   },
   {
@@ -118,7 +153,12 @@
     "de": "Spielerfotos im Tennis: auf der Matchseite, in den Listen, der Weltrangliste, der Suche und auf jeder Spielerseite, von Wikimedia Commons unter freien Lizenzen, mit Urheber und Lizenz.",
     "fr": "Des photos des joueurs au tennis : sur la page du match, dans les listes, le classement, la recherche et la page de chaque joueur, issues de Wikimedia Commons sous licences libres, avec l’auteur et la licence indiqués.",
     "it": "Foto dei giocatori nel tennis: nella pagina della partita, negli elenchi, nella classifica, nella ricerca e nella pagina di ogni giocatore, da Wikimedia Commons con licenze libere, con autore e licenza indicati.",
-    "tr": "Teniste oyuncu fotoğrafları: maç sayfasında, listelerde, sıralamada, aramada ve her oyuncunun sayfasında, Wikimedia Commons’tan özgür lisanslarla, fotoğrafçı ve lisans belirtilerek."
+    "tr": "Teniste oyuncu fotoğrafları: maç sayfasında, listelerde, sıralamada, aramada ve her oyuncunun sayfasında, Wikimedia Commons’tan özgür lisanslarla, fotoğrafçı ve lisans belirtilerek.",
+    "id": "Foto pemain di tenis: di halaman pertandingan, daftar pertandingan, peringkat, pencarian dan di setiap halaman pemain, dari Wikimedia Commons dengan lisensi bebas, dengan nama fotografer dan lisensinya.",
+    "hi": "टेनिस में खिलाड़ियों की फ़ोटो: मैच पेज, मैच सूचियों, रैंकिंग, सर्च और हर खिलाड़ी के पेज पर, Wikimedia Commons से मुक्त लाइसेंस के तहत, फ़ोटोग्राफ़र और लाइसेंस के नाम के साथ।",
+    "pl": "Zdjęcia zawodników w tenisie: na stronie meczu, na listach meczów, w rankingach, w wyszukiwarce i na stronie każdego zawodnika, z Wikimedia Commons na wolnych licencjach, z podanym autorem i licencją.",
+    "el": "Φωτογραφίες παικτών στο τένις: στη σελίδα αγώνα, στις λίστες αγώνων, στις κατατάξεις, στην αναζήτηση και σε κάθε σελίδα παίκτη, από το Wikimedia Commons με ελεύθερες άδειες, με το όνομα του φωτογράφου και την άδεια.",
+    "ru": "Фото игроков в теннисе: на странице матча, в списках матчей, рейтингах, поиске и на странице каждого игрока, из Wikimedia Commons по свободным лицензиям, с указанием автора и лицензии."
    }
   },
   {
@@ -133,7 +173,12 @@
     "de": "Wer getroffen hat, direkt unter dem Spielstand: Fußballtore nach Minute mit Eigentoren, Elfmetern und Roten Karten, der beste Werfer jedes Basketballteams und die Scoring-Spielzüge im American Football, live und nach dem Abpfiff. Tippe in jeder Liste auf den Pfeil eines laufenden oder beendeten Spiels, um dieselbe Zeile zu sehen.",
     "fr": "Qui a marqué, juste sous le score : les buts de football dans l’ordre des minutes, avec les buts contre son camp, les penalties et les cartons rouges, le meilleur marqueur de chaque équipe de basket et les actions de score au football américain, en direct et après le coup de sifflet final. Touchez la flèche d’un match en direct ou terminé dans n’importe quelle liste pour voir la même ligne.",
     "it": "Chi ha segnato, proprio sotto il punteggio: i gol del calcio in ordine di minuto, con autogol, rigori e cartellini rossi, il miglior marcatore di ogni squadra di basket e le azioni da punti nel football americano, in diretta e a fine partita. Tocca la freccia di una partita in corso o finita in qualsiasi elenco per vedere la stessa riga.",
-    "tr": "Kim attı, skorun hemen altında: futbolda dakika sırasıyla goller (kendi kalesine goller, penaltılar ve kırmızı kartlarla), her basketbol takımının en skoreri ve Amerikan futbolunda sayı getiren oyunlar, canlı ve maç bitince. Herhangi bir listede canlı ya da bitmiş bir maçın okuna dokunarak aynı satırı görebilirsiniz."
+    "tr": "Kim attı, skorun hemen altında: futbolda dakika sırasıyla goller (kendi kalesine goller, penaltılar ve kırmızı kartlarla), her basketbol takımının en skoreri ve Amerikan futbolunda sayı getiren oyunlar, canlı ve maç bitince. Herhangi bir listede canlı ya da bitmiş bir maçın okuna dokunarak aynı satırı görebilirsiniz.",
+    "id": "Siapa yang mencetak skor, tepat di bawah skor: gol sepak bola sesuai urutan menit dengan gol bunuh diri, penalti dan kartu merah, pencetak poin terbanyak tiap tim bola basket, dan scoring play di sepak bola Amerika, saat live dan setelah peluit akhir. Ketuk panah pada pertandingan yang selesai atau live di daftar mana pun untuk melihat baris yang sama.",
+    "hi": "किसने स्कोर किया, स्कोर के ठीक नीचे: फ़ुटबॉल के गोल मिनट के क्रम में, आत्मघाती गोल, पेनल्टी और रेड कार्ड के साथ, हर बास्केटबॉल टीम का टॉप स्कोरर, और अमेरिकन फ़ुटबॉल के स्कोरिंग प्ले, लाइव और अंतिम सीटी के बाद। किसी भी सूची में खत्म या लाइव मैच पर तीर दबाएँ और वही लाइन देखें।",
+    "pl": "Kto zdobył punkty, tuż pod wynikiem: gole w piłce nożnej w kolejności minut, z golami samobójczymi, rzutami karnymi i czerwonymi kartkami, najlepszy strzelec każdej drużyny koszykarskiej oraz akcje punktowe w futbolu amerykańskim, na żywo i po końcowym gwizdku. Stuknij strzałkę przy zakończonym lub trwającym meczu na dowolnej liście, aby zobaczyć tę samą linię.",
+    "el": "Ποιος σκόραρε, ακριβώς κάτω από το σκορ: τα γκολ του ποδοσφαίρου με σειρά λεπτών, με αυτογκόλ, πέναλτι και κόκκινες κάρτες, ο πρώτος σκόρερ κάθε ομάδας μπάσκετ και οι φάσεις πόντων στο αμερικανικό ποδόσφαιρο, ζωντανά και μετά το τελικό σφύριγμα. Πάτησε το βέλος σε έναν τελειωμένο ή ζωντανό αγώνα σε οποιαδήποτε λίστα για να δεις την ίδια γραμμή.",
+    "ru": "Кто забил — прямо под счётом: голы в футболе по минутам, с автоголами, пенальти и красными карточками, лучший бомбардир каждой баскетбольной команды и результативные розыгрыши в американском футболе, в прямом эфире и после финального свистка. Нажмите стрелку у завершённого или текущего матча в любом списке, чтобы увидеть ту же строку."
    }
   },
   {
@@ -148,7 +193,12 @@
     "de": "Live-Boxscore: Während des Spiels füllt sich der Boxscore laufend (Punkte, Würfe, Rebounds und Assists jedes Spielers, mit Teamsummen), und der beste Werfer jedes Teams steht unter dem Spielstand.",
     "fr": "Feuille de match en direct : pendant le match, l’onglet de la feuille de match se remplit au fil du jeu (points, tirs, rebonds et passes de chaque joueur, avec les totaux de l’équipe), et le meilleur marqueur de chaque équipe s’affiche sous le score.",
     "it": "Tabellino in diretta: durante la partita il tabellino si riempie man mano (punti, tiri, rimbalzi e assist di ogni giocatore, con i totali di squadra), e il miglior marcatore di ogni squadra compare sotto il punteggio.",
-    "tr": "Canlı maç istatistikleri: Maç sırasında istatistik sekmesi oynandıkça doluyor (her oyuncunun sayı, şut, ribaund ve asistleri, takım toplamlarıyla) ve her takımın en skoreri skorun altında görünüyor."
+    "tr": "Canlı maç istatistikleri: Maç sırasında istatistik sekmesi oynandıkça doluyor (her oyuncunun sayı, şut, ribaund ve asistleri, takım toplamlarıyla) ve her takımın en skoreri skorun altında görünüyor.",
+    "id": "Box score live: selama pertandingan, tab Box score kini terisi sambil berjalan (poin, tembakan, rebound, assist untuk setiap pemain, dengan total tim), dan pencetak poin terbanyak tiap tim tampil di bawah skor.",
+    "hi": "लाइव बॉक्स स्कोर: मैच के दौरान बॉक्स स्कोर टैब खेल के साथ भरता है (हर खिलाड़ी के अंक, शूटिंग, रिबाउंड, असिस्ट, टीम के कुल के साथ), और हर टीम का टॉप स्कोरर स्कोर के नीचे दिखता है।",
+    "pl": "Statystyki na żywo: w trakcie meczu zakładka Statystyki meczu wypełnia się na bieżąco (punkty, rzuty, zbiórki, asysty każdego zawodnika, z sumami drużyny), a najlepszy strzelec każdej drużyny jest widoczny pod wynikiem.",
+    "el": "Ζωντανό box score: κατά τη διάρκεια του αγώνα η καρτέλα Box score συμπληρώνεται όσο παίζεται (πόντοι, σουτ, ριμπάουντ, ασίστ για κάθε παίκτη, με σύνολα ομάδας), και ο πρώτος σκόρερ κάθε ομάδας φαίνεται κάτω από το σκορ.",
+    "ru": "Статистика в прямом эфире: во время матча вкладка \"Статистика матча\" заполняется по ходу игры (очки, броски, подборы, передачи каждого игрока, с итогами команды), а лучший бомбардир каждой команды показан под счётом."
    }
   },
   {
@@ -163,7 +213,12 @@
     "de": "Live-Spielerstatistiken: Während des Spiels zeigt der Spieler-Tab Pässe, Läufe und gefangene Bälle laufend an.",
     "fr": "Statistiques des joueurs en direct : pendant le match, l’onglet joueurs montre passes, courses et réceptions au fil du jeu.",
     "it": "Statistiche dei giocatori in diretta: durante la partita la scheda giocatori mostra passaggi, corse e ricezioni man mano che si gioca.",
-    "tr": "Canlı oyuncu istatistikleri: Maç sırasında oyuncular sekmesi pas, koşu ve top yakalama istatistiklerini maç ilerledikçe gösteriyor."
+    "tr": "Canlı oyuncu istatistikleri: Maç sırasında oyuncular sekmesi pas, koşu ve top yakalama istatistiklerini maç ilerledikçe gösteriyor.",
+    "id": "Statistik pemain live: selama pertandingan, tab Pemain menampilkan angka passing, rushing dan receiving seiring jalannya pertandingan.",
+    "hi": "लाइव खिलाड़ी आँकड़े: मैच के दौरान खिलाड़ी टैब पासिंग, रशिंग और रिसीविंग के आँकड़े खेल के साथ दिखाता है।",
+    "pl": "Statystyki zawodników na żywo: w trakcie meczu zakładka Zawodnicy pokazuje podania, biegi i przyjęcia na bieżąco.",
+    "el": "Ζωντανά στατιστικά παικτών: κατά τη διάρκεια του αγώνα η καρτέλα Παίκτες δείχνει πάσες, τρεξίματα και υποδοχές όσο προχωρά ο αγώνας.",
+    "ru": "Статистика игроков в прямом эфире: во время матча вкладка \"Игроки\" показывает пасы, выносы и приёмы по ходу игры."
    }
   },
   {
@@ -178,7 +233,12 @@
     "de": "SL Basketball 3.1: Das Tempo jedes Spiels wird jetzt richtig gelesen, auch wenn in einer Statistik ein Teil der Rebounds fehlt. Erwartete Ergebnisse und Gesamtpunkte liegen so auf dem echten Punkteniveau jeder Liga.",
     "fr": "SL Basketball 3.1 : le rythme de chaque match est désormais lu correctement même quand une feuille de match n'a pas tout le détail des rebonds, donc les scores et totaux attendus collent au vrai niveau de points de chaque ligue.",
     "it": "SL Basketball 3.1: il ritmo di ogni partita ora viene letto correttamente anche quando nelle statistiche manca parte dei rimbalzi, così punteggi e totali attesi corrispondono al vero livello di punti di ogni lega.",
-    "tr": "SL Basketball 3.1: Bir maç istatistiğinde ribaund ayrıntısı eksik olsa da her maçın temposu artık doğru okunuyor; beklenen skorlar ve toplamlar her ligin gerçek sayı düzeyine oturuyor."
+    "tr": "SL Basketball 3.1: Bir maç istatistiğinde ribaund ayrıntısı eksik olsa da her maçın temposu artık doğru okunuyor; beklenen skorlar ve toplamlar her ligin gerçek sayı düzeyine oturuyor.",
+    "id": "SL Basketball 3.1: tempo setiap pertandingan kini dibaca dengan benar saat box score tidak memiliki sebagian angka rebound, sehingga skor yang diharapkan dan total sesuai dengan level skor nyata setiap liga.",
+    "hi": "SL Basketball 3.1: जब बॉक्स स्कोर में रिबाउंड के कुछ आँकड़े न हों, तब भी हर मैच की रफ़्तार अब सही पढ़ी जाती है, ताकि अपेक्षित स्कोर और कुल हर लीग के असली स्कोरिंग स्तर पर रहें।",
+    "pl": "SL Basketball 3.1: tempo każdego meczu jest teraz odczytywane poprawnie, gdy w statystykach brakuje części zbiórek, więc oczekiwane wyniki i sumy punktów odpowiadają prawdziwemu poziomowi punktowemu każdej ligi.",
+    "el": "SL Basketball 3.1: ο ρυθμός κάθε αγώνα διαβάζεται πλέον σωστά όταν από το box score λείπει μέρος των ριμπάουντ, έτσι τα αναμενόμενα σκορ και τα σύνολα πόντων αντιστοιχούν στο πραγματικό επίπεδο σκοραρίσματος κάθε λίγκας.",
+    "ru": "SL Basketball 3.1: темп каждого матча теперь читается правильно, даже когда в статистике не хватает части подборов, поэтому ожидаемый счёт и тоталы соответствуют реальному уровню результативности каждой лиги."
    }
   },
   {
@@ -193,7 +253,12 @@
     "de": "Weitere Prognosen werden strenger geprüft: Eine zusätzliche Prognose wird nur veröffentlicht, wenn sie in jeder gut gefüllten 10-%-Stufe unseres Tests mit dem Ergebnis übereinstimmte, und ihre Genauigkeit darf nie unter die zuvor gezeigte Version fallen.",
     "fr": "Les pronostics supplémentaires sont vérifiés plus strictement : un pronostic n'est publié que s'il a correspondu aux résultats dans chaque tranche de 10 % bien remplie de notre test, et sa précision ne peut jamais tomber sous celle de la version affichée avant.",
     "it": "I pronostici aggiuntivi sono controllati in modo più severo: uno diventa pubblico solo se ha rispecchiato i risultati in ogni fascia del 10% con dati sufficienti del nostro test, e la sua precisione non può mai scendere sotto la versione mostrata prima.",
-    "tr": "Ek tahminler daha sıkı kontrol ediliyor: Bir ek tahmin ancak testimizin yeterli veriye sahip her %10'luk diliminde gerçekleşenle örtüştüyse yayınlanıyor ve isabeti daha önce gösterilen sürümün altına asla düşemiyor."
+    "tr": "Ek tahminler daha sıkı kontrol ediliyor: Bir ek tahmin ancak testimizin yeterli veriye sahip her %10'luk diliminde gerçekleşenle örtüştüyse yayınlanıyor ve isabeti daha önce gösterilen sürümün altına asla düşemiyor.",
+    "id": "Lebih banyak prediksi diperiksa lebih ketat: prediksi tambahan baru tampil publik jika sesuai dengan yang terjadi di setiap langkah 10% yang cukup terisi dalam uji kami, dan akurasinya tidak boleh turun di bawah versi yang tampil sebelumnya.",
+    "hi": "ज़्यादा भविष्यवाणियाँ ज़्यादा सख्ती से जाँची जाती हैं: कोई अतिरिक्त भविष्यवाणी तभी सार्वजनिक होती है जब वह हमारे टेस्ट के हर भरे-पूरे 10% हिस्से में असल नतीजों से मेल खाए, और उसकी सटीकता पहले दिखाए गए संस्करण से कभी नीचे नहीं जा सकती।",
+    "pl": "Więcej prognoz jest sprawdzanych surowiej: dodatkowa prognoza staje się publiczna tylko wtedy, gdy zgadzała się z rzeczywistością w każdym dobrze wypełnionym 10-procentowym przedziale naszego testu, a jej trafność nigdy nie może spaść poniżej wersji pokazywanej wcześniej.",
+    "el": "Περισσότερες προβλέψεις ελέγχονται πιο αυστηρά: μια επιπλέον πρόβλεψη γίνεται δημόσια μόνο αν συμφώνησε με όσα έγιναν σε κάθε καλά γεμάτο βήμα 10% του τεστ μας, και η ακρίβειά της δεν μπορεί ποτέ να πέσει κάτω από την έκδοση που εμφανιζόταν πριν.",
+    "ru": "Больше прогнозов проверяется строже: дополнительный прогноз становится публичным, только если он совпал с реальностью в каждом хорошо заполненном 10-процентном шаге нашего теста, и его точность никогда не может опуститься ниже версии, показанной раньше."
    }
   },
   {
@@ -208,7 +273,12 @@
     "de": "Neue Seiten erklären, wie jedes unserer Modelle funktioniert, mit seiner Trefferquote in jedem Wettbewerb. Dieses Änderungsprotokoll listet jede Änderung, die neueste zuerst.",
     "fr": "De nouvelles pages expliquent comment fonctionne chacun de nos modèles, avec sa précision dans chaque compétition. Ce journal des modifications liste chaque changement, du plus récent au plus ancien.",
     "it": "Nuove pagine spiegano come funziona ciascuno dei nostri modelli, con la sua precisione in ogni competizione. Questo registro delle modifiche elenca ogni cambiamento, dal più recente.",
-    "tr": "Yeni sayfalar her modelimizin nasıl çalıştığını ve her turnuvadaki isabet oranını anlatıyor. Bu değişiklik günlüğü her değişikliği en yeniden başlayarak listeliyor."
+    "tr": "Yeni sayfalar her modelimizin nasıl çalıştığını ve her turnuvadaki isabet oranını anlatıyor. Bu değişiklik günlüğü her değişikliği en yeniden başlayarak listeliyor.",
+    "id": "Halaman baru menjelaskan cara kerja setiap model kami, dengan akurasinya di setiap kompetisi. Catatan perubahan ini mencantumkan setiap perubahan, dari yang terbaru.",
+    "hi": "नए पेज बताते हैं कि हमारा हर मॉडल कैसे काम करता है, हर प्रतियोगिता में उसकी सटीकता के साथ। यह बदलावों की सूची हर बदलाव दिखाती है, सबसे नया पहले।",
+    "pl": "Nowe strony wyjaśniają, jak działa każdy z naszych modeli, z jego trafnością w każdych rozgrywkach. Ten dziennik zmian wymienia każdą zmianę, od najnowszej.",
+    "el": "Νέες σελίδες εξηγούν πώς λειτουργεί κάθε μοντέλο μας, με την ακρίβειά του σε κάθε διοργάνωση. Αυτό το ημερολόγιο αλλαγών καταγράφει κάθε αλλαγή, από την πιο πρόσφατη.",
+    "ru": "Новые страницы объясняют, как работает каждая наша модель, с её точностью в каждом турнире. Этот список изменений показывает каждое изменение, сначала новые."
    }
   },
   {
@@ -223,7 +293,12 @@
     "de": "Jeder Wettbewerb zählt jetzt in unserer öffentlichen Bilanz, in jeder Sportart. Nichts wird mehr als \"im Test\" ausgelassen.",
     "fr": "Toutes les compétitions comptent désormais dans notre bilan public, dans tous les sports. Plus rien n'est écarté comme \"en test\".",
     "it": "Ora ogni competizione conta nel nostro storico pubblico, in ogni sport. Niente viene escluso come \"in prova\".",
-    "tr": "Artık her spor dalında her turnuva herkese açık sicilimizde sayılıyor. Hiçbir şey \"testte\" diye dışarıda bırakılmıyor."
+    "tr": "Artık her spor dalında her turnuva herkese açık sicilimizde sayılıyor. Hiçbir şey \"testte\" diye dışarıda bırakılmıyor.",
+    "id": "Setiap kompetisi kini dihitung dalam catatan publik kami, di setiap olahraga. Tidak ada yang dikecualikan sebagai \"dalam pengujian\".",
+    "hi": "हर प्रतियोगिता अब हर खेल में हमारे सार्वजनिक रिकॉर्ड में गिनी जाती है। \"टेस्टिंग में\" कहकर कुछ भी बाहर नहीं रखा गया।",
+    "pl": "Każde rozgrywki liczą się teraz do naszego publicznego bilansu, w każdym sporcie. Nic nie jest pomijane jako \"w testach\".",
+    "el": "Κάθε διοργάνωση μετράει πλέον στο δημόσιο ρεκόρ μας, σε κάθε άθλημα. Τίποτα δεν μένει εκτός ως \"σε δοκιμή\".",
+    "ru": "Каждый турнир теперь учитывается в нашей публичной статистике, в каждом виде спорта. Ничего не исключено как \"на тестировании\"."
    }
   },
   {
@@ -238,7 +313,12 @@
     "de": "Die Tabellen zeigen jetzt eine Tabelle pro Conference oder Gruppe, die Divisions hinter einem Umschalter. Vorbereitungstabellen verschwinden, sobald die Saison beginnt.",
     "fr": "Les classements affichent désormais un tableau par conférence ou groupe, avec les divisions derrière un bouton. Les tableaux de présaison disparaissent dès le début de la saison.",
     "it": "Le classifiche mostrano ora una tabella per conference o girone, con le division dietro un selettore. Le tabelle di pre-stagione spariscono quando inizia la stagione.",
-    "tr": "Puan durumları artık her konferans veya grup için ayrı bir tablo gösteriyor, bölümler bir düğmenin arkasında. Hazırlık dönemi tabloları sezon başlayınca kayboluyor."
+    "tr": "Puan durumları artık her konferans veya grup için ayrı bir tablo gösteriyor, bölümler bir düğmenin arkasında. Hazırlık dönemi tabloları sezon başlayınca kayboluyor.",
+    "id": "Klasemen kini menampilkan satu tabel per konferensi atau grup, dengan divisi di balik tombol. Tabel pramusim hilang begitu musim dimulai.",
+    "hi": "अंक तालिका अब हर कॉन्फ़्रेंस या ग्रुप के लिए एक तालिका दिखाती है, डिवीज़न एक स्विच के पीछे। सीज़न शुरू होते ही प्री-सीज़न तालिकाएँ हट जाती हैं।",
+    "pl": "Tabele pokazują teraz jedną tabelę na konferencję lub grupę, z dywizjami pod przełącznikiem. Tabele przedsezonowe znikają, gdy zaczyna się sezon.",
+    "el": "Η βαθμολογία δείχνει πλέον έναν πίνακα ανά περιφέρεια ή όμιλο, με τις κατηγορίες πίσω από έναν διακόπτη. Οι πίνακες προετοιμασίας εξαφανίζονται μόλις ξεκινήσει η σεζόν.",
+    "ru": "Таблицы теперь показывают отдельную таблицу для каждой конференции или группы, а дивизионы — за переключателем. Предсезонные таблицы исчезают, как только начинается сезон."
    }
   },
   {
@@ -253,7 +333,12 @@
     "de": "Verschobene, verlegte oder nie gespielte Partien werden jetzt gewertet oder mit Begründung annulliert, damit keine ungewertet in unserer Bilanz bleibt.",
     "fr": "Les matchs reportés, déplacés ou jamais joués sont désormais réglés ou annulés avec un motif, pour qu'aucun ne reste sans résultat dans notre bilan.",
     "it": "Le partite rinviate, spostate o mai giocate ora vengono chiuse o annullate con un motivo, così nessuna resta senza esito nel nostro storico.",
-    "tr": "Ertelenen, taşınan ya da hiç oynanmayan maçlar artık sonuçlandırılıyor veya bir gerekçeyle geçersiz sayılıyor; böylece sicilimizde puanlanmamış maç kalmıyor."
+    "tr": "Ertelenen, taşınan ya da hiç oynanmayan maçlar artık sonuçlandırılıyor veya bir gerekçeyle geçersiz sayılıyor; böylece sicilimizde puanlanmamış maç kalmıyor.",
+    "id": "Pertandingan yang ditunda, dipindah atau tidak pernah dimainkan kini diselesaikan atau ditandai batal dengan alasannya, jadi tidak ada yang tertinggal tanpa nilai di catatan kami.",
+    "hi": "जो मैच स्थगित हुए, खिसकाए गए या कभी नहीं खेले गए, वे अब कारण के साथ निपटाए जाते हैं या रद्द माने जाते हैं, ताकि हमारे रिकॉर्ड में कोई भी बिना नतीजे के न रहे।",
+    "pl": "Mecze przełożone, przeniesione lub nigdy nierozegrane są teraz rozliczane albo oznaczane jako nieważne z podaniem powodu, więc żaden nie zostaje bez oceny w naszym bilansie.",
+    "el": "Οι αγώνες που αναβλήθηκαν, μετακινήθηκαν ή δεν έγιναν ποτέ πλέον κλείνουν ή σημειώνονται ως άκυροι με αιτιολογία, ώστε κανένας να μη μένει χωρίς αποτέλεσμα στο ρεκόρ μας.",
+    "ru": "Матчи, которые перенесли, сдвинули или так и не сыграли, теперь закрываются или отмечаются как аннулированные с указанием причины, так что ни один не остаётся без оценки в нашей статистике."
    }
   },
   {
@@ -268,7 +353,12 @@
     "de": "Tennis ist da: Matches, Spieler, Turniere und Ranglisten, mit Prognosen für ATP-, WTA-, Challenger- und Grand-Slam-Einzel.",
     "fr": "Le tennis arrive : matchs, joueurs, tournois et classements, avec des prédictions pour les simples ATP, WTA, Challenger et Grand Chelem.",
     "it": "Arriva il tennis: partite, giocatori, tornei e classifiche, con previsioni per i singolari ATP, WTA, Challenger e Slam.",
-    "tr": "Tenis geldi: maçlar, oyuncular, turnuvalar ve sıralamalar; ATP, WTA, Challenger ve Grand Slam tekler için tahminlerle."
+    "tr": "Tenis geldi: maçlar, oyuncular, turnuvalar ve sıralamalar; ATP, WTA, Challenger ve Grand Slam tekler için tahminlerle.",
+    "id": "Tenis hadir: pertandingan, pemain, turnamen dan peringkat, dengan prediksi untuk tunggal ATP, WTA, Challenger dan Grand Slam.",
+    "hi": "टेनिस आ गया: मैच, खिलाड़ी, टूर्नामेंट और रैंकिंग, ATP, WTA, Challenger और ग्रैंड स्लैम सिंगल्स की भविष्यवाणियों के साथ।",
+    "pl": "Nadchodzi tenis: mecze, zawodnicy, turnieje i rankingi, z prognozami dla singla ATP, WTA, Challenger i Wielkiego Szlema.",
+    "el": "Έρχεται το τένις: αγώνες, παίκτες, τουρνουά και κατατάξεις, με προβλέψεις για τα μονά ATP, WTA, Challenger και Grand Slam.",
+    "ru": "Теннис на сайте: матчи, игроки, турниры и рейтинги, с прогнозами для одиночных матчей ATP, WTA, Challenger и турниров Большого шлема."
    }
   },
   {
@@ -283,7 +373,12 @@
     "de": "Jedes Spiel bekommt jetzt eine Prognose. Ein Team, das neu in einer Liga ist, startet mit einer fairen Schätzung, statt ausgelassen zu werden.",
     "fr": "Chaque match a désormais une prédiction. Une équipe nouvelle dans une ligue part d'une estimation juste au lieu d'être ignorée.",
     "it": "Ora ogni partita ha una previsione. Una squadra nuova in un campionato parte da una stima equa invece di essere saltata.",
-    "tr": "Artık her maçın bir tahmini var. Bir lige yeni gelen takım atlanmak yerine makul bir tahminle başlıyor."
+    "tr": "Artık her maçın bir tahmini var. Bir lige yeni gelen takım atlanmak yerine makul bir tahminle başlıyor.",
+    "id": "Setiap pertandingan kini mendapat prediksi. Tim yang baru di sebuah liga dimulai dari perkiraan yang wajar alih-alih dilewati.",
+    "hi": "अब हर मैच की भविष्यवाणी होती है। किसी लीग में नई टीम को छोड़ा नहीं जाता, वह एक उचित अनुमान से शुरू होती है।",
+    "pl": "Każdy mecz dostaje teraz prognozę. Drużyna nowa w lidze startuje od uczciwego oszacowania, zamiast być pomijana.",
+    "el": "Κάθε αγώνας παίρνει πλέον πρόβλεψη. Μια ομάδα νέα σε μια λίγκα ξεκινά από μια λογική εκτίμηση αντί να παραλείπεται.",
+    "ru": "Теперь у каждого матча есть прогноз. Новая в лиге команда начинает с честной оценки, а не пропускается."
    }
   },
   {
@@ -298,7 +393,12 @@
     "de": "Unsere Modelle haben jetzt öffentliche Namen, die unter jeder Prognose stehen: SL Football 3.0, SL Basketball 3.0 und SL American Football 1.0.",
     "fr": "Nos modèles ont désormais un nom public, affiché sous chaque prédiction : SL Football 3.0, SL Basketball 3.0 et SL American Football 1.0.",
     "it": "I nostri modelli ora hanno un nome pubblico, mostrato sotto ogni previsione: SL Football 3.0, SL Basketball 3.0 e SL American Football 1.0.",
-    "tr": "Modellerimizin artık her tahminin altında görünen herkese açık adları var: SL Football 3.0, SL Basketball 3.0 ve SL American Football 1.0."
+    "tr": "Modellerimizin artık her tahminin altında görünen herkese açık adları var: SL Football 3.0, SL Basketball 3.0 ve SL American Football 1.0.",
+    "id": "Model kami kini punya nama publik, tampil di bawah setiap prediksi: SL Football 3.0, SL Basketball 3.0 dan SL American Football 1.0.",
+    "hi": "हमारे मॉडलों के अब सार्वजनिक नाम हैं, जो हर भविष्यवाणी के नीचे दिखते हैं: SL Football 3.0, SL Basketball 3.0 और SL American Football 1.0.",
+    "pl": "Nasze modele mają teraz publiczne nazwy, widoczne pod każdą prognozą: SL Football 3.0, SL Basketball 3.0 i SL American Football 1.0.",
+    "el": "Τα μοντέλα μας έχουν πλέον δημόσια ονόματα, που φαίνονται κάτω από κάθε πρόβλεψη: SL Football 3.0, SL Basketball 3.0 και SL American Football 1.0.",
+    "ru": "У наших моделей теперь есть публичные названия, они показаны под каждым прогнозом: SL Football 3.0, SL Basketball 3.0 и SL American Football 1.0."
    }
   },
   {
@@ -313,7 +413,12 @@
     "de": "Eine Plausibilitätsprüfung für enge Spiele: Ein Team mit klar schlechterer Form, Tabellenplatz und Bilanz im direkten Vergleich wird nie zum Favoriten.",
     "fr": "Un contrôle de bon sens pour les matchs serrés : une équipe nettement moins bien en forme, au classement et en face-à-face n'est jamais la favorite.",
     "it": "Un controllo di buon senso per le partite equilibrate: una squadra chiaramente peggiore per forma, classifica e scontri diretti non è mai la favorita.",
-    "tr": "Dengeli maçlar için sağduyu kontrolü: formu, sıralaması ve aralarındaki maçları açıkça daha kötü olan takım asla favori yapılmıyor."
+    "tr": "Dengeli maçlar için sağduyu kontrolü: formu, sıralaması ve aralarındaki maçları açıkça daha kötü olan takım asla favori yapılmıyor.",
+    "id": "Cek akal sehat untuk pertandingan ketat: tim dengan performa, posisi klasemen dan head-to-head yang jelas lebih buruk tidak pernah dijadikan favorit.",
+    "hi": "करीबी मैचों के लिए समझदारी की जाँच: जिस टीम की फ़ॉर्म, तालिका में जगह और आमने-सामने का रिकॉर्ड साफ़ तौर पर खराब हो, उसे कभी फ़ेवरेट नहीं बनाया जाता।",
+    "pl": "Kontrola zdrowego rozsądku przy wyrównanych meczach: drużyna z wyraźnie gorszą formą, miejscem w tabeli i bilansem bezpośrednich meczów nigdy nie zostaje faworytem.",
+    "el": "Έλεγχος κοινής λογικής για τους κλειστούς αγώνες: μια ομάδα με σαφώς χειρότερη φόρμα, θέση στη βαθμολογία και αναμετρήσεις δεν γίνεται ποτέ φαβορί.",
+    "ru": "Проверка здравым смыслом для равных матчей: команда с явно худшей формой, местом в таблице и личными встречами никогда не становится фаворитом."
    }
   },
   {
@@ -328,7 +433,12 @@
     "de": "American Football ist eine Sportart auf der Seite: NFL- und College-Spiele zusammen, mit einem Umschalter dazwischen.",
     "fr": "Le football américain devient un seul sport sur le site : matchs NFL et universitaires ensemble, avec un bouton pour passer de l'un à l'autre.",
     "it": "Il football americano è un solo sport sul sito: partite NFL e college insieme, con un selettore tra le due.",
-    "tr": "Amerikan futbolu sitede tek bir spor: NFL ve kolej maçları bir arada, aralarında geçiş düğmesiyle."
+    "tr": "Amerikan futbolu sitede tek bir spor: NFL ve kolej maçları bir arada, aralarında geçiş düğmesiyle.",
+    "id": "Sepak bola Amerika jadi satu olahraga di situs: pertandingan NFL dan kampus bersama, dengan tombol untuk beralih.",
+    "hi": "अमेरिकन फ़ुटबॉल साइट पर एक ही खेल है: NFL और कॉलेज के मैच एक साथ, उनके बीच एक स्विच के साथ।",
+    "pl": "Futbol amerykański to na stronie jeden sport: mecze NFL i uniwersyteckie razem, z przełącznikiem między nimi.",
+    "el": "Το αμερικανικό ποδόσφαιρο είναι ένα άθλημα στον ιστότοπο: αγώνες NFL και κολεγίων μαζί, με διακόπτη ανάμεσά τους.",
+    "ru": "Американский футбол — один вид спорта на сайте: матчи NFL и студенческие матчи вместе, с переключателем между ними."
    }
   },
   {
@@ -343,7 +453,12 @@
     "de": "Jeder Team-, Spieler- und Wettbewerbsname verlinkt jetzt auf seine eigene Seite.",
     "fr": "Chaque nom d'équipe, de joueur et de compétition mène désormais à sa propre page.",
     "it": "Ogni nome di squadra, giocatore e competizione ora porta alla sua pagina.",
-    "tr": "Her takım, oyuncu ve turnuva adı artık kendi sayfasına bağlanıyor."
+    "tr": "Her takım, oyuncu ve turnuva adı artık kendi sayfasına bağlanıyor.",
+    "id": "Setiap nama tim, pemain dan kompetisi kini menautkan ke halamannya sendiri.",
+    "hi": "हर टीम, खिलाड़ी और प्रतियोगिता का नाम अब उसके अपने पेज से जुड़ा है।",
+    "pl": "Każda nazwa drużyny, zawodnika i rozgrywek prowadzi teraz do własnej strony.",
+    "el": "Κάθε όνομα ομάδας, παίκτη και διοργάνωσης οδηγεί πλέον στη δική του σελίδα.",
+    "ru": "Каждое название команды, игрока и турнира теперь ведёт на свою страницу."
    }
   },
   {
@@ -358,7 +473,12 @@
     "de": "Spielseiten zeigen die wahrscheinliche Startfünf, und die Zahlen ändern sich nach dem NBA-Verletzungsbericht.",
     "fr": "Les pages de match montrent le cinq de départ probable, et les chiffres se mettent à jour après le rapport des blessures NBA.",
     "it": "Le pagine partita mostrano il probabile quintetto base, e i numeri si aggiornano dopo il bollettino infortuni NBA.",
-    "tr": "Maç sayfaları muhtemel ilk beşi gösteriyor ve rakamlar NBA sakatlık raporundan sonra güncelleniyor."
+    "tr": "Maç sayfaları muhtemel ilk beşi gösteriyor ve rakamlar NBA sakatlık raporundan sonra güncelleniyor.",
+    "id": "Halaman pertandingan menampilkan lima pemain awal yang mungkin, dan angkanya diperbarui setelah laporan cedera NBA.",
+    "hi": "मैच पेज संभावित शुरुआती पाँच खिलाड़ी दिखाते हैं, और NBA की चोट रिपोर्ट के बाद आँकड़े अपडेट होते हैं।",
+    "pl": "Strony meczów pokazują prawdopodobną pierwszą piątkę, a liczby aktualizują się po raporcie kontuzji NBA.",
+    "el": "Οι σελίδες αγώνων δείχνουν την πιθανή αρχική πεντάδα και οι αριθμοί ενημερώνονται μετά την αναφορά τραυματισμών του NBA.",
+    "ru": "Страницы матчей показывают вероятную стартовую пятёрку, а цифры обновляются после отчёта о травмах NBA."
    }
   },
   {
@@ -373,7 +493,12 @@
     "de": "Spielseiten bekommen eine Live-Siegchance, ein erwartetes Ergebnis und einen Verlaufsgraphen, dazu Tabs für Tabelle und Spielplan.",
     "fr": "Les pages de match ont une chance de victoire en direct, un score projeté et une courbe d'évolution, plus des onglets classement et calendrier.",
     "it": "Le pagine partita hanno la probabilità di vittoria in diretta, il punteggio previsto e un grafico dell'andamento, più le schede classifica e calendario.",
-    "tr": "Maç sayfalarına canlı kazanma şansı, öngörülen skor ve dalgalanma grafiği, ayrıca puan durumu ve fikstür sekmeleri geldi."
+    "tr": "Maç sayfalarına canlı kazanma şansı, öngörülen skor ve dalgalanma grafiği, ayrıca puan durumu ve fikstür sekmeleri geldi.",
+    "id": "Halaman pertandingan mendapat peluang menang live, skor proyeksi dan grafik ayunan, plus tab klasemen dan jadwal.",
+    "hi": "मैच पेजों पर लाइव जीत का मौका, अनुमानित स्कोर और उतार-चढ़ाव चार्ट, साथ में अंक तालिका और शेड्यूल टैब।",
+    "pl": "Strony meczów dostają szansę na wygraną na żywo, przewidywany wynik i wykres zmian, a także zakładki z tabelą i terminarzem.",
+    "el": "Οι σελίδες αγώνων αποκτούν ζωντανή πιθανότητα νίκης, προβλεπόμενο σκορ και γράφημα διακυμάνσεων, καθώς και καρτέλες βαθμολογίας και προγράμματος.",
+    "ru": "На страницах матчей появились шанс на победу в реальном времени, прогнозируемый счёт и график изменений, а также вкладки с таблицей и расписанием."
    }
   },
   {
@@ -388,7 +513,12 @@
     "de": "Neue Premium- und Pro-Pläne sowie Pakete mit einzelnen Tipps, in jeder Sportart.",
     "fr": "Nouvelles formules Premium et Pro, et packs de prédictions à l'unité, dans tous les sports.",
     "it": "Nuovi piani Premium e Pro, e pacchetti di previsioni singole, in ogni sport.",
-    "tr": "Her spor dalında yeni Premium ve Pro planları ile tekli tahmin paketleri."
+    "tr": "Her spor dalında yeni Premium ve Pro planları ile tekli tahmin paketleri.",
+    "id": "Paket Premium dan Pro baru, serta paket pilihan satuan, di setiap olahraga.",
+    "hi": "हर खेल में नए Premium और Pro प्लान, और एक-एक पिक के पैक।",
+    "pl": "Nowe plany Premium i Pro oraz pakiety pojedynczych typów, w każdym sporcie.",
+    "el": "Νέα πακέτα Premium και Pro, και πακέτα μεμονωμένων επιλογών, σε κάθε άθλημα.",
+    "ru": "Новые планы Premium и Pro и пакеты отдельных выборов, в каждом виде спорта."
    }
   },
   {
@@ -403,7 +533,12 @@
     "de": "Prognosen für jedes NFL-Spiel und ab demselben Tag für College Football: Teamstärke, Quarterbacks, Effizienz, Heimvorteil und Pausen.",
     "fr": "Des prédictions pour chaque match NFL, et pour le football universitaire dès le même jour : force de l'équipe, quarterbacks, efficacité, avantage du terrain et repos.",
     "it": "Previsioni per ogni partita NFL, e per il football universitario dallo stesso giorno: forza della squadra, quarterback, efficienza, fattore campo e riposo.",
-    "tr": "Her NFL maçı için ve aynı günden itibaren kolej futbolu için tahminler: takım gücü, oyun kurucular, verimlilik, saha avantajı ve dinlenme."
+    "tr": "Her NFL maçı için ve aynı günden itibaren kolej futbolu için tahminler: takım gücü, oyun kurucular, verimlilik, saha avantajı ve dinlenme.",
+    "id": "Prediksi untuk setiap pertandingan NFL, dan untuk sepak bola kampus sejak hari yang sama: kekuatan tim, quarterback, efisiensi, keuntungan kandang dan istirahat.",
+    "hi": "हर NFL मैच की भविष्यवाणियाँ, और उसी दिन से कॉलेज फ़ुटबॉल की भी: टीम की ताकत, क्वार्टरबैक, दक्षता, घरेलू मैदान और आराम।",
+    "pl": "Prognozy na każdy mecz NFL, a od tego samego dnia także na futbol uniwersytecki: siła drużyny, rozgrywający, skuteczność, atut własnego boiska i odpoczynek.",
+    "el": "Προβλέψεις για κάθε αγώνα NFL και, από την ίδια μέρα, για το κολεγιακό αμερικανικό ποδόσφαιρο: δύναμη ομάδας, quarterback, αποτελεσματικότητα, έδρα και ξεκούραση.",
+    "ru": "Прогнозы на каждый матч NFL, а с того же дня и на студенческий футбол: сила команды, квотербеки, эффективность, фактор своего поля и отдых."
    }
   },
   {
@@ -418,7 +553,12 @@
     "de": "Unser empfohlener Tipp ist jetzt die Doppelte Chance: die zwei wahrscheinlichsten Ergebnisse zusammen. Ab 85% ist es ein starker Tipp.",
     "fr": "Notre prédiction recommandée est désormais la double chance : les deux résultats les plus probables ensemble. 85% ou plus, c'est une prédiction forte.",
     "it": "La nostra previsione consigliata è ora la doppia chance: i due risultati più probabili insieme. Dall'85% in su è una previsione forte.",
-    "tr": "Önerdiğimiz tahmin artık çifte şans: en olası iki sonuç bir arada. %85 ve üzeri güçlü tahmin."
+    "tr": "Önerdiğimiz tahmin artık çifte şans: en olası iki sonuç bir arada. %85 ve üzeri güçlü tahmin.",
+    "id": "Pilihan yang kami rekomendasikan kini peluang ganda: dua hasil paling mungkin digabung. 85% atau lebih adalah pilihan kuat.",
+    "hi": "हमारा सुझाया पिक अब डबल चांस है: दो सबसे संभावित नतीजे एक साथ। 85% या उससे ज़्यादा मज़बूत पिक है।",
+    "pl": "Nasz polecany typ to teraz podwójna szansa: dwa najbardziej prawdopodobne wyniki razem. 85% lub więcej to mocny typ.",
+    "el": "Η προτεινόμενη επιλογή μας είναι πλέον η διπλή ευκαιρία: τα δύο πιθανότερα αποτελέσματα μαζί. Από 85% και πάνω είναι δυνατή επιλογή.",
+    "ru": "Наш рекомендуемый выбор теперь — двойной шанс: два самых вероятных исхода вместе. 85% и выше — сильный выбор."
    }
   },
   {
@@ -433,7 +573,12 @@
     "de": "Einfache Leitfäden (auf Englisch) erklären, wie man unsere Zahlen liest, dazu wöchentliche Prognoseseiten für die großen Ligen.",
     "fr": "Des guides simples (en anglais) expliquent comment lire nos chiffres, et des pages hebdomadaires de prédictions couvrent les grands championnats.",
     "it": "Guide semplici (in inglese) spiegano come leggere i nostri numeri, e ci sono pagine settimanali di previsioni per i grandi campionati.",
-    "tr": "Sade rehberler (İngilizce) rakamlarımızı nasıl okuyacağınızı anlatıyor; büyük ligler için haftalık tahmin sayfaları da var."
+    "tr": "Sade rehberler (İngilizce) rakamlarımızı nasıl okuyacağınızı anlatıyor; büyük ligler için haftalık tahmin sayfaları da var.",
+    "id": "Panduan dengan bahasa sederhana menjelaskan cara membaca angka kami, plus halaman prediksi mingguan untuk liga-liga besar.",
+    "hi": "आसान भाषा की गाइड बताती हैं कि हमारे आँकड़े कैसे पढ़ें, और बड़ी लीगों के लिए साप्ताहिक भविष्यवाणी पेज।",
+    "pl": "Proste poradniki wyjaśniają, jak czytać nasze liczby, a do tego cotygodniowe strony z prognozami dla dużych lig.",
+    "el": "Απλοί οδηγοί εξηγούν πώς να διαβάζεις τους αριθμούς μας, και εβδομαδιαίες σελίδες προβλέψεων για τις μεγάλες λίγκες.",
+    "ru": "Простые руководства объясняют, как читать наши цифры, а для крупных лиг есть еженедельные страницы прогнозов."
    }
   },
   {
@@ -448,7 +593,12 @@
     "de": "Live-Siegchance und erwartetes Endergebnis während der Basketballspiele.",
     "fr": "Chance de victoire en direct et score final projeté pendant les matchs de basket.",
     "it": "Probabilità di vittoria in diretta e punteggio finale previsto durante le partite di basket.",
-    "tr": "Basketbol maçları sırasında canlı kazanma şansı ve öngörülen maç sonu skoru."
+    "tr": "Basketbol maçları sırasında canlı kazanma şansı ve öngörülen maç sonu skoru.",
+    "id": "Peluang menang live dan proyeksi skor akhir selama pertandingan bola basket.",
+    "hi": "बास्केटबॉल मैचों के दौरान लाइव जीत का मौका और अनुमानित अंतिम स्कोर।",
+    "pl": "Szansa na wygraną na żywo i przewidywany wynik końcowy w trakcie meczów koszykówki.",
+    "el": "Ζωντανή πιθανότητα νίκης και προβλεπόμενο τελικό σκορ κατά τη διάρκεια των αγώνων μπάσκετ.",
+    "ru": "Шанс на победу в реальном времени и прогнозируемый итоговый счёт во время баскетбольных матчей."
    }
   },
   {
@@ -463,7 +613,12 @@
     "de": "Meine Tipps: Speichere deine eigenen Tipps und verfolge deine persönliche Bilanz.",
     "fr": "Mes prédictions : enregistrez vos propres choix et suivez votre bilan personnel.",
     "it": "Le mie previsioni: salva le tue scelte e segui il tuo storico personale.",
-    "tr": "Tahminlerim: kendi tahminlerinizi kaydedin ve kişisel sicilinizi takip edin."
+    "tr": "Tahminlerim: kendi tahminlerinizi kaydedin ve kişisel sicilinizi takip edin.",
+    "id": "Pilihan saya: simpan pilihan Anda sendiri dan ikuti catatan pribadi Anda.",
+    "hi": "मेरे पिक: अपने खुद के पिक सहेजें और अपना निजी रिकॉर्ड देखें।",
+    "pl": "Moje typy: zapisuj własne typy i śledź swój osobisty bilans.",
+    "el": "Οι επιλογές μου: αποθήκευσε τις δικές σου επιλογές και παρακολούθησε το προσωπικό σου ρεκόρ.",
+    "ru": "Мои выборы: сохраняйте свои выборы и следите за своей личной статистикой."
    }
   },
   {
@@ -478,7 +633,12 @@
     "de": "Live-Siegchance während Fußballspielen, aktualisiert mit Spielstand und Minute.",
     "fr": "Chance de victoire en direct pendant les matchs de football, mise à jour avec le score et la minute.",
     "it": "Probabilità di vittoria in diretta durante le partite di calcio, aggiornata con il risultato e il minuto.",
-    "tr": "Futbol maçları sırasında skora ve dakikaya göre güncellenen canlı kazanma şansı."
+    "tr": "Futbol maçları sırasında skora ve dakikaya göre güncellenen canlı kazanma şansı.",
+    "id": "Peluang menang live selama pertandingan sepak bola, diperbarui dengan skor dan menit.",
+    "hi": "फ़ुटबॉल मैचों के दौरान लाइव जीत का मौका, स्कोर और मिनट के साथ अपडेट।",
+    "pl": "Szansa na wygraną na żywo w trakcie meczów piłkarskich, aktualizowana wraz z wynikiem i minutą.",
+    "el": "Ζωντανή πιθανότητα νίκης κατά τη διάρκεια των ποδοσφαιρικών αγώνων, ενημερωμένη με το σκορ και το λεπτό.",
+    "ru": "Шанс на победу в реальном времени во время футбольных матчей, обновляется вместе со счётом и минутой."
    }
   },
   {
@@ -493,7 +653,12 @@
     "de": "Basketball-Prognosen berücksichtigen jetzt Spielerstärke, lernen am Saisonanfang schneller und nutzen Bewertungen pro Ballbesitz, getestet an über 14.000 Spielen, die das Modell nie gesehen hatte.",
     "fr": "Les prédictions de basket intègrent la force des joueurs, un apprentissage plus rapide en début de saison et des notes par possession, testées sur plus de 14 000 matchs que le modèle n'avait jamais vus.",
     "it": "Le previsioni di basket aggiungono la forza dei giocatori, un apprendimento più rapido a inizio stagione e valutazioni per possesso, testate su oltre 14.000 partite mai viste dal modello.",
-    "tr": "Basketbol tahminlerine oyuncu gücü, sezon başında daha hızlı öğrenme ve hücum başına reytingler eklendi; modelin hiç görmediği 14.000'i aşkın maçta test edildi."
+    "tr": "Basketbol tahminlerine oyuncu gücü, sezon başında daha hızlı öğrenme ve hücum başına reytingler eklendi; modelin hiç görmediği 14.000'i aşkın maçta test edildi.",
+    "id": "Prediksi bola basket mendapat kekuatan pemain, pembelajaran lebih cepat di awal musim dan rating berbasis penguasaan bola, diuji pada lebih dari 14.000 pertandingan yang belum pernah dilihat model.",
+    "hi": "बास्केटबॉल भविष्यवाणियों में अब खिलाड़ियों की ताकत, सीज़न की शुरुआत में तेज़ सीखना और पज़ेशन पर आधारित रेटिंग, उन 14,000 से ज़्यादा मैचों पर टेस्ट किए गए जिन्हें मॉडल ने कभी नहीं देखा।",
+    "pl": "Prognozy koszykarskie uwzględniają teraz siłę zawodników, szybszą naukę na początku sezonu i oceny oparte na posiadaniach, sprawdzone na ponad 14 000 meczów, których model nigdy nie widział.",
+    "el": "Οι προβλέψεις μπάσκετ αποκτούν δύναμη παικτών, γρηγορότερη μάθηση στην αρχή της σεζόν και αξιολογήσεις βάσει κατοχών, δοκιμασμένες σε πάνω από 14.000 αγώνες που το μοντέλο δεν είχε δει ποτέ.",
+    "ru": "Прогнозы в баскетболе теперь учитывают силу игроков, более быстрое обучение в начале сезона и рейтинги по владениям; всё проверено на более чем 14 000 матчей, которые модель никогда не видела."
    }
   },
   {
@@ -508,7 +673,12 @@
     "de": "15 weitere Fußballligen, mit Aufstellungen, Verletzungen und Spielstatistiken für jede Liga.",
     "fr": "15 championnats de football en plus, avec compositions, blessures et statistiques de match pour chaque championnat.",
     "it": "Altri 15 campionati di calcio, con formazioni, infortuni e statistiche di ogni partita.",
-    "tr": "15 futbol ligi daha; her lig için kadrolar, sakatlıklar ve maç istatistikleriyle."
+    "tr": "15 futbol ligi daha; her lig için kadrolar, sakatlıklar ve maç istatistikleriyle.",
+    "id": "15 liga sepak bola tambahan, dengan susunan pemain, cedera dan statistik pertandingan untuk setiap liga.",
+    "hi": "15 और फ़ुटबॉल लीग, हर लीग के लिए लाइन-अप, चोटें और मैच आँकड़ों के साथ।",
+    "pl": "15 kolejnych lig piłkarskich, ze składami, kontuzjami i statystykami meczów dla każdej ligi.",
+    "el": "15 ακόμη ποδοσφαιρικές λίγκες, με ενδεκάδες, τραυματισμούς και στατιστικά αγώνων για κάθε λίγκα.",
+    "ru": "Ещё 15 футбольных лиг, с составами, травмами и статистикой матчей для каждой лиги."
    }
   },
   {
@@ -523,7 +693,12 @@
     "de": "SportLikely gibt es jetzt auf Spanisch, Portugiesisch, Deutsch, Französisch, Italienisch und Türkisch.",
     "fr": "SportLikely est désormais disponible en espagnol, portugais, allemand, français, italien et turc.",
     "it": "SportLikely è ora disponibile in spagnolo, portoghese, tedesco, francese, italiano e turco.",
-    "tr": "SportLikely artık İspanyolca, Portekizce, Almanca, Fransızca, İtalyanca ve Türkçe olarak kullanılabiliyor."
+    "tr": "SportLikely artık İspanyolca, Portekizce, Almanca, Fransızca, İtalyanca ve Türkçe olarak kullanılabiliyor.",
+    "id": "SportLikely kini tersedia dalam bahasa Spanyol, Portugis, Jerman, Prancis, Italia dan Turki.",
+    "hi": "SportLikely अब स्पेनिश, पुर्तगाली, जर्मन, फ़्रेंच, इतालवी और तुर्की में उपलब्ध है।",
+    "pl": "SportLikely jest teraz dostępny po hiszpańsku, portugalsku, niemiecku, francusku, włosku i turecku.",
+    "el": "Το SportLikely είναι πλέον διαθέσιμο στα ισπανικά, πορτογαλικά, γερμανικά, γαλλικά, ιταλικά και τουρκικά.",
+    "ru": "SportLikely теперь доступен на испанском, португальском, немецком, французском, итальянском и турецком."
    }
   }
  ]

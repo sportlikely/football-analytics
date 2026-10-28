@@ -41,6 +41,11 @@ import fr from '../locales/push/fr.json';
 import it from '../locales/push/it.json';
 import pt from '../locales/push/pt.json';
 import trLang from '../locales/push/tr.json';
+import idLang from '../locales/push/id.json';
+import hiLang from '../locales/push/hi.json';
+import plLang from '../locales/push/pl.json';
+import elLang from '../locales/push/el.json';
+import ruLang from '../locales/push/ru.json';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS push_prefs (
@@ -91,10 +96,10 @@ export const pushPublicKey = () => (pushEnabled ? VAPID.publicKey : null);
 
 /* ---------- words ---------- */
 
-export const PUSH_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr'] as const;
+export const PUSH_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'] as const;
 export type PushLang = (typeof PUSH_LANGS)[number];
 export const asPushLang = (x: unknown): PushLang => ((PUSH_LANGS as readonly string[]).includes(String(x)) ? (x as PushLang) : 'en');
-export const PUSH_PACKS: Record<PushLang, Record<string, string>> = { en: {}, de, es, fr, it, pt, tr: trLang };
+export const PUSH_PACKS: Record<PushLang, Record<string, string>> = { en: {}, de, es, fr, it, pt, tr: trLang, id: idLang, hi: hiLang, pl: plLang, el: elLang, ru: ruLang };
 export function pushWords(lang: PushLang): Tx {
   const pack = PUSH_PACKS[lang];
   return (key, ...a) => a.reduce<string>((s, v, i) => s.split(`{${i}}`).join(String(v)), pack[key] ?? key);

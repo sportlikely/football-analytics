@@ -2903,7 +2903,7 @@ app.get('/api/today', (req, res) => {
     if (sport === 'basketball' && !(bbPublic() || req.access === 'admin')) return res.status(404).json({ error: 'Not found' });
     if (sport === 'tennis' && !(tennisPublic() || req.access === 'admin')) return res.status(404).json({ error: 'Not found' });
     if (sport === 'american-football' && !(nflPublic() || req.access === 'admin')) return res.status(404).json({ error: 'Not found' });
-    const lang = (['es', 'pt', 'de', 'fr', 'it', 'tr'].includes(String(req.query.lang)) ? String(req.query.lang) : 'en') as any;
+    const lang = (['es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'].includes(String(req.query.lang)) ? String(req.query.lang) : 'en') as any;
     const dayIso = typeof req.query.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.day) ? req.query.day : undefined;
     const tour = typeof req.query.tour === 'string' && /^(atp|wta|challenger|all)$/.test(req.query.tour) ? req.query.tour : null;
     res.set('Cache-Control', sport === 'american-football' || sport === 'tennis' ? 'private, max-age=300' : 'public, max-age=300').json({ data: todayGroups(sport, lang, dayIso, asLeagues(req.query.league), tour) });
@@ -4504,7 +4504,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   app.use(express.static(STATIC_DIR, { index: false, maxAge: '7d', setHeaders: (res, file) => { if (file.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); } }));
   const indexHtml = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
   // fix202: the sport home pages (every language) as search engines get them: stored pages built in the worker
-  const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr'].map(l => `/${l}`)].flatMap(l => ['', '/football', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
+  const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'].map(l => `/${l}`)].flatMap(l => ['', '/football', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
   // fix221: the finished HTML is stored beside each (made by the worker): the web process only sends it
   const VIEWS_HTML = { html: (b: any) => (b ? renderIndex(indexHtml, b) : '') };
   definePage({ name: 'seo', freshMs: 10 * 60 * 1000, warm: SEO_HOMES.map(p => ({ path: p })), variants: VIEWS_HTML, build: q => seoPage(q.path) });
@@ -4545,7 +4545,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     return h;
   };
   // fix235: a tab (/football/match/<slug>/stats) is its page for search engines (one stored copy, canonical = the page)
-  const seoPathOf = (p: string) => p.replace(/^((?:\/(?:es|pt|de|fr|it|tr))?\/[a-z-]+\/(?:match|league)\/[a-z0-9-]+)\/[a-z0-9-]+\/?$/, '$1');
+  const seoPathOf = (p: string) => p.replace(/^((?:\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru))?\/[a-z-]+\/(?:match|league)\/[a-z0-9-]+)\/[a-z0-9-]+\/?$/, '$1');
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
   // fix229: an address outside the web process's slug state — the worker reads the table (3 s at most, else the app page)
   // fix248c: a visitor waits at most 800 ms for the answer (then the app page: the app resolves the slug itself); a
@@ -4557,7 +4557,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     } catch { return null; }
   };
   // fix244: the Quick check on its own address (the app opens it on a 429 from the proxy rules; never counted)
-  app.get(/^(\/(de|es|fr|it|pt|tr))?\/quick-check\/?$/, (req, res) => {
+  app.get(/^(\/(de|es|fr|it|pt|tr|id|hi|pl|el|ru))?\/quick-check\/?$/, (req, res) => {
     res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html').send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey()));
   });
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
@@ -4577,7 +4577,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     if (la && 'search' in la) return res.redirect(302, la.search);
     // fix243: a past season's match page: admins only (410 + noindex for everyone else, every language)
     if (la && 'page' in la && la.page.past && req.access !== 'admin') {
-      const lang = /^\/(es|pt|de|fr|it|tr)(\/|$)/.exec(req.path)?.[1] || 'en';
+      const lang = /^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(\/|$)/.exec(req.path)?.[1] || 'en';
       return res.status(410).set({ 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-store' }).type('html').send(pastPage(lang, la.page.sport));
     }
     // old hub URLs (fix134): /predictions/PL → /predictions/premier-league, permanently
@@ -4623,7 +4623,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     }
     res.set('Cache-Control', 'no-cache');
     try {
-      const lang0 = (/^\/(es|pt|de|fr|it|tr)(\/|$)/.exec(req.path)?.[1] || 'en') as any;
+      const lang0 = (/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(\/|$)/.exec(req.path)?.[1] || 'en') as any;
       const bbg = !bbPublic() ? null : la && 'page' in la && la.page.sport === 'basketball' && la.page.kind === 'match' ? { id: Number(la.page.id), lang: lang0 } : bbGamePath(req.path);
       const home = seoHome(req.path);
       // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page
