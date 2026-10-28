@@ -1,8 +1,10 @@
 # SportLikely — single image: Express API + built React site + SQLite on a volume.
 # Node 24 (node:sqlite is built in). Used by Railway (see railway.json) or any Docker host.
 
-# Base image from Amazon's public mirror of the official Node image: Docker Hub limits downloads (429 errors on Railway).
-ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine
+# Base image: the official Node image from Google's Docker Hub mirror (same image, same digest). Docker Hub limits
+# downloads (429 on Railway); fix265b: Amazon's mirror (public.ecr.aws) then refused too — "429 Too Many Requests …
+# Data limit exceeded" on the image's metadata — and failed the fix261 / fix263 deploys before any build step.
+ARG NODE_IMAGE=mirror.gcr.io/library/node:24-alpine
 
 # ---- 1. build the frontend ----
 FROM ${NODE_IMAGE} AS web
