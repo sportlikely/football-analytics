@@ -36,7 +36,8 @@ Visitor counting is unchanged (bot reason `datacentre`).
 > 89.222.103.0/24, 152.233.x.0/24, 84.17.44.0/24) and appends its own address(es) to X-Forwarded-For; fix254's rule
 > took that edge address as `req.ip`, so every visitor (the friend on the VPN included) and real Googlebot looked like
 > "Datacamp" and shared the network cap. Since fix262b `req.ip` skips every consecutive edge hop (learned /24 ranges,
-> plus hops in the same AS as a learned range — such a request is never verified as a search engine), so the proxy
+> plus hops in the edge networks AS60068 / AS212238; fix268, Yarin 28 Oct: the client hop left of them is verified
+> as a search engine normally by list / DNS — the edge appends on the right, so the client cannot write that hop), so the proxy
 > limits, the Quick check and the data-centre check apply to the real client address. Data health "Search engines
 > verified" → "client networks" should show Datacamp ≈ 0 (only real VPN users on it); each Googlebot-UA sample lists
 > every hop and which one was taken. The 20–21 Oct episode (fix199, fake browser user-agents, ~25 addresses) predates

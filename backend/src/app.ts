@@ -181,7 +181,7 @@ import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Pr
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, crawlerCheck, costCapped } from './services/afUsage';
 import { clientIpMiddleware } from './services/edgeHops';
-import { noteCrawlerResponse, inGoogleRanges, crawlerReport, noteGooglebotSample } from './services/crawlerIps';
+import { noteCrawlerResponse, inGoogleRanges, crawlerReport, noteGooglebotSample, noteEdgeAsnVerified } from './services/crawlerIps';
 import { makeTrustProxy } from './utils/clientIp';
 import { engineOfUa } from './utils/crawlerRanges';
 import { botGate, isBotUa } from './services/botGate';
@@ -251,11 +251,15 @@ app.use((req, res, next) => {
 if (!isWorker) app.use((req, res, next) => {
   const ua = req.get('user-agent') || '';
   if (claimsCrawler(ua)) {
-    // fix262b: a hop skipped only because it is in the edge's network → never verified (a scraper there could put a
-    // Google address in front of its own)
-    const c = (req as any).slEdgeAsnSkip ? { ok: false, how: null } : crawlerCheck(req.ip, ua);
+    // fix268: the client hop is verified by list / DNS also when an edge-network hop was skipped (fix262b refused it)
+    const c = crawlerCheck(req.ip, ua);
     (req as any).slCrawler = c;
     if (c.ok) (req as any).verifiedCrawler = true;
+    if (c.ok && (req as any).slEdgeAsnSkip) noteEdgeAsnVerified();
+  } else if (inGoogleRanges(req.ip)) {
+    // fix268: an address in Google's published crawl lists is Google whatever its user-agent (never 429 / 503)
+    (req as any).slCrawler = { ok: true, how: 'list' };
+    (req as any).verifiedCrawler = true;
   }
   if (engineOfUa(ua) === 'google') noteGooglebotSample(req);
   if (claimsCrawler(ua) || inGoogleRanges(req.ip)) res.once('finish', () => noteCrawlerResponse(uaKey(ua), req.ip, (req as any).slCrawler?.ok ? (req as any).slCrawler.how : null, res.statusCode, req.path));
@@ -328,7 +332,6 @@ if (isWeb) app.use(deployErrorsMiddleware);
 // once, every other API request waits for the state (at most STARTUP_WAIT_MS) and is answered then — no 5xx. /health
 // and the socket keep the 503 (Railway's health check must see "not ready").
 const STARTUP_WAIT_MS = Number(process.env.STARTUP_WAIT_MS) || 30000;
-const CRAWLER_STARTUP_WAIT_MS = Number(process.env.CRAWLER_STARTUP_WAIT_MS) || 120000;
 if (isWeb) app.use(async (req, res, next) => {
   if (isReady()) return next();
   if (!needsState(req.path) && (!SITE_PASSWORD || req.path.startsWith('/assets/') || PUBLIC_FILES.has(req.path)) && serveEarly(req, res)) return;
@@ -340,7 +343,8 @@ if (isWeb) app.use(async (req, res, next) => {
       if (isReady()) return next();
       if (res.writableEnded || req.destroyed) return;
       // fix245: a verified search engine waits longer (a 503 to Googlebot counts against the site's crawl health)
-      if (Date.now() - t0 > (isVerifiedCrawler(req) ? CRAWLER_STARTUP_WAIT_MS : STARTUP_WAIT_MS)) return res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
+      // fix268: it waits until the state is loaded (or it hangs up) — never the 503
+      if (!isVerifiedCrawler(req) && Date.now() - t0 > STARTUP_WAIT_MS) return res.status(503).set('Retry-After', '5').set('Cache-Control', 'no-store').json({ error: 'Starting up', ready: false });
       setTimeout(tick, 100);
     };
     return tick();
@@ -519,7 +523,7 @@ app.use('/api', (req, _res, next) => {
   const ipH = ipKey(req);
   const claims = claimsCrawler(ua);
   const verdict = claims ? ((req as any).slCrawler?.ok ?? crawlerVerdict(req.ip, ua)) : false; // fix245: list, then DNS
-  const crawler = verdict === true;
+  const crawler = verdict === true || isVerifiedCrawler(req); // fix268: Google's ranges with any user-agent
   (req as any).verifiedCrawler = crawler;
   (req as any).crawlerClaim = claims ? verdict === true : null; // fix183: the visitor counter's crawler check
   // fix210: counted once, in the web process (a request the worker answers was counted there before it was passed on)
@@ -2078,8 +2082,14 @@ app.post('/api/admin/users/:id(\\d+)/password', jsonOnly, (req, res) => {
 
 function sendError(res: express.Response, error: any, fallback: string) {
   // fix173: no provider call allowed for this request (crawler, scraper cap, page budget): stored data only, not a failure
-  if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') return res.status(503).set('Retry-After', '3600').json({ error: 'More details soon', pending: true });
+  // fix268: a verified search engine gets the app's "pending" answer (202, as the deadline guard sends) — never a 503
+  const crawler = !!(res.req as any)?.verifiedCrawler;
+  if (error?.code === 'PAGE_BUDGET' || error?.code === 'NO_PROVIDER_CALL') {
+    if (crawler) return res.status(202).set('Cache-Control', 'no-store').json({ pending: true, data: null });
+    return res.status(503).set('Retry-After', '3600').json({ error: 'More details soon', pending: true });
+  }
   const status = error?.response?.status || 500;
+  if (crawler && status === 503) return res.status(202).set('Cache-Control', 'no-store').json({ pending: true, data: null });
   const message = error?.response?.data?.message || error?.message || fallback;
   logger.error(fallback, { status, message });
   res.status(status).json({ error: fallback, message });
@@ -2804,7 +2814,7 @@ const linkSport = (s: string): s is LinkSport => (LINK_SPORTS as readonly string
 const linkKind = (k: string): k is LinkKind => (LINK_KINDS as readonly string[]).includes(k);
 const slugEtags = new Map<string, { text: string; etag: string }>();
 const sendSlugs = (req: express.Request, res: express.Response, text: string | null) => {
-  if (!text) return res.status(503).set('Retry-After', '30').json({ error: 'Not ready yet' });
+  if (!text) return isVerifiedCrawler(req) ? res.status(202).set('Cache-Control', 'no-store').json({ pending: true, data: null }) : res.status(503).set('Retry-After', '30').json({ error: 'Not ready yet' });
   const k = req.path;
   let e = slugEtags.get(k);
   if (!e || e.text !== text) { e = { text, etag: etagOf(text) }; slugEtags.set(k, e); }

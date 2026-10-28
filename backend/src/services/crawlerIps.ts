@@ -100,10 +100,20 @@ type Counts = { engines: Record<Engine, EngineDay>; googleRanges: { requests: nu
  *  (they were taken on Railway's edge address); `networks` = the clients' listed networks (names + counts, no address) */
 type Day = Counts & { day: string; refusedRecent: string[]; sample: DnsSample | null; uaLog?: UaSample[]; since?: string; before262?: Counts; networks?: Record<string, number>; edgeRequests?: number; requestsAll?: number;
   /** fix262b: requests where a hop was skipped only by its network (edge AS), where every hop was a proxy; fake crawlers */
-  edgeAsnSkips?: number; allProxy?: number; fakes?: { requests: number; byNetwork: Record<string, number> } };
+  edgeAsnSkips?: number; allProxy?: number; fakes?: { requests: number; byNetwork: Record<string, number> };
+  /** fix268: the client rule the counts were taken with; the day's counts under the old rule (since → the deploy) */
+  rule?: number; beforeRule?: Counts & { rule: number; since: string; until: string }; edgeAsnVerified?: number };
+/** fix268: the client / verification rule — a deploy with a new one starts the day's counts again (the old ones kept aside) */
+export const CRAWLER_RULE = 268;
 const today = () => new Date().toISOString().slice(0, 10);
 const blank = (): EngineDay => ({ requests: 0, verified: 0, byList: 0, byDns: 0, refused: 0, s429: 0, s503: 0, api: 0 });
-const fresh = (): Day => ({ day: today(), engines: { google: blank(), bing: blank(), apple: blank() }, googleRanges: { requests: 0, refused: 0, s429: 0, s503: 0 }, refusedRecent: [], sample: null, since: new Date().toISOString() });
+const fresh = (): Day => ({ day: today(), engines: { google: blank(), bing: blank(), apple: blank() }, googleRanges: { requests: 0, refused: 0, s429: 0, s503: 0 }, refusedRecent: [], sample: null, since: new Date().toISOString(), rule: CRAWLER_RULE });
+/** fix268: a day row written under an older rule → its counts move aside, counting starts again now */
+export function underRule(old: Day, f: Day = fresh()): Day {
+  if (old.rule === CRAWLER_RULE) return { ...f, ...old };
+  return { ...f, ...old, engines: f.engines, googleRanges: f.googleRanges, refusedRecent: [], since: f.since, rule: CRAWLER_RULE, edgeAsnSkips: 0, edgeAsnVerified: 0,
+    beforeRule: { engines: old.engines, googleRanges: old.googleRanges, rule: old.rule ?? 262, since: old.since || `${old.day}T00:00:00.000Z`, until: f.since! } };
+}
 
 db.exec(`CREATE TABLE IF NOT EXISTS crawler_day (day TEXT PRIMARY KEY, data TEXT NOT NULL)`);
 let cur: Day = fresh();
@@ -114,7 +124,9 @@ try {
   if (r?.data) {
     const old = JSON.parse(r.data);
     // fix262: the counts taken before the fix (on the edge address) move aside; today's restart on the right address
-    if (old.since) cur = { ...fresh(), ...old };
+    // fix268: and a row from an older rule (fix262b refused Googlebot behind an unlearned edge hop) starts again
+    if (old.since && old.rule !== CRAWLER_RULE && (isWeb || !isWorker)) { cur = underRule(old); dirty0 = true; }
+    else if (old.since) cur = { ...fresh(), ...old };
     else if (isWeb || !isWorker) { const f = fresh(); cur = { ...f, ...old, engines: f.engines, googleRanges: f.googleRanges, refusedRecent: [], since: f.since, before262: { engines: old.engines, googleRanges: old.googleRanges } }; dirty0 = true; }
     else cur = { ...fresh(), ...old };
   }
@@ -208,7 +220,7 @@ export function noteGooglebotSample(req: { ip?: string; path?: string; socket?: 
       // fix262: did the edge headers come, and what fix254's rule (rightmost non-private hop) would have taken
       edge: hasEdgeHeader(req.headers), oldRule: clientOf(socket, xff, asnOf),
       // fix262b: every hop from the left, which one was taken and why
-      ...((req as any).slHops ? { hops: hopLine((req as any).slHops).slice(0, 400), why: (req as any).slEdgeAsnSkip ? 'a hop skipped by its network only: never verified as a search engine' : undefined } : {})
+      ...((req as any).slHops ? { hops: hopLine((req as any).slHops).slice(0, 400), why: (req as any).slEdgeAsnSkip ? `a hop skipped by its network (Railway's edge AS): the client hop checked normally — ${(req as any).slCrawler?.ok ? `verified (${(req as any).slCrawler.how})` : 'not verified'}` : undefined } : {})
     });
     dirty = true;
   } catch { /* logging never breaks a request */ }
@@ -261,6 +273,10 @@ export function noteClientNetwork(name: string | null, viaEdge: boolean, edgeAsn
     if (n[name] !== undefined || Object.keys(n).length < 50) n[name] = (n[name] || 0) + 1;
   } catch { /* counting never breaks a request */ }
 }
+/** fix268 (web): a search engine verified behind an edge hop skipped by its network (fix262b refused these) */
+export function noteEdgeAsnVerified() {
+  try { roll(); cur.edgeAsnVerified = (cur.edgeAsnVerified || 0) + 1; dirty = true; } catch { /* counting never breaks a request */ }
+}
 /** fix262: the networks line (data health + the reply) */
 export function networksLine(d: Day | null): string {
   if (!d?.requestsAll) return 'client networks: none counted yet';
@@ -280,11 +296,13 @@ export function crawlerHealth(edge?: { ranges: { range: string; lefts: number; s
   if (d.fakes?.requests) items.push(`fake crawlers (search-engine user-agent from a data-centre network, not verified; refused, not counted as the engine): ${d.fakes.requests} — ${Object.entries(d.fakes.byNetwork).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   // fix262b: the newest samples with every hop (which one was taken and why)
   for (const x of (d.uaLog || []).filter(x => x.hops).slice(-5)) items.push(`sample ${x.at.slice(11, 16)} ${x.path}: ${x.hops}${x.why ? ` — ${x.why}` : ''}`);
+  if (d.edgeAsnVerified) items.push(`fix268: ${d.edgeAsnVerified} search-engine requests verified behind an edge hop skipped by its network (refused before fix268)`);
+  if (d.beforeRule) { const b = d.beforeRule, bg = b.engines.google; items.push(`before the fix${CRAWLER_RULE} deploy (${b.since.slice(11, 16)}–${b.until.slice(11, 16)} UTC, fix${b.rule} rule): Googlebot ${bg.requests} requests, ${bg.verified} verified, ${bg.refused} refused (${bg.s429} / ${bg.s503}); from Google's ranges ${b.googleRanges.refused} got 429 / 503 (${b.googleRanges.s429} / ${b.googleRanges.s503})`); }
   if (d.before262) { const b = d.before262.engines.google; items.push(`before the fix262 deploy today (counted on the edge address): Googlebot ${b.requests} requests, ${b.verified} verified, ${b.refused} refused; from Google's ranges ${d.before262.googleRanges.requests}`); }
   if (d.sample) items.push(`DNS sample ${d.sample.at.slice(11, 16)} ${d.sample.ip}: system ${d.sample.system} · public ${d.sample.publicDns} · forward ${d.sample.forward}`);
   return [{
     id: 'crawlers-verified', label: 'Search engines verified', level,
-    detail: `Googlebot ${d.before262 ? `since ${(d.since || '').slice(11, 16)} UTC` : 'today'}: ${g.requests} requests, ${g.verified} verified (${g.byList} by Google's list, ${g.byDns} by DNS), ${g.refused} refused · from Google's ranges: ${gr.refused} got 429 / 503 (${gr.s429} / ${gr.s503}) · Bing ${d.engines.bing.verified}/${d.engines.bing.requests}, Apple ${d.engines.apple.verified}/${d.engines.apple.requests} verified · lists: ${status}`,
+    detail: `Googlebot ${d.before262 || d.beforeRule ? `since ${(d.since || '').slice(11, 16)} UTC` : 'today'}: ${g.requests} requests, ${g.verified} verified (${g.byList} by Google's list, ${g.byDns} by DNS), ${g.refused} refused · from Google's ranges: ${gr.refused} got 429 / 503 (${gr.s429} / ${gr.s503}) · Bing ${d.engines.bing.verified}/${d.engines.bing.requests}, Apple ${d.engines.apple.verified}/${d.engines.apple.requests} verified · lists: ${status}`,
     ...(items.length ? { items } : {})
   }];
 }

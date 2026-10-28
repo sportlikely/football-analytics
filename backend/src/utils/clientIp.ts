@@ -57,6 +57,9 @@ export const EDGE_HEADERS = ['x-railway-edge', 'x-hikari-trace'] as const;
 export const EDGE_MIN_LEFTS = 10; // fix262b: 20 → 10 (learned faster)
 export const EDGE_KEEP_DAYS = 30; // fix262b: 7 → 30
 export const EDGE_MIN_SHARE = 0.005;
+/** fix268: Railway's Hikari edge networks (Datacamp) — a hop there, on a request with the edge headers, is an edge hop
+ *  even before its /24 is learned (the learned ranges keep growing from the traffic) */
+export const EDGE_ASNS: readonly number[] = [60068, 212238];
 export const EDGE_MIN_REQUESTS = 100;
 const EDGE_WINDOW_MS = 6 * 3600000;
 const LEFTS_CAP = 64;
@@ -140,7 +143,7 @@ export class EdgeLearner {
   isEdge(ip: string): boolean { return this.isEdgeRange(ip); }
   /** the networks (AS) the learned edge ranges are in */
   edgeAsns(): Set<number> {
-    const out = new Set<number>();
+    const out = new Set<number>(EDGE_ASNS);
     // a range loaded before the network list was ready gets its AS now (its first address)
     for (const [r, k] of this.known) { if (k.asn == null) k.asn = this.asnOf(r.replace(/0\/24$/, '1').replace(/::\/48$/, '::1')); if (k.asn != null) out.add(k.asn); }
     return out;
@@ -162,8 +165,9 @@ type EdgeView = { isEdge: (ip: string) => boolean; edgeRangeOf?: (ip: string) =>
 /**
  * fix262: the client of one request. From the right: the socket, our own internal / Railway-AS hops, then — only on a
  * request carrying the edge headers — every consecutive learned edge hop; the first hop that is none of those is the
- * client. fix262b: a hop in the same network (AS) as a learned edge range counts as an edge hop too (edgeAsnSkip: such
- * a request is never verified as a search engine — a scraper on that network could write a Google address in front).
+ * client. fix262b: a hop in the same network (AS) as a learned edge range counts as an edge hop too (edgeAsnSkip).
+ * fix268: such a request's client hop is verified normally (list / DNS): the edge appends on the right, so the hop left
+ * of the edge hops is the one the edge saw (fix262b never verified it: Googlebot refused 299 times on 28 Oct).
  */
 export function explainClient(socket: string, xff: string | undefined | null, headers: Record<string, unknown> | undefined | null,
   asnOf: (ip: string) => number | null = () => null, edge: EdgeView | null = null): ClientExplain {

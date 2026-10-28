@@ -21,8 +21,9 @@ const busy = (res: express.Response) => {
 };
 
 export function forwardToWorker(req: express.Request, res: express.Response, waitedMs = 0, retry = false): void {
-  // fix245: a verified search engine waits up to 20 s for a restarting worker instead of the 503
-  if (!workerConnected() && (req as any).verifiedCrawler && waitedMs < 20_000 && !req.destroyed) { setTimeout(() => forwardToWorker(req, res, waitedMs + 500), 500); return; }
+  // fix245: a verified search engine waits for a restarting worker instead of the 503
+  // fix268: until the worker is back or it hangs up (was 20 s, then the 503)
+  if (!workerConnected() && (req as any).verifiedCrawler && !req.destroyed) { setTimeout(() => forwardToWorker(req, res, waitedMs + 500), 500); return; }
   if (!workerConnected()) return busy(res);
   waiting(res);
   const headers: http.OutgoingHttpHeaders = { ...req.headers };
@@ -40,6 +41,8 @@ export function forwardToWorker(req: express.Request, res: express.Response, wai
   // a GET is asked once more on a new connection (test:site saw a signed-in /api/favorites/calendar 503 once in 7,400 opens)
   up.on('error', () => {
     if (!answered && !retry && (req.method === 'GET' || req.method === 'HEAD') && !res.headersSent && !req.destroyed && workerConnected()) return forwardToWorker(req, res, waitedMs, true);
+    // fix268: a verified search engine's GET is asked again every second (a minute at most) instead of the 503
+    if (!answered && (req as any).verifiedCrawler && (req.method === 'GET' || req.method === 'HEAD') && !res.headersSent && !req.destroyed && waitedMs < 60_000) { setTimeout(() => forwardToWorker(req, res, waitedMs + 1000, true), 1000); return; }
     busy(res);
   });
   res.on('close', () => { if (!res.writableFinished) up.destroy(); });

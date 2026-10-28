@@ -117,7 +117,7 @@ test('fix262b: every consecutive edge hop is skipped — learned ranges, then th
   // a second-hop /24 not learned yet, but in the edge's network: skipped, marked
   const x = explainClient(SOCKET, `81.2.69.160, ${E2b}, ${E1}`, H, DC, l);
   assert.equal(x.ip, '81.2.69.160');
-  assert.equal(x.edgeAsnSkip, true, 'skipped by its network only: never verified as a search engine');
+  assert.equal(x.edgeAsnSkip, true, 'skipped by its network (fix268: the client hop is still verified)');
   assert.match(hopLine(x), /81\.2\.69\.160 \[TAKEN\] → 84\.17\.45\.3 \[edge network AS60068\] → 89\.222\.103\.7 \[edge 89\.222\.103\.0\/24\] → 100\.64\.0\.2 \[socket\]/);
   // a visitor really on Datacamp (a VPN) with nothing to the left stays the client
   assert.equal(clientOfRequest(SOCKET, `${E2b}, ${E1}`, H, DC, l), E2b);
@@ -135,6 +135,7 @@ test('fix262b: Googlebot user-agent from Azure / AWS with a forged Google hop = 
   assert.match(ci, /if \(listedCrawler\(ranges, ua, ip\) \|\| inGoogleRanges\(ip\)\) return null;/);
   assert.match(ci, /const fake = isFakeCrawler\(ua, ip, how\);[\s\S]*?e = null;/);
   assert.match(read('src/services/visitors.ts'), /fake \? 'fake-crawler' : uaBot \? 'ua'/);
-  assert.match(read('src/app.ts'), /slEdgeAsnSkip \? \{ ok: false, how: null \} : crawlerCheck\(req\.ip, ua\)/);
+  // fix268: the client hop behind an edge-network hop is checked normally (fix262b refused it)
+  assert.match(read('src/app.ts'), /const c = crawlerCheck\(req\.ip, ua\);/);
   assert.match(read('../docs/notes/security.md'), /was Railway's edge, not a scraper/);
 });
