@@ -175,15 +175,41 @@ test('fix253: the morning email lists three lines per kind, then "+N more"', () 
 
 /* ---------- site errors: groups close themselves after a build that stops them ---------- */
 
-test('fix253: a site-error group with no report since a newer build (6 h of it) closes itself; the open ones are the list for Claude', () => {
+test('fix253b: a site-error group closes after 24 h with no report once a newer build went live (unknown build = older); a deploy does not restart the wait', () => {
   const ce = require('../dist/services/clientErrors.js');
-  ce.reportClientError({ message: 'Cannot read properties of null (reading "split")', page: '/basketball', kind: 'page', version: 'index-OLD1', stack: 'at x (a.js:1:1)' });
-  const now = Date.now();
-  ce.noteBuild('index-NEW2', now + 1000);
-  ce.reportClientError({ message: 'Still broken', page: '/football', kind: 'page', version: 'index-NEW2', stack: 'at y (b.js:1:1)' });
-  db.prepare(`UPDATE client_errors SET last_at = ? WHERE message = 'Still broken'`).run(new Date(now + 2000).toISOString());
-  assert.equal(ce.closeStoppedErrors(now + 2 * H), 0, 'not before 6 h of the new build');
-  assert.equal(ce.closeStoppedErrors(now + 7 * H), 1);
-  const f = ce.errorsForClaude(now + 7 * H);
-  assert.equal(f.open, 1); assert.equal(f.top[0].message, 'Still broken'); assert.deepEqual(f.top[0].builds, ['index-NEW2']);
+  const now = Date.now(), iso = ms => new Date(ms).toISOString();
+  const group = (message, lastAgo, builds = '[]') => {
+    ce.reportClientError({ message, page: '/basketball', kind: 'page', stack: `at x (${message.length}.js:1:1)` }); // no version: builds []
+    db.prepare(`UPDATE client_errors SET last_at = ?, first_at = ?, builds = ? WHERE message = ?`).run(iso(now - lastAgo), iso(now - lastAgo - H), builds, message);
+  };
+  // 27 Oct as on the server: fix252's "split" (last 14:21) and "destructure" (01:12), both with builds [] (from before fix253)
+  group("Cannot read properties of null (reading 'split')", 26 * H);
+  group("Cannot destructure property 'default' of 'undefined'", 39 * H);
+  group('Quiet but no build since', 30 * H);
+  group('Reported 23 h ago', 23 * H);
+  group('Still broken on the new build', 2 * H, '["index-NEW3"]');
+  db.prepare('DELETE FROM client_builds').run();
+  ce.noteBuild('index-OLD2', now - 31 * H); // live before every group's last report but "Quiet …"'s
+  db.prepare(`UPDATE client_errors SET last_at = ? WHERE message = 'Quiet but no build since'`).run(iso(now - 30 * H));
+  ce.noteBuild('index-NEW3', now - 20 * H); // fix253 went live after "split" / "destructure"
+  ce.noteBuild('index-NEW4', now - H); // a later deploy (fix252c): must not restart the wait
+  db.prepare(`UPDATE client_builds SET first_at = ? WHERE version = 'index-OLD2'`).run(iso(now - 40 * H));
+  // "Quiet …": its last report (30 h) is after OLD2 (40 h) and before NEW3 (20 h) → NEW3 counts: closes too
+  const closed = ce.closeStoppedErrors(now);
+  const open = db.prepare('SELECT message FROM client_errors WHERE resolved_at IS NULL ORDER BY message').all().map(r => r.message);
+  assert.deepEqual(open, ['Reported 23 h ago', 'Still broken on the new build']);
+  assert.equal(closed, 3);
+  // a group with no build after its last report stays open however quiet it is
+  group('No build after it', 50 * H);
+  db.prepare('DELETE FROM client_builds').run();
+  ce.noteBuild('index-ONLY', now - 60 * H);
+  assert.equal(ce.closeStoppedErrors(now), 0);
+  // the list for Claude: what is still open, with its builds
+  const f = ce.errorsForClaude(now);
+  assert.equal(f.open, 3);
+  assert.ok(f.top.some(t => t.message === 'Still broken on the new build' && t.builds[0] === 'index-NEW3'));
+  // the Done for you entry names the build that went live after it
+  const done = require('../dist/services/doneForYou.js').doneList(7, now).filter(x => x.kind === 'site-errors');
+  assert.equal(done.length, 3);
+  assert.ok(done.some(x => /split/.test(x.title) && /index-NEW3/.test(x.why)), done.map(x => x.why).join(' | '));
 });

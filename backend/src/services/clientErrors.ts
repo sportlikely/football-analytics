@@ -5,8 +5,8 @@
  * sees which pages break and how often (Admin → Site health → Site errors). The first time a new problem shows up, the
  * admin gets one email (at most one email per problem per day, and at most 10 a day).
  *
- * fix253: grouped by message (+ page kind + code line) with the builds each group showed up in. A group that has no
- * report since a newer build went live (6 h of that build) closes itself (Done for you, Undo = open again); the open
+ * fix253: grouped by message (+ page kind + code line) with the builds each group showed up in. A group with no report
+ * for 24 h, once a build newer than its last report went live (fix253b), closes itself (Done for you, Undo = open again); the open
  * groups are a daily "for Claude" list in /api/admin/summary (top 10 messages with their counts), never Needs you.
  *
  * Privacy: no IP address, no user id, no cookies — only the message, a few lines of code location, the page path,
@@ -126,7 +126,8 @@ export function resolveClientError(sig: string, resolved: boolean) {
 
 /* ---------- fix253: groups close themselves after a build that stops them; the daily "for Claude" list ---------- */
 
-export const CLOSE_AFTER_MS = 6 * 3600 * 1000;
+/** fix253b: a group closes after this long with no report, once a newer build went live after its last one */
+export const CLOSE_AFTER_MS = 24 * 3600 * 1000;
 const STATIC_DIR = process.env.STATIC_DIR || path.resolve(__dirname, '../../../frontend/dist');
 /** the build the site serves now: its main file name ("index-AbC123"), as the browser reports it */
 export function currentBuild(dir = STATIC_DIR): string | null {
@@ -137,22 +138,32 @@ export function noteBuild(version: string | null, now = Date.now()) {
   if (version) db.prepare('INSERT OR IGNORE INTO client_builds (version, first_at) VALUES (?, ?)').run(version, new Date(now).toISOString());
 }
 
-/** Open groups with no report since the newest build went live (≥ 6 h of it) → closed, each in Done for you. */
+/**
+ * Open groups closed by themselves, each in Done for you. fix253b: the rule is "no report for 24 h, and a build newer than
+ * the last report went live" — the build that stopped it is the first one live after its last report, so the group's
+ * own (unknown, "builds: []") build always counts as older, and a deploy no longer restarts the wait (fix253 waited 6 h
+ * from the newest build only: every deploy started the clock again and 47 groups stayed open).
+ */
 export function closeStoppedErrors(now = Date.now()): number {
-  const b = db.prepare('SELECT version, first_at FROM client_builds ORDER BY first_at DESC LIMIT 1').get() as any;
-  if (!b || now - Date.parse(b.first_at) < CLOSE_AFTER_MS) return 0;
-  const rows = db.prepare('SELECT sig, message, page_kind, count, last_at, builds FROM client_errors WHERE resolved_at IS NULL AND last_at < ?').all(b.first_at) as any[];
+  const rows = db.prepare(`SELECT e.sig, e.message, e.page_kind, e.count, e.last_at, e.builds,
+      (SELECT b.version FROM client_builds b WHERE b.first_at > e.last_at ORDER BY b.first_at LIMIT 1) AS bv,
+      (SELECT b.first_at FROM client_builds b WHERE b.first_at > e.last_at ORDER BY b.first_at LIMIT 1) AS bat
+    FROM client_errors e WHERE e.resolved_at IS NULL AND e.last_at <= ?`).all(new Date(now - CLOSE_AFTER_MS).toISOString()) as any[];
   const at = new Date(now).toISOString();
-  for (const r of rows) {
+  let n = 0;
+  for (const row of rows) {
+    if (!row.bv) continue; // no build since its last report: the bug may still be live
+    const r = row, b = { version: row.bv, first_at: row.bat };
+    n++;
     db.prepare('UPDATE client_errors SET resolved_at = ? WHERE sig = ? AND resolved_at IS NULL').run(at, r.sig);
     recordDone({
       kind: 'site-errors', sport: null, ref: `${r.sig}:${b.version}`, title: `Closed: “${String(r.message).slice(0, 90)}” (${r.page_kind})`,
-      why: `${r.count} report(s), the last ${israelTime(r.last_at)}; none since build ${b.version} went live ${israelTime(b.first_at)}, so that build fixed it. It opens again by itself if it comes back.`,
+      why: `${r.count} report(s), the last ${israelTime(r.last_at)}; none in the 24 h since, and build ${b.version} went live after it (${israelTime(b.first_at)}), so a newer build fixed it. It opens again by itself if it comes back.`,
       link: adminUrl('site'), undo: { sig: r.sig }
     }, now);
   }
-  if (rows.length) logger.info(`site errors: ${rows.length} group(s) closed — none since build ${b.version}`);
-  return rows.length;
+  if (n) logger.info(`site errors: ${n} group(s) closed — no report for 24 h, a newer build live since (${rows.length - n} quiet but no build since)`);
+  return n;
 }
 onUndo('site-errors', (p: { sig: string }) => { resolveClientError(p.sig, false); return 'Open again.'; });
 
