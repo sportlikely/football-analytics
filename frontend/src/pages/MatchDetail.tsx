@@ -400,6 +400,9 @@ function MatchDetail() {
     if (wantReveal && hidden && !autoRevealed.current) { autoRevealed.current = true; setUnlockAnim(true) }
   }, [wantReveal, hidden])
 
+  // fix260: the details shown came from the server (not the list's seed)
+  const [served, setServed] = useState(false)
+  useEffect(() => { setServed(false) }, [matchId])
   primeGame('football', matchId) // fix250: the page's parts in one request
   const load = (initial = false) => {
     if (initial && !seedFromList(location.state, matchId)) setLoading(true)
@@ -408,6 +411,7 @@ function MatchDetail() {
       .then(res => {
         // fix165: a reload never takes the score / minute back (the socket push may be newer than the copy we got)
         const next: Details = res.data.data
+        setServed(true)
         setDetails(prev => (prev && next?.match && prev.match.id === next.match.id ? { ...next, match: newerFootballLive(prev.match, next.match) } : next))
         setError(null)
       })
@@ -1099,7 +1103,10 @@ function MatchDetail() {
         <p className="mt-3 text-xs text-muted">
           <Link to="/guides/win-percentages" className="hover:text-ink">{tt("New here? How to read our numbers")} <span aria-hidden className="text-accent rtl-flip">→</span></Link>
         </p>
-        {details.partial && <p className="mt-4 text-xs text-faint animate-pulse">{error ? `${tt("Could not load match:")} ${error}` : tt("Loading match…")}</p>}
+        {/* fix260: the server's own partial answer (provider slow / down: what we hold) is said once, not a "Loading…" pulsing for minutes */}
+        {details.partial && (served
+          ? <p className="mt-4 text-xs text-faint">{tt("More details soon. This page is being prepared — please check back a little later.")}</p>
+          : <p className="mt-4 text-xs text-faint animate-pulse">{error ? `${tt("Could not load match:")} ${error}` : tt("Loading match…")}</p>)}
       </>}
       tabs={tabs.map(x => ({ ...x, render: RENDER[x.id] }))}
       tab={tab}

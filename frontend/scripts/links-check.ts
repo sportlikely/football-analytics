@@ -94,7 +94,8 @@ for (const r of routes) {
 }
 for (const sport of LINK_SPORTS) for (const kind of LINK_KINDS) {
   if (sport === 'tennis' && kind === 'team') continue
-  if (!routes.some(r => (r.path === `/${sport}/${kind}/:slug` || ((kind === 'match' || kind === 'league') && r.path === `/${sport}/${kind}/:slug/*`)) && new RegExp(`<SlugRoute sport="${sport}" kind="${kind}"`).test(r.element)))
+  // fix260: team / player routes end in /* too (anything after the slug moves to the page: SlugRoute)
+  if (!routes.some(r => (r.path === `/${sport}/${kind}/:slug` || r.path === `/${sport}/${kind}/:slug/*`) && new RegExp(`<SlugRoute sport="${sport}" kind="${kind}"`).test(r.element)))
     problems.push(`frontend/src/App.tsx — ${sport}: no /${sport}/${kind}/:slug route (every sport has its slug pages)`)
 }
 // 6 (fix235): a match page takes its tab as a sub-path (…/match/:slug/*); every sport has /<sport>/matches and /today

@@ -232,7 +232,7 @@ export function Privacy() {
 
 export function NotFound() {
   return (
-    <div className="max-w-xl mx-auto px-4 py-20 text-center">
+    <div className="max-w-xl mx-auto px-4 py-20 text-center" data-not-found="">
       <div className="font-display text-6xl font-extrabold text-accent">404</div>
       <h1 className="text-ink font-semibold mt-3">This page doesn't exist.</h1>
       <p className="text-sm text-muted mt-1">The link may be old, or the match may have been removed.</p>

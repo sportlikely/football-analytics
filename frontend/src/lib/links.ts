@@ -117,13 +117,17 @@ const LEAGUE_FIXED: Partial<Record<LinkSport, Record<string, string>>> = {
   'american-football': { '1': 'nfl', '2': 'college-football', NFL: 'nfl', NCAA: 'college-football' }
 }
 
+// fix260: no name and no slug from the server = no link (the bare fallback drew /football/team/team, a dead link)
+const named = (slug: string, name: string | null | undefined, fallback: string) => slug !== fallback || !!String(name || '').trim()
 export function teamHref(sport: LinkSport, id: Id, name: string | null | undefined): string | null {
   if (!ok(id)) return null
-  return remember(sport, 'team', teamSlugOf(sport, id, name), id)
+  const slug = teamSlugOf(sport, id, name)
+  return named(slug, name, 'team') ? remember(sport, 'team', slug, id) : null
 }
 export function playerHref(sport: LinkSport, id: Id, name: string | null | undefined): string | null {
   if (!ok(id)) return null
-  return remember(sport, 'player', playerSlugOf(sport, id, name), id)
+  const slug = playerSlugOf(sport, id, name)
+  return named(slug, name, 'player') ? remember(sport, 'player', slug, id) : null
 }
 /** a league / competition / tournament by its code (football PL / AF383, basketball NBA, NFL 1 / 2, a tennis key) */
 export function leagueHref(sport: LinkSport, code: Id, name?: string | null): string | null {

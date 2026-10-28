@@ -20,7 +20,7 @@ const busy = (res: express.Response) => {
   else res.end();
 };
 
-export function forwardToWorker(req: express.Request, res: express.Response, waitedMs = 0): void {
+export function forwardToWorker(req: express.Request, res: express.Response, waitedMs = 0, retry = false): void {
   // fix245: a verified search engine waits up to 20 s for a restarting worker instead of the 503
   if (!workerConnected() && (req as any).verifiedCrawler && waitedMs < 20_000 && !req.destroyed) { setTimeout(() => forwardToWorker(req, res, waitedMs + 500), 500); return; }
   if (!workerConnected()) return busy(res);
@@ -30,13 +30,21 @@ export function forwardToWorker(req: express.Request, res: express.Response, wai
   headers['x-forwarded-for'] = req.ip || '';
   headers['x-forwarded-proto'] = req.protocol;
   headers[INTERNAL_HEADER] = internalKey();
-  const up = http.request({ host: '127.0.0.1', port: WORKER_PORT, method: req.method, path: req.originalUrl, headers, agent }, r => {
+  let answered = false;
+  const up = http.request({ host: '127.0.0.1', port: WORKER_PORT, method: req.method, path: req.originalUrl, headers, agent: retry ? false : agent }, r => {
+    answered = true;
     res.writeHead(r.statusCode || 502, r.headers);
     r.pipe(res);
   });
-  up.on('error', () => busy(res));
+  // fix260: a kept-alive socket the worker closed at that very moment (ECONNRESET before any answer) is not a restart:
+  // a GET is asked once more on a new connection (test:site saw a signed-in /api/favorites/calendar 503 once in 7,400 opens)
+  up.on('error', () => {
+    if (!answered && !retry && (req.method === 'GET' || req.method === 'HEAD') && !res.headersSent && !req.destroyed && workerConnected()) return forwardToWorker(req, res, waitedMs, true);
+    busy(res);
+  });
   res.on('close', () => { if (!res.writableFinished) up.destroy(); });
-  req.pipe(up);
+  if (retry) up.end(); // a GET's (empty) body was read by the first try
+  else req.pipe(up);
 }
 
 export type WorkerAnswer = { status: number; headers: http.IncomingHttpHeaders; body: Buffer };

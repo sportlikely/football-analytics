@@ -529,6 +529,11 @@ async function buildAndStore(pid: number, stored: any) {
       logger.warn(`player page ${pid}: serving the copy from ${stored.built_at} (${e.message})`);
       return { ...JSON.parse(stored.json), stale: true };
     }
+    // fix260: never built and the provider failing — the page from what we store (as crawlers get it), never a 500
+    if ((e?.response?.status || e?.status) !== 404) {
+      const off = await crawlerPage(pid).catch(() => null);
+      if (off) { logger.warn(`player page ${pid}: from our database only (${e.message})`); return { ...off, stale: true }; }
+    }
     throw e;
   }
 }

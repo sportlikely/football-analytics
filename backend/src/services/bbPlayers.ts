@@ -9,6 +9,7 @@ import { BB_LEAGUES, bbGet } from './basketball';
 import logger from '../utils/logger';
 import { isPreseason } from './bbModel';
 import { nbaKey } from './bbInjuries';
+import { bbCommonName } from '../utils/personName';
 import { bdlPlayerOf, bdlTeamOf, bdlSeasonNow, bdlContract, personKey } from './bdl';
 import { isCrawlerRequest } from './afUsage';
 import { yieldLoop, yieldEvery } from './perf';
@@ -84,9 +85,9 @@ const pct = (m: number, a: number) => (a > 0 ? Math.round((1000 * m) / a) / 10 :
 const leagueName = (code: string) => BB_LEAGUES.find(l => l.code === code)?.name || code;
 const parse = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
-/** "James LeBron" (API-Basketball) → the name as people write it, when balldontlie knows the player. */
+/** "James LeBron" (API-Basketball) → the name as people write it: balldontlie's when it knows the player, else the API's words first name first (fix260) */
 function displayName(name: string, bdl: any | null) {
-  return bdl ? `${bdl.first} ${bdl.last}`.trim() : name;
+  return bdl ? `${bdl.first} ${bdl.last}`.trim() : bbCommonName(name);
 }
 
 function sums(rows: any[]) {

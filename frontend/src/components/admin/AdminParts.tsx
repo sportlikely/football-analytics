@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
 import { errorText } from '../../lib/auth'
+import { reportError } from '../../lib/report'
 import { matchHref } from '../../lib/links'
 import {
   adminPath, byLevel, cardChecks, cardDef, cardLevel, healthRule, healthTab, worst,
@@ -40,9 +41,28 @@ export function Explained({ id, ctx, children }: { id: string; ctx: Ctx; childre
         {/* fix259: every card header */}
         <CopyForClaude size="sm" req={() => cardReq(id, ctx.checks)} />
       </div>
-      <div className="[&>section]:mb-0">{children}</div>
+      <div className="[&>section]:mb-0"><CardBoundary id={id}>{children}</CardBoundary></div>
     </div>
   )
+}
+
+/**
+ * fix260: one card that throws (a field missing while it loads, a new answer shape) shows its own red line and is reported
+ * like any site error — the rest of the admin page keeps working (28 Oct: the link-check card took Admin → Site health down)
+ */
+export class CardBoundary extends Component<{ id: string; children?: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null }
+  static getDerivedStateFromError(e: unknown) { return { error: String((e as Error)?.message || e) } }
+  componentDidCatch(err: unknown) { console.error(`admin card ${this.props.id} failed`, err); reportError(err, 'page') }
+  render() {
+    if (this.state.error == null) return this.props.children
+    return (
+      <section className="card p-5 sm:p-6 text-sm" data-card-error={this.props.id}>
+        <p className="text-loss font-semibold">This card failed to draw: {this.state.error}</p>
+        <button type="button" onClick={() => this.setState({ error: null })} className="mt-2 text-xs font-semibold text-accent hover:underline">Try again</button>
+      </section>
+    )
+  }
 }
 
 /** one data-health check with its plain title and explanation */

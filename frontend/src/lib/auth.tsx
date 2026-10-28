@@ -146,14 +146,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   // Live-score rooms (full / teaser) are chosen at connect time: reconnect when the access level changes
-  const firstAccess = useRef(true)
+  // fix260: the first answer of /auth/me is not a change — the socket connected with this cookie already (the old check
+  // took the start-up 'anon' → 'free' as one and dropped the socket mid-handshake for every signed-in visitor: a 400 on
+  // /socket.io and "WebSocket is already in CLOSING or CLOSED state" on each page load)
+  const lastAccess = useRef<Access | null>(null)
   useEffect(() => {
-    if (firstAccess.current) {
-      firstAccess.current = false
-      return
-    }
+    if (loading) return
+    if (lastAccess.current === null) { lastAccess.current = access; return }
+    if (lastAccess.current === access) return
+    lastAccess.current = access
     reconnectSocket()
-  }, [access])
+  }, [access, loading])
 
   const login = async (email: string, password: string, guard?: AuthGuard): Promise<SignInStep> => {
     const r = await axios.post(`${API_URL}/auth/login`, { email, password, ...(guard || {}) })

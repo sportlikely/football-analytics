@@ -16,7 +16,25 @@ try {
   git('fetch', '-q', 'origin', 'main');
   onMain = git('branch', '-r', '--contains', 'HEAD').split('\n').map(s => s.trim()).includes('origin/main');
 } catch { process.exit(0); }
-if (onMain) process.exit(0);
-const msg = `HEAD ${head} (${branch}) is not on origin/main — Railway will not build it. Ship it: git pull --rebase origin main → keep both sides on conflict → typecheck + this fix's tests → git push origin HEAD:main, then check git branch -r --contains HEAD shows origin/main (CLAUDE.md "Shipping"). Payments work is the only exception (branch + ask Yarin).`;
+// fix260: a fix is done only when test:site is green locally (on this exact code) AND in CI ("Site check" on GitHub)
+let siteMsg = '';
+try {
+  const root = git('rev-parse', '--show-toplevel');
+  const tree = git('rev-parse', 'HEAD^{tree}');
+  let rep = null;
+  try { rep = JSON.parse(readFileSync(`${root}/backend/site-report.json`, 'utf8')); } catch { /* never run */ }
+  if (!rep) siteMsg = 'test:site has not run on this machine (npm run test:site in backend).';
+  else if (!rep.full) siteMsg = 'the last test:site run was a partial one (SITE_LANGS / SITE_ONLY / SITE_SHARD set) — run the full npm run test:site.';
+  else if (rep.failed) siteMsg = `the last test:site run failed (${rep.failed} page opens on ${rep.pages?.length ?? '?'} pages, backend/site-report.json) — fix them and run it again.`;
+  else if (rep.tree !== tree) siteMsg = `test:site was green on other code (report ${rep.at}) — run npm run test:site again on HEAD ${head}.`;
+} catch { /* no git */ }
+if (onMain && !siteMsg) process.exit(0);
+if (onMain) {
+  const m = `${siteMsg} A fix is done only when test:site is green locally AND the "Site check" run on GitHub is green (CLAUDE.md "Shipping"; Railway deploys only after it).`;
+  if (input.stop_hook_active) console.log(JSON.stringify({ systemMessage: `⚠ ${m}` }));
+  else console.log(JSON.stringify({ decision: 'block', reason: m }));
+  process.exit(0);
+}
+const msg = `HEAD ${head} (${branch}) is not on origin/main — Railway will not build it. Ship it: git pull --rebase origin main → keep both sides on conflict → typecheck + this fix's tests → git push origin HEAD:main, then check git branch -r --contains HEAD shows origin/main (CLAUDE.md "Shipping"). Payments work is the only exception (branch + ask Yarin).${siteMsg ? ` Also: ${siteMsg}` : ''}`;
 if (input.stop_hook_active) console.log(JSON.stringify({ systemMessage: `⚠ ${msg}` }));
 else console.log(JSON.stringify({ decision: 'block', reason: msg }));

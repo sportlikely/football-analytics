@@ -19,7 +19,8 @@ import { onState, applyState } from './shared';
 import { yieldEvery } from './perf';
 import { isPastSeasonMatch, seasonStarts, pastSeasonIds } from './pastSeason';
 import { assignSlugs, assignMatchSlugs, baseOf, type SlugEntity, type SlugRow, type MatchEntity } from '../utils/slugAssign';
-import { teamSlug, slugify, playerSlug, matchSlug, parseMatchSlug, isSlug, splitTab, movedPage, LINK_SPORTS, ALLOWED_QUERY, type LinkSport, type LinkKind } from '../utils/slugRules';
+import { bbCommonName } from '../utils/personName';
+import { teamSlug, slugify, playerSlug, matchSlug, parseMatchSlug, isSlug, splitTail, movedPage, LINK_SPORTS, ALLOWED_QUERY, type LinkSport, type LinkKind } from '../utils/slugRules';
 
 db.exec(`CREATE TABLE IF NOT EXISTS slugs (sport TEXT NOT NULL, kind TEXT NOT NULL, slug TEXT NOT NULL, id TEXT NOT NULL, is_primary INTEGER NOT NULL DEFAULT 1, base TEXT, at TEXT NOT NULL, PRIMARY KEY (sport, kind, slug))`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_slugs_id ON slugs(sport, kind, id, is_primary)`);
@@ -285,9 +286,15 @@ export function linkAnswer(path: string, query = ''): LinkAnswer {
   let rest = (lm?.[2] || path).replace(/\/+$/, '') || '/';
   const kept = keptQuery(query);
   // fix235: a tab is a sub-path (/football/match/<slug>/stats); a sub-path that is not a tab of the page → the page
-  const tb = splitTab(rest);
+  // fix260: any depth, every kind (team / player pages answered 200 + the app's 404 before); a doubled relative link
+  // (…/player/lillard-damian/player/damian-lillard) → the inner item, resolved here (one hop)
+  const tb = splitTail(rest);
   if (tb && parseNew(tb.base)) {
-    if (!tb.tab) return { to: `${lang}${tb.base}${kept}` };
+    if (tb.inner && parseNew(tb.inner.split('/').slice(0, 4).join('/'))) {
+      const a = linkAnswer(`${lang}${tb.inner}`, query);
+      return a && ('to' in a || 'search' in a) ? a : { to: `${lang}${tb.inner}${kept}` };
+    }
+    if (!tb.tab) { const a = linkAnswer(`${lang}${tb.base}`, query); return a && 'to' in a ? a : { to: `${lang}${tb.base}${kept}` }; }
     rest = tb.base;
   }
   const sub = tb?.tab ? `/${tb.tab}` : '';
@@ -578,7 +585,9 @@ async function buildBasketball(step: () => Promise<void>, full: boolean) {
   for (const r of all(`SELECT ps.player_id AS id, MAX(ps.name) AS name, COUNT(*) AS n, MAX(g.kickoff) AS d, ps.team_id AS team FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff >= ? GROUP BY ps.player_id, ps.team_id`, daysAgo(2 * 365))) {
     if (!r.name) continue;
     const id = String(r.id), p = players.get(id) as any;
-    if (!p || r.d > p._d) players.set(id, { id, name: r.name, weight: (p?.weight || 0) + r.n, team: teamSlugs.get(String(r.team)) || null, _d: r.d } as any);
+    // fix260: first name first ("Lillard Damian" → damian-lillard); the API's order stays a name of the player (old slug → 301)
+    const name = bbCommonName(r.name);
+    if (!p || r.d > p._d) players.set(id, { id, name, names: name !== r.name ? [r.name] : [], weight: (p?.weight || 0) + r.n, team: teamSlugs.get(String(r.team)) || null, _d: r.d } as any);
     else p.weight += r.n;
   }
   await step();

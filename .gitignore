@@ -54,3 +54,7 @@ presentation/
 # fix213: layout check screenshots
 frontend/test-output/
 backend/test-output/
+
+# fix260: test:site / test:links reports (the Stop hook reads site-report.json)
+backend/site-report*.json
+backend/links-report.json

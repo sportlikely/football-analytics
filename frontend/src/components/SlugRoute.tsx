@@ -3,7 +3,7 @@ import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-route
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { knownId, rememberSlug, type LinkKind, type LinkSport } from '../lib/links'
-import { movedPage } from '../lib/slugRules'
+import { movedPage, splitTail } from '../lib/slugRules'
 import { t } from '../lib/i18n'
 
 /**
@@ -35,8 +35,12 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
   const nav = useNavigate()
   const loc = useLocation()
   // fix235: a tab sub-path (…/match/<slug>/stats), the query and the hash are kept on a move; a tab change is no new item
+  // fix260: a doubled relative link (…/player/<a>/player/<b>) opens the inner item; anything after a team / player page → the page
+  const tail0 = tab0 ? splitTail(`/${sport}/${kind}/${slug}/${tab0}`) : null
+  const moveTo = tail0?.inner ?? (tail0 && (kind === 'team' || kind === 'player') ? tail0.base : null)
+  useEffect(() => { if (moveTo) nav(`${moveTo}${loc.search}`, { replace: true }) }, [moveTo, loc.search, nav])
   const tail = useRef('')
-  tail.current = `${tab0 ? `/${tab0.replace(/\/+$/, '')}` : ''}${loc.search}${loc.hash}`
+  tail.current = `${tab0 && !moveTo ? `/${tab0.replace(/\/+$/, '')}` : ''}${loc.search}${loc.hash}`
   // a number (an old id) or a code with capitals (an old basketball league code: NBA, BB123) where the slug belongs
   const numeric = /^-?\d+$/.test(slug) || /[A-Z]/.test(slug)
   const [id, setId] = useState<string | null>(() => (numeric ? null : knownId(sport, kind, slug) ?? fromServer(sport, kind, slug)))

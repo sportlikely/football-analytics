@@ -124,6 +124,21 @@ export function splitTab(path: string): { base: string; tab: string | null } | n
   const list: readonly string[] = m[2] === 'match' ? MATCH_TABS : LEAGUE_TABS
   return { base: m[1], tab: list.includes(m[3]) ? m[3] : null }
 }
+/**
+ * fix260: anything after an item's slug, every kind and depth → { base, tab, inner }: tab = a tab of that page;
+ * inner = a doubled relative link ("/basketball/player/lillard-damian/player/damian-lillard" → "/basketball/player/damian-lillard",
+ * a 404 on 28 Oct); neither = the address moves to the page itself. null = nothing after an item's slug.
+ */
+export function splitTail(path: string): { base: string; tab: string | null; inner: string | null } | null {
+  const m = /^(\/([a-z-]+)\/(team|player|league|match)\/[a-z0-9-]+)\/(.+?)\/?$/.exec(path)
+  if (!m) return null
+  const t = splitTab(`${m[1]}/${m[4]}`)
+  if (t?.tab) return { ...t, inner: null }
+  const im = /^(?:([a-z-]+)\/)?(team|player|league|match)\/([a-z0-9-]+)(?:\/([a-z0-9-]+))?$/.exec(m[4])
+  const sport = im ? im[1] || m[2] : null
+  const inner = im && sport && (LINK_SPORTS as readonly string[]).includes(sport) ? `/${sport}/${im[2]}/${im[3]}${im[4] ? `/${im[4]}` : ''}` : null
+  return { base: m[1], tab: null, inner }
+}
 
 /** the pages every sport has under its name (same names in every sport; football no longer at the root) */
 export const SPORT_PAGES = ['matches', 'today', 'predictions', 'favorites', 'my-picks', 'upset-watch', 'draw-alerts', 'accuracy', 'how-it-works', 'past', 'rankings'] as const

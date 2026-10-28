@@ -878,6 +878,13 @@ async function pageData(afId: number): Promise<any> {
       logger.warn(`team page ${afId}: squad data from ${new Date(have.at).toISOString()} (${e.message})`);
       return assemble(afId, have.data);
     }
+    // fix260: never built and the provider failing — the page from our database (as crawlers get it), never a 500 that
+    // left the page on "Updating…"
+    if ((e?.response?.status || e?.status) !== 404) {
+      let off: any = null;
+      try { off = await noProviderCalls(() => offlinePage(afId)); } catch { /* nothing of ours either */ }
+      if (off) { logger.warn(`team page ${afId}: from our database only (${e.message})`); return off; }
+    }
     throw e;
   }
 }

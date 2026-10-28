@@ -1,0 +1,163 @@
+# fix260: every page checked before every deploy. Railway deploys a push to main only when this check is green
+# (Railway → service → Settings → Source → "Wait for CI": docs/notes/deploy.md). A red run blocks the deploy and the
+# "Report" job writes the failing pages in plain words (run summary + email to Yarin when the RESEND_API_KEY and
+# REPORT_EMAIL_TO secrets are set).
+name: Site check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: site-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  SITE_SHARDS: '8'
+
+jobs:
+  build:
+    name: Typecheck, parity, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Install (backend)
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+      - name: Install (frontend)
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck (backend)
+        working-directory: backend
+        run: npx tsc --noEmit -p .
+      - name: Typecheck (frontend)
+        working-directory: frontend
+        run: npx tsc --noEmit -p .
+      - name: Parity
+        working-directory: frontend
+        run: npm run parity
+      - name: Build the server
+        working-directory: backend
+        run: npx tsc -p .
+      - name: Build the app (+ chunks and relative-link checks on the built app)
+        working-directory: frontend
+        run: npx vite build && node scripts/chunks-check.mjs && node --experimental-strip-types --no-warnings scripts/relative-links-check.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builds
+          path: |
+            backend/dist
+            frontend/dist
+          retention-days: 3
+
+  links:
+    name: test:links
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - uses: actions/download-artifact@v4
+        with:
+          name: builds
+      - name: Chromium
+        working-directory: frontend
+        run: npx playwright-core install --with-deps chromium
+      - name: test:links
+        working-directory: backend
+        run: node --no-warnings scripts/links-test.mjs
+        env:
+          LINKS_REPORT: ${{ github.workspace }}/links-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-links
+          path: links-report.json
+          if-no-files-found: ignore
+
+  site:
+    name: test:site (part ${{ matrix.shard }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: backend
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - uses: actions/download-artifact@v4
+        with:
+          name: builds
+      - name: Chromium
+        working-directory: frontend
+        run: npx playwright-core install --with-deps chromium
+      - name: test:site
+        working-directory: backend
+        run: node --no-warnings scripts/site-test.mjs
+        env:
+          SITE_SHARD: ${{ matrix.shard }}/${{ env.SITE_SHARDS }}
+          SITE_CONCURRENCY: '4'
+          SITE_REPORT: ${{ github.workspace }}/site-report-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-site-${{ matrix.shard }}
+          path: site-report-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+
+  report:
+    name: Report (failing pages in plain words)
+    needs: [build, links, site]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: report-*
+          merge-multiple: true
+          path: reports
+      - name: Write the report and email it
+        run: node backend/scripts/ci-report.mjs reports/*.json
+        env:
+          FAILED_STEPS: ${{ needs.build.result != 'success' && 'typecheck / parity / build (open the run: nothing was deployed)' || '' }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}

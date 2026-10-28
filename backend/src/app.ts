@@ -2327,9 +2327,12 @@ function storedDetails(id: number): any | null {
 }
 /** What we hold without a provider call: the match from our saved predictions + its result, and the saved prediction. */
 function offlineDetails(id: number): any | null {
-  const p = db.prepare(`SELECT match_id, utc_date, competition_code, competition_name, home_team_id, home_team, away_team_id, away_team FROM predictions WHERE match_id = ? LIMIT 1`).get(id) as any;
+  let p = db.prepare(`SELECT match_id, utc_date, competition_code, competition_name, home_team_id, home_team, away_team_id, away_team FROM predictions WHERE match_id = ? LIMIT 1`).get(id) as any;
+  // fix260: an API-Football fixture we hold but never predicted: its fixture row (the page opens, never a 500)
+  if (!p && isAfMatchId(id)) p = db.prepare(`SELECT ? AS match_id, kickoff AS utc_date, 'AF' || league_id AS competition_code, division AS competition_name, ? + home_id AS home_team_id, home_name AS home_team, ? + away_id AS away_team_id, away_name AS away_team, status AS af_status, hg, ag FROM af_fixtures WHERE fixture_id = ?`).get(id, AF_OFFSET, AF_OFFSET, id - AF_OFFSET) as any;
   if (!p) return null;
-  const r = db.prepare(`SELECT home_goals, away_goals, outcome FROM results WHERE match_id = ? LIMIT 1`).get(id) as any;
+  let r = db.prepare(`SELECT home_goals, away_goals, outcome FROM results WHERE match_id = ? LIMIT 1`).get(id) as any;
+  if (!r && p.hg != null && p.ag != null && ['FT', 'AET', 'PEN'].includes(p.af_status)) r = { home_goals: p.hg, away_goals: p.ag, outcome: p.hg > p.ag ? 'H' : p.hg < p.ag ? 'A' : 'D' };
   const done = !!r && ['H', 'D', 'A'].includes(r.outcome);
   const match: any = {
     id, utcDate: p.utc_date, status: done ? 'FINISHED' : Date.parse(p.utc_date) > Date.now() ? 'TIMED' : 'IN_PLAY',
@@ -2536,7 +2539,9 @@ app.get('/api/matches/:id(\\d+)/head2head', async (req, res) => {
 app.get('/api/leagues', async (_req, res) => {
   try {
     // fix176: a league listed by both providers appears once (BSA → AF71, the one with the predictions)
-    const leagues = [...(await footballDataAPI.getLeagues()), ...afCompetitions()].filter((l: any) => !MERGED_LEAGUES[l.code]);
+    // fix260: Football-Data.org failing (403 / 429 / down) is never the visitor's error: the API-Football list alone
+    const fd = await footballDataAPI.getLeagues().catch((e: any) => { logger.warn(`leagues: Football-Data.org ${e?.response?.status || e?.message} — API-Football's list only`); return [] as any[]; });
+    const leagues = [...fd, ...afCompetitions()].filter((l: any) => !MERGED_LEAGUES[l.code]);
     res.json({ data: leagues, count: leagues.length, timestamp: new Date().toISOString() });
   } catch (error: any) {
     sendError(res, error, 'Failed to fetch leagues');
@@ -2554,8 +2559,10 @@ app.get('/api/leagues/:code/standings', async (req, res) => {
     let standings: any;
     try { standings = isAfCode(code) ? await getAfStandings(code) : await footballDataAPI.getStandings(code); }
     catch (e: any) {
-      if (!AF_TWIN[code]) throw e;
-      standings = await getAfStandings(AF_TWIN[code]).catch(() => null);
+      // fix260: the provider failing (out of calls, down, no key) is "no table right now" — the match / league page draws
+      // without it; a 500 here left the match page on "Updating…"
+      standings = AF_TWIN[code] ? await getAfStandings(AF_TWIN[code]).catch(() => null) : null;
+      if (!standings) logger.warn(`standings ${code}: ${e?.message} — answered without a table`);
     }
     if (!standings) return res.json({ data: null, timestamp: new Date().toISOString() });
     // Football-Data.org tables come without form on our plan: add it from the finished matches (newest first)
@@ -2592,8 +2599,9 @@ app.get('/api/leagues/:code/scorers', async (req, res) => {
     let scorers: any;
     try { scorers = isAfCode(code) ? await getAfScorers(code, limit) : await footballDataAPI.getScorers(code, limit); }
     catch (e: any) {
-      if (!AF_TWIN[code]) throw e;
-      scorers = await getAfScorers(AF_TWIN[code], limit).catch(() => ({ scorers: [] })); // fix176: between editions
+      // fix176: between editions → the twin; fix260: the provider failing (403 / 429 / down) → no scorers list, never a 403 / 500 to the page
+      scorers = AF_TWIN[code] ? await getAfScorers(AF_TWIN[code], limit).catch(() => ({ scorers: [] })) : { scorers: [] };
+      if (!AF_TWIN[code]) logger.warn(`scorers ${code}: ${e?.response?.status || e?.message} — answered without scorers`);
     }
     res.json({ data: scorers, timestamp: new Date().toISOString() });
   } catch (error: any) {
@@ -3479,7 +3487,7 @@ app.get('/api/nfl/games', (req, res) => {
     // a day on the visitor's clock (Today page)
     if (typeof req.query.from === 'string' && typeof req.query.to === 'string') {
       const f = new Date(req.query.from), t = new Date(req.query.to);
-      if (isNaN(f.getTime()) || isNaN(t.getTime()) || t <= f || t.getTime() - f.getTime() > 31 * 86400000) return res.status(400).json({ error: 'Bad range' }); // fix152a: up to 30 days (Games page)
+      if (isNaN(f.getTime()) || isNaN(t.getTime()) || t <= f || t.getTime() - f.getTime() > 36 * 86400000) return res.status(400).json({ error: 'Bad range' }); // fix152a: up to 30 days (Games page); fix260: the league page asks 21 days back + 14 ahead (35 days: 400 on every NFL / college league page)
       // fix185: both leagues by default, by kick-off
       return res.json({ data: { games: nflWith(req, nflLgs(req).flatMap(l => nflGamesBetween(f.toISOString(), t.toISOString(), l)).sort(byKick)) } });
     }

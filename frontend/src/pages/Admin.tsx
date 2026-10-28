@@ -43,7 +43,10 @@ export default function Admin() {
   const [checks, setChecks] = useState<HealthCheck[] | null>(null)
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
 
-  const loadSummary = useCallback(() => axios.get(`${API_URL}/admin/summary`).then(r => setSummary(r.data.data)).catch(() => undefined), [])
+  // fix260: a locked console (423) is said in words with a way out — never a page waiting for ever
+  const [locked, setLocked] = useState<string | null>(null)
+  const loadSummary = useCallback(() => axios.get(`${API_URL}/admin/summary`).then(r => { setSummary(r.data.data); setLocked(null) })
+    .catch(e => { if (e?.response?.status === 423) setLocked(e.response.data?.error || 'Sign in to the staff console first.') }), [])
   const loadChecks = useCallback(() => axios.get(`${API_URL}/data-health`).then(r => { setChecks(r.data.data?.checks || []); setCheckedAt(r.data.data?.at || null) }).catch(() => setChecks([])), [])
   const reload = useCallback(() => { loadSummary(); loadChecks() }, [loadSummary, loadChecks])
   useEffect(() => {
@@ -59,6 +62,13 @@ export default function Admin() {
   if (!tabParam && params.get('tab') === 'users') return <Navigate to={adminPath('users')} replace />
   if (tabParam && !adminTabOf(tabParam)) return <Navigate to="/admin" replace />
   const tab: AdminTab = adminTabOf(tabParam) || 'needs-you'
+  if (locked) return (
+    <div className="max-w-md mx-auto px-4 py-16 text-center" data-console-locked="">
+      <h1 className="font-display text-2xl font-bold text-ink mb-2">Staff console locked</h1>
+      <p className="text-sm text-muted mb-4">{locked}</p>
+      <button type="button" onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-accent text-bg font-semibold text-sm">Sign in to the console</button>
+    </div>
+  )
 
   const ctx: Ctx = { summary, checks }
   const red = (checks || []).filter(c => c.level === 'fail')
@@ -655,12 +665,25 @@ function ModelDailyCard() {
 }
 
 /** fix164: team links that would open "We couldn't find this team" (matches of the last and next 7 days, every sport). */
+type LinkCheck = { at: string; ms: number; checked: Record<string, number>; failures: { sport: string; teamId: number; name: string; competition: string; link: string }[] }
 function LinkCheckCard() {
-  const [d, setD] = useState<{ at: string; ms: number; checked: Record<string, number>; failures: { sport: string; teamId: number; name: string; competition: string; link: string }[] } | null>(null)
+  const [d, setD] = useState<LinkCheck | null>(null)
   const [busy, setBusy] = useState(false)
-  const load = (run = false) => { setBusy(run); return axios.get(`${API_URL}/admin/link-check`, { params: run ? { run: 1 } : {} }).then(r => setD(r.data.data)).catch(() => undefined).finally(() => setBusy(false)) }
-  useEffect(() => { load() }, [])
-  if (!d) return null
+  // fix260: no check stored yet (a fresh start) answers { running: true } (fix234) — read as "running", asked again, never
+  // read as a check (its missing failures list crashed Admin → Site health, 28 Oct)
+  const [running, setRunning] = useState(false)
+  const load = useCallback((run = false) => {
+    setBusy(run)
+    return axios.get(`${API_URL}/admin/link-check`, { params: run ? { run: 1 } : {} }).then(r => {
+      const x = r.data?.data
+      const ok = !!x && Array.isArray(x.failures) && !!x.checked
+      if (ok) setD(x)
+      setRunning(!ok || !!r.data?.job?.running)
+    }).catch(() => undefined).finally(() => setBusy(false))
+  }, [])
+  useEffect(() => { load() }, [load])
+  useEffect(() => { if (!running) return; const t = setInterval(() => load(), 3000); return () => clearInterval(t) }, [running, load])
+  if (!d) return running ? <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Broken team links: the first check is running…</section> : null
   const n = d.failures.length, total = Object.values(d.checked).reduce((a, b) => a + b, 0)
   return (
     <section className="card p-5 sm:p-6 mb-8">

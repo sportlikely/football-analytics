@@ -15,8 +15,13 @@ branch this chat is on (claude/*, a worktree, anything):
 - Payments changes are the only exception: they go on a branch and Yarin merges (existing rule).
 - A failed Railway deploy (fix265): GitHub Actions "Docker build (Railway check)" (`.github/workflows/docker-build.yml`)
   runs the same Dockerfile + a /health start on every push to main — read its log for the failing line.
+- **A fix is done only when `npm run test:site` is green locally AND the "Site check" run on GitHub is green** (fix260,
+  Yarin 28 Oct: every page checked before every deploy). Before pushing: `cd backend && npm run test:site` and
+  `npm run test:links` (full runs; `SITE_LANGS=en SITE_WIDTHS=1280` only for a quick pass while working). After pushing:
+  the Site check (`.github/workflows/site-check.yml`: typecheck, parity, test:links, test:site in 8 parts) must pass —
+  Railway deploys only then ("Wait for CI", docs/notes/deploy.md). A red run = not deployed: fix it, push again.
 - The Stop hook (`.claude/settings.json` → `.claude/hooks/check-on-main.mjs`) asks once at the end of a task when HEAD is
-  not on origin/main, then warns.
+  not on origin/main, or when `backend/site-report.json` is missing / red / partial / from other code than HEAD; then warns.
 
 SportLikely (sportlikely.com) is a sports-prediction site: football live, basketball launching ~18 Oct 2026, more sports later.
 Owner: Yarin. One repo, one Railway service (`railway.json`, Dockerfile) serving the API and the built site. SQLite on a
@@ -231,6 +236,12 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   `bbResults.ts` (basketball), `resultChecks.ts` (American football, tennis).
 - Copy for Claude (fix259): `services/forClaude.ts` + `utils/forClaude.ts` (text, secret filter, 12 KB), frontend `components/admin/CopyForClaude.tsx`
   + `lib/forClaude.ts` — a new admin card gets the button through its Explained frame; a new red / yellow row passes its own `req`. Admin / CRM only.
+- Site gate (fix260): `backend/scripts/site-test.mjs` (test:site: every route × language × 375 / 1280 px × signed-out / free /
+  admin + Admin / CRM tabs console signed in and locked), `links-test.mjs` (test:links: sitemaps + language homes, 2 levels,
+  404 / 410 / 5xx / loops / relative hrefs), `site-server.mjs` (the server on a database copy or the seeded data),
+  `site-seed.mjs` (test users + teams / players / games of every sport), `ci-report.mjs` (failing pages in plain words);
+  frontend `scripts/relative-links-check.ts` in parity. A new page type or route goes in site-test.mjs's lists. Notes:
+  docs/notes/deploy.md.
 - `OPEN_API` in `app.ts` lists the public routes; everything else is admin/staff only (answered by the worker).
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):
