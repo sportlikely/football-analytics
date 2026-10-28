@@ -28,6 +28,7 @@ import { onExtraLeague } from './leagueConfig';
 import { every, after, yielder, mapGames, yieldLoop, afterHeavy, everyHeavy } from './perf';
 import { stringifyAsync } from '../utils/jsonAsync';
 import { onState, publishState } from './shared';
+import { teamKey, proposeTwin, type TwinCand } from '../utils/nameMatch';
 
 export const AF_OFFSET = 1_000_000_000;
 export const isAfMatchId = (id: number) => id >= AF_OFFSET;
@@ -178,6 +179,7 @@ export function toFdMatch(f: any) {
     stage: /regular season/i.test(round) ? 'REGULAR_SEASON' : round.toUpperCase().replace(/\s+/g, '_') || null,
     group: null,
     venue: f.fixture?.venue?.name || null,
+    venueCity: f.fixture?.venue?.city || null, // fix264: the weather card's place without a fixture call
     competition: competitionOf(f.league),
     area: { name: f.league?.country, flag: f.league?.flag },
     season: { startDate: `${f.league?.season}-07-01`, endDate: `${(f.league?.season || 0) + 1}-06-30` },
@@ -995,10 +997,8 @@ export function afLiveReading(fid: number): { match: any; at: number } | null {
   return raw ? { match: toFdMatch(raw), at: afLiveAt } : null;
 }
 
-function nameKey(s: string) {
-  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ')
-    .split(' ').filter(w => w && !['fc', 'cf', 'afc', 'sc', 'ac', 'as', 'ssc', 'sv', 'club', 'de', 'cp'].includes(w)).join(' ');
-}
+// fix264: ø / æ / ß folded too ("FK Bodø/Glimt" = "Bodo/Glimt"), "FK" dropped like "FC" (utils/nameMatch.ts)
+const nameKey = teamKey;
 /**
  * fix212b: names the two providers write differently (Football-Data.org long name ↔ API-Football short name), by key.
  * "Wolverhampton Wanderers FC" is "Wolves" at API-Football: neither contains the other, so Wolves – Watford (ELC,
@@ -1017,7 +1017,7 @@ const ALIASES: Record<string, string[]> = {
   'sporting clube portugal': ['sporting cp', 'sporting lisbon', 'sporting'], 'olympique lyonnais': ['lyon'], 'olympique marseille': ['marseille'],
   'hellas verona': ['verona'], 'real sociedad futbol': ['real sociedad'], 'rcd espanyol barcelona': ['espanyol'], 'real betis balompie': ['betis', 'real betis'],
   'deportivo alaves': ['alaves'], 'rayo vallecano madrid': ['rayo vallecano'], 'celta vigo': ['celta'], 'us sassuolo calcio': ['sassuolo'], 'fc internazionale milano': ['inter', 'inter milan'],
-  'afc ajax': ['ajax'], 'psv': ['psv eindhoven'], 'feyenoord rotterdam': ['feyenoord'], 'sl benfica': ['benfica'], 'fc porto': ['porto'], 'sporting braga': ['braga']
+  'bodo glimt': ['bodoe glimt'], 'afc ajax': ['ajax'], 'psv': ['psv eindhoven'], 'feyenoord rotterdam': ['feyenoord'], 'sl benfica': ['benfica'], 'fc porto': ['porto'], 'sporting braga': ['braga']
 };
 db.exec(`CREATE TABLE IF NOT EXISTS team_aliases (name_key TEXT NOT NULL, alias_key TEXT NOT NULL, PRIMARY KEY (name_key, alias_key))`);
 let aliasRows: Map<string, Set<string>> | null = null;
@@ -1029,14 +1029,18 @@ function keysOf(name: string): string[] {
     aliasRows = new Map();
     const add = (a: string, b: string) => { if (!aliasRows!.has(a)) aliasRows!.set(a, new Set()); aliasRows!.get(a)!.add(b); };
     for (const [n, list] of Object.entries(ALIASES)) for (const a of list) { add(n, a); add(a, n); }
-    try { for (const r of db.prepare(`SELECT name_key, alias_key FROM team_aliases`).all() as any[]) { add(r.name_key, r.alias_key); add(r.alias_key, r.name_key); } } catch { /* fresh */ }
+    // keys stored before fix264 are folded again (ø, "fk")
+    try { for (const r of db.prepare(`SELECT name_key, alias_key FROM team_aliases`).all() as any[]) { const a = nameKey(r.name_key), b = nameKey(r.alias_key); if (a && b) { add(a, b); add(b, a); } } } catch { /* fresh */ }
   }
   return [k, ...(aliasRows.get(k) || [])];
 }
 /** Admin / scripts: a new alias pair (both ways), kept in the database */
-export function addTeamAlias(name: string, alias: string) {
-  db.prepare(`INSERT OR IGNORE INTO team_aliases (name_key, alias_key) VALUES (?, ?)`).run(nameKey(name), nameKey(alias));
+export function addTeamAlias(name: string, alias: string): boolean {
+  const a = nameKey(name), b = nameKey(alias);
+  if (!a || !b || a === b) return false;
+  const r = db.prepare(`INSERT OR IGNORE INTO team_aliases (name_key, alias_key) VALUES (?, ?)`).run(a, b);
   aliasRows = null;
+  return Number(r.changes) > 0;
 }
 export function sameTeam(a: string, b: string) {
   const xs = keysOf(a), ys = keysOf(b);
@@ -1264,6 +1268,45 @@ export async function afFixturesFull(fixtureIds: number[]): Promise<Map<number, 
 export async function afTwinOfFd(match: any, opts: { force?: boolean } = {}): Promise<{ fid: number; swapped: boolean } | null> {
   const fid = await afFixtureForFd(match, !!opts.force);
   return fid ? { fid, swapped: fdToAfSwap.has(match.id) } : null;
+}
+
+/**
+ * fix264: a Football-Data game still without a twin close to kick-off — that day's API-Football fixtures (the cached
+ * day list) scored on both names (fuzzy) + kick-off (utils/nameMatch.proposeTwin). Unambiguous → the names that differ
+ * become a team_aliases pair (both ways) and the game is looked up again; else the best candidate is only listed.
+ */
+export interface AliasProposal { fdId: number; game: string; kickoff: string; candidate: string | null; fixture: number | null; score: number | null; applied: boolean; aliases: string[] }
+export async function proposeTwinAliases(match: any): Promise<AliasProposal | null> {
+  if (!afConfigured() || !match?.utcDate) return null;
+  const day = String(match.utcDate).slice(0, 10);
+  const j = await cached(`alldate:${day}`, 3 * 3600 * 1000, () => afGet('/fixtures', { date: day }));
+  const ko = Date.parse(match.utcDate);
+  const country = match.competition?.type === 'LEAGUE' ? String(match.area?.name || '').toLowerCase() : '';
+  const hIds = afTeamIdsOf(match.homeTeam?.id), aIds = afTeamIdsOf(match.awayTeam?.id);
+  const is = (afName: string, afId: number, t: any, ids: number[]) => ids.includes(afId) || sameTeam(afName, t?.name) || sameTeam(afName, t?.shortName || '');
+  const cands: TwinCand[] = (j.response || [])
+    .filter((x: any) => Math.abs(Date.parse(x.fixture?.date) - ko) <= 3 * 3600 * 1000 && (!country || !x.league?.country || String(x.league.country).toLowerCase() === country))
+    .map((x: any) => ({
+      id: x.fixture.id, home: x.teams?.home?.name || '', away: x.teams?.away?.name || '', kickoff: x.fixture.date,
+      sameHome: is(x.teams?.home?.name, x.teams?.home?.id, match.homeTeam, hIds), sameAway: is(x.teams?.away?.name, x.teams?.away?.id, match.awayTeam, aIds)
+    }));
+  const p = proposeTwin({ home: match.homeTeam?.name || '', away: match.awayTeam?.name || '', kickoff: match.utcDate }, cands);
+  const out: AliasProposal = {
+    fdId: match.id, game: `${match.homeTeam?.name} – ${match.awayTeam?.name} (${match.competition?.code || '?'})`, kickoff: match.utcDate,
+    candidate: p.best ? `${p.best.home} – ${p.best.away}${p.best.minutes ? ` (${p.best.minutes} min apart)` : ''}` : null, fixture: p.best?.id ?? null,
+    score: p.best ? Math.round(p.best.score * 100) / 100 : null, applied: false, aliases: []
+  };
+  if (!p.apply || !p.best) return out;
+  const c = cands.find(x => x.id === p.best!.id)!;
+  // a pair is only kept when both keys are real names (4+ letters: a short key would match too much by "contains")
+  const pairs: [string, string][] = [];
+  if (!c.sameHome) pairs.push([match.homeTeam?.name, c.home]);
+  if (!c.sameAway) pairs.push([match.awayTeam?.name, c.away]);
+  if (pairs.some(([a, b]) => teamKey(a).length < 4 || teamKey(b).length < 4)) return out;
+  for (const [a, b] of pairs) if (addTeamAlias(a, b)) out.aliases.push(`${a} = ${b}`);
+  out.applied = true;
+  fdToAf.delete(match.id); fdToAfMissAt.delete(match.id); // looked up again with the new names
+  return out;
 }
 
 export async function afExtrasForFd(match: any): Promise<{ home: any; away: any; minute: number | null; events: ReturnType<typeof eventsOnFd> } | null> {

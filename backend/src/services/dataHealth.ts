@@ -169,7 +169,14 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     checks.push({
       id: 'fd-twins', label: 'Football-Data games linked to API-Football (next 7 days)', level: tw.list.length ? 'warn' : 'ok',
       detail: tw.list.length ? `${tw.list.length} game(s) without an API-Football twin — a freeze would leave them stale; add an alias (team_aliases) if the names differ` : `Every game linked${tw.at ? ` · checked ${ago(now - tw.at)} ago` : ''}`,
-      items: tw.list.slice(0, 20).map(x => `${x.name} · ${x.kickoff.slice(0, 16).replace('T', ' ')} UTC · FD ${x.id}`)
+      items: [
+        ...tw.list.slice(0, 20).map(x => {
+          // fix264: the alias job's best guess for it (applied only when unambiguous)
+          const p = tw.proposals.find(q => q.fdId === x.id && !q.applied);
+          return `${x.name} · ${x.kickoff.slice(0, 16).replace('T', ' ')} UTC · FD ${x.id}${p ? ` · ${p.candidate ? `closest API-Football game: ${p.candidate} (score ${p.score}, not sure enough to apply)` : 'no API-Football game near that kick-off'}` : ''}`;
+        }),
+        ...tw.proposals.filter(p => p.applied && p.aliases.length).map(p => `alias added: ${p.aliases.join('; ')} (${p.game})`)
+      ]
     });
   }
   try {
@@ -418,7 +425,9 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
         level: age > 48 * 3600 * 1000 || low.length ? 'warn' : 'ok',
         detail: `${a.matched} of ${a.checked - (a.lag || 0)} top scorers match (${a.leagues})${lag.length ? ` · ${lag.length} still updating after a game` : ''} · checked ${ago(age)} ago`
           + (low.length ? ` · under 95 %: ${low.map(([c, t]) => `${c} ${pct(t)} %`).join(', ')}` : ' · every league 95 %+'),
-        items: [...bad, ...lag].slice(0, 25).map((i: any) => `${i.league || ''} ${i.player || ''}: ${i.detail}${i.reason ? ` — ${i.reason}` : ''}`)
+        // fix264: a player whose page waits for the provider's update after a game is "updating", not a difference
+        items: [...bad.map((i: any) => `${i.league || ''} ${i.player || ''}: ${i.detail}${i.reason ? ` — ${i.reason}` : ''}`),
+          ...lag.map((i: any) => `updating · ${i.league || ''} ${i.player || ''}: ${i.detail} — not counted until the provider's next update`)].slice(0, 25)
       });
     }
   } catch { /* no report yet */ }

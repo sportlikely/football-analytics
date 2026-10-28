@@ -17,7 +17,7 @@
 import { db } from '../db';
 import logger from '../utils/logger';
 import { reportLive, bestLive } from './liveScores';
-import { afTwinOfFd, afLiveReading, afFixturesFull, afIdOfFd } from './afMatches';
+import { afTwinOfFd, afLiveReading, afFixturesFull, afIdOfFd, proposeTwinAliases, type AliasProposal } from './afMatches';
 import { afConfigured, afRemaining } from './apiFootball';
 import { noteAutoFix, adminUrl } from './adminMail';
 import { onState, publishState } from './shared';
@@ -26,6 +26,7 @@ import { yieldLoop } from './perf';
 export const DUE_MS = 15 * 60 * 1000; // kick-off + 15 min and still not started = FD is behind
 export const STALE_MS = 15 * 60 * 1000; // a live / just-finished game whose FD reading is older than this
 export const FREEZE_MS = 20 * 60 * 1000; // the whole window's newest lastUpdated older than this = frozen
+export const ALIAS_WINDOW_MS = 48 * 60 * 60 * 1000; // fix264: no twin this close to kick-off → propose an alias
 export const SHOULD_BE_LIVE_MS = 3 * 60 * 60 * 1000; // kick-off up to 3 h ago: live or just finished
 const FINAL = new Set(['FINISHED', 'AWARDED', 'CANCELLED', 'POSTPONED', 'SUSPENDED']);
 const NOT_STARTED = new Set(['SCHEDULED', 'TIMED']);
@@ -114,6 +115,8 @@ const warned = new Set<number>();
 const forcedAt = new Map<number, number>();
 let twinless: { id: number; name: string; kickoff: string }[] = [];
 let twinsCheckedAt = 0;
+// fix264: the alias proposals of the last run (applied ones and the ones only listed)
+let proposals: AliasProposal[] = [];
 /**
  * Link the FD matches of the next `days` days to their API-Football fixture (one day list per day, cached 3 h), so a
  * freeze never finds a game without a twin, and keep the list of the ones still without one for data health.
@@ -139,15 +142,34 @@ export async function linkFdTwins(window: any[], now = Date.now(), days = 7): Pr
     }
     if (checked % 10 === 0) await yieldLoop();
   }
+  // fix264: a game within 48 h still without a twin → that day's API-Football games scored on both names + kick-off;
+  // an unambiguous one adds the alias and links the game, the rest are listed (at most 10 a run)
+  const props: AliasProposal[] = [];
+  for (const x of miss.filter(x => ms(x.kickoff)! - now <= ALIAS_WINDOW_MS).slice(0, 10)) {
+    const m = soon.find(g => g.id === x.id);
+    if (!m || afRemaining() < 150) break;
+    try {
+      const p = await proposeTwinAliases(m);
+      if (!p) continue;
+      props.push(p);
+      if (p.applied && await afTwinOfFd(m)) {
+        linked++;
+        miss.splice(miss.indexOf(x), 1);
+        logger.info(`FD twins: ${p.game} linked to API-Football ${p.fixture} by a new alias (${p.aliases.join('; ') || 'names already known'}, score ${p.score})`);
+        if (p.aliases.length) noteAutoFix('football data', `Team alias added: ${p.aliases.join('; ')}`, `${p.game} had no API-Football twin ${Math.round((ms(p.kickoff)! - now) / 3600e3)} h before kick-off; matched ${p.candidate} (score ${p.score}).`, adminUrl('data'));
+      }
+    } catch (e: any) { logger.warn(`FD twins: alias proposal for ${x.id}: ${e?.message || e}`); }
+  }
   twinless = miss.sort((a, b) => a.kickoff.localeCompare(b.kickoff));
   twinsCheckedAt = now;
-  publishState('fd:twins', { twinless, at: now });
+  proposals = props;
+  publishState('fd:twins', { twinless, at: now, proposals });
   if (miss.length) logger.warn(`FD twins: ${miss.length} of ${soon.length} game(s) in the next ${days} days without an API-Football twin: ${miss.slice(0, 5).map(x => `${x.id} ${x.name}`).join('; ')}`);
   return { checked, linked, missing: miss.length };
 }
-onState('fd:twins', (_k, v: { twinless: typeof twinless; at: number }) => { twinless = v.twinless; twinsCheckedAt = v.at; });
-/** data health: FD games of the coming days without an API-Football twin (and when that was last checked) */
-export const fdTwinless = () => ({ list: twinless, at: twinsCheckedAt });
+onState('fd:twins', (_k, v: { twinless: typeof twinless; at: number; proposals?: AliasProposal[] }) => { twinless = v.twinless; twinsCheckedAt = v.at; proposals = v.proposals || []; });
+/** data health: FD games of the coming days without an API-Football twin (and when that was last checked), fix264: + alias proposals */
+export const fdTwinless = () => ({ list: twinless, at: twinsCheckedAt, proposals });
 
 /**
  * Report API-Football's status, minute and score for the FD matches that need it: from the last live=all poll when the

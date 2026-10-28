@@ -24,7 +24,7 @@ import { groupForCompetition, fdNameFor, GROUPS } from './history';
 import { tournamentPlace } from '../utils/tennisPlaces';
 import {
   type ExtrasSport, type TeamGame, type Trend, type Band, type Weather,
-  weatherNotes, isIndoor, hourAt, refereeStats, refName, difficultyBand, leagueRates, teamTrends, gameTrends, medianLine, trendIsTrue
+  weatherNotes, isIndoor, hourAt, geoQueries, refereeStats, refName, difficultyBand, leagueRates, teamTrends, gameTrends, medianLine, trendIsTrue
 } from '../utils/gameExtras';
 import type { Check } from './dataHealth';
 
@@ -93,7 +93,7 @@ async function collectFootball(now: number): Promise<number> {
   for (const m of list) {
     const fid = m.id >= AF_OFFSET ? m.id - AF_OFFSET : afIdOfFd(m.id)?.fid || null;
     const ref = (m.referees || []).find((r: any) => !r.type || r.type === 'REFEREE')?.name || null;
-    putGame.run('football', m.id, m.utcDate, m.venue || null, null, m.area?.name || null, 0, refName(ref), null, null, at);
+    putGame.run('football', m.id, m.utcDate, m.venue || null, m.venueCity || null, m.area?.name || null, 0, refName(ref), null, null, at);
     if (fid) fids.set(fid, m);
   }
   // the fixtures themselves (venue city, referee, league, season): 20 a call, refreshed every 6 h, the last 3 h before
@@ -150,7 +150,7 @@ function collectTennis(now: number): number {
 
 const venueRow = db.prepare(`SELECT * FROM extras_venues WHERE sport = ? AND venue = ?`);
 const putVenue = db.prepare(`INSERT OR REPLACE INTO extras_venues (sport, venue, city, country, lat, lon, source, tried_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-/** where to look a venue up: football / NFL by its city (the stadium's town is close enough for the weather), tennis by the city */
+/** Open-Meteo's place search (towns): the biggest place of that name in the country */
 async function geocode(city: string, country: string | null): Promise<{ lat: number; lon: number } | null> {
   const j = await fetcher(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&language=en&format=json`);
   const list: any[] = Array.isArray(j?.results) ? j.results : [];
@@ -159,26 +159,50 @@ async function geocode(city: string, country: string | null): Promise<{ lat: num
   const best = ok.sort((a, b) => (b.population || 0) - (a.population || 0))[0];
   return best && Number.isFinite(best.latitude) && Number.isFinite(best.longitude) ? { lat: best.latitude, lon: best.longitude } : null;
 }
+/** fix264: OpenStreetMap's search (Nominatim: stadiums by name too; free, 1 call a second, our User-Agent) */
+let osmAt = 0;
+async function geocodeOsm(q: string): Promise<{ lat: number; lon: number } | null> {
+  const wait = osmAt + 1100 - Date.now();
+  if (wait > 0) await new Promise(res => setTimeout(res, wait));
+  osmAt = Date.now();
+  const j = await fetcher(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1&accept-language=en`);
+  const hit = Array.isArray(j) ? j[0] : null;
+  const lat = Number(hit?.lat), lon = Number(hit?.lon);
+  return hit && Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+}
 const venueKey = (r: any) => (r.sport === 'tennis' ? r.venue : r.venue || (r.city ? `@${r.city}` : null));
+/** fix264: a miss under the new look-up chain (older misses, and misses stored before the town was known, are tried again now) */
+const MISS = 'not found (fix264)';
+const knownVenue = db.prepare(`SELECT lat, lon FROM extras_venues WHERE venue = ? AND lat IS NOT NULL LIMIT 1`);
 async function geocodeVenues(now: number, max = 40): Promise<number> {
-  const rows = db.prepare(`SELECT DISTINCT sport, venue, city, country FROM extras_games WHERE indoor = 0 AND kickoff > ? AND (city IS NOT NULL OR venue IS NOT NULL)`).all(new Date(now - 2 * HOUR).toISOString()) as any[];
+  const rows = db.prepare(`SELECT sport, venue, MAX(city) AS city, MAX(country) AS country FROM extras_games WHERE indoor = 0 AND kickoff > ? AND (city IS NOT NULL OR venue IS NOT NULL) GROUP BY sport, venue, CASE WHEN venue IS NULL THEN city END`).all(new Date(now - 2 * HOUR).toISOString()) as any[];
   let n = 0;
   for (const r of rows) {
     const key = venueKey(r);
     if (!key) continue;
     const v: any = venueRow.get(r.sport, key);
-    // a venue not found is tried again after 7 days (the provider may name its city by then)
-    if (v && (v.lat != null || Date.parse(v.tried_at) > now - 7 * DAY)) continue;
+    // found: never again; a miss: again after 7 days, or now when it was missed by the old chain or before its town was known
+    if (v && (v.lat != null || (v.source === MISS && (v.city || !r.city) && Date.parse(v.tried_at) > now - 7 * DAY))) continue;
     if (n >= max) break;
     if (outOfTime()) { cutShort.add('venues'); break; }
     n++;
-    let at: { lat: number; lon: number } | null = null, source = 'city';
-    try {
-      if (r.city) at = await geocode(String(r.city).replace(/\s*\(.*\)\s*$/, ''), r.country);
-      if (!at && r.venue && r.sport !== 'tennis') { at = await geocode(r.venue, r.country); source = 'venue name'; }
-    } catch (e: any) { logger.warn(`game extras: geocoding ${key}: ${e?.message || e}`); continue; }
-    putVenue.run(r.sport, key, r.city || null, r.country || null, at?.lat ?? null, at?.lon ?? null, at ? source : null, new Date(now).toISOString());
-    await new Promise(res => setTimeout(res, 300)); // gentle on the free service
+    let at: { lat: number; lon: number } | null = null, source = '';
+    // the same stadium already found under another sport / spelling of the key
+    const same: any = r.venue ? knownVenue.get(r.venue) : null;
+    if (same) { at = { lat: same.lat, lon: same.lon }; source = 'known venue'; }
+    // one geocoder failing (network, rate limit) moves on to the next query; all of them failing = tried again next tick
+    let failed = 0, tried = 0;
+    const queries = at ? [] : geoQueries(r);
+    for (const g of queries) {
+      tried++;
+      try { at = g.via === 'osm' ? await geocodeOsm(g.q) : await geocode(g.q, r.country); } catch (e: any) { failed++; logger.warn(`game extras: geocoding ${key} (${g.source}): ${e?.message || e}`); }
+      if (at) { source = g.source; break; }
+      if (outOfTime()) break;
+    }
+    if (!at && (tried < queries.length || (failed && failed === queries.length))) continue; // cut short: not a miss
+    putVenue.run(r.sport, key, r.city || null, r.country || null, at?.lat ?? null, at?.lon ?? null, at ? source : MISS, new Date(now).toISOString());
+    if (!at) logger.info(`game extras: no coordinates for ${r.sport} ${key}${r.city ? ` (${r.city}${r.country ? `, ${r.country}` : ''})` : ''}`);
+    await new Promise(res => setTimeout(res, 300)); // gentle on the free services
   }
   return n;
 }
@@ -547,7 +571,11 @@ async function buildCoverage(now: number) {
     }
     out[sport] = c;
   }
-  const venuesMissing = (db.prepare(`SELECT sport, venue, city, country FROM extras_venues WHERE lat IS NULL ORDER BY sport, venue LIMIT 60`).all() as any[])
+  // fix264: only the venues of the coming outdoor games that still have no coordinates (not every miss ever stored)
+  const venuesMissing = (db.prepare(`SELECT v.sport, v.venue, v.city, v.country FROM extras_venues v WHERE v.lat IS NULL
+      AND EXISTS (SELECT 1 FROM extras_games g WHERE g.sport = v.sport AND g.indoor = 0 AND g.kickoff > ? AND (g.venue = v.venue OR (g.venue IS NULL AND '@' || g.city = v.venue)))
+      AND NOT EXISTS (SELECT 1 FROM extras_venues w WHERE w.venue = v.venue AND w.lat IS NOT NULL)
+      ORDER BY v.sport, v.venue LIMIT 60`).all(new Date(now).toISOString()) as any[])
     .map(v => `${v.sport}: ${v.venue}${v.city && !String(v.venue).includes(v.city) ? ` (${v.city})` : ''}${v.country ? `, ${v.country}` : ''}`);
   db.prepare(`INSERT OR REPLACE INTO extras_coverage (id, json, at) VALUES (1, ?, ?)`).run(JSON.stringify({ sports: out, missingWeather, venuesMissing }), new Date(now).toISOString());
 }
@@ -579,7 +607,7 @@ export function gameExtrasHealth(now = Date.now()): Check[] {
   return [{
     id: 'game-extras', label: 'Game extras',
     level: stale || share < 0.8 ? 'warn' : 'ok',
-    detail: `${stale ? `Last built ${Math.round(age / HOUR)} h ago. ` : ''}${should ? `${Math.round(share * 100)}% of the next 48 h's outdoor games have their weather card` : 'No outdoor game in the next 48 h'} · ${parts.join(' · ')}`,
+    detail: `${stale ? `Last built ${Math.round(age / HOUR)} h ago. ` : ''}${should ? `${Math.round(share * 100)}% of the next 48 h's outdoor games have their weather card` : 'No outdoor game in the next 48 h'}${c.venuesMissing.length ? ` · ${c.venuesMissing.length} venue(s) of coming games without coordinates` : ''} · ${parts.join(' · ')}`,
     items: [...c.missingWeather.slice(0, 20), ...c.venuesMissing.slice(0, 20).map(v => `venue without coordinates: ${v}`)]
   }];
 }

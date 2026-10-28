@@ -205,3 +205,26 @@ export function trendIsTrue(t: Trend, games: TeamGame[], surface: string | null 
   if (list.length !== t.n || t.n < MIN_TREND_GAMES) return false;
   return list.filter(g => holds(t.pattern, g, t.line ?? 2.5)).length === t.k;
 }
+
+/**
+ * fix264: where to look a venue up, in order — the venue's own name with its town (OpenStreetMap finds stadiums:
+ * "Celtic Park, Glasgow, Scotland"), then the town alone (Open-Meteo, then OpenStreetMap), then the venue name alone.
+ * API-Football's venue data has no coordinates, so a free geocoder it is; each venue is looked up once and stored.
+ */
+export type GeoQuery = { via: 'osm' | 'open-meteo'; q: string; source: string };
+export const cleanCity = (c: string | null | undefined) => String(c || '').replace(/\s*\(.*\)\s*$/, '').split(',')[0].trim();
+export function geoQueries(r: { sport: string; venue?: string | null; city?: string | null; country?: string | null }): GeoQuery[] {
+  const city = cleanCity(r.city), country = String(r.country || '').trim();
+  const venue = r.sport === 'tennis' ? '' : String(r.venue || '').trim();
+  const out: GeoQuery[] = [];
+  const join = (...xs: string[]) => xs.filter(Boolean).join(', ');
+  if (venue) out.push({ via: 'osm', q: join(venue, city, country), source: 'venue (OpenStreetMap)' });
+  if (city) {
+    out.push({ via: 'open-meteo', q: city, source: 'city' });
+    out.push({ via: 'osm', q: join(city, country), source: 'city (OpenStreetMap)' });
+  }
+  if (venue && city) out.push({ via: 'osm', q: join(venue, country), source: 'venue (OpenStreetMap)' });
+  if (venue && !city) out.push({ via: 'open-meteo', q: venue, source: 'venue name' });
+  const seen = new Set<string>();
+  return out.filter(x => { const k = `${x.via}|${x.q.toLowerCase()}`; return !seen.has(k) && !!seen.add(k); });
+}

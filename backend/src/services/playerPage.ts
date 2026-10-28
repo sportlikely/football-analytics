@@ -17,6 +17,7 @@ import { resolveAfTeamId, competitionName, teamNameOf } from './teamPage';
 import { everyHeavy, yieldLoop } from './perf';
 import { isWeb, isWorker } from './role';
 import { onIpc, sendIpc } from './ipc';
+import { samePlayerName, nameSearchTerms } from '../utils/nameMatch';
 
 const AF_OFFSET = 1_000_000_000;
 // fix166: 24 h (was 12 h); 3 h while his club has played in the last 24 h (the provider's numbers catch up)
@@ -708,30 +709,22 @@ export async function playerPage(rawId: number, full: boolean, wait = false, min
 
 const plain = (s: string) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-function sameName(a: string, b: string) {
-  const x = plain(a).split(' '), y = plain(b).split(' ');
-  if (!x.length || !y.length) return false;
-  if (plain(a) === plain(b)) return true;
-  const lx = x[x.length - 1], ly = y[y.length - 1];
-  // one name only ("Zabiri", "Pedri"): the other's surname or first name
-  if (x.length === 1 || y.length === 1) {
-    const one = x.length === 1 ? x[0] : y[0], other = x.length === 1 ? y : x;
-    return one.length >= 4 && (other[other.length - 1] === one || other[0] === one);
-  }
-  // "E. Haaland" vs "Erling Haaland"; "Vinícius Júnior" vs "Vinicius Junior"
-  if (lx === ly && x[0][0] === y[0][0]) return true;
-  // a middle name used as the first name: "Yassir Zabiri" vs "Mohamed Yassir Zabiri"
-  if (lx === ly) {
-    const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-    return short.slice(0, -1).every(w => w.length >= 3 && long.includes(w));
-  }
-  return false;
-}
+/** fix264: shared with the twin finder (utils/nameMatch.ts); `loose` inside one club or league only */
+const sameName = (a: string, b: string, loose = false) => samePlayerName(a, b, loose);
 
 const findCache = new Map<string, number | null>();
 // Football-Data.org competition code → API-Football league id
 export const FD_TO_AF: Record<string, number> = { PL: 39, ELC: 40, PD: 140, SA: 135, BL1: 78, FL1: 61, DED: 88, PPL: 94, BSA: 71, CL: 2, EC: 4, WC: 1 };
 
+/** fix264: the one player of a provider answer with this name (exact spellings first; the loose one only when unique) */
+function pickByName(list: any[], name: string, loose: boolean): number | null {
+  const is = (it: any, l: boolean) => sameName(it.player?.name, name, l) || sameName(`${it.player?.firstname} ${it.player?.lastname}`, name, l);
+  const exact = list.find((it: any) => is(it, false));
+  if (exact) return exact.player?.id ?? null;
+  if (!loose) return null;
+  const ids = [...new Set(list.filter((it: any) => is(it, true)).map((it: any) => it.player?.id).filter(Boolean))];
+  return ids.length === 1 ? ids[0] as number : null;
+}
 export async function findPlayer(name: string, teamId: number, code?: string, teamName?: string): Promise<number | null> {
   const key = `${name}|${teamId}|${code}`;
   if (findCache.has(key)) return findCache.get(key)!;
@@ -744,30 +737,29 @@ export async function findPlayer(name: string, teamId: number, code?: string, te
     const rows = db.prepare(`SELECT player_id, name, MAX(season) AS season, SUM(COALESCE(minutes, 0)) AS minutes FROM af_player_season WHERE team_id = ? AND season IN (?, ?)
       GROUP BY player_id, name ORDER BY MAX(season) DESC, SUM(COALESCE(minutes, 0)) DESC`).all(af, S, S - 1) as any[];
     const main = twinMainOf();
+    // fix264: the exact spellings first, then the loose one ("Marcus Thuram-Ulien" = "Marcus Thuram") — his club only
     hit = rows.find(r => sameName(r.name, name))?.player_id ?? null;
+    if (!hit) { const ids = [...new Set(rows.filter(r => sameName(r.name, name, true)).map(r => r.player_id))]; if (ids.length === 1) hit = ids[0]; }
     if (hit && main.has(hit)) hit = main.get(hit)!;
-    if (!hit && afRemaining() > 500) {
-      const last = plain(name).split(' ').pop() || '';
-      if (last.length >= 4) {
-        try {
-          const j: any = await afGet('/players', { team: af, season: S, search: last });
-          hit = (j.response || []).find((it: any) => sameName(it.player?.name, name) || sameName(`${it.player?.firstname} ${it.player?.lastname}`, name))?.player?.id ?? null;
-        } catch (e: any) {
-          logger.warn(`player find ${name}: ${e.message}`);
-        }
+    for (const term of nameSearchTerms(name)) {
+      if (hit || afRemaining() <= 500) break;
+      try {
+        const j: any = await afGet('/players', { team: af, season: S, search: term });
+        hit = pickByName(j.response || [], name, true);
+      } catch (e: any) {
+        logger.warn(`player find ${name}: ${e.message}`);
       }
     }
   }
   // promoted clubs the history mapping doesn't know yet: search the league instead of the team
-  if (!hit && code && FD_TO_AF[code] && afRemaining() > 500) {
-    const last = plain(name).split(' ').pop() || '';
-    if (last.length >= 4) {
-      try {
-        const j: any = await afGet('/players', { league: FD_TO_AF[code], season: seasonNow(), search: last });
-        hit = (j.response || []).find((it: any) => sameName(it.player?.name, name) || sameName(`${it.player?.firstname} ${it.player?.lastname}`, name))?.player?.id ?? null;
-      } catch (e: any) {
-        logger.warn(`player find (league) ${name}: ${e.message}`);
-      }
+  for (const term of code && FD_TO_AF[code] ? nameSearchTerms(name) : []) {
+    if (hit || afRemaining() <= 500) break;
+    try {
+      const j: any = await afGet('/players', { league: FD_TO_AF[code!], season: seasonNow(), search: term });
+      // fix264: the loose spelling only when one player of the league fits it
+      hit = pickByName(j.response || [], name, true);
+    } catch (e: any) {
+      logger.warn(`player find (league) ${name}: ${e.message}`);
     }
   }
   // last resort: the provider's profile search (all players, any club)
