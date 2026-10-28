@@ -1,4 +1,4 @@
-import { t } from '../../../lib/i18n'
+import { t, ltr } from '../../../lib/i18n'
 
 /**
  * fix174: the game by quarter when the provider has no play-by-play — each quarter's points, who won it and the
@@ -26,10 +26,10 @@ export default function QuarterStrip({ home, away, q }: { home: string; away: st
               <div className="text-[10px] font-bold uppercase tracking-wide text-faint">{c.label}</div>
               <div className="num text-sm font-extrabold mt-1"><span className={won === 'H' ? 'text-home' : 'text-muted'}>{c.h}</span><span className="text-faint">–</span><span className={won === 'A' ? 'text-away' : 'text-muted'}>{c.a}</span></div>
               <div className="h-8 mt-1.5 relative" aria-hidden>
-                <span className="absolute left-0 right-0 top-1/2 h-px bg-line" />
+                <span className="absolute start-0 end-0 top-1/2 h-px bg-line" />
                 <span className={`absolute left-1/2 -translate-x-1/2 w-2 rounded-full ${c.run >= 0 ? 'bg-home bottom-1/2' : 'bg-away top-1/2'}`} style={{ height: `${(Math.abs(c.run) / max) * 50}%` }} />
               </div>
-              <div className={`num text-[11px] font-semibold ${c.run > 0 ? 'text-home' : c.run < 0 ? 'text-away' : 'text-faint'}`}>{c.run > 0 ? '+' : ''}{c.run}</div>
+              <div className={`num text-[11px] font-semibold ${c.run > 0 ? 'text-home' : c.run < 0 ? 'text-away' : 'text-faint'}`}>{ltr(`${c.run > 0 ? '+' : ''}${c.run}`)}</div>
             </div>
           )
         })}

@@ -36,10 +36,10 @@ export default function NbaModelCheckCard() {
   const g = d.gate
   const row = (label: string, a: { v3: Score; v4: Score }, ok?: boolean) => (
     <tr className="border-t border-line/50">
-      <td className="py-1.5 pr-3 text-muted">{label}</td>
-      <td className="py-1.5 pr-3 num">{a.v4.games}</td>
-      <td className="py-1.5 pr-3 num">{ll(a.v3)} · {a.v3.games ? `${a.v3.hitRate}%` : '—'}</td>
-      <td className={`py-1.5 pr-3 num font-semibold ${ok === undefined ? 'text-ink' : ok ? 'text-win' : 'text-loss'}`}>{ll(a.v4)} · {a.v4.games ? `${a.v4.hitRate}%` : '—'}</td>
+      <td className="py-1.5 pe-3 text-muted">{label}</td>
+      <td className="py-1.5 pe-3 num">{a.v4.games}</td>
+      <td className="py-1.5 pe-3 num">{ll(a.v3)} · {a.v3.games ? `${a.v3.hitRate}%` : '—'}</td>
+      <td className={`py-1.5 pe-3 num font-semibold ${ok === undefined ? 'text-ink' : ok ? 'text-win' : 'text-loss'}`}>{ll(a.v4)} · {a.v4.games ? `${a.v4.hitRate}%` : '—'}</td>
     </tr>
   )
   const names = (l: Removed[]) => l.map(p => `${p.name} (${p.min} min${p.keep > 0 ? `, ${Math.round(p.keep * 100)}%` : ''}${p.status ? `, ${p.status}` : ''})`).join(', ')
@@ -57,7 +57,7 @@ export default function NbaModelCheckCard() {
       {g && (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Gate (log loss · picks right)</th><th className="pb-1 pr-3 font-normal">games</th><th className="pb-1 pr-3 font-normal">bb-v3</th><th className="pb-1 pr-3 font-normal">v4</th></tr></thead>
+            <thead><tr className="text-faint text-start"><th className="pb-1 pe-3 font-normal">Gate (log loss · picks right)</th><th className="pb-1 pe-3 font-normal">games</th><th className="pb-1 pe-3 font-normal">bb-v3</th><th className="pb-1 pe-3 font-normal">v4</th></tr></thead>
             <tbody>
               {row(`${g.test.season} whole season (no worse)`, g.test.whole, g.test.passWhole)}
               {row(`${g.test.season} games 1–25 (better)`, g.test.first25, g.test.passFirst25)}

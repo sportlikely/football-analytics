@@ -55,10 +55,10 @@ export default function SportSoon({ sport }: { sport: Exclude<SportId, 'football
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
       <div className="card relative overflow-hidden p-6 sm:p-10">
-        <div className="pointer-events-none absolute -right-16 -top-16 text-[180px] sm:text-[240px] leading-none opacity-[0.07] select-none" aria-hidden>{info.icon}</div>
+        <div className="pointer-events-none absolute -end-16 -top-16 text-[180px] sm:text-[240px] leading-none opacity-[0.07] select-none" aria-hidden>{info.icon}</div>
         <span className="inline-block px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-accent/15 text-accent">{t('Coming soon')}</span>
         <h1 className="mt-4 font-display text-3xl sm:text-5xl font-extrabold tracking-tight text-ink">
-          <span aria-hidden className="mr-2">{info.icon}</span>{t('{0} predictions', { 0: info.name })}
+          <span aria-hidden className="me-2">{info.icon}</span>{t('{0} predictions', { 0: info.name })}
         </h1>
         <p className="mt-3 text-muted max-w-xl">
           {t('We are building a model for {0}, the same way we built football: tested on past seasons first, then every prediction saved before the game and checked in public.', { 0: info.name })}

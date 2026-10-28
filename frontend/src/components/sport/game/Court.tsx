@@ -38,7 +38,7 @@ export default function Court({ home, away, playerHref }: { home: CourtSide; awa
             {s.bench.map(p => (
               <li key={`${p.id}${p.name}`} className="flex items-center gap-1.5 min-w-0">
                 {p.id ? <Link to={playerHref(p.id, p.name) || '#'} className="truncate text-muted hover:text-ink hover:underline">{p.name}</Link> : <span className="truncate text-muted">{p.name}</span>}
-                {p.min != null && <span className="ml-auto num text-faint shrink-0">{Math.round(p.min)}′</span>}
+                {p.min != null && <span className="ms-auto num text-faint shrink-0">{Math.round(p.min)}′</span>}
               </li>
             ))}
           </ul>
@@ -52,7 +52,7 @@ export default function Court({ home, away, playerHref }: { home: CourtSide; awa
               <li key={`${p.id}${p.name}`} className="flex items-center gap-1.5 min-w-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-loss shrink-0" />
                 {p.id ? <Link to={playerHref(p.id, p.name) || '#'} className="truncate text-ink hover:underline">{p.name}</Link> : <span className="truncate text-ink">{p.name}</span>}
-                {p.status && <span className="ml-auto text-loss font-semibold shrink-0">{p.status}</span>}
+                {p.status && <span className="ms-auto text-loss font-semibold shrink-0">{p.status}</span>}
               </li>
             ))}
           </ul>

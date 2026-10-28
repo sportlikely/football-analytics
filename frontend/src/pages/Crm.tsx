@@ -131,12 +131,12 @@ function Inbox() {
           <ul className="divide-y divide-line/50 max-h-[70vh] overflow-y-auto">
             {list.rows.map(r => (
               <li key={r.id}>
-                <button type="button" onClick={() => setOpenId(r.id)} className={`w-full text-left px-4 py-3 hover:bg-surface2/50 ${openId === r.id ? 'bg-surface2/70' : ''}`}>
+                <button type="button" onClick={() => setOpenId(r.id)} className={`w-full text-start px-4 py-3 hover:bg-surface2/50 ${openId === r.id ? 'bg-surface2/70' : ''}`}>
                   <div className="flex items-center gap-2 text-[11px] text-faint">
                     <span className={`px-1.5 py-0.5 rounded font-bold uppercase tracking-wide text-[9px] ${STATUS_TONE[r.status] || ''}`}>{r.status}</span>
                     <span>#{r.id}</span><span>{TOPIC[r.topic] || r.topic}</span>
                     {r.plan && r.plan !== 'free' && <span className="text-accent font-semibold">{r.plan}</span>}
-                    <span className="ml-auto">{fmt(r.updatedAt || r.at)}</span>
+                    <span className="ms-auto">{fmt(r.updatedAt || r.at)}</span>
                   </div>
                   <div className="text-sm font-semibold text-ink truncate mt-0.5">{r.name || r.email}</div>
                   <div className="text-xs text-muted line-clamp-2">{r.preview}</div>
@@ -227,7 +227,7 @@ function ThreadView({ id, onChange, staff }: { id: number; onChange: () => void;
           <p className="text-sm text-ink whitespace-pre-wrap break-words">{m.message}</p>
         </div>
         {t.replies.map(r => (
-          <div key={r.id} className={`rounded-2xl p-4 ${r.kind === 'note' ? 'border border-dashed border-draw/50 bg-draw/5' : 'border border-accent/30 bg-accent/5 ml-4 sm:ml-10'}`}>
+          <div key={r.id} className={`rounded-2xl p-4 ${r.kind === 'note' ? 'border border-dashed border-draw/50 bg-draw/5' : 'border border-accent/30 bg-accent/5 ms-4 sm:ms-10'}`}>
             <div className="text-[11px] text-faint mb-1">
               {r.kind === 'note' ? 'Internal note' : 'Reply'} · {r.byName} · {fmt(r.at)}{r.kind === 'reply' && !r.sent ? ' · not delivered' : ''}
             </div>
@@ -259,7 +259,7 @@ function ThreadView({ id, onChange, staff }: { id: number; onChange: () => void;
 
       {t.others.length > 0 && (
         <div className="text-xs text-muted">
-          Other messages from this email: {t.others.map(o => <span key={o.id} className="mr-2">#{o.id} ({TOPIC[o.topic] || o.topic}, {o.status})</span>)}
+          Other messages from this email: {t.others.map(o => <span key={o.id} className="me-2">#{o.id} ({TOPIC[o.topic] || o.topic}, {o.status})</span>)}
         </div>
       )}
     </section>
@@ -372,14 +372,14 @@ function Campaigns() {
         <div className="px-5 py-3 border-b border-line/60 font-display font-bold text-ink">Sent campaigns</div>
         {list.length === 0 ? <p className="p-5 text-sm text-faint">None yet.</p> : (
           <table className="w-full text-sm">
-            <thead><tr className="text-[11px] uppercase tracking-wide text-faint text-left"><th className="px-5 py-2">Date</th><th className="px-2 py-2">Subject</th><th className="px-2 py-2 text-right">Sent</th><th className="px-5 py-2 text-right">Status</th></tr></thead>
+            <thead><tr className="text-[11px] uppercase tracking-wide text-faint text-start"><th className="px-5 py-2">Date</th><th className="px-2 py-2">Subject</th><th className="px-2 py-2 text-end">Sent</th><th className="px-5 py-2 text-end">Status</th></tr></thead>
             <tbody className="divide-y divide-line/50">
               {list.map(c => (
                 <tr key={c.id}>
                   <td className="px-5 py-2 text-muted whitespace-nowrap">{fmt(c.createdAt)}</td>
                   <td className="px-2 py-2 text-ink truncate max-w-[280px]">{c.subject}</td>
-                  <td className="px-2 py-2 text-right num">{c.sent}/{c.total}{c.failed ? <span className="text-loss"> · {c.failed} failed</span> : ''}</td>
-                  <td className="px-5 py-2 text-right text-xs">{c.status === 'sending' ? <span className="text-draw font-semibold">sending…</span> : <span className="text-win">done</span>}</td>
+                  <td className="px-2 py-2 text-end num">{c.sent}/{c.total}{c.failed ? <span className="text-loss"> · {c.failed} failed</span> : ''}</td>
+                  <td className="px-5 py-2 text-end text-xs">{c.status === 'sending' ? <span className="text-draw font-semibold">sending…</span> : <span className="text-win">done</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -444,8 +444,8 @@ function Revenue() {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[560px]">
-            <thead><tr className="text-[11px] uppercase tracking-wide text-faint text-left">
-              <th className="px-5 py-2">Month</th><th className="px-2 py-2">Sign-ups</th><th className="px-2 py-2 text-right">New paying</th><th className="px-2 py-2 text-right">Revenue</th><th className="px-2 py-2 text-right">Cancelled</th><th className="px-5 py-2 text-right">Deleted</th>
+            <thead><tr className="text-[11px] uppercase tracking-wide text-faint text-start">
+              <th className="px-5 py-2">Month</th><th className="px-2 py-2">Sign-ups</th><th className="px-2 py-2 text-end">New paying</th><th className="px-2 py-2 text-end">Revenue</th><th className="px-2 py-2 text-end">Cancelled</th><th className="px-5 py-2 text-end">Deleted</th>
             </tr></thead>
             <tbody className="divide-y divide-line/50">
               {d.monthly.slice().reverse().map(m => (
@@ -453,14 +453,14 @@ function Revenue() {
                   <td className="px-5 py-2 text-muted num whitespace-nowrap">{new Date(`${m.month}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</td>
                   <td className="px-2 py-2">
                     <div className="flex items-center gap-2">
-                      <span className="w-6 text-right num text-ink">{m.signups}</span>
+                      <span className="w-6 text-end num text-ink">{m.signups}</span>
                       <span className="flex-1 max-w-[160px] h-1.5 rounded-full bg-surface2 overflow-hidden"><span className="block h-full bg-accent rounded-full" style={{ width: `${(m.signups / maxSign) * 100}%` }} /></span>
                     </div>
                   </td>
-                  <td className="px-2 py-2 text-right num text-ink">{m.newPaid || '–'}</td>
-                  <td className="px-2 py-2 text-right num text-ink">{m.revenue ? `$${m.revenue.toLocaleString('en-US')}` : '–'}</td>
-                  <td className={`px-2 py-2 text-right num ${m.cancels ? 'text-loss' : 'text-faint'}`}>{m.cancels || '–'}</td>
-                  <td className={`px-5 py-2 text-right num ${m.deletes ? 'text-loss' : 'text-faint'}`}>{m.deletes || '–'}</td>
+                  <td className="px-2 py-2 text-end num text-ink">{m.newPaid || '–'}</td>
+                  <td className="px-2 py-2 text-end num text-ink">{m.revenue ? `$${m.revenue.toLocaleString('en-US')}` : '–'}</td>
+                  <td className={`px-2 py-2 text-end num ${m.cancels ? 'text-loss' : 'text-faint'}`}>{m.cancels || '–'}</td>
+                  <td className={`px-5 py-2 text-end num ${m.deletes ? 'text-loss' : 'text-faint'}`}>{m.deletes || '–'}</td>
                 </tr>
               ))}
             </tbody>
@@ -478,7 +478,7 @@ function Revenue() {
                 <li key={r.reason} className="flex items-center gap-3 text-sm">
                   <span className="w-56 truncate text-ink">{REASON[r.reason] || r.reason}</span>
                   <span className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><span className="block h-full bg-loss/80 rounded-full" style={{ width: `${(r.n / max) * 100}%` }} /></span>
-                  <span className="w-8 text-right num text-muted">{r.n}</span>
+                  <span className="w-8 text-end num text-muted">{r.n}</span>
                 </li>
               )
             })}
@@ -532,7 +532,7 @@ function Customers() {
           <ul className="divide-y divide-line/50 max-h-[70vh] overflow-y-auto">
             {rows.map(r => (
               <li key={r.id}>
-                <button type="button" onClick={() => setOpenId(r.id)} className={`w-full text-left px-4 py-2.5 hover:bg-surface2/50 ${openId === r.id ? 'bg-surface2/70' : ''}`}>
+                <button type="button" onClick={() => setOpenId(r.id)} className={`w-full text-start px-4 py-2.5 hover:bg-surface2/50 ${openId === r.id ? 'bg-surface2/70' : ''}`}>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-ink truncate flex-1">{r.email}</span>
                     {r.trust && <span title={(r.trustReasons || []).join(' · ')} className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${TRUST_TONE[r.trust]}`}>{TRUST_LABEL[r.trust]}</span>}
@@ -566,7 +566,7 @@ function CustomerView({ id }: { id: number }) {
   }
   if (!c) return <section className="card p-6 text-sm text-faint">{error || 'Loading…'}</section>
   const staffAcct = !!c.role
-  const row = (k: string, v: ReactNode) => <div className="flex justify-between gap-3 py-1.5 border-b border-line/40 text-sm"><span className="text-muted">{k}</span><span className="text-ink text-right">{v}</span></div>
+  const row = (k: string, v: ReactNode) => <div className="flex justify-between gap-3 py-1.5 border-b border-line/40 text-sm"><span className="text-muted">{k}</span><span className="text-ink text-end">{v}</span></div>
 
   return (
     <section className="card p-5 sm:p-6 space-y-5">
@@ -597,7 +597,7 @@ function CustomerView({ id }: { id: number }) {
               <option value="premium">Premium</option><option value="pro">Pro</option><option value="free">Free</option>
             </select>
             {plan !== 'free' && (
-              <label className="text-xs text-muted">Days<input value={days} onChange={e => setDays(e.target.value.replace(/\D/g, '').slice(0, 3))} className="ml-1 w-16 rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink num" inputMode="numeric" /></label>
+              <label className="text-xs text-muted">Days<input value={days} onChange={e => setDays(e.target.value.replace(/\D/g, '').slice(0, 3))} className="ms-1 w-16 rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink num" inputMode="numeric" /></label>
             )}
             <button type="button" disabled={busy} onClick={() => {
               if (!window.confirm(plan === 'free' ? `Set ${c.email} back to Free?` : `Give ${c.email} ${plan} for ${days} days?`)) return
@@ -865,7 +865,7 @@ function Team() {
           <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="text-[11px] text-faint">
-                <th className="text-left px-5 py-2 font-semibold w-[260px]">Permission</th>
+                <th className="text-start px-5 py-2 font-semibold w-[260px]">Permission</th>
                 {cols.map(r => (
                   <th key={r.key} className="px-2 py-2 font-semibold text-center align-bottom">
                     <span className="block text-ink">{r.name}</span>
@@ -976,7 +976,7 @@ function Testers({ canInvite }: { canInvite: boolean }) {
             {d.invites.map(i => (
               <li key={i.code} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
                 <span className="flex-1 min-w-[220px]">
-                  <span className="block text-ink font-semibold">{i.label || 'Invite link'} {!i.open && <span className="ml-1 text-[11px] text-loss">closed</span>}</span>
+                  <span className="block text-ink font-semibold">{i.label || 'Invite link'} {!i.open && <span className="ms-1 text-[11px] text-loss">closed</span>}</span>
                   <span className="block text-[11px] text-faint num select-all break-all">{linkOf(i.code)}</span>
                 </span>
                 <span className="text-xs text-muted num">{i.uses}{i.maxUses ? ` / ${i.maxUses}` : ''} joined · {i.days} days Pro</span>
@@ -993,8 +993,8 @@ function Testers({ canInvite }: { canInvite: boolean }) {
         {d.testers.length === 0 ? <p className="p-5 text-sm text-faint">Nobody has joined yet.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[640px]">
-              <thead><tr className="text-[11px] text-faint text-left">
-                <th className="px-5 py-2 font-semibold">Tester</th><th className="px-3 py-2 font-semibold">Joined</th><th className="px-3 py-2 font-semibold">Pro until</th><th className="px-3 py-2 font-semibold">Last seen</th><th className="px-3 py-2 font-semibold text-right">Feedback</th>
+              <thead><tr className="text-[11px] text-faint text-start">
+                <th className="px-5 py-2 font-semibold">Tester</th><th className="px-3 py-2 font-semibold">Joined</th><th className="px-3 py-2 font-semibold">Pro until</th><th className="px-3 py-2 font-semibold">Last seen</th><th className="px-3 py-2 font-semibold text-end">Feedback</th>
               </tr></thead>
               <tbody className="divide-y divide-line/50">
                 {d.testers.map(t => (
@@ -1003,7 +1003,7 @@ function Testers({ canInvite }: { canInvite: boolean }) {
                     <td className="px-3 py-2 text-muted num">{fmtDay(t.joinedAt)}</td>
                     <td className={`px-3 py-2 num ${t.active ? 'text-ink' : 'text-faint'}`}>{fmtDay(t.until)}</td>
                     <td className="px-3 py-2 text-muted num">{fmtDay(t.lastLoginAt)}</td>
-                    <td className="px-3 py-2 text-right num text-ink">{t.feedback}</td>
+                    <td className="px-3 py-2 text-end num text-ink">{t.feedback}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1043,7 +1043,7 @@ function Activity() {
       </div>
       <section className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-line/60 flex flex-wrap items-center gap-2">
-          <h2 className="font-display font-bold text-ink mr-auto">Staff activity</h2>
+          <h2 className="font-display font-bold text-ink me-auto">Staff activity</h2>
           <select value={staffId} onChange={e => setStaffId(e.target.value)} className="rounded-lg border border-line bg-surface2/60 px-2 py-1.5 text-xs text-ink">
             <option value="">All staff</option>
             {d.staff.map(s => <option key={s.id} value={s.id}>{s.email} ({s.n})</option>)}
@@ -1091,8 +1091,8 @@ function CustomerCredits({ id, canGrant }: { id: number; canGrant: boolean }) {
       <div className="flex items-baseline justify-between"><div className="font-semibold text-ink text-sm">Pick packs</div><div className="text-sm text-ink">Balance <b className="num">{d.balance}</b></div></div>
       {canGrant && (
         <div className="flex flex-wrap items-end gap-2">
-          <label className="text-xs text-muted">Picks<input value={n} onChange={e => setN(e.target.value.replace(/\D/g, '').slice(0, 3))} className="ml-1 w-16 rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink num" inputMode="numeric" /></label>
-          <label className="text-xs text-muted flex-1 min-w-[140px]">Note<input value={note} onChange={e => setNote(e.target.value.slice(0, 60))} className="ml-1 w-full rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink" placeholder="goodwill, support case…" /></label>
+          <label className="text-xs text-muted">Picks<input value={n} onChange={e => setN(e.target.value.replace(/\D/g, '').slice(0, 3))} className="ms-1 w-16 rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink num" inputMode="numeric" /></label>
+          <label className="text-xs text-muted flex-1 min-w-[140px]">Note<input value={note} onChange={e => setNote(e.target.value.slice(0, 60))} className="ms-1 w-full rounded-lg border border-line bg-surface2/60 px-2 py-2 text-sm text-ink" placeholder="goodwill, support case…" /></label>
           <button type="button" onClick={() => grant(1)} className="rounded-xl bg-accent text-bg font-semibold px-4 py-2 text-sm">Give</button>
           <button type="button" onClick={() => grant(-1)} className="rounded-xl border border-line text-ink font-semibold px-4 py-2 text-sm">Take</button>
         </div>

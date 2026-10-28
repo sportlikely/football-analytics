@@ -55,7 +55,7 @@ export function RowScorers({ lines, homeName, awayName }: { lines: ScorerLines; 
     <div data-scorers="row" className="space-y-0.5 text-[11px] text-muted">
       {(['home', 'away'] as const).map(s => lines[s].length > 0 && (
         <div key={s} className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 min-w-0">
-          <span className="text-faint font-semibold mr-0.5">{s === 'home' ? homeName : awayName}</span>
+          <span className="text-faint font-semibold me-0.5">{s === 'home' ? homeName : awayName}</span>
           {lines[s].map((it, i) => <Item key={i} it={it} />)}
         </div>
       ))}

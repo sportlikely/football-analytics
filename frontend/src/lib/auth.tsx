@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import axios from 'axios'
 import { API_URL, socket } from './socket'
-import { t } from './i18n'
+import { t, noteLangs, initialMenuLangs, type Lang } from './i18n'
 import { setLinkAdmin } from './links'
 import { resetApiCache } from './apiCache'
 
@@ -44,6 +44,8 @@ interface SessionPayload {
   perms?: Perm[]
   tester?: { until: string } | null
   verificationRequired?: boolean
+  /** fix257: the language menu (admins: every language; everyone else: the public ones) */
+  langs?: string[]
 }
 
 /** fix216: the picks emails opt-in (unchecked by default) and the browser's time zone and language */
@@ -51,6 +53,8 @@ export interface SignupExtra { picksOptIn: boolean; tz: string; lang: string }
 
 interface AuthState {
   user: User | null
+  /** fix257: languages in the menu for this visitor */
+  langs: Lang[]
   access: Access
   staff: Staff
   /** beta tester (invite link): Pro until this date */
@@ -98,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tester, setTester] = useState<{ until: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [verificationRequired, setVerificationRequired] = useState(false)
+  const [langs, setLangs] = useState<Lang[]>(initialMenuLangs)
 
   const apply = (d: SessionPayload) => {
     // fix250: the kept API answers (lib/apiCache.ts) belong to one person and plan
@@ -108,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStaff(d.staff ?? null)
     setPerms(d.perms ?? [])
     setTester(d.tester ?? null)
+    setLangs(noteLangs(d.langs, d.access === 'admin'))
     if (typeof d.verificationRequired === 'boolean') setVerificationRequired(d.verificationRequired)
   }
 
@@ -201,7 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, access, staff, tester, can: (p: Perm) => perms.includes(p), loading, full, paid, needsVerification, login, loginCode, signup, verify, resendCode, resetPassword, setOptIn, logout, refresh }}
+      value={{ user, langs, access, staff, tester, can: (p: Perm) => perms.includes(p), loading, full, paid, needsVerification, login, loginCode, signup, verify, resendCode, resetPassword, setOptIn, logout, refresh }}
     >
       {children}
     </AuthContext.Provider>

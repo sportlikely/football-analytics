@@ -120,7 +120,7 @@ export default function Admin() {
             return (
               <Link key={t.key} to={adminPath(t.key)} aria-current={tab === t.key ? 'page' : undefined}
                 className={`px-3.5 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${tab === t.key ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}>
-                {t.label}{n > 0 && <span className={`ml-1.5 num text-[11px] font-bold px-1.5 rounded-full ${tab === t.key ? 'bg-bg/20' : t.key === 'needs-you' ? 'bg-draw/20 text-draw' : 'bg-loss/15 text-loss'}`}>{n}</span>}
+                {t.label}{n > 0 && <span className={`ms-1.5 num text-[11px] font-bold px-1.5 rounded-full ${tab === t.key ? 'bg-bg/20' : t.key === 'needs-you' ? 'bg-draw/20 text-draw' : 'bg-loss/15 text-loss'}`}>{n}</span>}
               </Link>
             )
           })}
@@ -302,14 +302,14 @@ function UsersSection({ ctx }: { ctx: Ctx }) {
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-faint text-xs border-b border-line">
+            <tr className="text-start text-faint text-xs border-b border-line">
               <th className="px-4 py-3 font-medium">Email</th>
               <th className="px-4 py-3 font-medium">Plan</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Updates</th>
               <th className="px-4 py-3 font-medium">Joined</th>
               <th className="px-4 py-3 font-medium">Last sign-in</th>
-              <th className="px-4 py-3 font-medium text-right">Actions</th>
+              <th className="px-4 py-3 font-medium text-end">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -334,26 +334,26 @@ function UsersSection({ ctx }: { ctx: Ctx }) {
                 <td className="px-4 py-3 text-xs">{u.marketingOptIn ? <span className="text-win">Yes</span> : <span className="text-faint">No</span>}</td>
                 <td className="px-4 py-3 num text-muted">{fmt(u.createdAt)}</td>
                 <td className="px-4 py-3 num text-muted">{fmt(u.lastLoginAt)}</td>
-                <td className="px-4 py-3 text-right whitespace-nowrap">
+                <td className="px-4 py-3 text-end whitespace-nowrap">
                   {!u.isAdmin &&
                     <>
                       {u.plan !== 'premium' && (
-                        <button onClick={() => setPlan(u, 'premium')} className="text-xs font-semibold text-accent mr-3">
+                        <button onClick={() => setPlan(u, 'premium')} className="text-xs font-semibold text-accent me-3">
                           Premium
                         </button>
                       )}
                       {u.plan !== 'pro' && (
-                        <button onClick={() => setPlan(u, 'pro')} className="text-xs font-semibold text-accent mr-3">
+                        <button onClick={() => setPlan(u, 'pro')} className="text-xs font-semibold text-accent me-3">
                           Pro
                         </button>
                       )}
                       {u.plan !== 'free' && (
-                        <button onClick={() => setPlan(u, 'free')} className="text-xs text-muted hover:text-loss mr-3">
+                        <button onClick={() => setPlan(u, 'free')} className="text-xs text-muted hover:text-loss me-3">
                           Free
                         </button>
                       )}
                     </>}
-                  {u.role && <Link to="/crm?tab=team" className="text-xs text-draw font-semibold mr-3" title="Staff role — change it in CRM → Team & roles">{u.role.replace(/_/g, ' ')}</Link>}
+                  {u.role && <Link to="/crm?tab=team" className="text-xs text-draw font-semibold me-3" title="Staff role — change it in CRM → Team & roles">{u.role.replace(/_/g, ' ')}</Link>}
                   <button onClick={() => resetPw(u)} className="text-xs text-muted hover:text-ink">
                     Reset password
                   </button>
@@ -519,7 +519,7 @@ function BackupsCard() {
               <span className="w-32 shrink-0 text-[11px] text-faint num">{when(f.at)}</span>
               <span className="text-ink truncate num text-xs">{f.name}</span>
               <span className="text-[11px] text-faint num">{mb(f.size)}</span>
-              <button type="button" disabled={busy} onClick={() => download(f.name)} className="ml-auto text-xs font-semibold text-accent disabled:opacity-60">Download</button>
+              <button type="button" disabled={busy} onClick={() => download(f.name)} className="ms-auto text-xs font-semibold text-accent disabled:opacity-60">Download</button>
             </li>
           ))}
         </ul>
@@ -606,16 +606,16 @@ function ModelDailyCard() {
       {cands.length > 0 && (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="text-faint text-left">
-              <tr><th className="py-1 pr-2 font-normal">Candidate ({ran!.date}, {ran!.challengers?.games?.W ?? 0} / {ran!.challengers?.games?.Wp ?? 0} games)</th><th className="py-1 pr-2 font-normal text-right">last 60</th><th className="py-1 pr-2 font-normal text-right">prev 60</th><th className="py-1 pr-2 font-normal text-right">sure</th><th className="py-1 font-normal">verdict</th></tr>
+            <thead className="text-faint text-start">
+              <tr><th className="py-1 pe-2 font-normal">Candidate ({ran!.date}, {ran!.challengers?.games?.W ?? 0} / {ran!.challengers?.games?.Wp ?? 0} games)</th><th className="py-1 pe-2 font-normal text-end">last 60</th><th className="py-1 pe-2 font-normal text-end">prev 60</th><th className="py-1 pe-2 font-normal text-end">sure</th><th className="py-1 font-normal">verdict</th></tr>
             </thead>
             <tbody className="divide-y divide-line/40">
               {cands.slice(0, 12).map(c => (
                 <tr key={c.id}>
-                  <td className="py-1 pr-2 text-ink">{c.label}</td>
-                  <td className={`py-1 pr-2 num text-right ${c.dW < 0 ? 'text-win' : 'text-muted'}`}>{sg(c.dW)}</td>
-                  <td className={`py-1 pr-2 num text-right ${c.dWp < 0 ? 'text-win' : 'text-muted'}`}>{sg(c.dWp)}</td>
-                  <td className="py-1 pr-2 num text-right text-muted">{c.boot ? `${Math.round(c.boot.pBetter * 100)}%` : '—'}</td>
+                  <td className="py-1 pe-2 text-ink">{c.label}</td>
+                  <td className={`py-1 pe-2 num text-end ${c.dW < 0 ? 'text-win' : 'text-muted'}`}>{sg(c.dW)}</td>
+                  <td className={`py-1 pe-2 num text-end ${c.dWp < 0 ? 'text-win' : 'text-muted'}`}>{sg(c.dWp)}</td>
+                  <td className="py-1 pe-2 num text-end text-muted">{c.boot ? `${Math.round(c.boot.pBetter * 100)}%` : '—'}</td>
                   <td className={`py-1 ${c.pass ? 'text-win font-semibold' : 'text-muted'}`}>{c.pass ? 'passes' : c.gap || c.why}</td>
                 </tr>
               ))}
@@ -665,7 +665,7 @@ function LinkCheckCard() {
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <h2 className="font-display text-lg font-bold text-ink">Broken team links: <span className={n ? 'text-loss' : 'text-win'}>{n}</span></h2>
         <span className="text-xs text-faint">{total} teams of the last and next 7 days · checked {new Date(d.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · daily after the 04:00 jobs
-          <button type="button" disabled={busy} onClick={() => load(true)} className="ml-3 font-semibold text-accent hover:underline disabled:opacity-50">{busy ? 'Checking…' : 'Check now'}</button>
+          <button type="button" disabled={busy} onClick={() => load(true)} className="ms-3 font-semibold text-accent hover:underline disabled:opacity-50">{busy ? 'Checking…' : 'Check now'}</button>
         </span>
       </div>
       {n === 0 ? <p className="text-sm text-faint">Every team link opens a team page.</p> : (
@@ -710,8 +710,8 @@ function SiteErrorsCard() {
                 <span className="text-[11px] num text-loss font-bold">{r.count}×</span>
                 <span className="text-[11px] text-faint">last {when(r.lastAt)} · first {when(r.firstAt)}{r.browsers.length ? ` · ${r.browsers.join(', ')}` : ''}</span>
                 {/* fix259: one site error, with the newest others */}
-                {!r.resolvedAt && <CopyForClaude size="sm" className="ml-auto" req={() => ({ place: 'Admin → Site health → Site errors', scope: 'site-error', sig: r.sig })} />}
-                <button type="button" onClick={() => mark(r.sig, !r.resolvedAt)} className={`${r.resolvedAt ? 'ml-auto ' : ''}text-xs font-semibold text-accent hover:underline`}>
+                {!r.resolvedAt && <CopyForClaude size="sm" className="ms-auto" req={() => ({ place: 'Admin → Site health → Site errors', scope: 'site-error', sig: r.sig })} />}
+                <button type="button" onClick={() => mark(r.sig, !r.resolvedAt)} className={`${r.resolvedAt ? 'ms-auto ' : ''}text-xs font-semibold text-accent hover:underline`}>
                   {r.resolvedAt ? 'Reopen' : 'Mark fixed'}
                 </button>
               </div>
@@ -825,14 +825,14 @@ function AfUsageCard() {
           {d.topAgents.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs min-w-[520px]">
-                <thead><tr className="text-faint text-left">{['User-agent', 'Requests', 'API calls', 'Blocked'].map(h => <th key={h} className="font-semibold py-1 pr-2">{h}</th>)}</tr></thead>
+                <thead><tr className="text-faint text-start">{['User-agent', 'Requests', 'API calls', 'Blocked'].map(h => <th key={h} className="font-semibold py-1 pe-2">{h}</th>)}</tr></thead>
                 <tbody>
                   {d.topAgents.map((a: any) => (
                     <tr key={a.ua} className="border-t border-line/50">
-                      <td className="py-1 pr-2 text-muted max-w-[320px] truncate" title={a.ua}>{a.ua}</td>
-                      <td className="py-1 pr-2 num">{n(a.requests)}</td>
-                      <td className="py-1 pr-2 num">{n(a.afCalls)}</td>
-                      <td className={`py-1 pr-2 num ${a.blocked ? 'text-loss' : ''}`}>{n(a.blocked)}</td>
+                      <td className="py-1 pe-2 text-muted max-w-[320px] truncate" title={a.ua}>{a.ua}</td>
+                      <td className="py-1 pe-2 num">{n(a.requests)}</td>
+                      <td className="py-1 pe-2 num">{n(a.afCalls)}</td>
+                      <td className={`py-1 pe-2 num ${a.blocked ? 'text-loss' : ''}`}>{n(a.blocked)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -878,18 +878,18 @@ function NflCard() {
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs min-w-[560px]">
-              <thead><tr className="text-faint text-left">{['Season', 'Coverage', 'Games', 'Scores', 'Regular', 'Playoffs', 'First', 'Last'].map(h => <th key={h} className="font-semibold py-1 pr-2">{h}</th>)}</tr></thead>
+              <thead><tr className="text-faint text-start">{['Season', 'Coverage', 'Games', 'Scores', 'Regular', 'Playoffs', 'First', 'Last'].map(h => <th key={h} className="font-semibold py-1 pe-2">{h}</th>)}</tr></thead>
               <tbody>
                 {d.seasons.map((s: any) => (
                   <tr key={s.season} className="border-t border-line/50">
-                    <td className="py-1 pr-2 font-semibold text-ink">{s.season}{s.current ? ' ·now' : ''}</td>
-                    <td className="py-1 pr-2 text-muted">{cov(s.coverage)}</td>
-                    <td className="py-1 pr-2 num">{s.stored?.games ?? '–'}</td>
-                    <td className="py-1 pr-2 num">{s.stored?.finished ?? '–'}</td>
-                    <td className="py-1 pr-2 num">{s.stored?.regular ?? '–'}</td>
-                    <td className="py-1 pr-2 num">{s.stored?.playoffs ?? '–'}</td>
-                    <td className="py-1 pr-2">{day(s.stored?.first ?? null)}</td>
-                    <td className="py-1 pr-2">{day(s.stored?.last ?? null)}</td>
+                    <td className="py-1 pe-2 font-semibold text-ink">{s.season}{s.current ? ' ·now' : ''}</td>
+                    <td className="py-1 pe-2 text-muted">{cov(s.coverage)}</td>
+                    <td className="py-1 pe-2 num">{s.stored?.games ?? '–'}</td>
+                    <td className="py-1 pe-2 num">{s.stored?.finished ?? '–'}</td>
+                    <td className="py-1 pe-2 num">{s.stored?.regular ?? '–'}</td>
+                    <td className="py-1 pe-2 num">{s.stored?.playoffs ?? '–'}</td>
+                    <td className="py-1 pe-2">{day(s.stored?.first ?? null)}</td>
+                    <td className="py-1 pe-2">{day(s.stored?.last ?? null)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -975,9 +975,9 @@ function SecurityCard() {
                     <span className="w-32 shrink-0 text-[11px] text-faint num">{fmt(r.at)}</span>
                     <span className="font-semibold text-loss">▸ {EVENT_LABEL[r.event] || r.event}</span>
                     <span className="text-muted min-w-0 break-words">{r.detail}</span>
-                    <span className="ml-auto" onClick={e => e.preventDefault()}><CopyForClaude size="sm" req={() => secReq(r)} /></span>
+                    <span className="ms-auto" onClick={e => e.preventDefault()}><CopyForClaude size="sm" req={() => secReq(r)} /></span>
                   </summary>
-                  <ul className="mt-2 ml-2 sm:ml-36 space-y-0.5 text-[11px] text-faint num">
+                  <ul className="mt-2 ms-2 sm:ms-36 space-y-0.5 text-[11px] text-faint num">
                     {(r.addresses || []).length === 0 && <li>No address written yet (written every 30 s per address).</li>}
                     {(r.addresses || []).map(a => (
                       <li key={a.ip} className="flex flex-wrap gap-x-3">
@@ -995,7 +995,7 @@ function SecurityCard() {
                 <span className="w-32 shrink-0 text-[11px] text-faint num">{fmt(r.at)}</span>
                 <span className={`font-semibold ${BAD.has(r.event) ? 'text-loss' : 'text-ink'}`}>{EVENT_LABEL[r.event] || r.event}</span>
                 <span className="text-muted truncate">{r.email || (r.event === 'scraper' && r.detail) || '—'}</span>
-                <span className="ml-auto text-[11px] text-faint num">{r.ip || ''}{r.ua ? ` · ${browserOf(r.ua)}` : ''}</span>
+                <span className="ms-auto text-[11px] text-faint num">{r.ip || ''}{r.ua ? ` · ${browserOf(r.ua)}` : ''}</span>
                 {BAD.has(r.event) && <CopyForClaude size="sm" req={() => secReq(r)} />}
               </li>
             ))}
@@ -1030,7 +1030,7 @@ function ContactCard() {
   return (
     <section className="card p-5 sm:p-6 mb-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
-        <h2 className="font-display text-lg font-bold text-ink">Contact messages <Link to="/crm" className="ml-2 text-xs font-semibold text-accent">Open CRM inbox →</Link></h2>
+        <h2 className="font-display text-lg font-bold text-ink">Contact messages <Link to="/crm" className="ms-2 text-xs font-semibold text-accent">Open CRM inbox →</Link></h2>
         <span className="text-xs text-faint">
           {d.open} open · {d.rows.length} total ·{' '}
           <button type="button" onClick={() => setAll(v => !v)} className="text-accent font-semibold">{all ? 'Open only' : 'Show all'}</button>
@@ -1049,7 +1049,7 @@ function ContactCard() {
                 <a href={`mailto:${r.email}?subject=${encodeURIComponent(`Re: your message to SportLikely (#${r.id})`)}`} className="text-accent">{r.email}</a>
                 {r.userId && <span>account #{r.userId}</span>}
                 {!r.sent && <span className="text-loss font-semibold">email not delivered — reply from here</span>}
-                <button type="button" onClick={() => mark(r.id, !r.handled)} className="ml-auto text-xs font-semibold text-accent">{r.handled ? 'Reopen' : 'Mark answered'}</button>
+                <button type="button" onClick={() => mark(r.id, !r.handled)} className="ms-auto text-xs font-semibold text-accent">{r.handled ? 'Reopen' : 'Mark answered'}</button>
               </div>
               <p className="text-ink mt-1 whitespace-pre-wrap break-words">{r.message}</p>
             </li>

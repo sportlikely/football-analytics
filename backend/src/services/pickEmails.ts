@@ -55,6 +55,9 @@ import hiLang from '../locales/email/hi.json';
 import plLang from '../locales/email/pl.json';
 import elLang from '../locales/email/el.json';
 import ruLang from '../locales/email/ru.json';
+import ar from '../locales/email/ar.json';
+import he from '../locales/email/he.json';
+import { LANG_LOCALE, isRtl } from '../utils/langs';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS email_prefs (
@@ -100,11 +103,11 @@ const nowIso = () => new Date().toISOString();
 
 /* ---------- words ---------- */
 
-export const EMAIL_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'] as const;
+export const EMAIL_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru', 'ar', 'he'] as const;
 export type EmailLang = (typeof EMAIL_LANGS)[number];
 export const asEmailLang = (x: unknown): EmailLang => ((EMAIL_LANGS as readonly string[]).includes(String(x)) ? (x as EmailLang) : 'en');
-export const EMAIL_PACKS: Record<EmailLang, Record<string, string>> = { en: {}, de, es, fr, it, pt, tr: trLang, id: idLang, hi: hiLang, pl: plLang, el: elLang, ru: ruLang };
-const LOCALES: Record<EmailLang, string> = { en: 'en-GB', de: 'de-DE', es: 'es-ES', fr: 'fr-FR', it: 'it-IT', pt: 'pt-BR', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
+export const EMAIL_PACKS: Record<EmailLang, Record<string, string>> = { en: {}, de, es, fr, it, pt, tr: trLang, id: idLang, hi: hiLang, pl: plLang, el: elLang, ru: ruLang, ar, he };
+const LOCALES: Record<EmailLang, string> = LANG_LOCALE;
 /** `tx(key, a, b)`: the language's words for an English key, {0}, {1} filled (English is the key, like the site) */
 export function words(lang: EmailLang) {
   const pack = EMAIL_PACKS[lang];
@@ -618,6 +621,10 @@ const LIME = '#c6f432', INK = '#0b0e13', TEXT = '#111419', MUTED = '#5d6573', LI
 export const FOOTER_LINE = 'SportLikely · predictions are probabilities, not promises. Information only, not betting advice. 18+. If gambling stops being fun, stop and';
 const HELP_URL = 'https://www.begambleaware.org';
 
+/** fix257: ar / he are written right to left — dir="rtl" on <html> and the outer table, left / right swapped (English unchanged). */
+const dirAttr = (lang: EmailLang) => (isRtl(lang) ? ' dir="rtl"' : '');
+const side = (lang: EmailLang, s: 'left' | 'right') => (isRtl(lang) ? (s === 'left' ? 'right' : 'left') : s);
+
 /** The page link with the language prefix and UTM tags. */
 const linkTo = (lang: EmailLang, p: string, campaign: string) => {
   const [path0, hash] = p.split('#');
@@ -648,14 +655,14 @@ function rowHtml(tx: ReturnType<typeof words>, lang: EmailLang, tz: string, r: R
   const href = linkTo(lang, r.path, campaign);
   const meta = `${esc(tx(SPORT_NAME[r.sport]))} · ${esc(r.league)} · ${esc(timeLabel(lang, tz, r.start, withDay))}${r.fav ? ` · <span style="color:${MUTED}">★ ${esc(tx('Your team'))}</span>` : ''}`;
   const pick = r.shown
-    ? `<span style="color:${MUTED}">${esc(tx('Our pick'))} ·</span> <b>${esc(pickText(tx, r))}</b> · <b>${r.pct.toFixed(0)}%</b>${r.strong ? ` <span class="sl-pill" style="display:inline-block;background:${LIME};color:${INK};font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;margin-left:4px">${esc(tx('Strong pick'))}</span>` : ''}`
+    ? `<span style="color:${MUTED}">${esc(tx('Our pick'))} ·</span> <b>${esc(pickText(tx, r))}</b> · <b>${r.pct.toFixed(0)}%</b>${r.strong ? ` <span class="sl-pill" style="display:inline-block;background:${LIME};color:${INK};font-size:11px;font-weight:800;padding:2px 7px;border-radius:999px;margin-${side(lang, 'left')}:4px">${esc(tx('Strong pick'))}</span>` : ''}`
     : `<a href="${esc(linkTo(lang, '/premium', campaign))}" style="color:${TEXT};text-decoration:none"><span style="display:inline-block;background:${SOFT};border:1px solid ${LINE};color:${MUTED};font-weight:700;padding:3px 9px;border-radius:8px">🔒 ${esc(tx('Unlock with Pro'))}</span></a>`;
   return `<tr><td class="sl-row" style="padding:12px 24px;border-top:1px solid ${LINE}">
     <div class="sl-muted" style="font-size:12px;color:${MUTED};margin-bottom:6px">${meta}</div>
     <a href="${esc(href)}" style="color:${TEXT};text-decoration:none"><table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>
-      <td style="padding-right:8px">${crestImg(r.homeImg)}</td><td class="sl-text" style="font-size:15px;font-weight:700;color:${TEXT}">${esc(r.home)}</td>
+      <td style="padding-${side(lang, 'right')}:8px">${crestImg(r.homeImg)}</td><td class="sl-text" style="font-size:15px;font-weight:700;color:${TEXT}">${esc(r.home)}</td>
       <td style="padding:0 8px;color:${MUTED}">–</td>
-      <td class="sl-text" style="font-size:15px;font-weight:700;color:${TEXT}">${esc(r.away)}</td><td style="padding-left:8px">${crestImg(r.awayImg)}</td>
+      <td class="sl-text" style="font-size:15px;font-weight:700;color:${TEXT}">${esc(r.away)}</td><td style="padding-${side(lang, 'left')}:8px">${crestImg(r.awayImg)}</td>
     </tr></table></a>
     <div class="sl-text" style="font-size:14px;color:${TEXT};margin-top:6px">${pick}</div>
   </td></tr>`;
@@ -673,7 +680,7 @@ function frame(f: Frame): string {
   const tx = words(f.lang);
   const unsub = picksUnsubUrl(f.userId);
   const manage = linkTo(f.lang, '/account/emails', f.campaign);
-  return `<!doctype html><html lang="${f.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return `<!doctype html><html lang="${f.lang}"${dirAttr(f.lang)}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>SportLikely</title>
 <style>
 @media (prefers-color-scheme: dark) {
@@ -684,13 +691,13 @@ function frame(f: Frame): string {
 </style></head>
 <body class="sl-bg" style="margin:0;padding:0;background:${SOFT};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;color:${TEXT};-webkit-text-size-adjust:100%">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(f.preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="sl-bg" style="background:${SOFT}"><tr><td align="center" style="padding:20px 10px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="sl-bg"${dirAttr(f.lang)} style="background:${SOFT}"><tr><td align="center" style="padding:20px 10px">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" class="sl-card" style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${LINE};border-radius:16px;overflow:hidden">
   <tr><td style="background:${INK};padding:18px 24px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td><a href="${esc(linkTo(f.lang, '/', f.campaign))}" style="text-decoration:none"><img src="${SITE}/logo-mark.png" width="26" height="26" alt="" style="vertical-align:middle;border:0;border-radius:6px">
-        <span style="vertical-align:middle;font-weight:800;font-size:19px;color:#ffffff;margin-left:6px">Sport<span style="color:${LIME}">Likely</span></span></a></td>
-      <td align="right" style="font-size:12px;font-weight:700;color:${LIME}">${esc(f.label)}</td>
+        <span style="vertical-align:middle;font-weight:800;font-size:19px;color:#ffffff;margin-${side(f.lang, 'left')}:6px">Sport<span style="color:${LIME}">Likely</span></span></a></td>
+      <td align="${side(f.lang, 'right')}" style="font-size:12px;font-weight:700;color:${LIME}">${esc(f.label)}</td>
     </tr></table>
   </td></tr>
   ${f.body}
@@ -698,7 +705,7 @@ function frame(f: Frame): string {
     <a href="${esc(f.cta.href)}" style="display:inline-block;background:${LIME};color:${INK};font-weight:800;font-size:14px;text-decoration:none;padding:12px 20px;border-radius:10px">${esc(f.cta.text)}</a>
   </td></tr>
 </table>
-<p class="sl-muted" style="max-width:560px;font-size:11px;line-height:1.55;color:${MUTED};margin:16px auto 0;text-align:left">
+<p class="sl-muted" style="max-width:560px;font-size:11px;line-height:1.55;color:${MUTED};margin:16px auto 0;text-align:${side(f.lang, 'left')}">
   ${esc(tx(FOOTER_LINE))} <a href="${HELP_URL}" style="color:${MUTED}">${esc(tx('get help'))}</a>.<br>
   ${esc(tx('You get this email because you turned it on in your SportLikely account.'))}
   <a href="${esc(manage)}" style="color:${MUTED}">${esc(tx('Manage emails'))}</a> · <a href="${esc(unsub)}" style="color:${MUTED}">${esc(tx('Unsubscribe'))}</a><br>

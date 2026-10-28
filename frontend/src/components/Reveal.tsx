@@ -55,7 +55,7 @@ export function RevealCover({ onReveal, autoStart = false, model }: { onReveal: 
           <div className="w-full max-w-md h-2 rounded-full bg-surface2 overflow-hidden">
             <div className="h-full rounded-full bg-accent transition-[width] ease-out" style={{ width: fill ? '100%' : '4%', transitionDuration: '1700ms' }} />
           </div>
-          <ul className="w-full max-w-md space-y-1.5 text-left text-sm">
+          <ul className="w-full max-w-md space-y-1.5 text-start text-sm">
             {STEPS.map((s, i) => (
               <li key={s} className={`flex items-center gap-2.5 transition-opacity duration-300 ${i <= step ? 'opacity-100' : 'opacity-30'}`}>
                 <span className={`w-4 h-4 rounded-full grid place-items-center text-[10px] font-extrabold ${i < step ? 'bg-accent text-bg' : i === step ? 'border-2 border-accent' : 'border border-line'}`}>

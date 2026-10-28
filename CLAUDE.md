@@ -100,10 +100,14 @@ is model work, the matching note, in the same commit.
 - Before pushing: `cd frontend && npm run parity` must pass (also part of `npm run type-check` / `npm run build`). A new
   football block means a parity key in `frontend/src/lib/sportParity.ts` + the basketball and NFL versions in the same
   commit (listed in their `*.parity.ts` files), or an 'na: <reason>' Yarin approved (`docs/notes/sport-parity.md`).
-- Copy: short, plain English, no jargon. Eleven locales in `frontend/src/locales/*.json` (de, es, fr, it, pt, tr, id, hi, pl, el, ru;
-  English is the key; fix256). A new UI string needs the key used through `t("...")` and a translation in all eleven files
-  (`npm run parity` fails on a missing key — scripts/locales-check.ts)
-  (`json.dumps(..., ensure_ascii=False, indent=1)` keeps the file format).
+- Copy: short, plain English, no jargon. Locales in `frontend/src/locales/*.json` (de, es, fr, it, pt, tr, id, hi, pl, el,
+  ru (fix256), ar, he (fix257); English is the key). A new UI string needs the key used through `t("...")` and a
+  translation in every file (`json.dumps(..., ensure_ascii=False, indent=1)` keeps the file format); `npm run parity`
+  (scripts/locales-check.ts) fails on a missing key. ar / he are right to left and admin-only until the Railway variable
+  `PUBLIC_LANGS` names them (backend `utils/langs.ts` = frontend `lib/i18n.ts` LANGS): no hreflang / sitemap / crawler HTML,
+  /ar and /he 404 for visitors. Layout uses logical classes only (ms-/me-/ps-/pe-/start-/end-/text-start/text-end, never
+  ml-/mr-/left-/text-left), a direction glyph or icon gets `.rtl-flip`, a signed number `ltr()`; numbers stay Western
+  digits, dates via LOCALE.
 - Phones first: check layouts at 375 px. Bottom nav on phones; floating accessibility button bottom-left.
 - Don't add dependencies without a reason; the backend uses Node's built-in `node:sqlite`, no ORM.
 - The server can't be reached from local tests; test model changes on a database copy (admins can download one from

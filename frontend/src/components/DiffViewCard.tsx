@@ -51,19 +51,19 @@ export default function DiffViewCard() {
   const leagues = [...new Set(rows.filter(g => g.league !== 'All leagues').map(g => g.league))]
   const info = d.sports.find(s => s.sport === sport)
   const head = (
-    <thead><tr className="text-faint text-left">
-      <th className="pb-1 pr-3 font-normal">Gap</th><th className="pb-1 pr-3 font-normal">Games</th><th className="pb-1 pr-3 font-normal">Our side happened</th>
-      <th className="pb-1 pr-3 font-normal">Market said</th><th className="pb-1 pr-3 font-normal">We said</th><th className="pb-1 pr-3 font-normal">Return (95%)</th>
+    <thead><tr className="text-faint text-start">
+      <th className="pb-1 pe-3 font-normal">Gap</th><th className="pb-1 pe-3 font-normal">Games</th><th className="pb-1 pe-3 font-normal">Our side happened</th>
+      <th className="pb-1 pe-3 font-normal">Market said</th><th className="pb-1 pe-3 font-normal">We said</th><th className="pb-1 pe-3 font-normal">Return (95%)</th>
     </tr></thead>
   )
   const line = (g: Group, label: string) => (
     <tr key={`${g.league}-${g.band}`} className="border-t border-line/50">
-      <td className="py-1.5 pr-3 text-muted whitespace-nowrap">{label}</td>
-      <td className="py-1.5 pr-3 num">{g.games}</td>
-      <td className="py-1.5 pr-3 num font-semibold text-ink">{g.hit ?? '—'}%</td>
-      <td className="py-1.5 pr-3 num">{g.market ?? '—'}%</td>
-      <td className="py-1.5 pr-3 num">{g.ours ?? '—'}%</td>
-      <td className={`py-1.5 pr-3 num font-semibold whitespace-nowrap ${roiTone(g)}`}>{roi(g)} <span className="font-normal text-faint">{ci(g)}</span></td>
+      <td className="py-1.5 pe-3 text-muted whitespace-nowrap">{label}</td>
+      <td className="py-1.5 pe-3 num">{g.games}</td>
+      <td className="py-1.5 pe-3 num font-semibold text-ink">{g.hit ?? '—'}%</td>
+      <td className="py-1.5 pe-3 num">{g.market ?? '—'}%</td>
+      <td className="py-1.5 pe-3 num">{g.ours ?? '—'}%</td>
+      <td className={`py-1.5 pe-3 num font-semibold whitespace-nowrap ${roiTone(g)}`}>{roi(g)} <span className="font-normal text-faint">{ci(g)}</span></td>
     </tr>
   )
   const groupLine = (g: Group) => (

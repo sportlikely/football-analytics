@@ -124,7 +124,7 @@ export default function LeaguesCard({ sport = 'football' }: { sport?: 'football'
                         <span className="text-[11px] text-faint num">{bb ? 'BB' : 'AF'}{x.id}</span>
                         {!x.enabled && <span className="text-[11px] text-loss">removed{x.live ? ' · leaves after the next deploy' : ''}</span>}
                         {x.enabled && (
-                          <span className="ml-auto flex items-center gap-3">
+                          <span className="ms-auto flex items-center gap-3">
                             <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer">
                               <input type="checkbox" checked={x.trial} onChange={e => setTrial(x.id, e.target.checked)} />
                               In testing
@@ -162,13 +162,13 @@ export default function LeaguesCard({ sport = 'football' }: { sport?: 'football'
                   <thead className="sticky top-0 bg-surface text-[11px] uppercase tracking-wide text-faint">
                     <tr>
                       <th className="w-8 px-2 py-2" />
-                      <th className="text-left px-2 py-2">Country</th>
-                      <th className="text-left px-2 py-2">League</th>
+                      <th className="text-start px-2 py-2">Country</th>
+                      <th className="text-start px-2 py-2">League</th>
                       <th className="px-2 py-2">Data</th>
                       {!bb && <th className="px-2 py-2">Injuries</th>}
                       <th className="px-2 py-2">Past seasons</th>
                       <th className="px-2 py-2">Season</th>
-                      <th className="text-left px-2 py-2" />
+                      <th className="text-start px-2 py-2" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line/40">
@@ -178,7 +178,7 @@ export default function LeaguesCard({ sport = 'football' }: { sport?: 'football'
                           {addable(l) && <input type="checkbox" checked={picked.has(l.id)} onChange={() => toggle(l.id)} onClick={e => e.stopPropagation()} aria-label={`Add ${l.name}`} />}
                         </td>
                         <td className="px-2 py-1.5 whitespace-nowrap">
-                          {l.flag && <img src={l.flag} alt="" className="inline-block w-4 h-3 mr-1.5 align-[-1px] object-cover rounded-[2px]" loading="lazy" />}
+                          {l.flag && <img src={l.flag} alt="" className="inline-block w-4 h-3 me-1.5 align-[-1px] object-cover rounded-[2px]" loading="lazy" />}
                           <span className="text-muted">{l.country}</span>
                         </td>
                         <td className="px-2 py-1.5 text-ink">{l.name}</td>

@@ -94,14 +94,14 @@ export default function NflPlayer() {
           <Card title={t('Career by season')}>
             <div className="overflow-x-auto -mx-1">
               <table className="w-full text-sm min-w-[480px]">
-                <thead><tr className="text-[10px] uppercase tracking-wide text-faint"><th className="text-left font-semibold py-1 px-1">{t('Season')}</th><th className="text-left font-semibold py-1 px-1">{t('Team')}</th><th className="text-right font-semibold py-1 px-1">{t('GP')}</th>{cols.map(c => <th key={c.key} className="text-right font-semibold py-1 px-1">{t(c.label)}</th>)}</tr></thead>
+                <thead><tr className="text-[10px] uppercase tracking-wide text-faint"><th className="text-start font-semibold py-1 px-1">{t('Season')}</th><th className="text-start font-semibold py-1 px-1">{t('Team')}</th><th className="text-end font-semibold py-1 px-1">{t('GP')}</th>{cols.map(c => <th key={c.key} className="text-end font-semibold py-1 px-1">{t(c.label)}</th>)}</tr></thead>
                 <tbody>
                   {d.career!.map(s => (
                     <tr key={`${s.season}${s.team?.id}`} className="border-t border-line/50">
                       <td className="py-1.5 px-1 num text-muted">{s.season}</td>
                       <td className="py-1.5 px-1">{s.team ? <span className="flex items-center gap-1.5 min-w-0"><TeamLogo team={s.team} size={14} /><NameLink to={href.nflTeam(s.team.id, s.team.name)} className="truncate text-ink">{s.team.name}</NameLink></span> : '–'}</td>
-                      <td className="py-1.5 px-1 text-right num text-muted">{s.games}</td>
-                      {cols.map(c => <td key={c.key} className="py-1.5 px-1 text-right num text-ink">{s.stats[c.key] ?? '–'}</td>)}
+                      <td className="py-1.5 px-1 text-end num text-muted">{s.games}</td>
+                      {cols.map(c => <td key={c.key} className="py-1.5 px-1 text-end num text-ink">{s.stats[c.key] ?? '–'}</td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -121,7 +121,7 @@ export default function NflPlayer() {
                     <span className="w-16 text-xs text-faint">{new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
                     <span className="flex items-center gap-1.5 min-w-0"><span className="text-xs text-faint">{home ? t('vs') : '@'}</span><TeamLogo team={opp} size={16} /><span className="truncate text-ink">{opp.name}</span></span>
                     {g.score && <span className="num text-muted">{home ? `${g.score.home}–${g.score.away}` : `${g.score.away}–${g.score.home}`}</span>}
-                    <span className="basis-full sm:basis-auto sm:ml-auto text-xs text-muted truncate">
+                    <span className="basis-full sm:basis-auto sm:ms-auto text-xs text-muted truncate">
                       {Object.entries(l.groups).map(([gn, st]) => `${gn}: ${Object.entries(st).slice(0, 4).map(([k, v]) => `${k} ${v}`).join(', ')}`).join(' · ')}
                     </span>
                   </MaybeLink>

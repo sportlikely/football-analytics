@@ -6,12 +6,15 @@
  * for an older build, at the 900 ms cut and during a start-up — while /id, /pl … (built fresh after fix256) were right.
  * Now the plain page gets the address's lang, canonical and the 13 hreflang links (12 languages + x-default), and a
  * stored copy without them (copyLooksRight) is treated like an old build: not sent, rebuilt.
- * Pure: no imports (earlyStatic loads it before the app's modules).
+ * Pure: no imports but utils/langs.ts (itself import-free; earlyStatic loads this before the app's modules).
+ * fix257: the languages come from utils/langs.ts — every one is understood in the address (/ar, /he too), hreflang
+ * names the public ones only (PUBLIC_LANGS), and a page in a language that is not public is noindex without alternates.
  */
+import { ALL_LANGS, publicLangs, isPublicLang, type SiteLang } from './langs';
 
-export const PAGE_LANGS = ['en', 'es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'] as const;
-export type PageLang = (typeof PAGE_LANGS)[number];
-const PREFIX = /^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(?=\/|$)/;
+export const PAGE_LANGS = ALL_LANGS;
+export type PageLang = SiteLang;
+const PREFIX = new RegExp(`^\\/(${ALL_LANGS.filter(l => l !== 'en').join('|')})(?=\\/|$)`);
 const SITE = 'https://sportlikely.com';
 /** pages that are never indexed (account, sign-in …): lang only, no alternates */
 const PRIVATE = /^\/(login|signup|join|forgot|verify|account|reset|admin|crm|quick-check|search)(\/|$)/;
@@ -24,9 +27,9 @@ export function langOfPath(p0: string): { lang: PageLang; path: string } {
 }
 export const langHref = (lang: PageLang, p: string) => (lang === 'en' ? p : `/${lang}${p === '/' ? '' : p}`);
 
-/** the 13 alternates of a page (every language + x-default = the English address) */
+/** the alternates of a page (the public languages + x-default = the English address) */
 export function hreflangLinks(p: string, site = SITE): string[] {
-  return [...PAGE_LANGS.map(l => `<link rel="alternate" hreflang="${l}" href="${site + langHref(l, p)}" />`),
+  return [...publicLangs().map(l => `<link rel="alternate" hreflang="${l}" href="${site + langHref(l, p)}" />`),
     `<link rel="alternate" hreflang="x-default" href="${site + p}" />`];
 }
 
@@ -39,6 +42,7 @@ export function appPageFor(indexHtml: string, reqPath: string, site = SITE): str
   const page = pageOfTab(path);
   const url = site + langHref(lang, page);
   let out = indexHtml.replace(/<html lang="[^"]*"/, `<html lang="${lang}"`);
+  if (!isPublicLang(lang)) return out.replace('</head>', '<meta name="robots" content="noindex"></head>');
   if (PRIVATE.test(path)) return out;
   out = out.replace(/<link rel="canonical" href="[^"]*"\s*\/?>/, `<link rel="canonical" href="${url}" />`)
     .replace(/<meta property="og:url" content="[^"]*"\s*\/?>/, `<meta property="og:url" content="${url}" />`);
@@ -54,5 +58,5 @@ export function copyLooksRight(html: string, lang: PageLang): boolean {
   if (!head.includes('hreflang="x-default"')) return false;
   // an English-only page (guides) names only en + x-default; every other page all 12 languages
   const n = (head.match(/hreflang="/g) || []).length;
-  return n === 2 || PAGE_LANGS.every(l => head.includes(`hreflang="${l}"`));
+  return n === 2 || publicLangs().every(l => head.includes(`hreflang="${l}"`));
 }

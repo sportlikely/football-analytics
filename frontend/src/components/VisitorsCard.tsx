@@ -68,9 +68,9 @@ function Countries({ c }: { c: NonNullable<Visitors['countries']> }) {
               <span className="w-6 text-center text-base leading-none" aria-hidden>{flagOf(r.country)}</span>
               <span className="w-40 truncate text-ink">{nameOf(r.country)}</span>
               <span className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><span className="block h-full rounded-full bg-accent/70" style={{ width: `${(r.visitors / max) * 100}%` }} /></span>
-              <span className="w-10 text-right num text-ink">{r.visitors}</span>
-              <span className="w-14 text-right num text-[11px] text-faint" title="bots / scripts filtered">{r.bots ? `+${r.bots} bots` : ''}</span>
-              <span className="w-12 text-right num text-[11px] text-faint">{total ? Math.round((r.visitors / total) * 100) : 0}%</span>
+              <span className="w-10 text-end num text-ink">{r.visitors}</span>
+              <span className="w-14 text-end num text-[11px] text-faint" title="bots / scripts filtered">{r.bots ? `+${r.bots} bots` : ''}</span>
+              <span className="w-12 text-end num text-[11px] text-faint">{total ? Math.round((r.visitors / total) * 100) : 0}%</span>
             </li>
           ))}
         </ul>
@@ -156,7 +156,7 @@ function WhoCard({ w }: { w: Who }) {
               <li key={n.asn} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 <span className="min-w-0 flex-1 truncate text-ink">{n.name} <span className="text-faint text-[11px]">AS{n.asn}{n.cc ? `, ${n.cc}` : ''}</span></span>
                 {mark(n.mark)}
-                <span className="text-right num text-[11px] text-faint">{n0(n.addresses)} addr · {n0(n.requests)} req{n.refused ? ` · ${n0(n.refused)} refused` : ''}{n.passed ? ` · ${n0(n.passed)} passed the check` : ''}{n.passRefused ? ` · ${n0(n.passRefused)} refused after it` : ''}{n.logged ? ' · in the security log' : ''}</span>
+                <span className="text-end num text-[11px] text-faint">{n0(n.addresses)} addr · {n0(n.requests)} req{n.refused ? ` · ${n0(n.refused)} refused` : ''}{n.passed ? ` · ${n0(n.passed)} passed the check` : ''}{n.passRefused ? ` · ${n0(n.passRefused)} refused after it` : ''}{n.logged ? ' · in the security log' : ''}</span>
                 {/* fix259: a network that was refused or looks like a script */}
                 {(n.refused > 0 || n.mark === 'script' || n.mark === 'data-centre') && <CopyForClaude size="sm" req={() => ({
                   place: 'Admin → Visitors & users → Visitors → Who is calling today', scope: 'item',
@@ -172,7 +172,7 @@ function WhoCard({ w }: { w: Who }) {
             <li key={a.ua} className="flex items-baseline gap-3">
               <span className="min-w-0 flex-1 truncate text-ink text-xs" title={a.ua}>{a.ua}</span>
               {mark(a.mark)}
-              <span className="w-14 text-right num text-[11px] text-faint">{n0(a.requests)}</span>
+              <span className="w-14 text-end num text-[11px] text-faint">{n0(a.requests)}</span>
             </li>
           ))}
         </ul>

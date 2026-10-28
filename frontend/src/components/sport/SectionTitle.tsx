@@ -7,7 +7,7 @@ export default function SectionTitle({ label, sub, count, accent, sticky, unit }
   return (
     <div ref={sticky ? ref : undefined} className={`flex items-baseline gap-3 mb-3 ${sticky ? `sticky top-[113px] sm:top-16 z-30 py-2 -my-2 ${stuckBg(stuck)}` : ''}`}>
       <h2 className={`font-display text-lg font-bold tracking-tight ${accent === 'live' ? 'text-live' : 'text-ink'}`}>
-        {accent === 'live' && <span className="inline-block w-2 h-2 rounded-full bg-live animate-pulseDot mr-2 align-middle" />}
+        {accent === 'live' && <span className="inline-block w-2 h-2 rounded-full bg-live animate-pulseDot me-2 align-middle" />}
         {label}
       </h2>
       {count !== undefined && <span className="num text-xs text-faint">{count} {unit ?? tt("matches")}</span>}

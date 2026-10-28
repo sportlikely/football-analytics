@@ -147,7 +147,7 @@ const PAGES = ['/', '/football', '/football/matches', '/basketball/matches', '/f
 const alternates = html => [...html.matchAll(/hreflang="([^"]+)" href="([^"]+)"/g)].map(m => [m[1], m[2]]);
 
 test('(2) the hreflang set is 13 links: the 12 languages + x-default', () => {
-  assert.deepEqual([...PAGE_LANGS], ALL);
+  assert.deepEqual([...PAGE_LANGS], [...ALL, 'ar', 'he'], 'every language is understood (fix257: ar / he admin-only, not in hreflang by default)');
   const links = hreflangLinks('/football/matches');
   assert.equal(links.length, 13);
   assert.ok(links.at(-1).includes('hreflang="x-default" href="https://sportlikely.com/football/matches"'));

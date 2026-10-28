@@ -55,9 +55,9 @@ export default function EmailsAdminCard() {
       {d && (d.perDay.length ? (
         <div className="overflow-x-auto">
           <table className="w-full text-sm tabular-nums">
-            <thead><tr className="text-xs text-faint text-left"><th className="py-1 pr-3">Day (UTC)</th>{COLS.map(c => <th key={c} className="py-1 px-2 text-right">{c}</th>)}</tr></thead>
+            <thead><tr className="text-xs text-faint text-start"><th className="py-1 pe-3">Day (UTC)</th>{COLS.map(c => <th key={c} className="py-1 px-2 text-end">{c}</th>)}</tr></thead>
             <tbody>{d.perDay.map(r => (
-              <tr key={r.day} className="border-t border-line/50"><td className="py-1 pr-3 text-ink">{r.day}</td>{COLS.map(c => <td key={c} className={`py-1 px-2 text-right ${(c === 'failed' || c === 'bounced' || c === 'complained') && r[c] ? 'text-loss' : 'text-ink'}`}>{r[c]}</td>)}</tr>
+              <tr key={r.day} className="border-t border-line/50"><td className="py-1 pe-3 text-ink">{r.day}</td>{COLS.map(c => <td key={c} className={`py-1 px-2 text-end ${(c === 'failed' || c === 'bounced' || c === 'complained') && r[c] ? 'text-loss' : 'text-ink'}`}>{r[c]}</td>)}</tr>
             ))}</tbody>
           </table>
         </div>

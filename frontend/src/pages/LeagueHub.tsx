@@ -51,7 +51,7 @@ export default function LeagueHub() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 sm:py-10 space-y-5">
       <header className="space-y-2">
-        <Link to={leagueUrl} className="text-sm text-muted hover:text-ink">← {hub.name}</Link>
+        <Link to={leagueUrl} className="text-sm text-muted hover:text-ink"><span aria-hidden className="rtl-flip">←</span> {hub.name}</Link>
         <h1 className="font-display text-2xl sm:text-4xl font-extrabold tracking-tight text-ink">{hub.name} {hub.sport === 'american-football' ? 'games' : 'predictions'} this week</h1>
         <p className="text-sm font-semibold text-faint">{range(hub.from, hub.to)}</p>
         <p className="text-[15px] text-muted leading-relaxed">{hub.intro}</p>

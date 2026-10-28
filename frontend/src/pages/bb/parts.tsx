@@ -94,11 +94,11 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
   return (
     <div>
     <Link to={matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff }) ?? ''} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
-      {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
+      {isLive && <span className="absolute start-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       {/* time / status */}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
         {favWhy.length > 0 && (
-          <span className="absolute -left-2.5 sm:-left-3 top-1/2 -translate-y-1/2 text-accent" title={t('Favorite: {0}', { 0: favWhy.map(f => f.name).join(', ') })}>
+          <span className="absolute -start-2.5 sm:-start-3 top-1/2 -translate-y-1/2 text-accent" title={t('Favorite: {0}', { 0: favWhy.map(f => f.name).join(', ') })}>
             <svg viewBox="0 0 24 24" className="w-3 h-3" fill="currentColor" aria-hidden><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z" /></svg>
           </span>
         )}
@@ -129,7 +129,7 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
             <div key={side} className="flex items-center gap-2 min-w-0 h-5">
               <TeamLogo team={team} size={15} />
               <span className={`text-[13px] truncate ${pick === side || won(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>{team.name}</span>
-              {score !== null && <span className={`ml-auto pl-2 num text-[13px] font-extrabold tabular-nums ${isLive ? 'text-live' : done && !won(side) ? 'text-muted' : 'text-ink'}`}>{score}</span>}
+              {score !== null && <span className={`ms-auto ps-2 num text-[13px] font-extrabold tabular-nums ${isLive ? 'text-live' : done && !won(side) ? 'text-muted' : 'text-ink'}`}>{score}</span>}
             </div>
           )
         })}
@@ -194,7 +194,7 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
       </div>
       )}
     </Link>
-      {scOpen && <RowScorersLine href={matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} live={isLive} homeName={g.home.name} awayName={g.away.name} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+      {scOpen && <RowScorersLine href={matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} live={isLive} homeName={g.home.name} awayName={g.away.name} className="px-3 sm:px-4 pb-2 ps-[3.6rem] sm:ps-[4.1rem]" />}
     </div>
   )
 }
@@ -289,7 +289,7 @@ function LiveRowPct({ g }: { g: BbGame }) {
   const pct = Math.round(lead === 'H' ? l.pHome : l.pAway)
   return (
     <>
-      <span className="sm:hidden text-right leading-tight" title={t('Live win chance')}>
+      <span className="sm:hidden text-end leading-tight" title={t('Live win chance')}>
         <span className="block text-[11px] font-bold truncate max-w-[84px] text-live">{name}</span>
         <span className="block num text-[11px] font-semibold text-ink/80">{pct}%</span>
       </span>

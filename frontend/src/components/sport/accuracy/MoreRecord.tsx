@@ -32,7 +32,7 @@ export default function MoreRecord({ sport }: { sport: MoreSport }) {
         {r.outputs.map(o => (
           <div key={o.output} className="border-t border-line/60 pt-3 first:border-0 first:pt-0">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="text-sm font-semibold text-ink">{name[o.output] || o.output}{o.public === false && <span className="ml-2 text-[10px] font-bold uppercase text-draw">{t('admin only')}</span>}</span>
+              <span className="text-sm font-semibold text-ink">{name[o.output] || o.output}{o.public === false && <span className="ms-2 text-[10px] font-bold uppercase text-draw">{t('admin only')}</span>}</span>
               <span className="text-xs text-muted num">
                 {o.games ? t('{0} games · {1}% right', { 0: o.games.toLocaleString(LOCALE), 1: o.hitRate ?? '–' }) : t('No games checked yet')}
               </span>

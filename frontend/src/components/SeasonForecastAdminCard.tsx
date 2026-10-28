@@ -62,19 +62,19 @@ export default function SeasonForecastAdminCard() {
 
       <div className="mt-4 overflow-x-auto">
         <table className="w-full text-xs num">
-          <thead><tr className="text-faint text-left"><th className="py-1 pr-2">League</th><th className="pr-2">Season</th><th className="pr-2">Run</th><th className="pr-2">Runs</th><th className="pr-2">Time</th><th className="pr-2">Games left</th><th className="pr-2">Rules</th><th>Inputs</th></tr></thead>
+          <thead><tr className="text-faint text-start"><th className="py-1 pe-2">League</th><th className="pe-2">Season</th><th className="pe-2">Run</th><th className="pe-2">Runs</th><th className="pe-2">Time</th><th className="pe-2">Games left</th><th className="pe-2">Rules</th><th>Inputs</th></tr></thead>
           <tbody className="divide-y divide-line/50">
             {d.leagues.map(r => {
               const k = `${r.sport}|${r.code}`
               return (
                 <tr key={k} className="align-top cursor-pointer" onClick={() => setOpen(open === k ? null : k)}>
-                  <td className="py-1.5 pr-2 text-ink">{r.sport} · {r.name || r.code}</td>
-                  <td className="pr-2">{r.season}</td>
-                  <td className="pr-2">{ago(r.run_at)}</td>
-                  <td className="pr-2">{r.runs.toLocaleString()}</td>
-                  <td className="pr-2">{r.ms} ms</td>
-                  <td className="pr-2">{r.games_left}</td>
-                  <td className={`pr-2 ${r.known ? '' : 'text-loss'}`}>{r.known ? (open === k ? rulesText(r.rules) : 'known') : 'no zones'}</td>
+                  <td className="py-1.5 pe-2 text-ink">{r.sport} · {r.name || r.code}</td>
+                  <td className="pe-2">{r.season}</td>
+                  <td className="pe-2">{ago(r.run_at)}</td>
+                  <td className="pe-2">{r.runs.toLocaleString('en-GB')}</td>
+                  <td className="pe-2">{r.ms} ms</td>
+                  <td className="pe-2">{r.games_left}</td>
+                  <td className={`pe-2 ${r.known ? '' : 'text-loss'}`}>{r.known ? (open === k ? rulesText(r.rules) : 'known') : 'no zones'}</td>
                   <td className="text-muted">{r.note}</td>
                 </tr>
               )

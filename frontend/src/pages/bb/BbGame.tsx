@@ -7,7 +7,7 @@ import { primeGame } from '../../lib/gameBundle'
 import { useApiFresh } from '../../lib/apiCache'
 import PageSkeleton from '../../components/PageSkeleton'
 import { API_URL } from '../../lib/socket'
-import { t, lang } from '../../lib/i18n'
+import { t, lang, ltr } from '../../lib/i18n'
 import { useAuth } from '../../lib/auth'
 import { useReveal } from '../../lib/reveal'
 import YourPicks from '../../components/YourPicks'
@@ -164,7 +164,7 @@ export default function BbGame() {
             ]}
             why={bbWhy(d)}
             howCalc={d.model ? <>{d.grid && <GridSplit grid={d.grid} home={g.home.name} away={g.away.name} />}<ModelTable g={g} model={d.model} ratings={d.ratings} /></> : undefined}
-            badges={g.resultCheck ? <span title={t('The final score from our data provider looks wrong. This game doesn’t count in our record until it is checked.')} className="ml-auto rounded-full px-3 py-1 text-xs font-bold bg-draw/15 text-draw">{t('Result being checked')}</span> : undefined}
+            badges={g.resultCheck ? <span title={t('The final score from our data provider looks wrong. This game doesn’t count in our record until it is checked.')} className="ms-auto rounded-full px-3 py-1 text-xs font-bold bg-draw/15 text-draw">{t('Result being checked')}</span> : undefined}
             noPrediction={t('No prediction for this game.')}
           />
           {/* fix204: more predictions from the same model (locked like the prediction) */}
@@ -255,11 +255,11 @@ export default function BbGame() {
       footer={showQ ? (
         <div className="overflow-x-auto">
           <table className="mx-auto text-xs num">
-            <thead><tr className="text-faint"><th className="px-3 text-left font-semibold" />{['Q1', 'Q2', 'Q3', 'Q4', 'OT'].map((x, i) => (i < 4 || q!.home[4] !== null) && <th key={x} className="px-3 font-semibold">{t(x)}</th>)}<th className="px-3 font-semibold">{t('Total')}</th></tr></thead>
+            <thead><tr className="text-faint"><th className="px-3 text-start font-semibold" />{['Q1', 'Q2', 'Q3', 'Q4', 'OT'].map((x, i) => (i < 4 || q!.home[4] !== null) && <th key={x} className="px-3 font-semibold">{t(x)}</th>)}<th className="px-3 font-semibold">{t('Total')}</th></tr></thead>
             <tbody>
               {(['home', 'away'] as const).map(s => (
                 <tr key={s}>
-                  <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left"><NameLink to={href.bbTeam((s === 'home' ? g.home : g.away).id, (s === 'home' ? g.home : g.away).name)}>{(s === 'home' ? g.home : g.away).name}</NameLink></td>
+                  <td className="px-3 py-0.5 text-muted font-semibold font-sans text-start"><NameLink to={href.bbTeam((s === 'home' ? g.home : g.away).id, (s === 'home' ? g.home : g.away).name)}>{(s === 'home' ? g.home : g.away).name}</NameLink></td>
                   {q![s].map((v, i) => (i < 4 || q!.home[4] !== null) && <td key={i} className="px-3 text-center text-ink">{v ?? '–'}</td>)}
                   <td className="px-3 text-center text-ink font-bold">{s === 'home' ? g.score!.home : g.score!.away}</td>
                 </tr>
@@ -455,7 +455,7 @@ function InjuriesCard({ d }: { d: Detail }) {
       <div className="flex items-center gap-2 mb-3">
         <TeamLogo team={team} size={22} />
         <NameLink to={href.bbTeam(team.id, team.name)} className="font-display font-bold text-ink">{team.name}</NameLink>
-        {pts ? <span className="ml-auto text-xs font-bold text-loss num">−{pts.toFixed(1)} {t('pts')}</span> : null}
+        {pts ? <span className="ms-auto text-xs font-bold text-loss num">−{pts.toFixed(1)} {t('pts')}</span> : null}
       </div>
       {list.length === 0 ? <p className="text-sm text-faint">{t('No injuries listed.')}</p> : (
         <ul className="space-y-2">
@@ -465,9 +465,9 @@ function InjuriesCard({ d }: { d: Detail }) {
                 <span className={`w-2 h-2 rounded-full shrink-0 ${x.weight >= 1 ? 'bg-loss' : x.weight >= 0.4 ? 'bg-draw' : 'bg-faint'}`} />
                 {x.playerId ? <Link to={playerHref('basketball', x.playerId, x.name)!} className="text-ink font-semibold truncate hover:text-accent">{x.name}</Link> : <span className="text-ink font-semibold truncate">{x.name}</span>}
                 {x.minutes !== null && <span className="text-[11px] text-faint num">{t('{0} min', { 0: x.minutes })}</span>}
-                <span className={`ml-auto text-xs font-bold ${x.weight >= 1 ? 'text-loss' : 'text-draw'}`}>{x.status}</span>
+                <span className={`ms-auto text-xs font-bold ${x.weight >= 1 ? 'text-loss' : 'text-draw'}`}>{x.status}</span>
               </div>
-              {x.comment && <p className="mt-0.5 ml-4 text-xs text-muted line-clamp-2">{x.comment}</p>}
+              {x.comment && <p className="mt-0.5 ms-4 text-xs text-muted line-clamp-2">{x.comment}</p>}
             </li>
           ))}
         </ul>
@@ -514,33 +514,33 @@ function BoxTab({ d }: { d: Detail }) {
         <table className="w-full text-xs num">
           <thead>
             <tr className="text-faint">
-              <th className="text-left font-semibold py-1">{t('Player')}</th>
-              <th className="text-right font-semibold px-1">{t('MIN')}</th>
-              <th className="text-right font-semibold px-1">{t('PTS')}</th>
-              <th className="text-right font-semibold px-1">{t('FG')}</th>
-              <th className="text-right font-semibold px-1">{t('3PT')}</th>
-              <th className="text-right font-semibold px-1">{t('FT')}</th>
-              <th className="text-right font-semibold px-1">{t('REB')}</th>
-              <th className="text-right font-semibold px-1">{t('AST')}</th>
-              {more && <><th className="text-right font-semibold px-1">{t('STL')}</th><th className="text-right font-semibold px-1">{t('BLK')}</th><th className="text-right font-semibold px-1">{t('TO')}</th><th className="text-right font-semibold px-1">+/−</th></>}
+              <th className="text-start font-semibold py-1">{t('Player')}</th>
+              <th className="text-end font-semibold px-1">{t('MIN')}</th>
+              <th className="text-end font-semibold px-1">{t('PTS')}</th>
+              <th className="text-end font-semibold px-1">{t('FG')}</th>
+              <th className="text-end font-semibold px-1">{t('3PT')}</th>
+              <th className="text-end font-semibold px-1">{t('FT')}</th>
+              <th className="text-end font-semibold px-1">{t('REB')}</th>
+              <th className="text-end font-semibold px-1">{t('AST')}</th>
+              {more && <><th className="text-end font-semibold px-1">{t('STL')}</th><th className="text-end font-semibold px-1">{t('BLK')}</th><th className="text-end font-semibold px-1">{t('TO')}</th><th className="text-end font-semibold px-1">+/−</th></>}
             </tr>
           </thead>
           <tbody>
             {played.map(pl => (
               <tr key={pl.id} className="border-t border-line/40 align-top">
-                <td className="py-1 font-sans text-ink whitespace-nowrap"><PlayerPhoto src={pl.photo} name={pl.name} size={18} className="mr-1.5 align-middle" /><Link to={playerHref('basketball', pl.id, pl.name)!} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ml-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
-                <td className="text-right px-1 text-muted">{pl.minutes !== null ? Math.round(pl.minutes) : '–'}</td>
-                <td className="text-right px-1 text-ink font-bold">{pl.points ?? '–'}</td>
-                <td className="text-right px-1 text-muted"><Shot m={pl.fgm} a={pl.fga} /></td>
-                <td className="text-right px-1 text-muted"><Shot m={pl.tpm} a={pl.tpa} /></td>
-                <td className="text-right px-1 text-muted"><Shot m={pl.ftm} a={pl.fta} /></td>
-                <td className="text-right px-1 text-muted">{pl.rebounds ?? '–'}</td>
-                <td className="text-right px-1 text-muted">{pl.assists ?? '–'}</td>
+                <td className="py-1 font-sans text-ink whitespace-nowrap"><PlayerPhoto src={pl.photo} name={pl.name} size={18} className="me-1.5 align-middle" /><Link to={playerHref('basketball', pl.id, pl.name)!} className="hover:text-accent">{pl.name}</Link>{pl.starter && <span className="ms-1 text-[9px] text-accent font-bold">{t('S')}</span>}</td>
+                <td className="text-end px-1 text-muted">{pl.minutes !== null ? Math.round(pl.minutes) : '–'}</td>
+                <td className="text-end px-1 text-ink font-bold">{pl.points ?? '–'}</td>
+                <td className="text-end px-1 text-muted"><Shot m={pl.fgm} a={pl.fga} /></td>
+                <td className="text-end px-1 text-muted"><Shot m={pl.tpm} a={pl.tpa} /></td>
+                <td className="text-end px-1 text-muted"><Shot m={pl.ftm} a={pl.fta} /></td>
+                <td className="text-end px-1 text-muted">{pl.rebounds ?? '–'}</td>
+                <td className="text-end px-1 text-muted">{pl.assists ?? '–'}</td>
                 {more && <>
-                  <td className="text-right px-1 text-muted">{pl.steals ?? '–'}</td>
-                  <td className="text-right px-1 text-muted">{pl.blocks ?? '–'}</td>
-                  <td className="text-right px-1 text-muted">{pl.turnovers ?? '–'}</td>
-                  <td className={`text-right px-1 ${pl.plusMinus == null ? 'text-faint' : pl.plusMinus > 0 ? 'text-win' : pl.plusMinus < 0 ? 'text-loss' : 'text-muted'}`}>{pl.plusMinus == null ? '–' : pl.plusMinus > 0 ? `+${pl.plusMinus}` : pl.plusMinus}</td>
+                  <td className="text-end px-1 text-muted">{pl.steals ?? '–'}</td>
+                  <td className="text-end px-1 text-muted">{pl.blocks ?? '–'}</td>
+                  <td className="text-end px-1 text-muted">{pl.turnovers ?? '–'}</td>
+                  <td className={`text-end px-1 ${pl.plusMinus == null ? 'text-faint' : pl.plusMinus > 0 ? 'text-win' : pl.plusMinus < 0 ? 'text-loss' : 'text-muted'}`}>{pl.plusMinus == null ? '–' : ltr(pl.plusMinus > 0 ? `+${pl.plusMinus}` : pl.plusMinus)}</td>
                 </>}
               </tr>
             ))}
@@ -548,13 +548,13 @@ function BoxTab({ d }: { d: Detail }) {
               <tr className="border-t-2 border-line align-top font-bold">
                 <td className="py-1 font-sans text-ink">{t('Team totals')}</td>
                 <td />
-                <td className="text-right px-1 text-ink">{tot.points}</td>
-                <td className="text-right px-1 text-ink"><Shot m={tot.fgm} a={tot.fga} /></td>
-                <td className="text-right px-1 text-ink"><Shot m={tot.tpm} a={tot.tpa} /></td>
-                <td className="text-right px-1 text-ink"><Shot m={tot.ftm} a={tot.fta} /></td>
-                <td className="text-right px-1 text-ink">{tot.rebounds}</td>
-                <td className="text-right px-1 text-ink">{tot.assists}</td>
-                {more && <><td className="text-right px-1 text-ink">{tot.steals}</td><td className="text-right px-1 text-ink">{tot.blocks}</td><td className="text-right px-1 text-ink">{tot.turnovers}</td><td /></>}
+                <td className="text-end px-1 text-ink">{tot.points}</td>
+                <td className="text-end px-1 text-ink"><Shot m={tot.fgm} a={tot.fga} /></td>
+                <td className="text-end px-1 text-ink"><Shot m={tot.tpm} a={tot.tpa} /></td>
+                <td className="text-end px-1 text-ink"><Shot m={tot.ftm} a={tot.fta} /></td>
+                <td className="text-end px-1 text-ink">{tot.rebounds}</td>
+                <td className="text-end px-1 text-ink">{tot.assists}</td>
+                {more && <><td className="text-end px-1 text-ink">{tot.steals}</td><td className="text-end px-1 text-ink">{tot.blocks}</td><td className="text-end px-1 text-ink">{tot.turnovers}</td><td /></>}
               </tr>
             )}
           </tbody>
@@ -571,7 +571,7 @@ function BoxTab({ d }: { d: Detail }) {
   }
   return (
     <>
-      {d.boxLive && <div className="mb-3 text-right"><LiveBoxLabel at={d.boxLive.at} /></div>}
+      {d.boxLive && <div className="mb-3 text-end"><LiveBoxLabel at={d.boxLive.at} /></div>}
       <div className="grid gap-6 lg:grid-cols-2">
         {side(g.home, d.box!.home, g.score?.home ?? null)}
         {side(g.away, d.box!.away, g.score?.away ?? null)}

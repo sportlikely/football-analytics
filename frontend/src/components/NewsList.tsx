@@ -72,7 +72,7 @@ export function NewsLead({ items, max = 7 }: { items: NewsItem[]; max?: number }
           <span className="relative block aspect-[16/9] bg-surface2 overflow-hidden">
             <img src={lead.image || ''} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
             <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-            <span className="absolute left-4 bottom-3 text-[11px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
+            <span className="absolute start-4 bottom-3 text-[11px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
           </span>
         )}
         <span className="p-5 flex flex-col gap-2 flex-1">

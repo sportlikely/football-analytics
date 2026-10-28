@@ -196,6 +196,7 @@ import {
 import { playerDataStatus, teamPlayers } from './services/playerData';
 import { MODEL_V3, modelV3Status, runBacktestV3, runBacktestV3All, backtestProgressV3, prepareModelV3, CONV, sweepV3, autoVariants, parseCompactVariants, sweepProgress, backfillV3, setRelOverride, SweepVariant, tuneLeaguesV3, leagueTuneProgress, leagueConvStatus, clearLeagueConv, tunedStatus, clearTuning, applyStoredTuning, prepareModelV3Async } from './services/gridModel';
 import { noteGameView } from './services/gameViews';
+import { publicLangs, isPublicLang, langOfPath, hiddenLangPath, menuLangs } from './utils/langs';
 
 const isDev = (process.env.NODE_ENV || 'development') !== 'production';
 
@@ -800,7 +801,9 @@ function authFail(res: express.Response, e: any) {
 function sessionPayload(user: User | null) {
   let tester: { until: string } | null = null;
   try { tester = user ? testerOf(user.id) : null; } catch { /* table not ready */ }
-  return { user, access: accessOf(user), staff: staffOf(user), perms: permsOf(user), tester, verificationRequired };
+  // fix257: the language menu (admins: every language; everyone else: PUBLIC_LANGS)
+  const access = accessOf(user);
+  return { user, access, staff: staffOf(user), perms: permsOf(user), tester, verificationRequired, langs: menuLangs(access) };
 }
 
 // Only JSON bodies on auth POSTs (with SameSite=Lax cookies this blocks cross-site form posts)
@@ -4524,7 +4527,8 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   app.use(express.static(STATIC_DIR, { index: false, maxAge: '7d', setHeaders: (res, file) => { if (file.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); } }));
   const indexHtml = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
   // fix202: the sport home pages (every language) as search engines get them: stored pages built in the worker
-  const SEO_HOMES = ['', ...['es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'].map(l => `/${l}`)].flatMap(l => ['', '/football', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
+  // fix257: public languages only (PUBLIC_LANGS) — an admin-only language (ar, he) has no crawler copy
+  const SEO_HOMES = ['', ...publicLangs().filter(l => l !== 'en').map(l => `/${l}`)].flatMap(l => ['', '/football', '/basketball', '/american-football', '/tennis'].map(s => `${l}${s}` || '/'));
   // fix221: the finished HTML is stored beside each (made by the worker): the web process only sends it
   const VIEWS_HTML = { html: (b: any) => (b ? renderIndex(indexHtml, b) : '') };
   definePage({ name: 'seo', freshMs: 10 * 60 * 1000, warm: SEO_HOMES.map(p => ({ path: p })), variants: VIEWS_HTML, build: q => seoPage(q.path) });
@@ -4565,7 +4569,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     return h;
   };
   // fix235: a tab (/football/match/<slug>/stats) is its page for search engines (one stored copy, canonical = the page)
-  const seoPathOf = (p: string) => p.replace(/^((?:\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru))?\/[a-z-]+\/(?:match|league)\/[a-z0-9-]+)\/[a-z0-9-]+\/?$/, '$1');
+  const seoPathOf = (p: string) => p.replace(/^((?:\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he))?\/[a-z-]+\/(?:match|league)\/[a-z0-9-]+)\/[a-z0-9-]+\/?$/, '$1');
   const seoHome = (p: string) => { const x = p.replace(/\/+$/, '') || '/'; return SEO_HOMES.includes(x) ? x : null; };
   // fix229: an address outside the web process's slug state — the worker reads the table (3 s at most, else the app page)
   // fix248c: a visitor waits at most 800 ms for the answer (then the app page: the app resolves the slug itself); a
@@ -4577,7 +4581,16 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     } catch { return null; }
   };
   // fix244: the Quick check on its own address (the app opens it on a 429 from the proxy rules; never counted)
-  app.get(/^(\/(de|es|fr|it|pt|tr|id|hi|pl|el|ru))?\/quick-check\/?$/, (req, res) => {
+  // fix257: a language that is not public yet (ar, he until PUBLIC_LANGS names it): 404 + noindex for everyone but
+  // admins, before any redirect or stored page (nothing about it leaks to search engines)
+  const hiddenLangHtml = indexHtml.replace('</head>', '<meta name="robots" content="noindex"></head>')
+    .replace('<div id="root"></div>', '<div id="root"><div class="sl-seo" style="max-width:960px;margin:0 auto;padding:24px 16px;font-family:system-ui,sans-serif;line-height:1.6"><h1>Page not found</h1><p><a href="/">SportLikely home</a></p></div></div>');
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/') || !hiddenLangPath(req.path, req.access)) return next();
+    res.status(404).set({ 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-store' }).type('html').send(hiddenLangHtml);
+  });
+  app.get(/^(\/(de|es|fr|it|pt|tr|id|hi|pl|el|ru|ar|he))?\/quick-check\/?$/, (req, res) => {
     res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html').send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey()));
   });
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
@@ -4597,7 +4610,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     if (la && 'search' in la) return res.redirect(302, la.search);
     // fix243: a past season's match page: admins only (410 + noindex for everyone else, every language)
     if (la && 'page' in la && la.page.past && req.access !== 'admin') {
-      const lang = /^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(\/|$)/.exec(req.path)?.[1] || 'en';
+      const lang = /^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he)(\/|$)/.exec(req.path)?.[1] || 'en';
       return res.status(410).set({ 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-store' }).type('html').send(pastPage(lang, la.page.sport));
     }
     // old hub URLs (fix134): /predictions/PL → /predictions/premier-league, permanently
@@ -4642,8 +4655,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       if (refused) return res.status(429).set({ 'Retry-After': String(refused.retryAfter), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('text/plain').send('Too many pages from this address. Please try again later.');
     }
     res.set('Cache-Control', 'no-cache');
+    // fix257: an admin on a language that is not public: the plain app page (no crawler copy, never indexed)
+    if (!isPublicLang(langOfPath(req.path))) return res.set('X-Robots-Tag', 'noindex').type('html').send(appPageOf(req.path));
     try {
-      const lang0 = (/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru)(\/|$)/.exec(req.path)?.[1] || 'en') as any;
+      const lang0 = (/^\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he)(\/|$)/.exec(req.path)?.[1] || 'en') as any;
       const bbg = !bbPublic() ? null : la && 'page' in la && la.page.sport === 'basketball' && la.page.kind === 'match' ? { id: Number(la.page.id), lang: lang0 } : bbGamePath(req.path);
       const home = seoHome(req.path);
       // fix210: stored pages only; a page never built waits at most 3 s for the worker, then the plain app page

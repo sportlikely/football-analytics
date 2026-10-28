@@ -99,7 +99,7 @@ export default function Contact() {
             <span className="text-[11px] text-faint">{message.length}/5000</span>
           </label>
           {/* honeypot: hidden from people and screen readers */}
-          <div aria-hidden="true" className="absolute -left-[9999px] w-px h-px overflow-hidden">
+          <div aria-hidden="true" className="absolute -start-[9999px] w-px h-px overflow-hidden">
             <label>Website<input tabIndex={-1} autoComplete="off" value={website} onChange={e => setWebsite(e.target.value)} /></label>
           </div>
           {error && <div className="rounded-xl border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-loss">{error}</div>}

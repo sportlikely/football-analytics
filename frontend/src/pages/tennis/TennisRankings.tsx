@@ -18,7 +18,7 @@ const Move = ({ r }: { r: Row }) => (
 )
 const Name = ({ r }: { r: Row }) => {
   // fix211: the player's photo when we have one (initials otherwise), then flag and name
-  const body = <><PlayerPhoto src={r.photo} name={r.name} size={22} className="mr-2 align-middle" />{flagOf(r.country) && <span aria-hidden className="mr-1.5">{flagOf(r.country)}</span>}{r.name}</>
+  const body = <><PlayerPhoto src={r.photo} name={r.name} size={22} className="me-2 align-middle" />{flagOf(r.country) && <span aria-hidden className="me-1.5">{flagOf(r.country)}</span>}{r.name}</>
   return r.id ? <Link to={tennisHref.player(r.id, r.name)!} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{body}</Link> : <span className="min-w-0 truncate font-semibold text-ink">{body}</span>
 }
 
@@ -47,7 +47,7 @@ export default function TennisRankings() {
         <li key={r.rank} className="flex items-center gap-2 py-1.5 text-sm min-w-0">
           <span className="w-8 num text-faint shrink-0">{r.rank}</span>
           <Name r={r} />
-          <span className="ml-auto shrink-0"><Move r={r} /></span>
+          <span className="ms-auto shrink-0"><Move r={r} /></span>
         </li>
       ))}
     </ul>
@@ -69,11 +69,11 @@ export default function TennisRankings() {
           {d === undefined ? <Skeleton rows={12} h="h-7" /> : !rows.length ? <p className="text-sm text-faint">{t('The rankings appear after the next update.')}</p> : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[11px] text-faint text-left">
+                <tr className="text-[11px] text-faint text-start">
                   <th className="py-1.5 w-10 font-semibold">#</th>
                   <th className="py-1.5 w-12 font-semibold">{t('Move')}</th>
                   <th className="py-1.5 font-semibold">{t('Player')}</th>
-                  <th className="py-1.5 text-right font-semibold">{t('Points')}</th>
+                  <th className="py-1.5 text-end font-semibold">{t('Points')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/50">
@@ -82,7 +82,7 @@ export default function TennisRankings() {
                     <td className="py-1.5 num text-muted">{r.rank}</td>
                     <td className="py-1.5"><Move r={r} /></td>
                     <td className="py-1.5 max-w-0 w-full"><div className="flex min-w-0"><Name r={r} /></div></td>
-                    <td className="py-1.5 pl-2 text-right num text-ink">{r.points !== null ? r.points.toLocaleString(LOCALE) : '–'}</td>
+                    <td className="py-1.5 ps-2 text-end num text-ink">{r.points !== null ? r.points.toLocaleString(LOCALE) : '–'}</td>
                   </tr>
                 ))}
               </tbody>

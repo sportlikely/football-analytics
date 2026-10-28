@@ -1,11 +1,13 @@
 /**
  * fix244: the Quick check — what a browser on a VPN / proxy network sees when the proxy rules (services/proxyGuard.ts)
- * would refuse it: a small SportLikely page (no app, so no API calls), 7 languages, with Cloudflare Turnstile. Passing it
+ * would refuse it: a small SportLikely page (no app, so no API calls), 9 languages (ar / he right to left), with Cloudflare Turnstile. Passing it
  * (POST /api/auth/quick-check) sets the signed sl_pass cookie, then the page reloads (or, at /quick-check, goes back to
  * the page the app was on). Without Turnstile keys: the plain "try again later, or sign in" line. Pure: no imports.
  */
 
-export const QC_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'] as const;
+export const QC_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru', 'ar', 'he'] as const;
+/** Written right to left (= utils/langs.ts RTL_LANGS; this file stays import-free). */
+const QC_RTL: readonly QcLang[] = ['ar', 'he'];
 export type QcLang = (typeof QC_LANGS)[number];
 
 type Words = { title: string; vpn: string; why: string; checking: string; done: string; failed: string; signin: string; signinWhy: string; later: string; footer: string };
@@ -105,12 +107,29 @@ export const QC_WORDS: Record<QcLang, Words> = {
     checking: 'Проверяем…', done: 'Готово. Открываем страницу…', failed: 'Не получилось. Попробуйте ещё раз.',
     signin: 'Войти', signinWhy: 'Если вы вошли с подтверждённым email, мы никогда не спрашиваем.',
     later: 'Из этой сети открыто слишком много страниц. Попробуйте позже или войдите.',
-    footer: 'Спортивные прогнозы · вероятности, а не обещания · 18+'
+    footer: 'Спортивные прогнозы · вероятности, а не обещания · 18+',
+  },
+  ar: {
+    title: 'تحقق سريع', vpn: 'أنت متصل عبر شبكة VPN أو بروكسي.',
+    why: 'تُفتح صفحات كثيرة من هذه الشبكة، لذلك نتحقق من أنك شخص حقيقي. الأمر يستغرق ثانية.',
+    checking: 'جارٍ التحقق…', done: 'تم. جارٍ فتح الصفحة…', failed: 'لم ينجح ذلك. حاول مرة أخرى.',
+    signin: 'تسجيل الدخول', signinWhy: 'عند تسجيل الدخول ببريد إلكتروني مؤكد، لن يُطلب منك ذلك أبدًا.',
+    later: 'فُتحت صفحات كثيرة جدًا من هذه الشبكة. حاول لاحقًا، أو سجّل الدخول.',
+    footer: 'توقعات رياضية · احتمالات، لا وعود · 18+'
+  },
+  he: {
+    title: 'בדיקה מהירה', vpn: 'נראה שאתם מחוברים דרך VPN או פרוקסי.',
+    why: 'מהרשת הזו נפתחים הרבה עמודים, אז אנחנו בודקים שמדובר באדם. זה לוקח שנייה.',
+    checking: 'בודקים…', done: 'זהו. פותחים את העמוד…', failed: 'זה לא הצליח. נסו שוב.',
+    signin: 'התחברות', signinWhy: 'מי שמחובר עם אימייל מאומת לא נשאל אף פעם.',
+    later: 'נפתחו יותר מדי עמודים מהרשת הזו. נסו שוב מאוחר יותר, או התחברו.',
+    footer: 'תחזיות ספורט · הסתברויות, לא הבטחות · 18+'
   }
 };
 
 /** The language of an address (/es/…), else English. */
-export const qcLangOf = (path: string): QcLang => ((/^\/(de|es|fr|it|pt|tr|id|hi|pl|el|ru)(\/|$)/.exec(path)?.[1] as QcLang) || 'en');
+const QC_PREFIX = new RegExp(`^\\/(${QC_LANGS.filter(l => l !== 'en').join('|')})(\\/|$)`);
+export const qcLangOf = (path: string): QcLang => ((QC_PREFIX.exec(path)?.[1] as QcLang) || 'en');
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const js = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
@@ -148,7 +167,7 @@ export function quickCheckPage(lang: QcLang, siteKey: string | null): string {
 })();
 </script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=slQc&amp;render=explicit" async defer></script>` : '';
   return `<!doctype html>
-<html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="${lang}"${QC_RTL.includes(lang) ? ' dir="rtl"' : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>${esc(w.title)} · SportLikely</title><link rel="icon" href="/favicon.svg">
 <style>
 :root{--bg:#f4f5f7;--card:#fff;--ink:#11151d;--muted:#5b6475;--line:#e3e6ec;--accent:#4d7c0f;--on:#fff}

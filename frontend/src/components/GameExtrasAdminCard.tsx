@@ -44,20 +44,20 @@ export default function GameExtrasAdminCard() {
       {!c ? <p className="text-sm text-faint">Not built yet (every 3 h; first run ~6 min after the start).</p> : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm num">
-            <thead><tr className="text-[11px] text-faint text-left">
-              <th className="py-1 pr-3 font-normal">Sport</th><th className="pr-3 font-normal">Games 72 h (48 h)</th><th className="pr-3 font-normal">Weather 48 h</th><th className="pr-3 font-normal">Weather 72 h</th>
-              <th className="pr-3 font-normal">Indoor</th><th className="pr-3 font-normal">Referee (with stats)</th><th className="pr-3 font-normal">Trends</th><th className="font-normal">Next games</th>
+            <thead><tr className="text-[11px] text-faint text-start">
+              <th className="py-1 pe-3 font-normal">Sport</th><th className="pe-3 font-normal">Games 72 h (48 h)</th><th className="pe-3 font-normal">Weather 48 h</th><th className="pe-3 font-normal">Weather 72 h</th>
+              <th className="pe-3 font-normal">Indoor</th><th className="pe-3 font-normal">Referee (with stats)</th><th className="pe-3 font-normal">Trends</th><th className="font-normal">Next games</th>
             </tr></thead>
             <tbody>
               {Object.entries(c.sports).map(([s, x]) => (
                 <tr key={s} className="border-t border-line">
-                  <td className="py-1.5 pr-3 font-semibold text-ink">{s}</td>
-                  <td className="pr-3">{x.games} ({x.games48})</td>
-                  <td className={`pr-3 ${x.weather48Should && x.weather48Have / x.weather48Should < 0.8 ? 'text-loss' : ''}`}>{share(x.weather48Have, x.weather48Should)}</td>
-                  <td className="pr-3">{share(x.weatherHave, x.weatherShould)}</td>
-                  <td className="pr-3">{x.indoor}</td>
-                  <td className="pr-3">{s === 'football' ? `${x.refereeNamed} (${x.refereeStats})` : 'n/a'}</td>
-                  <td className="pr-3">{share(x.trends, x.games)}</td>
+                  <td className="py-1.5 pe-3 font-semibold text-ink">{s}</td>
+                  <td className="pe-3">{x.games} ({x.games48})</td>
+                  <td className={`pe-3 ${x.weather48Should && x.weather48Have / x.weather48Should < 0.8 ? 'text-loss' : ''}`}>{share(x.weather48Have, x.weather48Should)}</td>
+                  <td className="pe-3">{share(x.weatherHave, x.weatherShould)}</td>
+                  <td className="pe-3">{x.indoor}</td>
+                  <td className="pe-3">{s === 'football' ? `${x.refereeNamed} (${x.refereeStats})` : 'n/a'}</td>
+                  <td className="pe-3">{share(x.trends, x.games)}</td>
                   <td>{share(x.difficulty, x.games)}</td>
                 </tr>
               ))}

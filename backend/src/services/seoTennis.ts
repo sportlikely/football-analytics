@@ -9,10 +9,11 @@ import { slModel } from '../utils/modelNames';
 import { moreSentence } from './morePredictions';
 import { tennisPublic, tennisMatchesBetween, tennisMatch, tennisPlayer, tennisTournament, tennisRankings, tennisWriteup, tierLabel, levelRank, type TMatch } from './tennisSite';
 import type { Lang } from './seoText';
+import { LANG_LOCALE } from '../utils/langs';
 
 const BRAND = 'SportLikely';
 const SITE = 'https://sportlikely.com';
-const LOC: Record<Lang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-PT', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
+const LOC: Record<Lang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-PT', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU', ar: LANG_LOCALE.ar, he: LANG_LOCALE.he };
 const link = (lang: Lang, p: string) => (lang === 'en' ? p : `/${lang}${p === '/' ? '' : p}`);
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const fill = (s: string, ...a: (string | number)[]) => s.replace(/\{(\d)\}/g, (_, i) => String(a[Number(i)] ?? ''));
@@ -161,7 +162,29 @@ const W: Record<Lang, Words> = {
     matchTitle: '{0} – {1}: прогноз · {2}', matchDesc: '{0} – {1}, {2}, {3}: рейтинг, последняя форма, цифры подачи и приёма и личные встречи. Бесплатный обзор и наш выбор.', matchH1: '{0} – {1}: прогноз',
     playerTitle: '{0}: рейтинг, результаты и следующий матч', playerDesc: '{0}{1}: последние результаты, форма, цифры подачи и приёма, титулы и следующий матч с нашим прогнозом.',
     tourTitle: '{0} {1}: сетка, результаты и прогнозы', tourDesc: '{0} {1}: сетка, результаты, прошлые чемпионы и наш прогноз на каждый матч турнира.',
-    next: 'Следующие матчи', results: 'Результаты', meetings: 'Последние встречи', form: 'Последняя форма', champions: 'Прошлые чемпионы', draw: 'Сетка', preview: 'Обзор матча', noMatches: 'Матчей не запланировано.', rank: 'Место', points: 'Очки', tournaments: 'Турниры', firstMeeting: 'Первая встреча в наших данных.'
+    next: 'Следующие матчи', results: 'Результаты', meetings: 'Последние встречи', form: 'Последняя форма', champions: 'Прошлые чемпионы', draw: 'Сетка', preview: 'Обзор матча', noMatches: 'Матчей не запланировано.', rank: 'Место', points: 'Очки', tournaments: 'Турниры', firstMeeting: 'Первая встреча в наших данных.',
+  },
+  ar: {
+    soonTitle: 'توقعات التنس · قريبًا', soonDesc: 'توقعات التنس لكل مباريات ATP وWTA وChallenger قادمة قريبًا إلى SportLikely.',
+    homeTitle: 'توقعات التنس: ATP وWTA وChallenger', homeDesc: 'توقعات التنس لكل مباريات ATP وWTA وChallenger: فرصة كل لاعب، والنتيجة المرجحة بالمجموعات، ومجموع الأشواط، محفوظة قبل أول إرسال.',
+    homeH1: 'توقعات التنس', homeIntro: 'من يفوز في كل مباراة ATP وWTA وChallenger، مع فرصة كل لاعب والنتيجة الأرجح بالمجموعات وأسباب كل اختيار. كل توقع يُحفظ قبل أول إرسال ويُراجع علنًا.',
+    todayTitle: 'توقعات التنس اليوم', todayDesc: 'مباريات ATP وWTA وChallenger اليوم حسب البطولة، مع تصنيف اللاعبين ومستواهم الأخير وآخر مواجهة بينهم. يتم التحديث كل يوم.', todayH1: 'توقعات التنس اليوم',
+    rankTitle: 'تصنيف ATP وWTA', rankDesc: 'تصنيف ATP وWTA للفردي: أفضل اللاعبين مع نقاطهم ومدى تقدمهم أو تراجعهم منذ آخر تحديث، مع روابط لكل لاعب.', rankH1: 'تصنيف ATP وWTA',
+    matchTitle: 'توقع {0} ضد {1} · {2}', matchDesc: '{0} ضد {1}، {2}، {3}: التصنيف والمستوى الأخير وأرقام الإرسال والاستقبال والمواجهات المباشرة. معاينة مجانية واختيارنا.', matchH1: 'توقع {0} ضد {1}',
+    playerTitle: '{0}: التصنيف والنتائج والمباراة القادمة', playerDesc: '{0}{1}: آخر النتائج والمستوى وأرقام الإرسال والاستقبال والألقاب والمباراة القادمة، مع توقعنا لها.',
+    tourTitle: '{0} {1}: القرعة والنتائج والتوقعات', tourDesc: '{0} {1}: القرعة والنتائج والأبطال السابقون وتوقعنا لكل مباراة في البطولة.',
+    next: 'المباريات القادمة', results: 'النتائج', meetings: 'آخر المواجهات', form: 'المستوى الأخير', champions: 'الأبطال السابقون', draw: 'القرعة', preview: 'معاينة المباراة', noMatches: 'لا توجد مباريات مجدولة.', rank: 'التصنيف', points: 'النقاط', tournaments: 'البطولات', firstMeeting: 'أول مواجهة في بياناتنا.'
+  },
+  he: {
+    soonTitle: 'תחזיות טניס · בקרוב', soonDesc: 'תחזיות טניס לכל משחקי ATP, WTA ו-Challenger מגיעות בקרוב ל-SportLikely.',
+    homeTitle: 'תחזיות טניס: ATP, WTA ו-Challenger', homeDesc: 'תחזיות טניס לכל משחקי ATP, WTA ו-Challenger: הסיכוי של כל שחקן, התוצאה הצפויה במערכות וסך הגיימים, נשמרות לפני ההגשה הראשונה.',
+    homeH1: 'תחזיות טניס', homeIntro: 'מי ינצח בכל משחק ATP, WTA ו-Challenger, עם הסיכוי של כל שחקן, התוצאה הסבירה ביותר במערכות והסיבות מאחורי כל בחירה. כל תחזית נשמרת לפני ההגשה הראשונה ונבדקת בגלוי.',
+    todayTitle: 'תחזיות טניס להיום', todayDesc: 'משחקי ATP, WTA ו-Challenger של היום לפי טורניר, עם הדירוג של השחקנים, הכושר האחרון שלהם והמפגש האחרון ביניהם. מתעדכן כל יום.', todayH1: 'תחזיות טניס להיום',
+    rankTitle: 'דירוג ATP ו-WTA', rankDesc: 'דירוג היחידים של ATP ו-WTA: השחקנים המובילים, הנקודות שלהם וכמה עלו או ירדו מאז העדכון האחרון, עם קישור לכל שחקן.', rankH1: 'דירוג ATP ו-WTA',
+    matchTitle: 'תחזית {0} נגד {1} · {2}', matchDesc: '{0} נגד {1}, {2}, {3}: דירוג, כושר אחרון, נתוני הגשה והחזרה וראש בראש. סקירה חינם והבחירה שלנו.', matchH1: 'תחזית {0} נגד {1}',
+    playerTitle: '{0}: דירוג, תוצאות והמשחק הבא', playerDesc: '{0}{1}: תוצאות אחרונות, כושר, נתוני הגשה והחזרה, תארים והמשחק הבא, עם התחזית שלנו אליו.',
+    tourTitle: '{0} {1}: הגרלה, תוצאות ותחזיות', tourDesc: '{0} {1}: ההגרלה, התוצאות, האלופים הקודמים והתחזית שלנו לכל משחק בטורניר.',
+    next: 'המשחקים הבאים', results: 'תוצאות', meetings: 'מפגשים אחרונים', form: 'כושר אחרון', champions: 'אלופים קודמים', draw: 'הגרלה', preview: 'סקירה לפני המשחק', noMatches: 'אין משחקים מתוכננים.', rank: 'דירוג', points: 'נקודות', tournaments: 'טורנירים', firstMeeting: 'מפגש ראשון בנתונים שלנו.'
   }
 };
 

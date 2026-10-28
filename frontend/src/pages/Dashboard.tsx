@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import RecentResults from '../components/RecentResults'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
-import { t as tt } from '../lib/i18n'
+import { t as tt, ltr } from '../lib/i18n'
 import Games from '../components/sport/Games'
 import { footballGames } from '../components/sport/games/football'
 
@@ -90,29 +90,28 @@ export function LeaguePanel({ code }: { code: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-faint">
-                  <th className="text-left font-medium py-1 pl-1 w-6">#</th>
-                  <th className="text-left font-medium py-1">{tt("Team")}</th>
-                  <th className="text-right font-medium py-1 num">P</th>
-                  <th className="text-right font-medium py-1 num">{tt("GD")}</th>
-                  <th className="text-right font-medium py-1 pr-1 num">{tt("Pts")}</th>
+                  <th className="text-start font-medium py-1 ps-1 w-6">#</th>
+                  <th className="text-start font-medium py-1">{tt("Team")}</th>
+                  <th className="text-end font-medium py-1 num">P</th>
+                  <th className="text-end font-medium py-1 num">{tt("GD")}</th>
+                  <th className="text-end font-medium py-1 pe-1 num">{tt("Pts")}</th>
                 </tr>
               </thead>
               <tbody>
                 {t.table.map(r => (
                   <tr key={r.team.id} className="border-t border-line/50">
-                    <td className="py-1.5 pl-1 num text-faint">{r.position}</td>
+                    <td className="py-1.5 ps-1 num text-faint">{r.position}</td>
                     <td className="py-1.5">
                       <span className="flex items-center gap-2 min-w-0">
                         <Crest team={r.team} size={16} />
                         <span className="truncate text-ink">{r.team.shortName || r.team.name}</span>
                       </span>
                     </td>
-                    <td className="py-1.5 text-right num text-muted">{r.playedGames}</td>
-                    <td className={`py-1.5 text-right num ${r.goalDifference > 0 ? 'text-win' : r.goalDifference < 0 ? 'text-loss' : 'text-muted'}`}>
-                      {r.goalDifference > 0 ? '+' : ''}
-                      {r.goalDifference}
+                    <td className="py-1.5 text-end num text-muted">{r.playedGames}</td>
+                    <td className={`py-1.5 text-end num ${r.goalDifference > 0 ? 'text-win' : r.goalDifference < 0 ? 'text-loss' : 'text-muted'}`}>
+                      {ltr(`${r.goalDifference > 0 ? '+' : ''}${r.goalDifference}`)}
                     </td>
-                    <td className="py-1.5 pr-1 text-right num font-bold text-ink">{r.points}</td>
+                    <td className="py-1.5 pe-1 text-end num font-bold text-ink">{r.points}</td>
                   </tr>
                 ))}
               </tbody>
@@ -131,16 +130,16 @@ export function LeaguePanel({ code }: { code: string }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="text-faint">
-                <th className="text-left font-medium py-1 pl-1 w-6">#</th>
-                <th className="text-left font-medium py-1">{tt("Player")}</th>
-                <th className="text-right font-medium py-1 num">{tab === 'scorers' ? 'G' : 'A'}</th>
-                <th className="text-right font-medium py-1 pr-1 num">{tab === 'scorers' ? 'A' : 'G'}</th>
+                <th className="text-start font-medium py-1 ps-1 w-6">#</th>
+                <th className="text-start font-medium py-1">{tt("Player")}</th>
+                <th className="text-end font-medium py-1 num">{tab === 'scorers' ? 'G' : 'A'}</th>
+                <th className="text-end font-medium py-1 pe-1 num">{tab === 'scorers' ? 'A' : 'G'}</th>
               </tr>
             </thead>
             <tbody>
               {(tab === 'scorers' ? topScorers : topAssists).map((sc, i) => (
                 <tr key={sc.player.id} className="border-t border-line/50">
-                  <td className="py-1.5 pl-1 num text-faint">{i + 1}</td>
+                  <td className="py-1.5 ps-1 num text-faint">{i + 1}</td>
                   <td className="py-1.5">
                     <span className="flex items-center gap-2 min-w-0">
                       <Crest team={sc.team} size={16} />
@@ -150,8 +149,8 @@ export function LeaguePanel({ code }: { code: string }) {
                       </span>
                     </span>
                   </td>
-                  <td className="py-1.5 text-right num font-bold text-ink">{tab === 'scorers' ? sc.goals ?? 0 : sc.assists ?? 0}</td>
-                  <td className="py-1.5 pr-1 text-right num text-muted">{tab === 'scorers' ? sc.assists ?? 0 : sc.goals ?? 0}</td>
+                  <td className="py-1.5 text-end num font-bold text-ink">{tab === 'scorers' ? sc.goals ?? 0 : sc.assists ?? 0}</td>
+                  <td className="py-1.5 pe-1 text-end num text-muted">{tab === 'scorers' ? sc.assists ?? 0 : sc.goals ?? 0}</td>
                 </tr>
               ))}
               {(tab === 'scorers' ? topScorers : topAssists).length === 0 && (

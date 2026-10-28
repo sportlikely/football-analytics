@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { t as tt, LOCALE } from '../../lib/i18n'
+import { t as tt, LOCALE, isRtl } from '../../lib/i18n'
 import { isCovered, revealMatch, justRevealed } from '../../lib/reveal'
 import CountUp from '../CountUp'
 import { RevealChip } from '../Reveal'
@@ -116,7 +116,7 @@ export function FirstVisit({ a, stats }: { a: SportAdapter['intro']; stats?: { v
 /** The playing surface in perspective under the hero: football pitch, basketball court or American-football field. */
 function Field({ kind }: { kind: SportAdapter['field'] }) {
   return (
-    <svg aria-hidden viewBox="0 0 1000 400" preserveAspectRatio="none" className="absolute -z-10 left-[-10%] w-[120%] bottom-0 h-[55%] opacity-30" style={{ transform: 'perspective(600px) rotateX(55deg)', transformOrigin: 'bottom' }}>
+    <svg aria-hidden viewBox="0 0 1000 400" preserveAspectRatio="none" className="absolute -z-10 start-[-10%] w-[120%] bottom-0 h-[55%] opacity-30" style={{ transform: 'perspective(600px) rotateX(55deg)', transformOrigin: 'bottom' }}>
       <g fill="none" stroke="#C8FF3D" strokeWidth="2">
         {kind === 'pitch' ? (
           <>
@@ -209,8 +209,8 @@ export function FeaturedHero({ g, a, label }: { g: HGame | null; a: SportAdapter
   const p = g.pred
   return (
     <div className="relative overflow-hidden rounded-[32px] border border-white/10 min-h-[420px] sm:min-h-[480px] bg-[#0A0E15] text-[#EEF1F6] isolate">
-      {g.home.logo && <img src={g.home.logo} alt="" aria-hidden className="absolute -z-10 -left-24 top-1/2 -translate-y-1/2 w-[560px] h-[560px] object-contain blur-[80px] opacity-50 saturate-150" />}
-      {g.away.logo && <img src={g.away.logo} alt="" aria-hidden className="absolute -z-10 -right-24 top-1/2 -translate-y-1/2 w-[560px] h-[560px] object-contain blur-[80px] opacity-50 saturate-150" />}
+      {g.home.logo && <img src={g.home.logo} alt="" aria-hidden className="absolute -z-10 -start-24 top-1/2 -translate-y-1/2 w-[560px] h-[560px] object-contain blur-[80px] opacity-50 saturate-150" />}
+      {g.away.logo && <img src={g.away.logo} alt="" aria-hidden className="absolute -z-10 -end-24 top-1/2 -translate-y-1/2 w-[560px] h-[560px] object-contain blur-[80px] opacity-50 saturate-150" />}
       <div aria-hidden className="absolute inset-0 -z-10 bg-[radial-gradient(600px_260px_at_50%_-60px,rgba(255,255,255,0.16),transparent_70%),linear-gradient(to_bottom,rgba(7,9,13,0.1),rgba(7,9,13,0.75))]" />
       <Field kind={a.field} />
 
@@ -239,7 +239,7 @@ export function FeaturedHero({ g, a, label }: { g: HGame | null; a: SportAdapter
 
         <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-6">
           <div className="flex-1 space-y-2">
-            <div className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9AA3B2] text-center sm:text-left">{a.labels.modelPrediction}</div>
+            <div className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9AA3B2] text-center sm:text-start">{a.labels.modelPrediction}</div>
             {p.kind === 'full' && covered(g) ? (
               <RevealChip dark onReveal={() => revealMatch(g.reveal!.id)} />
             ) : p.kind === 'full' ? (
@@ -284,14 +284,16 @@ export function FeaturedCarousel({ games, a }: { games: HGame[]; a: SportAdapter
     if (!el) return
     const n = (i + games.length) % games.length
     const slide = el.children[n] as HTMLElement | undefined
-    if (slide) el.scrollTo({ left: slide.offsetLeft, behavior: 'smooth' })
+    // fix257: right to left, scrollLeft runs from 0 down to negative, counted from the first card
+    if (slide) el.scrollTo({ left: isRtl ? slide.offsetLeft - (el.children[0] as HTMLElement).offsetLeft : slide.offsetLeft, behavior: 'smooth' })
   }, [games.length])
   const onScroll = () => {
     const el = track.current
     if (!el) return
     const kids = [...el.children] as HTMLElement[]
     let best = 0, dist = Infinity
-    kids.forEach((k, i) => { const d = Math.abs(k.offsetLeft - el.scrollLeft); if (d < dist) { dist = d; best = i } })
+    const at0 = isRtl && kids[0] ? kids[0].offsetLeft + el.scrollLeft : el.scrollLeft
+    kids.forEach((k, i) => { const d = Math.abs(k.offsetLeft - at0); if (d < dist) { dist = d; best = i } })
     setAt(best)
   }
   useEffect(() => {
@@ -303,8 +305,8 @@ export function FeaturedCarousel({ games, a }: { games: HGame[]; a: SportAdapter
   const hold = () => setHeld(true)
   const arrow = (dir: -1 | 1) => (
     <button type="button" onClick={() => { hold(); go(at + dir) }} aria-label={dir < 0 ? tt('Previous match') : tt('Next match')}
-      className={`hidden sm:grid absolute top-1/2 -translate-y-1/2 ${dir < 0 ? 'left-3' : 'right-3'} z-10 w-10 h-10 place-items-center rounded-full bg-black/40 border border-white/15 text-white backdrop-blur-md hover:bg-black/60 transition-colors`}>
-      <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{dir < 0 ? <path d="M15 5l-7 7 7 7" /> : <path d="M9 5l7 7-7 7" />}</svg>
+      className={`hidden sm:grid absolute top-1/2 -translate-y-1/2 ${dir < 0 ? 'start-3' : 'end-3'} z-10 w-10 h-10 place-items-center rounded-full bg-black/40 border border-white/15 text-white backdrop-blur-md hover:bg-black/60 transition-colors`}>
+      <svg viewBox="0 0 24 24" className="w-5 h-5 rtl-flip" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{dir < 0 ? <path d="M15 5l-7 7 7 7" /> : <path d="M9 5l7 7-7 7" />}</svg>
     </button>
   )
   return (
@@ -379,7 +381,7 @@ export function SideCard({ d, a }: { d: { live: HGame[]; soonest: HGame[] }; a: 
                 <span className="block text-sm font-bold truncate">{g.home.short} – {g.away.short}</span>
                 <span className="block text-[11px] text-faint truncate">{g.competition.name}</span>
               </span>
-              <span className="text-right flex-shrink-0">
+              <span className="text-end flex-shrink-0">
                 <span className="block text-xs font-bold text-ink">{new Date(g.kickoff).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}</span>
                 <span className="block text-[11px] text-faint">{new Date(g.kickoff).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
               </span>
@@ -485,7 +487,7 @@ export function RecordCard({ r }: { r: HRecord }) {
             <div key={x.key} className="space-y-1.5">
               <div className="flex justify-between items-start gap-3">
                 <span className={`font-bold ${i === 0 ? 'text-ink' : 'text-muted text-sm'}`}>{x.label}</span>
-                <span className="text-right leading-none flex-shrink-0">
+                <span className="text-end leading-none flex-shrink-0">
                   <span className={`block font-display num ${i === 0 ? 'text-2xl text-accent' : 'text-base text-ink'}`}>{x.pct}%</span>
                   <span className="block text-[10px] text-faint mt-1">{tt("{0} games", { 0: x.n })}</span>
                 </span>
@@ -560,7 +562,7 @@ export function ResultsCard({ r }: { r: HResults }) {
       ) : rows.length === 0 ? (
         <p className="px-1 text-xs text-faint">{tt("No finished games in the last {0} days.", { 0: r.days })}</p>
       ) : (
-        <ul className="space-y-1 max-h-[340px] overflow-y-auto overscroll-contain pr-1">
+        <ul className="space-y-1 max-h-[340px] overflow-y-auto overscroll-contain pe-1">
           {rows.map(x => <ResultItem key={x.id} x={x} side={side} />)}
         </ul>
       )}
@@ -619,7 +621,7 @@ export function NewsBlock({ news, full, loading }: { news: HNews[]; full: boolea
                     <span className="relative block aspect-[16/9] bg-surface2 overflow-hidden">
                       <img src={lead.image || ''} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
                       <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                      <span className="absolute left-4 bottom-3 text-[11px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
+                      <span className="absolute start-4 bottom-3 text-[11px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
                     </span>
                   )}
                   <span className="p-5 flex flex-col gap-2 flex-1">
@@ -669,7 +671,7 @@ export function NewsRail({ news, loading }: { news: HNews[]; loading: string }) 
               <span className="relative block aspect-[16/9] bg-surface2 overflow-hidden">
                 <img src={lead.image || ''} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }} />
                 <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                <span className="absolute left-3 bottom-2 text-[10px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
+                <span className="absolute start-3 bottom-2 text-[10px] font-extrabold uppercase tracking-wide text-[#C8FF3D]">{lead.source}</span>
               </span>
             )}
             <span className="p-3 flex flex-col gap-1.5 flex-1 min-w-0">

@@ -39,7 +39,7 @@ function PickCard({ p, n }: { p: Pick; n: number }) {
   const max = 50
   return (
     <Link to={matchHref('football', p.matchId, { home: p.home, away: p.away, date: p.date })!} className="card card-hover relative overflow-hidden p-5 sm:p-6 flex flex-col gap-5 border-draw/40">
-      <div className="pointer-events-none absolute -top-24 -right-24 w-64 h-64 rounded-full bg-draw/15 blur-3xl" />
+      <div className="pointer-events-none absolute -top-24 -end-24 w-64 h-64 rounded-full bg-draw/15 blur-3xl" />
       <div className="relative flex items-center justify-between gap-3 text-xs">
         <span className="inline-flex items-center gap-2 min-w-0">
           <span className="px-2 py-0.5 rounded-full bg-draw/20 text-draw font-extrabold uppercase tracking-wider text-[10px] whitespace-nowrap">{tt("Draw pick")}{' '}{n}</span>
@@ -69,7 +69,7 @@ function PickCard({ p, n }: { p: Pick; n: number }) {
           <div className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden">
             <div className="h-full bg-draw rounded-full" style={{ width: `${Math.min(100, (p.ourDraw / max) * 100)}%` }} />
           </div>
-          <span className="num w-12 text-right font-bold text-ink">{Math.round(p.ourDraw)}%</span>
+          <span className="num w-12 text-end font-bold text-ink">{Math.round(p.ourDraw)}%</span>
         </div>
         <p className="text-[11px] text-faint">{tt("A typical game ends level about 1 time in 4. This one is among the most likely draws of the week.")}</p>
       </div>
@@ -144,7 +144,7 @@ export default function DrawAlerts() {
                     </span>
                     <span className="block text-[11px] text-faint truncate">{m.league}</span>
                   </span>
-                  <span className="w-14 text-right font-display font-extrabold text-draw num">{Math.round(m.draw)}%</span>
+                  <span className="w-14 text-end font-display font-extrabold text-draw num">{Math.round(m.draw)}%</span>
                 </Link>
               </li>
             ))}
@@ -167,8 +167,8 @@ export default function DrawAlerts() {
                     <span className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden">
                       <span className="block h-full rounded-full bg-draw" style={{ width: `${Math.min(100, ((l.now ?? 0) / 40) * 100)}%` }} />
                     </span>
-                    <span className="w-11 text-right num font-bold text-ink">{l.now !== null ? `${Math.round(l.now)}%` : '–'}</span>
-                    <span className="w-9 text-right num text-[11px] text-faint">{l.last !== null ? `${Math.round(l.last)}%` : ''}</span>
+                    <span className="w-11 text-end num font-bold text-ink">{l.now !== null ? `${Math.round(l.now)}%` : '–'}</span>
+                    <span className="w-9 text-end num text-[11px] text-faint">{l.last !== null ? `${Math.round(l.last)}%` : ''}</span>
                   </li>
                 ))}
               </ul>
@@ -190,7 +190,7 @@ export default function DrawAlerts() {
                       <span className="block truncate text-[11px] text-faint">{t.league}</span>
                     </span>
                     <span className="text-[11px] text-muted num whitespace-nowrap">{tt("{0} of {1}", { 0: t.d, 1: t.n })}</span>
-                    <span className="w-11 text-right num font-bold text-draw">{Math.round(t.rate)}%</span>
+                    <span className="w-11 text-end num font-bold text-draw">{Math.round(t.rate)}%</span>
                   </li>
                 ))}
               </ul>

@@ -5,7 +5,7 @@ import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
 import { refreshUnlocks, useUnlocks, resetDay, money, type Pack } from '../lib/unlocks'
 import PickPacks from '../components/PickPacks'
-import { t } from '../lib/i18n'
+import { t, ltr } from '../lib/i18n'
 import { useSectionPath } from '../lib/tabPath'
 
 /**
@@ -142,7 +142,7 @@ export default function Premium() {
           {([['month', t("Monthly")], ['6 months', t("6 months")], ['year', t("Yearly")]] as [Period, string][]).map(([k, label]) => (
             <button key={k} type="button" role="tab" aria-selected={period === k} onClick={() => setPeriod(k)}
               className={`px-3.5 sm:px-4 py-2 rounded-full text-sm font-semibold ${period === k ? 'bg-accent text-bg' : 'text-muted hover:text-ink'}`}>
-              {label}{k !== 'month' && <span className={`ml-1.5 text-[10px] font-extrabold ${period === k ? 'text-bg' : 'text-win'}`}>{k === 'year' ? '−20%' : '−10%'}</span>}
+              {label}{k !== 'month' && <span className={`ms-1.5 text-[10px] font-extrabold ${period === k ? 'text-bg' : 'text-win'}`}>{ltr(k === 'year' ? '−20%' : '−10%')}</span>}
             </button>
           ))}
         </div>
@@ -155,8 +155,8 @@ export default function Premium() {
           const per = period === 'month' ? t("/ month") : period === 'year' ? t("/ year") : t("/ 6 months")
           return (
             <div key={kind} className={`card p-6 flex flex-col relative overflow-hidden ${pro ? 'border-accent/60 shadow-lift order-first md:order-none' : ''}`}>
-              {pro && <div className="pointer-events-none absolute -top-24 -right-24 w-64 h-64 rounded-full bg-accent/20 blur-3xl" />}
-              {pro && <span className="absolute top-4 right-4 text-[10px] font-extrabold uppercase tracking-wider text-bg bg-accent px-2.5 py-1 rounded-full">{t("Most popular")}</span>}
+              {pro && <div className="pointer-events-none absolute -top-24 -end-24 w-64 h-64 rounded-full bg-accent/20 blur-3xl" />}
+              {pro && <span className="absolute top-4 end-4 text-[10px] font-extrabold uppercase tracking-wider text-bg bg-accent px-2.5 py-1 rounded-full">{t("Most popular")}</span>}
               <div className="relative flex flex-col flex-1">
                 <div className={`label ${pro ? 'text-accent' : ''}`}>{pro ? t("Pro") : t("Premium")}</div>
                 <div className="mt-1 flex items-baseline gap-1">

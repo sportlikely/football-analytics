@@ -224,8 +224,8 @@ function Accuracy() {
               <table className="w-full text-sm">
                 <thead className="label">
                   <tr>
-                    <th className="text-left font-medium py-1">{tt("Date")}</th>
-                    <th className="text-left font-medium">{tt("Match")}</th>
+                    <th className="text-start font-medium py-1">{tt("Date")}</th>
+                    <th className="text-start font-medium">{tt("Match")}</th>
                     <th className="text-center font-medium">{tt("Score")}</th>
                     <th className="text-center font-medium">1</th>
                     <th className="text-center font-medium">X</th>
@@ -244,9 +244,9 @@ function Accuracy() {
                         <Link to={matchHref('football', r.matchId, { home: r.home, away: r.away, date: r.date })!} className="hover:underline">
                           {r.home} – {r.away}
                         </Link>
-                        <span className="text-xs text-faint ml-2 hidden md:inline">{r.competition}</span>
+                        <span className="text-xs text-faint ms-2 hidden md:inline">{r.competition}</span>
                         {model === 'ALL' && (
-                          <span className="text-[10px] text-faint ml-2">{r.model === 'grid-v3' ? 'v3' : r.model === 'v3-mix' ? 'v3-mix' : r.model === 'feat-v1' ? 'feat' : r.model === 'dc-history-v2' ? 'v2' : 'v1'}</span>
+                          <span className="text-[10px] text-faint ms-2">{r.model === 'grid-v3' ? 'v3' : r.model === 'v3-mix' ? 'v3-mix' : r.model === 'feat-v1' ? 'feat' : r.model === 'dc-history-v2' ? 'v2' : 'v1'}</span>
                         )}
                       </td>
                       <td className="text-center font-semibold num">{r.score}</td>
@@ -444,8 +444,8 @@ function MetricsView({ m, groupLabel = 'League' }: { m: Metrics; groupLabel?: st
               <div key={b.range} className="grid grid-cols-[90px_1fr_120px] items-center gap-3 text-sm">
                 <span className="text-muted num">{b.range}</span>
                 <div className="relative h-3 bg-surface2 rounded-full overflow-hidden">
-                  <div className="absolute inset-y-0 left-0 bg-accent/80 rounded-full" style={{ width: `${b.actual}%` }} />
-                  <div className="absolute -inset-y-1 w-0.5 bg-ink" style={{ left: `${b.predicted}%` }} title={tt("predicted {0}%", { 0: b.predicted })} />
+                  <div className="absolute inset-y-0 start-0 bg-accent/80 rounded-full" style={{ width: `${b.actual}%` }} />
+                  <div className="absolute -inset-y-1 w-0.5 bg-ink" style={{ insetInlineStart: `${b.predicted}%` }} title={tt("predicted {0}%", { 0: b.predicted })} />
                 </div>
                 <span className="num text-ink/80">
                   {b.actual}% <span className="text-faint">{tt("of {0}", { 0: b.n })}</span>
@@ -463,17 +463,17 @@ function MetricsView({ m, groupLabel = 'League' }: { m: Metrics; groupLabel?: st
           <table className="w-full text-sm">
             <thead className="label">
               <tr>
-                <th className="text-left font-medium py-1">{tt("Outcome")}</th>
-                <th className="text-right font-medium">{tt("Model picked")}</th>
-                <th className="text-right font-medium">{tt("Actually happened")}</th>
+                <th className="text-start font-medium py-1">{tt("Outcome")}</th>
+                <th className="text-end font-medium">{tt("Model picked")}</th>
+                <th className="text-end font-medium">{tt("Actually happened")}</th>
               </tr>
             </thead>
             <tbody>
               {(['H', 'D', 'A'] as Outcome[]).map(o => (
                 <tr key={o} className="border-t border-line/50">
                   <td className="py-1.5">{OUTCOME_LABEL[o]}</td>
-                  <td className="text-right num">{m.picks[o]}</td>
-                  <td className="text-right num">{m.outcomes[o]}</td>
+                  <td className="text-end num">{m.picks[o]}</td>
+                  <td className="text-end num">{m.outcomes[o]}</td>
                 </tr>
               ))}
             </tbody>
@@ -483,23 +483,23 @@ function MetricsView({ m, groupLabel = 'League' }: { m: Metrics; groupLabel?: st
           <table className="w-full text-sm">
             <thead className="label">
               <tr>
-                <th className="text-left font-medium py-1">{groupLabel}</th>
-                <th className="text-right font-medium">{tt("Matches")}</th>
-                <th className="text-right font-medium">{tt("Hit")}</th>
-                <th className="text-right font-medium">{tt("Brier")}</th>
-                <th className="text-right font-medium">{tt("Market")}</th>
-                <th className="text-right font-medium">P/L</th>
+                <th className="text-start font-medium py-1">{groupLabel}</th>
+                <th className="text-end font-medium">{tt("Matches")}</th>
+                <th className="text-end font-medium">{tt("Hit")}</th>
+                <th className="text-end font-medium">{tt("Brier")}</th>
+                <th className="text-end font-medium">{tt("Market")}</th>
+                <th className="text-end font-medium">P/L</th>
               </tr>
             </thead>
             <tbody>
               {m.byCompetition.map(c => (
                 <tr key={c.code} className="border-t border-line/50">
                   <td className="py-1.5">{c.name}</td>
-                  <td className="text-right num">{c.n}</td>
-                  <td className="text-right num">{c.hitRate}%</td>
-                  <td className="text-right num">{c.brier}</td>
-                  <td className="text-right num text-muted">{c.marketBrier ?? '–'}</td>
-                  <td className={`text-right num ${c.profit > 0 ? 'text-win' : c.profit < 0 ? 'text-live' : ''}`}>
+                  <td className="text-end num">{c.n}</td>
+                  <td className="text-end num">{c.hitRate}%</td>
+                  <td className="text-end num">{c.brier}</td>
+                  <td className="text-end num text-muted">{c.marketBrier ?? '–'}</td>
+                  <td className={`text-end num ${c.profit > 0 ? 'text-win' : c.profit < 0 ? 'text-live' : ''}`}>
                     {c.bets ? `${c.profit > 0 ? '+' : ''}${c.profit.toFixed(1)}u` : '–'}
                   </td>
                 </tr>
@@ -653,8 +653,8 @@ function Backtest() {
               <table className="w-full text-sm">
                 <thead className="label">
                   <tr>
-                    <th className="text-left font-medium py-1">{tt("Date")}</th>
-                    <th className="text-left font-medium">{tt("Match")}</th>
+                    <th className="text-start font-medium py-1">{tt("Date")}</th>
+                    <th className="text-start font-medium">{tt("Match")}</th>
                     <th className="text-center font-medium">{tt("Score")}</th>
                     <th className="text-center font-medium">1</th>
                     <th className="text-center font-medium">X</th>
@@ -668,7 +668,7 @@ function Backtest() {
                       <tr key={i} className="border-t border-line/50">
                         <td className="py-1.5 text-muted whitespace-nowrap">{r.date}</td>
                         <td>
-                          {r.home} – {r.away} <span className="text-xs text-faint ml-1">{DIVISION_NAME[r.division] || r.division}</span>
+                          {r.home} – {r.away} <span className="text-xs text-faint ms-1">{DIVISION_NAME[r.division] || r.division}</span>
                         </td>
                         <td className="text-center font-semibold num">{r.hg}–{r.ag}</td>
                         {(['H', 'D', 'A'] as Outcome[]).map(o => {
@@ -820,28 +820,28 @@ function ClvPanel({ days }: { days: number }) {
           <div className="overflow-x-auto mt-4">
             <table className="w-full text-sm">
               <thead className="label">
-                <tr className="text-left">
-                  <th className="py-2 pr-3">{tt("Edge ≥")}</th>
-                  <th className="py-2 pr-3 text-right">{tt("Picks")}</th>
-                  <th className="py-2 pr-3 text-right">{tt("Moved our way")}</th>
-                  <th className="py-2 pr-3 text-right">{tt("CLV > 0")}</th>
-                  <th className="py-2 pr-3 text-right">{tt("Avg CLV")}</th>
-                  <th className="py-2 pr-3 text-right">{tt("Settled")}</th>
-                  <th className="py-2 text-right">{tt("ROI at open price")}</th>
+                <tr className="text-start">
+                  <th className="py-2 pe-3">{tt("Edge ≥")}</th>
+                  <th className="py-2 pe-3 text-end">{tt("Picks")}</th>
+                  <th className="py-2 pe-3 text-end">{tt("Moved our way")}</th>
+                  <th className="py-2 pe-3 text-end">{tt("CLV > 0")}</th>
+                  <th className="py-2 pe-3 text-end">{tt("Avg CLV")}</th>
+                  <th className="py-2 pe-3 text-end">{tt("Settled")}</th>
+                  <th className="py-2 text-end">{tt("ROI at open price")}</th>
                 </tr>
               </thead>
               <tbody>
                 {d.value.map(v => (
                   <tr key={v.edge} className="border-t border-line/50">
-                    <td className="py-2 pr-3 num">{Math.round(v.edge * 100)}%</td>
-                    <td className="py-2 pr-3 text-right num">{v.bets}</td>
-                    <td className="py-2 pr-3 text-right num">{v.lineMovedOurWay ?? '–'}{v.lineMovedOurWay !== null ? '%' : ''}</td>
-                    <td className="py-2 pr-3 text-right num">{v.clvPositive ?? '–'}{v.clvPositive !== null ? '%' : ''}</td>
-                    <td className={`py-2 pr-3 text-right num ${v.avgClv !== null && v.avgClv > 0 ? 'text-win' : ''}`}>
+                    <td className="py-2 pe-3 num">{Math.round(v.edge * 100)}%</td>
+                    <td className="py-2 pe-3 text-end num">{v.bets}</td>
+                    <td className="py-2 pe-3 text-end num">{v.lineMovedOurWay ?? '–'}{v.lineMovedOurWay !== null ? '%' : ''}</td>
+                    <td className="py-2 pe-3 text-end num">{v.clvPositive ?? '–'}{v.clvPositive !== null ? '%' : ''}</td>
+                    <td className={`py-2 pe-3 text-end num ${v.avgClv !== null && v.avgClv > 0 ? 'text-win' : ''}`}>
                       {v.avgClv !== null ? `${v.avgClv > 0 ? '+' : ''}${v.avgClv}%` : '–'}
                     </td>
-                    <td className="py-2 pr-3 text-right num">{v.settled}</td>
-                    <td className={`py-2 text-right num ${v.roi !== null ? (v.roi >= 0 ? 'text-win' : 'text-loss') : ''}`}>
+                    <td className="py-2 pe-3 text-end num">{v.settled}</td>
+                    <td className={`py-2 text-end num ${v.roi !== null ? (v.roi >= 0 ? 'text-win' : 'text-loss') : ''}`}>
                       {v.roi !== null ? `${v.roi > 0 ? '+' : ''}${v.roi}%` : '–'}
                     </td>
                   </tr>
@@ -862,13 +862,13 @@ function ClvPanel({ days }: { days: number }) {
                   <tbody>
                     {d.recent.map((r, i) => (
                       <tr key={i} className="border-t border-line/40">
-                        <td className="py-1.5 pr-3 text-faint num">{new Date(r.kickoff).toLocaleDateString(LOCALE, { day: '2-digit', month: 'short' })}</td>
-                        <td className="py-1.5 pr-3 text-ink">{r.match}</td>
-                        <td className="py-1.5 pr-3 text-muted">
+                        <td className="py-1.5 pe-3 text-faint num">{new Date(r.kickoff).toLocaleDateString(LOCALE, { day: '2-digit', month: 'short' })}</td>
+                        <td className="py-1.5 pe-3 text-ink">{r.match}</td>
+                        <td className="py-1.5 pe-3 text-muted">
                           {r.selection === 'H' ? tt("Home") : r.selection === 'D' ? tt("Draw") : tt("Away")} · v3 {r.v3}%
                         </td>
-                        <td className="py-1.5 pr-3 num text-muted">{r.openOdds} → {r.closeOdds}</td>
-                        <td className={`py-1.5 pr-3 num ${r.clv > 0 ? 'text-win' : 'text-loss'}`}>{tt("CLV")}{' '}{r.clv > 0 ? '+' : ''}{r.clv}%</td>
+                        <td className="py-1.5 pe-3 num text-muted">{r.openOdds} → {r.closeOdds}</td>
+                        <td className={`py-1.5 pe-3 num ${r.clv > 0 ? 'text-win' : 'text-loss'}`}>{tt("CLV")}{' '}{r.clv > 0 ? '+' : ''}{r.clv}%</td>
                         <td className="py-1.5 text-faint">{r.outcome ?? tt("pending")}</td>
                       </tr>
                     ))}

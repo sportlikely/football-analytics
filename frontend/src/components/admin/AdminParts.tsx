@@ -59,7 +59,7 @@ function CheckRow({ c }: { c: HealthCheck }) {
           <div className="text-[11px] text-faint break-words mt-0.5">{c.detail}</div>
           {c.level !== 'ok' && <div className={`text-xs mt-0.5 ${c.level === 'fail' ? 'text-loss' : 'text-draw'}`}><b>What to do:</b> {r?.todo || 'Tell Claude.'}</div>}
           {open && !!c.items?.length && (
-            <ul className="mt-2 space-y-1 text-xs text-muted list-disc pl-4 break-words">{c.items.map((it, i) => <li key={i}>{it}</li>)}</ul>
+            <ul className="mt-2 space-y-1 text-xs text-muted list-disc ps-4 break-words">{c.items.map((it, i) => <li key={i}>{it}</li>)}</ul>
           )}
         </div>
         {/* fix259: next to every red / yellow check */}
@@ -136,7 +136,7 @@ export function Tiles({ tiles }: { tiles: TileDef[] }) {
             {t.hint && <div className="text-[11px] text-faint mt-1">{t.hint}</div>}
           </>
         )
-        const cls = 'block text-left rounded-xl border border-line/60 bg-surface2/50 px-4 py-3'
+        const cls = 'block text-start rounded-xl border border-line/60 bg-surface2/50 px-4 py-3'
         return t.to ? <Link key={t.label} to={t.to} className={`${cls} hover:border-accent/40 transition-colors`}>{body}</Link> : <div key={t.label} className={cls}>{body}</div>
       })}
     </div>
@@ -206,7 +206,7 @@ export function ResultsToCheck({ done }: { done: () => void }) {
                   {href ? <Link to={href} className="font-semibold text-draw hover:underline">{x.home} – {x.away}</Link> : <span className="font-semibold text-ink">{x.home} – {x.away}</span>}
                   <span className="text-[11px] text-muted">Football · {x.competition} · no final at either provider · {x.note}</span>
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-2 sm:pl-[68px]">
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 sm:ps-[68px]">
                   <input aria-label={`${x.home} goals`} inputMode="numeric" value={s.home} onChange={e => goals(x.id, 'home', e.target.value)} className={box} />
                   <span className="text-faint">–</span>
                   <input aria-label={`${x.away} goals`} inputMode="numeric" value={s.away} onChange={e => goals(x.id, 'away', e.target.value)} className={box} />
@@ -226,7 +226,7 @@ export function ResultsToCheck({ done }: { done: () => void }) {
               {x.href ? <Link to={x.href} className="font-semibold text-draw hover:underline">{x.label}</Link> : <span className="font-semibold text-ink">{x.label}</span>}
               <span className="text-[11px] text-muted">{x.meta}</span>
             </div>
-            <div className="mt-1.5 flex flex-wrap gap-2 sm:pl-[68px]">
+            <div className="mt-1.5 flex flex-wrap gap-2 sm:ps-[68px]">
               {x.swap && <button type="button" disabled={!!busy} onClick={() => act(x.key, x.url, 'swap')} className={`${btn} bg-accent text-bg`}>{x.swap}</button>}
               <button type="button" disabled={!!busy} onClick={() => act(x.key, x.url, 'confirm')} className={`${btn} bg-surface2 border border-line text-ink`}>Keep as is</button>
             </div>
@@ -251,7 +251,7 @@ function ContactOpen({ done }: { done: () => void }) {
             <span>#{r.id} · {day(r.at)}</span>
             <span className="text-ink">{r.name || '—'}</span>
             <a href={`mailto:${r.email}?subject=${encodeURIComponent(`Re: your message to SportLikely (#${r.id})`)}`} className="text-accent">{r.email}</a>
-            <button type="button" onClick={() => mark(r.id)} className="ml-auto h-8 px-3 rounded-lg text-xs font-semibold bg-win/15 text-win hover:bg-win/25">Mark answered</button>
+            <button type="button" onClick={() => mark(r.id)} className="ms-auto h-8 px-3 rounded-lg text-xs font-semibold bg-win/15 text-win hover:bg-win/25">Mark answered</button>
           </div>
           <p className="text-ink mt-1 whitespace-pre-wrap break-words line-clamp-3">{r.message}</p>
         </li>
@@ -304,7 +304,7 @@ export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
           <ol className="divide-y divide-line/50 text-sm">
             {f.top.map((x, i) => (
               <li key={i} className="py-2 flex flex-wrap items-baseline gap-x-3">
-                <span className="num w-12 text-right font-bold text-ink">{x.count}×</span>
+                <span className="num w-12 text-end font-bold text-ink">{x.count}×</span>
                 <span className="text-ink break-words min-w-0 flex-1">{x.message}</span>
                 <span className="text-[11px] text-faint">{x.page} · last {day(x.lastAt)}</span>
               </li>
@@ -350,10 +350,10 @@ export function DoneForYouCard({ reload }: { reload: () => void }) {
                 <span className="w-14 text-[11px] text-faint num">{day(x.at)}</span>
                 <span className="text-[11px] font-semibold text-muted">{x.kindLabel}</span>
                 <span className={`font-semibold ${x.undoneAt ? 'text-faint line-through' : 'text-ink'}`}>{x.title}</span>
-                {x.canUndo && <button type="button" disabled={busy !== null} onClick={() => undo(x.id)} className="ml-auto h-8 px-3 rounded-lg text-xs font-semibold bg-surface2 border border-line text-ink disabled:opacity-50">Undo</button>}
-                {x.undoneAt && <span className="ml-auto text-[11px] text-faint">undone{x.undoneBy ? ` by ${x.undoneBy}` : ''}</span>}
+                {x.canUndo && <button type="button" disabled={busy !== null} onClick={() => undo(x.id)} className="ms-auto h-8 px-3 rounded-lg text-xs font-semibold bg-surface2 border border-line text-ink disabled:opacity-50">Undo</button>}
+                {x.undoneAt && <span className="ms-auto text-[11px] text-faint">undone{x.undoneBy ? ` by ${x.undoneBy}` : ''}</span>}
               </div>
-              <p className="mt-1 text-xs text-muted sm:pl-[68px] break-words">{x.why}{x.link && <> — <a href={x.link} target="_blank" rel="noopener noreferrer nofollow" className="underline">source</a></>}</p>
+              <p className="mt-1 text-xs text-muted sm:ps-[68px] break-words">{x.why}{x.link && <> — <a href={x.link} target="_blank" rel="noopener noreferrer nofollow" className="underline">source</a></>}</p>
             </li>
           ))}
         </ul>

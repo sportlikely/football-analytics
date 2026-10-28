@@ -217,19 +217,19 @@ export default function Player() {
               <table className="w-full text-sm min-w-[560px]">
                 <thead>
                   <tr className="text-[11px] text-faint">
-                    <th className="text-left font-medium py-1.5 pl-2">{tt("Competition")}</th>
-                    <th className="text-left font-medium py-1.5">{tt("Team")}</th>
-                    <th className="text-right font-medium py-1.5 num w-12">{tt("Apps")}</th>
-                    {full && <th className="text-right font-medium py-1.5 num w-14">{tt("Min")}</th>}
-                    <th className="text-right font-medium py-1.5 num w-12">{tt("Goals")}</th>
-                    {full && <th className="text-right font-medium py-1.5 num w-12">{tt("Ast")}</th>}
-                    {full && <th className="text-right font-medium py-1.5 num w-14 pr-2">{tt("Rating")}</th>}
+                    <th className="text-start font-medium py-1.5 ps-2">{tt("Competition")}</th>
+                    <th className="text-start font-medium py-1.5">{tt("Team")}</th>
+                    <th className="text-end font-medium py-1.5 num w-12">{tt("Apps")}</th>
+                    {full && <th className="text-end font-medium py-1.5 num w-14">{tt("Min")}</th>}
+                    <th className="text-end font-medium py-1.5 num w-12">{tt("Goals")}</th>
+                    {full && <th className="text-end font-medium py-1.5 num w-12">{tt("Ast")}</th>}
+                    {full && <th className="text-end font-medium py-1.5 num w-14 pe-2">{tt("Rating")}</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {season.rows.map((r, i) => (
                     <tr key={i} className="border-t border-line/50">
-                      <td className="py-2 pl-2">
+                      <td className="py-2 ps-2">
                         <span className="flex items-center gap-2 min-w-0">
                           {r.league.logo && <img src={r.league.logo} alt="" className="w-5 h-5 object-contain bg-white/90 rounded p-0.5" />}
                           {r.league.code ? (
@@ -247,12 +247,12 @@ export default function Player() {
                           </Link>
                         )}
                       </td>
-                      <td className="py-2 text-right num text-muted">{r.apps}</td>
-                      {full && <td className="py-2 text-right num text-muted">{r.minutes}</td>}
-                      <td className="py-2 text-right num font-bold text-ink">{r.goals}</td>
-                      {full && <td className="py-2 text-right num text-muted">{r.assists}</td>}
+                      <td className="py-2 text-end num text-muted">{r.apps}</td>
+                      {full && <td className="py-2 text-end num text-muted">{r.minutes}</td>}
+                      <td className="py-2 text-end num font-bold text-ink">{r.goals}</td>
+                      {full && <td className="py-2 text-end num text-muted">{r.assists}</td>}
                       {full && (
-                        <td className={`py-2 pr-2 text-right num font-bold ${r.rating ? (r.rating >= 7.3 ? 'text-win' : r.rating >= 6.9 ? 'text-accent' : 'text-draw') : 'text-faint'}`}>{r.rating ?? '–'}</td>
+                        <td className={`py-2 pe-2 text-end num font-bold ${r.rating ? (r.rating >= 7.3 ? 'text-win' : r.rating >= 6.9 ? 'text-accent' : 'text-draw') : 'text-faint'}`}>{r.rating ?? '–'}</td>
                       )}
                     </tr>
                   ))}
@@ -301,12 +301,12 @@ export default function Player() {
             <table className="w-full text-sm min-w-[520px]">
               <thead>
                 <tr className="text-[11px] text-faint">
-                  <th className="text-left font-medium py-1.5 pl-2 w-20">{tt("Season")}</th>
-                  <th className="text-left font-medium py-1.5">{tt("Club")}</th>
-                  <th className="text-right font-medium py-1.5 num w-12">{tt("Apps")}</th>
-                  <th className="text-right font-medium py-1.5 num w-12">{tt("Goals")}</th>
-                  {full && <th className="text-right font-medium py-1.5 num w-12">{tt("Ast")}</th>}
-                  {full && <th className="text-right font-medium py-1.5 num w-16 pr-2">{tt("Min")}</th>}
+                  <th className="text-start font-medium py-1.5 ps-2 w-20">{tt("Season")}</th>
+                  <th className="text-start font-medium py-1.5">{tt("Club")}</th>
+                  <th className="text-end font-medium py-1.5 num w-12">{tt("Apps")}</th>
+                  <th className="text-end font-medium py-1.5 num w-12">{tt("Goals")}</th>
+                  {full && <th className="text-end font-medium py-1.5 num w-12">{tt("Ast")}</th>}
+                  {full && <th className="text-end font-medium py-1.5 num w-16 pe-2">{tt("Min")}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -318,27 +318,27 @@ export default function Player() {
                       onClick={() => { setSi(i); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
                       className={`border-t border-line/50 cursor-pointer hover:bg-surface2/40 ${si === i ? 'bg-accent/5' : ''}`}
                     >
-                      <td className="py-2 pl-2 num text-muted">{s.label}</td>
+                      <td className="py-2 ps-2 num text-muted">{s.label}</td>
                       <td className="py-2">
                         <span className="flex items-center gap-2 min-w-0">
                           {clubs.map(c => <img key={c.id} src={c.logo} alt="" className="w-4 h-4 object-contain" />)}
                           <span className="truncate text-ink">{clubs.map((c, k) => <span key={c.id}>{k > 0 && ' · '}<NameLink to={teamHref(c)}>{c.name}</NameLink></span>)}</span>
                         </span>
                       </td>
-                      <td className="py-2 text-right num text-muted">{s.totals.apps}</td>
-                      <td className="py-2 text-right num font-bold text-ink">{s.totals.goals}</td>
-                      {full && <td className="py-2 text-right num text-muted">{s.totals.assists ?? 0}</td>}
-                      {full && <td className="py-2 pr-2 text-right num text-muted">{(s.totals.minutes ?? 0).toLocaleString(LOCALE)}</td>}
+                      <td className="py-2 text-end num text-muted">{s.totals.apps}</td>
+                      <td className="py-2 text-end num font-bold text-ink">{s.totals.goals}</td>
+                      {full && <td className="py-2 text-end num text-muted">{s.totals.assists ?? 0}</td>}
+                      {full && <td className="py-2 pe-2 text-end num text-muted">{(s.totals.minutes ?? 0).toLocaleString(LOCALE)}</td>}
                     </tr>
                   )
                 })}
                 {data.career && (
                   <tr className="border-t-2 border-line">
-                    <td className="py-2 pl-2 font-bold text-ink" colSpan={2}>{tt("Total")}</td>
-                    <td className="py-2 text-right num font-bold text-ink">{data.career.apps}</td>
-                    <td className="py-2 text-right num font-extrabold text-accent">{data.career.goals}</td>
-                    {full && <td className="py-2 text-right num font-bold text-ink">{data.career.assists ?? 0}</td>}
-                    {full && <td className="py-2 pr-2 text-right num font-bold text-ink">{(data.career.minutes ?? 0).toLocaleString(LOCALE)}</td>}
+                    <td className="py-2 ps-2 font-bold text-ink" colSpan={2}>{tt("Total")}</td>
+                    <td className="py-2 text-end num font-bold text-ink">{data.career.apps}</td>
+                    <td className="py-2 text-end num font-extrabold text-accent">{data.career.goals}</td>
+                    {full && <td className="py-2 text-end num font-bold text-ink">{data.career.assists ?? 0}</td>}
+                    {full && <td className="py-2 pe-2 text-end num font-bold text-ink">{(data.career.minutes ?? 0).toLocaleString(LOCALE)}</td>}
                   </tr>
                 )}
               </tbody>
@@ -367,17 +367,17 @@ export default function Player() {
             <table className="w-full text-sm min-w-[520px]">
               <thead>
                 <tr className="text-[11px] text-faint">
-                  <th className="text-left font-medium py-1.5 pl-2">{tt("Competition")}</th>
-                  <th className="text-left font-medium py-1.5">{tt("Played")}</th>
-                  <th className="text-right font-medium py-1.5 num w-12">{tt("Apps")}</th>
-                  <th className="text-right font-medium py-1.5 num w-12">{tt("Goals")}</th>
-                  {full && <th className="text-right font-medium py-1.5 num w-12 pr-2">{tt("Ast")}</th>}
+                  <th className="text-start font-medium py-1.5 ps-2">{tt("Competition")}</th>
+                  <th className="text-start font-medium py-1.5">{tt("Played")}</th>
+                  <th className="text-end font-medium py-1.5 num w-12">{tt("Apps")}</th>
+                  <th className="text-end font-medium py-1.5 num w-12">{tt("Goals")}</th>
+                  {full && <th className="text-end font-medium py-1.5 num w-12 pe-2">{tt("Ast")}</th>}
                 </tr>
               </thead>
               <tbody>
                 {data.international.map((r, i) => (
                   <tr key={i} className="border-t border-line/50">
-                    <td className="py-2 pl-2">
+                    <td className="py-2 ps-2">
                       <span className="flex items-center gap-2 min-w-0">
                         {r.team && <img src={r.team.logo} alt="" className="w-4 h-4 object-contain" />}
                         <NameLink to={href.league(r.league.code || r.league.id, r.league.name)} className="truncate text-ink">{r.league.name}</NameLink>
@@ -385,9 +385,9 @@ export default function Player() {
                       </span>
                     </td>
                     <td className="py-2 text-[11px] text-faint whitespace-nowrap">{span(r.from, r.to)}</td>
-                    <td className="py-2 text-right num text-muted">{r.apps}</td>
-                    <td className="py-2 text-right num font-bold text-ink">{r.goals}</td>
-                    {full && <td className="py-2 pr-2 text-right num text-muted">{r.assists}</td>}
+                    <td className="py-2 text-end num text-muted">{r.apps}</td>
+                    <td className="py-2 text-end num font-bold text-ink">{r.goals}</td>
+                    {full && <td className="py-2 pe-2 text-end num text-muted">{r.assists}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -418,12 +418,12 @@ export default function Player() {
                     <img src={tr.from.logo} alt="" className="w-4 h-4 object-contain flex-shrink-0" />
                     <span className="truncate">{tr.from.name}</span>
                   </Link>
-                  <span className="text-faint flex-shrink-0">→</span>
+                  <span aria-hidden className="text-faint flex-shrink-0 rtl-flip">→</span>
                   <Link to={teamHref(tr.to)} className="flex items-center gap-1.5 min-w-0 font-semibold text-ink hover:text-accent">
                     <img src={tr.to.logo} alt="" className="w-4 h-4 object-contain flex-shrink-0" />
                     <span className="truncate">{tr.to.name}</span>
                   </Link>
-                  <span className="ml-auto text-[11px] text-faint whitespace-nowrap">{tr.type}</span>
+                  <span className="ms-auto text-[11px] text-faint whitespace-nowrap">{tr.type}</span>
                 </li>
               ))}
             </ul>

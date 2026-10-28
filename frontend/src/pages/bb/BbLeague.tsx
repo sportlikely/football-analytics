@@ -3,7 +3,7 @@ import { useEntityId } from '../../components/SlugRoute'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
-import { t } from '../../lib/i18n'
+import { t, ltr } from '../../lib/i18n'
 import { hubFor, hubHref } from '../../lib/hubs'
 import { useBbConfig, bbLeagueFav, type BbGame } from '../../lib/bb'
 import { GameList, Skeleton, TeamLogo, LiveRow } from './parts'
@@ -36,13 +36,13 @@ export function StandingsTable({ data, mark = [], colors }: { data: Standings; m
           <table className="w-full table-fixed text-xs sm:text-sm">
             <thead>
               <tr className="text-faint text-[10px] uppercase tracking-wide">
-                <th className="text-left font-semibold py-1.5 w-9">#</th>
-                <th className="text-left font-semibold py-1.5">{t('Team')}</th>
-                <th className="text-right font-semibold py-1.5 w-8 sm:w-10">{t('P')}</th>
-                <th className="text-right font-semibold py-1.5 w-8 sm:w-10">{t('W')}</th>
-                <th className="text-right font-semibold py-1.5 w-8 sm:w-10">{t('L')}</th>
-                <th className="text-right font-semibold py-1.5 w-14 sm:w-32">%</th>
-                <th className="text-right font-semibold py-1.5 w-16 hidden sm:table-cell">{t('+/−')}</th>
+                <th className="text-start font-semibold py-1.5 w-9">#</th>
+                <th className="text-start font-semibold py-1.5">{t('Team')}</th>
+                <th className="text-end font-semibold py-1.5 w-8 sm:w-10">{t('P')}</th>
+                <th className="text-end font-semibold py-1.5 w-8 sm:w-10">{t('W')}</th>
+                <th className="text-end font-semibold py-1.5 w-8 sm:w-10">{t('L')}</th>
+                <th className="text-end font-semibold py-1.5 w-14 sm:w-32">%</th>
+                <th className="text-end font-semibold py-1.5 w-16 hidden sm:table-cell">{t('+/−')}</th>
               </tr>
             </thead>
             <tbody>
@@ -53,25 +53,25 @@ export function StandingsTable({ data, mark = [], colors }: { data: Standings; m
                 return (
                   <tr key={r.team.id} className={`border-t border-line/40 ${c === 'H' ? 'bg-home/10' : c === 'A' ? 'bg-away/10' : on ? 'bg-accent/10' : 'hover:bg-surface2/40'}`}>
                     <td className="py-1.5 relative">
-                      {(c || on) && <span className={`absolute left-0 inset-y-1 w-[3px] rounded-full ${c === 'H' ? 'bg-home' : c === 'A' ? 'bg-away' : 'bg-accent'}`} />}
-                      <span className={`ml-1.5 inline-grid place-items-center w-5 h-5 rounded-md num text-[10px] font-bold ${r.position <= 3 ? 'bg-accent/15 text-accent' : 'text-faint'}`}>{r.position}</span>
+                      {(c || on) && <span className={`absolute start-0 inset-y-1 w-[3px] rounded-full ${c === 'H' ? 'bg-home' : c === 'A' ? 'bg-away' : 'bg-accent'}`} />}
+                      <span className={`ms-1.5 inline-grid place-items-center w-5 h-5 rounded-md num text-[10px] font-bold ${r.position <= 3 ? 'bg-accent/15 text-accent' : 'text-faint'}`}>{r.position}</span>
                     </td>
-                    <td className="py-1.5 pr-2">
+                    <td className="py-1.5 pe-2">
                       <Link to={teamHref('basketball', r.team.id, r.team.name)!} className={`flex items-center gap-2 hover:text-accent ${on ? 'font-bold text-ink' : 'text-ink'}`}>
                         <TeamLogo team={r.team} size={18} /><span className="truncate">{r.team.name}</span>
                       </Link>
                     </td>
-                    <td className="py-1.5 text-right num text-muted">{r.played}</td>
-                    <td className="py-1.5 text-right num text-ink font-semibold">{r.won}</td>
-                    <td className="py-1.5 text-right num text-muted">{r.lost}</td>
-                    <td className="py-1.5 text-right num text-muted">
+                    <td className="py-1.5 text-end num text-muted">{r.played}</td>
+                    <td className="py-1.5 text-end num text-ink font-semibold">{r.won}</td>
+                    <td className="py-1.5 text-end num text-muted">{r.lost}</td>
+                    <td className="py-1.5 text-end num text-muted">
                       <span className="inline-flex items-center justify-end gap-2">
                         {r.pct !== null && <span className="hidden sm:block w-12 h-1.5 rounded-full bg-surface2 overflow-hidden"><span className="block h-full rounded-full bg-win/70" style={{ width: `${r.pct * 100}%` }} /></span>}
                         {r.pct !== null ? r.pct.toFixed(3).replace(/^0/, '') : '–'}
                       </span>
                     </td>
-                    <td className={`py-1.5 text-right num hidden sm:table-cell font-semibold ${diff === null ? 'text-muted' : diff > 0 ? 'text-win' : diff < 0 ? 'text-loss' : 'text-muted'}`}>
-                      {diff !== null ? (diff > 0 ? '+' : '') + diff.toFixed(1) : '–'}
+                    <td className={`py-1.5 text-end num hidden sm:table-cell font-semibold ${diff === null ? 'text-muted' : diff > 0 ? 'text-win' : diff < 0 ? 'text-loss' : 'text-muted'}`}>
+                      {diff !== null ? ltr((diff > 0 ? '+' : '') + diff.toFixed(1)) : '–'}
                     </td>
                   </tr>
                 )
@@ -151,7 +151,7 @@ export default function BbLeague() {
           </Card>
         )}
         <Card title={t('Next games')} action={<Link to="/basketball/matches" className="text-xs font-bold text-accent">{t('All →')}</Link>}>
-          {!next ? <Skeleton rows={5} /> : <div className="max-h-[430px] overflow-y-auto overscroll-contain pr-1"><GameList games={next.filter(g => g.state !== 'live')} empty={t('No games in the next 10 days.')} /></div>}
+          {!next ? <Skeleton rows={5} /> : <div className="max-h-[430px] overflow-y-auto overscroll-contain pe-1"><GameList games={next.filter(g => g.state !== 'live')} empty={t('No games in the next 10 days.')} /></div>}
         </Card>
         {(news === null || news === undefined || news.length > 0) && (
         <Card title={t('{0} news', { 0: league?.name || code.toUpperCase() })}>
@@ -159,7 +159,7 @@ export default function BbLeague() {
         </Card>
         )}
         <Card title={t('Latest results')}>
-          {!results ? <Skeleton rows={5} /> : <div className="max-h-[430px] overflow-y-auto overscroll-contain pr-1"><GameList games={results} empty={t('No results in the last three weeks.')} /></div>}
+          {!results ? <Skeleton rows={5} /> : <div className="max-h-[430px] overflow-y-auto overscroll-contain pe-1"><GameList games={results} empty={t('No results in the last three weeks.')} /></div>}
         </Card>
       </>}
     />
@@ -183,8 +183,8 @@ export function LeadersCard({ data }: { data: Leaders }) {
           <li key={x.name} className="flex items-center gap-3 py-2 text-sm">
             <span className="w-5 num text-faint">{x.rank}</span>
             {x.id ? <Link to={playerHref('basketball', x.id, x.name)!} className="text-ink font-semibold hover:text-accent truncate">{x.name}</Link> : <span className="text-ink font-semibold truncate">{x.name}</span>}
-            <span className="ml-auto num font-bold text-ink">{x.value}</span>
-            <span className="text-[10px] text-faint w-12 text-right">{t('{0} GP', { 0: x.games })}</span>
+            <span className="ms-auto num font-bold text-ink">{x.value}</span>
+            <span className="text-[10px] text-faint w-12 text-end">{t('{0} GP', { 0: x.games })}</span>
           </li>
         ))}
       </ol>

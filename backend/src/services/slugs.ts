@@ -26,7 +26,7 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_slugs_id ON slugs(sport, kind, id, is_pr
 db.exec(`CREATE TABLE IF NOT EXISTS slug_ids (sport TEXT NOT NULL, kind TEXT NOT NULL, old_id TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (sport, kind, old_id))`);
 
 const AF = 1_000_000_000;
-const LANG_RE = '(?:\\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru))?';
+const LANG_RE = '(?:\\/(es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he))?';
 
 /* ---------- the old (id) addresses of every sport: the pages still read these ids ---------- */
 
@@ -190,7 +190,7 @@ export function publicPathOf(sport: LinkSport, kind: LinkKind, id: string | numb
  * kept, the old query dropped except ALLOWED_QUERY); anything else, or an item without a slug, comes back unchanged.
  */
 export function pubPath(href: string): string {
-  const m = /^(https:\/\/sportlikely\.com)?(\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru))?(\/[^?#]*)(\?[^#]*)?(#.*)?$/.exec(href);
+  const m = /^(https:\/\/sportlikely\.com)?(\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he))?(\/[^?#]*)(\?[^#]*)?(#.*)?$/.exec(href);
   if (!m) return href;
   const old = parseOld(m[3]);
   if (!old) {
@@ -204,7 +204,7 @@ export function pubPath(href: string): string {
 }
 /** href="…" / href='…' / "url":"…" of old addresses inside HTML or JSON-LD text → new ones */
 export function pubLinks(html: string): string {
-  return html.replace(/(href=["']|"url":"|"@id":")((?:https:\/\/sportlikely\.com)?(?:\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru))?\/(?:(?:team|match|player|league|basketball|american-football|tennis|predictions)\/[^"'#\s]*|(?:matches|favorites|my-picks|upset-watch|draw-alerts|accuracy|past)(?=[?"'#\s])[^"'#\s]*))/g,
+  return html.replace(/(href=["']|"url":"|"@id":")((?:https:\/\/sportlikely\.com)?(?:\/(?:es|pt|de|fr|it|tr|id|hi|pl|el|ru|ar|he))?\/(?:(?:team|match|player|league|basketball|american-football|tennis|predictions)\/[^"'#\s]*|(?:matches|favorites|my-picks|upset-watch|draw-alerts|accuracy|past)(?=[?"'#\s])[^"'#\s]*))/g,
     (_a, pre: string, url: string) => pre + pubPath(url.replace(/&amp;/g, '&')).replace(/&(?!amp;)/g, '&amp;'));
 }
 function keptQuery(qs: string): string {

@@ -3,12 +3,12 @@ import { Link, useParams } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
-import { t as tt } from '../lib/i18n'
+import { t as tt, LOCALE } from '../lib/i18n'
 
 /* Beta tester invite: /join/<code> → free Pro for N days. Signed-in visitors join at once. */
 
 interface Info { valid: boolean; closed: boolean; full: boolean; days: number }
-const dateOf = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+const dateOf = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' })
 
 export default function Join() {
   const { code = '' } = useParams()
@@ -48,7 +48,7 @@ export default function Join() {
       {needsVerification && (
         <p className="text-sm text-draw font-semibold">{tt("Confirm your email to switch Pro on.")} <Link to="/verify" className="underline">{tt("Confirm now")}</Link></p>
       )}
-      <div className="rounded-xl border border-line bg-surface2/50 p-4 text-left text-sm text-ink space-y-1.5">
+      <div className="rounded-xl border border-line bg-surface2/50 p-4 text-start text-sm text-ink space-y-1.5">
         <p className="font-semibold">{tt("How to help us")}</p>
         <p className="text-muted">{tt("Use the site like you normally would before and after matches. Whenever something is broken, confusing or missing — or you like something — press the Feedback button at the bottom right of every page. Short is fine.")}</p>
       </div>
@@ -59,7 +59,7 @@ export default function Join() {
     return box(<>
       <h1 className="font-display text-2xl font-extrabold text-ink">{tt("This invite link doesn't work")}</h1>
       <p className="text-sm text-muted">{!info ? tt("The link is not valid. Check that you copied all of it.") : info.full ? tt("All places on this invite are taken.") : tt("This invite has been closed.")}</p>
-      <Link to="/" className="inline-block text-sm font-semibold text-accent">{tt("Go to SportLikely")} →</Link>
+      <Link to="/" className="inline-block text-sm font-semibold text-accent">{tt("Go to SportLikely")} <span aria-hidden className="rtl-flip">→</span></Link>
     </>)
 
   if (user)

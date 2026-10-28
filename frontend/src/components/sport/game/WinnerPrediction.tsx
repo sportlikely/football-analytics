@@ -49,7 +49,7 @@ function Tile({ k, label, v, active, roll, delay = 0, text }: { k: 'H' | 'A' | '
   return (
     <div className={`rounded-xl border p-3 sm:p-4 text-center min-w-0 ${active ? border : 'border-line/70 bg-surface2/40'} ${roll && active ? 'animate-pop' : ''}`}>
       <div className="text-[11px] text-faint mb-1 truncate">
-        {k !== 'T' && <span className={`font-bold mr-1 ${active ? color : ''}`}>{k === 'H' ? '1' : '2'}</span>}
+        {k !== 'T' && <span className={`font-bold me-1 ${active ? color : ''}`}>{k === 'H' ? '1' : '2'}</span>}
         {label}
       </div>
       <div className={`num text-2xl sm:text-3xl font-extrabold ${active ? color : k === 'T' ? 'text-ink' : 'text-ink/70'}`}>
@@ -122,7 +122,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
                 {topV >= x.strongAt + 10 ? t('Very strong pick') : topV >= x.strongAt ? t('Strong pick') : topV >= 55 ? t('Pick') : Math.abs((p.pHome || 0) - (p.pAway || 0)) < 3 ? t('Even game') : t('Close game')}
               </span>
               <span className="text-muted">{t('Our pick')} · <span className="text-ink font-semibold">{team.name}</span> · <span className="num text-accent font-extrabold">{Math.round(topV)}%</span></span>
-              {typeof p.hit === 'boolean' && <span className={`ml-auto rounded-full px-3 py-1 text-xs font-bold ${p.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{p.hit ? t('Right') : t('Wrong')}</span>}
+              {typeof p.hit === 'boolean' && <span className={`ms-auto rounded-full px-3 py-1 text-xs font-bold ${p.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{p.hit ? t('Right') : t('Wrong')}</span>}
               {x.badges}
             </div>
             <div className="flex h-2.5 gap-[3px] mt-4">
@@ -144,7 +144,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
                 <div className="text-sm font-bold text-ink mb-2">{t('Why we think so')}</div>
                 <ul className="space-y-2">
                   {x.why.map((w, i) => (
-                    <li key={i} className={`flex items-start gap-3 text-sm ${w.sub ? 'pl-5' : ''}`}>
+                    <li key={i} className={`flex items-start gap-3 text-sm ${w.sub ? 'ps-5' : ''}`}>
                       <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${w.tone === 'H' ? 'bg-home' : w.tone === 'A' ? 'bg-away' : 'bg-faint'} ${w.sub ? 'opacity-60' : ''}`} />
                       <span className={`flex-1 leading-snug ${w.sub ? 'text-muted' : 'text-ink'}`}>{w.text}</span>
                       {w.points && (
@@ -162,7 +162,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
               </div>
             )}
             {guessFirstOn() && x.upcoming && (
-              <div className="mt-2 text-right">
+              <div className="mt-2 text-end">
                 <button type="button" onClick={() => hideMatch(x.rid)} className="text-xs text-faint hover:text-ink underline underline-offset-4">{t('Hide prediction again')}</button>
               </div>
             )}

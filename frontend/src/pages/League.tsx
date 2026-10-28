@@ -239,38 +239,38 @@ function League() {
                     <table className="w-full text-sm min-w-[520px]">
                       <thead>
                         <tr className="text-[11px] text-faint">
-                          <th className="text-left font-medium py-1.5 pl-2 w-8">#</th>
-                          <th className="text-left font-medium py-1.5">{tt("Team")}</th>
-                          <th className="text-right font-medium py-1.5 num w-9">P</th>
-                          <th className="text-right font-medium py-1.5 num w-9">W</th>
-                          <th className="text-right font-medium py-1.5 num w-9">D</th>
-                          <th className="text-right font-medium py-1.5 num w-9">L</th>
-                          <th className="text-right font-medium py-1.5 num w-16 hidden sm:table-cell">{tt("Goals")}</th>
-                          <th className="text-right font-medium py-1.5 num w-10">{tt("GD")}</th>
-                          <th className="text-right font-medium py-1.5 num w-10 pr-2">{tt("Pts")}</th>
+                          <th className="text-start font-medium py-1.5 ps-2 w-8">#</th>
+                          <th className="text-start font-medium py-1.5">{tt("Team")}</th>
+                          <th className="text-end font-medium py-1.5 num w-9">P</th>
+                          <th className="text-end font-medium py-1.5 num w-9">W</th>
+                          <th className="text-end font-medium py-1.5 num w-9">D</th>
+                          <th className="text-end font-medium py-1.5 num w-9">L</th>
+                          <th className="text-end font-medium py-1.5 num w-16 hidden sm:table-cell">{tt("Goals")}</th>
+                          <th className="text-end font-medium py-1.5 num w-10">{tt("GD")}</th>
+                          <th className="text-end font-medium py-1.5 num w-10 pe-2">{tt("Pts")}</th>
                           {hasForm && <th className="text-center font-medium py-1.5 w-[104px] hidden md:table-cell" title={tt("Last 5 league games, latest on the right")}>{tt("Form")}</th>}
                         </tr>
                       </thead>
                       <tbody>
                         {t.table.map(r => (
                           <tr key={r.team.id} className="border-t border-line/50 hover:bg-surface2/40">
-                            <td className="py-2 pl-2 num text-faint">{r.position}</td>
+                            <td className="py-2 ps-2 num text-faint">{r.position}</td>
                             <td className="py-2">
                               <Link to={teamLink(r.team, code)} className="flex items-center gap-2 min-w-0 hover:text-accent">
                                 <Crest team={r.team} />
                                 <span className="truncate font-medium text-ink">{tn(r.team)}</span>
                               </Link>
                             </td>
-                            <td className="py-2 text-right num text-muted">{r.playedGames}</td>
-                            <td className="py-2 text-right num text-muted">{r.won}</td>
-                            <td className="py-2 text-right num text-muted">{r.draw}</td>
-                            <td className="py-2 text-right num text-muted">{r.lost}</td>
-                            <td className="py-2 text-right num text-muted hidden sm:table-cell">{r.goalsFor ?? '–'}:{r.goalsAgainst ?? '–'}</td>
-                            <td className={`py-2 text-right num ${r.goalDifference > 0 ? 'text-win' : r.goalDifference < 0 ? 'text-loss' : 'text-muted'}`}>
+                            <td className="py-2 text-end num text-muted">{r.playedGames}</td>
+                            <td className="py-2 text-end num text-muted">{r.won}</td>
+                            <td className="py-2 text-end num text-muted">{r.draw}</td>
+                            <td className="py-2 text-end num text-muted">{r.lost}</td>
+                            <td className="py-2 text-end num text-muted hidden sm:table-cell">{r.goalsFor ?? '–'}:{r.goalsAgainst ?? '–'}</td>
+                            <td className={`py-2 text-end num ${r.goalDifference > 0 ? 'text-win' : r.goalDifference < 0 ? 'text-loss' : 'text-muted'}`}>
                               {r.goalDifference > 0 ? '+' : ''}
                               {r.goalDifference}
                             </td>
-                            <td className="py-2 pr-2 text-right num font-bold text-ink">{r.points}</td>
+                            <td className="py-2 pe-2 text-end num font-bold text-ink">{r.points}</td>
                             {hasForm && <td className="py-2 hidden md:table-cell">
                               <span className="flex justify-center gap-1">
                                 {String(r.form || '')
@@ -319,7 +319,7 @@ function League() {
                   const max = leaders === 'goals' ? top[0].goals || 1 : top[0].assists || 1
                   return (
                     <li key={s.player.id} className="flex items-center gap-3 py-1.5">
-                      <span className="w-5 text-xs num text-faint text-right">{i + 1}</span>
+                      <span className="w-5 text-xs num text-faint text-end">{i + 1}</span>
                       <Crest team={s.team} size={22} />
                       <span className="min-w-0 flex-1">
                         <Link to={scorerHref(s, code)} className="block text-sm font-semibold text-ink truncate hover:text-accent">{s.player.name}</Link>
@@ -327,8 +327,8 @@ function League() {
                           <span className="block h-full rounded-full bg-accent" style={{ width: `${(v / max) * 100}%` }} />
                         </span>
                       </span>
-                      <NameLink to={teamLink(s.team, code)} className="text-[11px] text-faint w-28 truncate text-right hidden sm:block">{tn(s.team)}</NameLink>
-                      <span className="font-display font-bold text-ink num w-6 text-right">{v}</span>
+                      <NameLink to={teamLink(s.team, code)} className="text-[11px] text-faint w-28 truncate text-end hidden sm:block">{tn(s.team)}</NameLink>
+                      <span className="font-display font-bold text-ink num w-6 text-end">{v}</span>
                     </li>
                   )
                 })}
@@ -354,13 +354,13 @@ function League() {
             </Card>
           )}
 
-          <Card title={tt("Next fixtures")} action={<Link to={`/football/matches?league=${code}`} className="text-xs font-bold text-accent">All →</Link>}>
+          <Card title={tt("Next fixtures")} action={<Link to={`/football/matches?league=${code}`} className="text-xs font-bold text-accent">All <span aria-hidden className="rtl-flip">→</span></Link>}>
             {!matches ? (
               <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 rounded-xl bg-surface2/60 animate-pulse" />)}</div>
             ) : upcoming.length === 0 ? (
               <p className="text-sm text-faint">{tt("No fixtures in the next 30 days.")}</p>
             ) : (
-              <ul className="max-h-[430px] overflow-y-auto overscroll-contain pr-1 space-y-1">
+              <ul className="max-h-[430px] overflow-y-auto overscroll-contain pe-1 space-y-1">
                 {upcoming.map(m => (
                   <li key={m.id}>
                     <FixtureRow m={m} />
@@ -377,7 +377,7 @@ function League() {
             ) : news.length === 0 ? (
               <p className="text-sm text-faint">{tt("No news about this league in the last two weeks.")}</p>
             ) : (
-              <ul className="max-h-[520px] overflow-y-auto overscroll-contain pr-1 space-y-1">
+              <ul className="max-h-[520px] overflow-y-auto overscroll-contain pe-1 space-y-1">
                 {news.map(n => (
                   <li key={n.link}>
                     <a href={n.link} target="_blank" rel="noreferrer" className="flex gap-3 p-2 rounded-xl hover:bg-surface2/60 transition-colors">
@@ -413,7 +413,7 @@ function League() {
                 </span>
               ) : undefined}
             >
-              <ul className="max-h-[430px] overflow-y-auto overscroll-contain pr-1 divide-y divide-line/50">
+              <ul className="max-h-[430px] overflow-y-auto overscroll-contain pe-1 divide-y divide-line/50">
                 {edition.matches.map(m => {
                   const ft = m.score?.fullTime
                   return (
@@ -435,7 +435,7 @@ function League() {
           )}
 
           <section className="card p-3">
-            <RecentResults code={code} limit={50} days={120} compact large listClass="max-h-[430px] overflow-y-auto overscroll-contain pr-1" />
+            <RecentResults code={code} limit={50} days={120} compact large listClass="max-h-[430px] overflow-y-auto overscroll-contain pe-1" />
           </section>
       </>}
     />
@@ -462,7 +462,7 @@ function FixtureRow({ m }: { m: Match }) {
         <span className="flex items-center gap-1.5 text-[13px] sm:text-sm"><Crest team={m.homeTeam} size={16} /><span className="truncate text-ink">{tn(m.homeTeam)}</span></span>
         <span className="flex items-center gap-1.5 text-[13px] sm:text-sm"><Crest team={m.awayTeam} size={16} /><span className="truncate text-ink">{tn(m.awayTeam)}</span></span>
       </span>
-      <span className="flex-shrink-0 text-right flex flex-col items-end">
+      <span className="flex-shrink-0 text-end flex flex-col items-end">
         {covered ? (
           <button
             onClick={e => {

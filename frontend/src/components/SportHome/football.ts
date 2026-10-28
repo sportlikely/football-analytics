@@ -5,7 +5,7 @@ import { type Prediction, doubleChance, dcLabel, shortTeam } from '../../lib/pre
 import { useAuth } from '../../lib/auth'
 import { matchFame } from '../../lib/fame'
 import { useFavorites } from '../../lib/favorites'
-import { t as tt } from '../../lib/i18n'
+import { t as tt, LOCALE } from '../../lib/i18n'
 import { slModel } from '../../lib/modelNames'
 import type { SportAdapter, SportHomeData, HGame, HNews, HRecordRow, HResult, HSpecialItem } from './types'
 import { footballTeamHref } from '../../lib/teamLink'
@@ -204,7 +204,7 @@ function useFootballData(): SportHomeData {
     news,
     full,
     record: {
-      rows, aside: summary ? (summary.doubleChance?.n ? tt("{0} games, last {1} days", { 0: summary.doubleChance.n.toLocaleString(), 1: summary.days }) : tt("last {0} days", { 0: summary.days })) : null,
+      rows, aside: summary ? (summary.doubleChance?.n ? tt("{0} games, last {1} days", { 0: summary.doubleChance.n.toLocaleString(LOCALE), 1: summary.days }) : tt("last {0} days", { 0: summary.days })) : null,
       note: `${tt("Picks right, every game counted. Each prediction is saved before kick-off and never edited.")} ${tt("Double chance = one of the two results we rate highest (1X, X2 or 12).")}`,
       link: { to: '/football/accuracy', label: tt("See the full record →") },
       empty: { text: tt("No finished games yet.") }
@@ -220,7 +220,7 @@ function useFootballData(): SportHomeData {
     },
     results: { rows: resultRows, days: 30, link: { to: '/football/accuracy', label: tt("How accurate is the model? →") } },
     introStats: summary?.doubleChance?.v3 != null ? [
-      { value: `${summary.doubleChance.v3}%`, label: tt("right · double chance"), sub: tt("{0} games, last {1} days", { 0: summary.doubleChance.n.toLocaleString(), 1: summary.days }) },
+      { value: `${summary.doubleChance.v3}%`, label: tt("right · double chance"), sub: tt("{0} games, last {1} days", { 0: summary.doubleChance.n.toLocaleString(LOCALE), 1: summary.days }) },
       ...(sure ? [{ value: `${sure.pct}%`, label: tt("when we're {0}%+ sure · double chance", { 0: sure.min }), sub: tt("{0} games", { 0: sure.n }) }] : [])
     ] : undefined
   }

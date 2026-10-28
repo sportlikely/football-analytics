@@ -16,12 +16,15 @@ const FRONT = path.resolve(here, '../../frontend/src');
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'fix206-how-'));
 process.env.NODE_ENV = 'production';
 process.env.LOG_LEVEL = 'warn';
+process.env.PUBLIC_LANGS = 'en,es,pt,de,fr,it,tr,ar,he'; // fix257: ar / he are admin-only by default; the crawler pages are tested as public
 const require = createRequire(import.meta.url);
 const { db } = require('../dist/db/index.js');
 const hiw = require('../dist/services/howItWorks.js');
 const { renderIndex, seoPage, sitemapXml, SITEMAPS } = require('../dist/services/seo.js');
 
-const LANGS = ['de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'];
+const LANGS = ['de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru', 'ar', 'he'];
+/** fix257: changelog entries carry their own text in these; ar / he show the English until an entry has its own */
+const CHANGELOG_LANGS = ['de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru'];
 const INPUT_FILES = { football: 'gridModel', basketball: 'bbModel', 'american-football': 'nflModel', tennis: 'tennisModel' };
 const inputs = {};
 for (const [s, f] of Object.entries(INPUT_FILES)) inputs[s] = (await import(pathToFileURL(path.join(SRC, `${f}.inputs.ts`)).href)).MODEL_INPUTS;
@@ -41,7 +44,7 @@ test('every locale has every string of the pages, the model inputs and the new U
     // placeholders survive the translation
     for (const k of keys) for (const p of k.match(/\{\w+\}/g) || []) assert.ok(d[k].includes(p), `${l}: "${k}" lost ${p}`);
   }
-  for (const e of changelog) for (const l of ['en', ...LANGS]) assert.ok(e.text[l]?.trim(), `changelog ${e.date}: no ${l} text`);
+  for (const e of changelog) for (const l of ['en', ...CHANGELOG_LANGS]) assert.ok(e.text[l]?.trim(), `changelog ${e.date}: no ${l} text`);
 });
 
 test('the input lists match the model configs and the code', () => {
@@ -87,7 +90,7 @@ test('the changelog: newest first, valid entries, renders for crawlers in every 
     const html = renderIndex('<html lang="en"><head><title>x</title></head><body><div id="root"></div></body></html>', s);
     assert.ok(html.includes('hreflang="de"') && html.includes('hreflang="x-default"'));
     const first = changelog.find(e => hiw.hiwPublic(e.sport));
-    assert.ok(s.body.includes(first.text[l].replace(/"/g, '&quot;').replace(/'/g, '&#39;')), `${l}: newest entry missing`);
+    assert.ok(s.body.includes((first.text[l] || first.text.en).replace(/"/g, '&quot;').replace(/'/g, '&#39;')), `${l}: newest entry missing`);
   }
   assert.ok(SITEMAPS['sitemap-football.xml']().includes('/changelog</loc>'));
   assert.ok(sitemapXml().includes('sitemap-football.xml'));

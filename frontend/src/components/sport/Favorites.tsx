@@ -133,7 +133,7 @@ export default function Favorites({ a }: { a: FavoritesAdapter }) {
                     {gs.map(g => (
                       <div key={g.id}>
                         <GameRow g={g} showComp />
-                        <div className="px-3 sm:px-4 -mt-1.5 pb-2 pl-[68px] sm:pl-[72px] text-[11px] text-accent/90 truncate">★ {g.favWhy.join(' · ')}</div>
+                        <div className="px-3 sm:px-4 -mt-1.5 pb-2 ps-[68px] sm:ps-[72px] text-[11px] text-accent/90 truncate">★ {g.favWhy.join(' · ')}</div>
                       </div>
                     ))}
                   </div>

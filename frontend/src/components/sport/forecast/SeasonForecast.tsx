@@ -81,9 +81,9 @@ function ChanceTable({ data, rows, teamHref }: { data: FcLeague; rows: FcTeam[];
     <div className="overflow-x-auto -mx-1 px-1">
       <table className="w-full text-sm num">
         <thead>
-          <tr className="text-[11px] text-faint text-right">
-            <th className="text-left font-medium py-1.5 pr-2 w-6">#</th>
-            <th className="text-left font-medium py-1.5">{t('Team')}</th>
+          <tr className="text-[11px] text-faint text-end">
+            <th className="text-start font-medium py-1.5 pe-2 w-6">#</th>
+            <th className="text-start font-medium py-1.5">{t('Team')}</th>
             <th className="font-medium py-1.5 px-2 whitespace-nowrap">{sport === 'football' ? t('Points now') : t('Record now')}</th>
             <th className="font-medium py-1.5 px-2 whitespace-nowrap">{sport === 'football' ? t('Avg points') : t('Avg wins')}</th>
             <th className="font-medium py-1.5 px-2 whitespace-nowrap">{t('Avg place')}</th>
@@ -93,21 +93,21 @@ function ChanceTable({ data, rows, teamHref }: { data: FcLeague; rows: FcTeam[];
         <tbody className="divide-y divide-line">
           {rows.map((x, i) => (
             <tr key={x.id} className={x.locked ? 'text-faint' : ''}>
-              <td className="py-2 pr-2 text-faint">{x.locked ? x.now.rank : i + 1}</td>
+              <td className="py-2 pe-2 text-faint">{x.locked ? x.now.rank : i + 1}</td>
               <td className="py-2 min-w-[7rem] max-w-[9rem] sm:max-w-[14rem]"><Name x={x} teamHref={teamHref} /></td>
-              <td className="py-2 px-2 text-right text-muted">{nowText(sport, x)}</td>
+              <td className="py-2 px-2 text-end text-muted">{nowText(sport, x)}</td>
               {x.locked ? (
-                <td colSpan={2 + zones.length} className="py-2 px-2 text-right" aria-label={t('Pro')}>
+                <td colSpan={2 + zones.length} className="py-2 px-2 text-end" aria-label={t('Pro')}>
                   <span className="inline-block blur-[5px] opacity-60 select-none" aria-hidden>{zones.map(() => '00%').join('  ')} 00.0</span>
                 </td>
               ) : (
                 <>
-                  <td className="py-2 px-2 text-right">{x.avgPts?.toFixed(1)}</td>
-                  <td className="py-2 px-2 text-right">{x.avgPos?.toFixed(1)}</td>
+                  <td className="py-2 px-2 text-end">{x.avgPts?.toFixed(1)}</td>
+                  <td className="py-2 px-2 text-end">{x.avgPos?.toFixed(1)}</td>
                   {zones.map(z => {
                     const v = x.zones?.[z] ?? 0
                     return (
-                      <td key={z} className="py-2 px-2 text-right">
+                      <td key={z} className="py-2 px-2 text-end">
                         <span className={`inline-block min-w-[2.75rem] rounded-md px-1.5 py-0.5 ${v >= 0.005 ? (BAD_ZONE(z) ? 'text-loss' : 'text-ink') : 'text-faint'}`}
                           style={v >= 0.005 ? { background: `rgb(var(--${BAD_ZONE(z) ? 'loss' : 'accent'}) / ${Math.min(0.35, v * 0.35 + 0.04)})` } : undefined}>{pct(v, extremes)}</span>
                       </td>
@@ -132,7 +132,7 @@ function HeatMap({ rows, teamHref, extremes }: { rows: FcTeam[]; teamHref: (id: 
       <table className="text-[11px] num border-separate border-spacing-0.5">
         <thead>
           <tr className="text-faint">
-            <th className="text-left font-medium pr-2 sticky left-0 bg-surface">{t('Team')}</th>
+            <th className="text-start font-medium pe-2 sticky start-0 bg-surface">{t('Team')}</th>
             {Array.from({ length: n }, (_, k) => <th key={k} className="font-medium w-8 text-center">{k + 1}</th>)}
           </tr>
         </thead>
@@ -142,7 +142,7 @@ function HeatMap({ rows, teamHref, extremes }: { rows: FcTeam[]; teamHref: (id: 
             return (
             <Fragment key={x.id}>
               <tr>
-                <td className="pr-2 sticky left-0 bg-surface min-w-[7rem] max-w-[10rem]"><Name x={x} teamHref={teamHref} /></td>
+                <td className="pe-2 sticky start-0 bg-surface min-w-[7rem] max-w-[10rem]"><Name x={x} teamHref={teamHref} /></td>
                 {x.pos!.map((p, k) => (
                   <td key={k} className="w-8 h-7 text-center rounded" title={`${x.name} · ${k + 1} · ${pct(p, extremes)}`}
                     style={{ background: p > 0 ? `rgb(var(--accent) / ${Math.min(0.85, p * 1.6)})` : undefined, color: p > 0.4 ? 'rgb(var(--bg))' : undefined }}>

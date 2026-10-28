@@ -1,4 +1,4 @@
-import { t } from '../../../lib/i18n'
+import { t, ltr } from '../../../lib/i18n'
 
 /** fix219: what the backend sends (backend/src/utils/bbGridMath.ts GridView) */
 export interface GridView {
@@ -47,29 +47,29 @@ export default function GridSplit({ grid, home, away }: { grid: GridView; home: 
         <table className="w-full text-xs">
           <thead>
             <tr className="text-faint">
-              <th className="text-left font-medium py-1">{t('Parameter')}</th>
-              <th className="text-right font-medium py-1 w-12">{t('Rel.')}</th>
-              <th className="text-right font-medium py-1 w-16 truncate max-w-[4rem]">{home}</th>
-              <th className="text-right font-medium py-1 w-16 truncate max-w-[4rem]">{away}</th>
-              <th className="text-right font-medium py-1 w-14">{t('Edge')}</th>
+              <th className="text-start font-medium py-1">{t('Parameter')}</th>
+              <th className="text-end font-medium py-1 w-12">{t('Rel.')}</th>
+              <th className="text-end font-medium py-1 w-16 truncate max-w-[4rem]">{home}</th>
+              <th className="text-end font-medium py-1 w-16 truncate max-w-[4rem]">{away}</th>
+              <th className="text-end font-medium py-1 w-14">{t('Edge')}</th>
             </tr>
           </thead>
           <tbody>
             {grid.rows.map(r => (
               <tr key={r.id} className="border-t border-line/40">
-                <td className="py-1 pr-2 text-muted">{rowName(r.key)}</td>
-                <td className="py-1 text-right num text-faint">{r.rel}</td>
-                <td className="py-1 text-right num text-ink">{num(r.home)}</td>
-                <td className="py-1 text-right num text-ink">{num(r.away)}</td>
-                <td className={`py-1 text-right num font-semibold ${r.edge > 0 ? 'text-home' : r.edge < 0 ? 'text-away' : 'text-faint'}`}>{r.edge > 0 ? '+' : ''}{r.edge}</td>
+                <td className="py-1 pe-2 text-muted">{rowName(r.key)}</td>
+                <td className="py-1 text-end num text-faint">{r.rel}</td>
+                <td className="py-1 text-end num text-ink">{num(r.home)}</td>
+                <td className="py-1 text-end num text-ink">{num(r.away)}</td>
+                <td className={`py-1 text-end num font-semibold ${r.edge > 0 ? 'text-home' : r.edge < 0 ? 'text-away' : 'text-faint'}`}>{ltr(`${r.edge > 0 ? '+' : ''}${r.edge}`)}</td>
               </tr>
             ))}
             <tr className="border-t border-line/70 font-semibold">
               <td className="py-1 text-ink">{t('Total')}</td>
               <td />
-              <td className="py-1 text-right num text-ink">{grid.points.home}</td>
-              <td className="py-1 text-right num text-ink">{grid.points.away}</td>
-              <td className={`py-1 text-right num ${grid.points.home >= grid.points.away ? 'text-home' : 'text-away'}`}>{grid.points.home - 500 > 0 ? '+' : ''}{grid.points.home - 500}</td>
+              <td className="py-1 text-end num text-ink">{grid.points.home}</td>
+              <td className="py-1 text-end num text-ink">{grid.points.away}</td>
+              <td className={`py-1 text-end num ${grid.points.home >= grid.points.away ? 'text-home' : 'text-away'}`}>{grid.points.home - 500 > 0 ? '+' : ''}{grid.points.home - 500}</td>
             </tr>
           </tbody>
         </table>

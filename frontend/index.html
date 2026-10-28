@@ -2,6 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // fix257: Arabic and Hebrew read right to left: mirror the page before the first paint (the app keeps it in step).
+      (function () {
+        var m = /^\/(ar|he)(\/|$)/.exec(location.pathname);
+        if (m) { document.documentElement.dir = 'rtl'; document.documentElement.lang = m[1]; }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -58,7 +65,9 @@
           fr: ['Mise à jour de SportLikely…', 'De retour dans un instant.', 'Recharger'],
           it: ['Aggiornamento di SportLikely…', 'Torniamo tra un momento.', 'Ricarica'],
           pt: ['Atualizando o SportLikely…', 'Voltamos em um instante.', 'Recarregar'],
-          tr: ['SportLikely güncelleniyor…', 'Birazdan döneceğiz.', 'Yeniden yükle']
+          tr: ['SportLikely güncelleniyor…', 'Birazdan döneceğiz.', 'Yeniden yükle'],
+          ar: ['جارٍ تحديث SportLikely…', 'سنعود خلال لحظات.', 'إعادة التحميل'],
+          he: ['SportLikely מתעדכן…', 'נחזור בעוד רגע.', 'לטעון מחדש']
         };
         var report = function (why) {
           try {
@@ -84,7 +93,7 @@
         var showCard = function (why) {
           if (card || mounted) return;
           if (hardReload()) return;
-          var lang = (/^\/(de|es|fr|it|pt|tr)(\/|$)/.exec(location.pathname) || [])[1] || 'en', t = WORDS[lang];
+          var lang = (/^\/(de|es|fr|it|pt|tr|ar|he)(\/|$)/.exec(location.pathname) || [])[1] || 'en', t = WORDS[lang];
           var dark = de.classList.contains('dark');
           card = d.createElement('div');
           card.setAttribute('role', 'alert');

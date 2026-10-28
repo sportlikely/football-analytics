@@ -17,7 +17,7 @@ export default function PlayerPhoto({ src, name, flag, size = 40, square = false
   const url = officialPhoto(src)
   const shape = square ? 'rounded-3xl' : 'rounded-full'
   const badge = flag && size >= 28 ? (
-    <span aria-hidden className="absolute -bottom-0.5 -right-0.5 grid place-items-center rounded-full bg-surface ring-2 ring-surface leading-none" style={{ width: Math.round(size * 0.42), height: Math.round(size * 0.42), fontSize: Math.round(size * 0.3) }}>{flag}</span>
+    <span aria-hidden className="absolute -bottom-0.5 -end-0.5 grid place-items-center rounded-full bg-surface ring-2 ring-surface leading-none" style={{ width: Math.round(size * 0.42), height: Math.round(size * 0.42), fontSize: Math.round(size * 0.3) }}>{flag}</span>
   ) : null
   return (
     <span className={`relative inline-grid flex-shrink-0 ${className}`} style={{ width: size, height: size }}>

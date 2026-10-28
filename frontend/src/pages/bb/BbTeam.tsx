@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
-import { t, LOCALE } from '../../lib/i18n'
+import { t, LOCALE, ltr } from '../../lib/i18n'
 import { useBbConfig, bbTeamFav, type BbGame } from '../../lib/bb'
 import { useNews, NewsRows } from '../../components/NewsList'
 import { GameList, Skeleton } from './parts'
@@ -104,7 +104,7 @@ export default function BbTeam() {
                           <div className="relative h-2 mt-1 rounded-full bg-surface2">
                             <span className="absolute left-1/2 top-0 bottom-0 w-px bg-line" />
                             <span className={`absolute top-0 bottom-0 rounded-full ${Math.abs(diff) < (r.scale || 1) * 0.15 ? 'bg-faint' : good ? 'bg-win' : 'bg-loss'}`}
-                              style={rel >= 0 ? { left: '50%', width: `${rel * 50}%` } : { right: '50%', width: `${-rel * 50}%` }} />
+                              style={rel >= 0 ? { insetInlineStart: '50%', width: `${rel * 50}%` } : { insetInlineEnd: '50%', width: `${-rel * 50}%` }} />
                           </div>
                         </li>
                       )
@@ -130,11 +130,11 @@ export default function BbTeam() {
               {s && s.games > 0 && (
                 <Card title={an.previousSeason ? t('Last season in numbers') : t('Season in numbers')}>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                    <dt className="text-muted">{t('Home record')}</dt><dd className="text-right num text-ink">{s.homeWon}–{s.homeLost}{s.marginHome !== null ? ` (${s.marginHome > 0 ? '+' : ''}${s.marginHome})` : ''}</dd>
-                    <dt className="text-muted">{t('Away record')}</dt><dd className="text-right num text-ink">{s.awayWon}–{s.awayLost}{s.marginAway !== null ? ` (${s.marginAway > 0 ? '+' : ''}${s.marginAway})` : ''}</dd>
-                    <dt className="text-muted">{t('Back-to-backs (2nd night)')}</dt><dd className="text-right num text-ink">{s.b2bWon}–{s.b2bLost}</dd>
-                    <dt className="text-muted">{t('Close games (5 points or less)')}</dt><dd className="text-right num text-ink">{s.closeWon}–{s.closeLost}</dd>
-                    {d.averages && <><dt className="text-muted">{t('Points scored / allowed (last 10)')}</dt><dd className="text-right num text-ink">{d.averages.pointsFor} / {d.averages.pointsAgainst}</dd></>}
+                    <dt className="text-muted">{t('Home record')}</dt><dd className="text-end num text-ink">{s.homeWon}–{s.homeLost}{s.marginHome !== null ? ` (${s.marginHome > 0 ? '+' : ''}${s.marginHome})` : ''}</dd>
+                    <dt className="text-muted">{t('Away record')}</dt><dd className="text-end num text-ink">{s.awayWon}–{s.awayLost}{s.marginAway !== null ? ` (${s.marginAway > 0 ? '+' : ''}${s.marginAway})` : ''}</dd>
+                    <dt className="text-muted">{t('Back-to-backs (2nd night)')}</dt><dd className="text-end num text-ink">{s.b2bWon}–{s.b2bLost}</dd>
+                    <dt className="text-muted">{t('Close games (5 points or less)')}</dt><dd className="text-end num text-ink">{s.closeWon}–{s.closeLost}</dd>
+                    {d.averages && <><dt className="text-muted">{t('Points scored / allowed (last 10)')}</dt><dd className="text-end num text-ink">{d.averages.pointsFor} / {d.averages.pointsAgainst}</dd></>}
                   </dl>
                   <p className="mt-3 text-[11px] text-faint">{t('In brackets: average points won or lost by.')}</p>
                 </Card>
@@ -182,7 +182,7 @@ function MarginChart({ games, team }: { games: Analysis['last20']; team: { id: n
           return (
             <MaybeLink key={g.id} to={matchHref('basketball', g.id, g.home ? { home: team.name, homeId: team.id, away: g.opponent, date: g.kickoff } : { home: g.opponent, away: team.name, awayId: team.id, date: g.kickoff })} className="relative h-full group" style={{ width: `${w}%` }}
               title={`${new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })} · ${g.home ? t('H') : t('A')} ${g.opponent} · ${g.for}–${g.against}`}>
-              <span className={`absolute left-[15%] right-[15%] rounded-sm ${g.margin > 0 ? 'bg-win' : 'bg-loss'} group-hover:opacity-80`}
+              <span className={`absolute start-[15%] end-[15%] rounded-sm ${g.margin > 0 ? 'bg-win' : 'bg-loss'} group-hover:opacity-80`}
                 style={g.margin > 0 ? { bottom: '50%', height: `${h}%` } : { top: '50%', height: `${h}%` }} />
             </MaybeLink>
           )
@@ -202,39 +202,39 @@ function SquadCard({ players }: { players: SquadPlayer[] }) {
         <table className="w-full text-xs num">
           <thead>
             <tr className="text-faint">
-              <th className="text-left font-semibold py-1 px-2 w-7">#</th>
-              <th className="text-left font-semibold py-1 pr-2">{t('Player')}</th>
-              <th className="text-right font-semibold px-1">{t('GP')}</th>
-              <th className="text-right font-semibold px-1">{t('MIN')}</th>
-              <th className="text-right font-semibold px-1">{t('PTS')}</th>
-              <th className="text-right font-semibold px-1">{t('REB')}</th>
-              <th className="text-right font-semibold px-1">{t('AST')}</th>
-              <th className="text-right font-semibold px-1">{t('FG%')}</th>
-              <th className="text-right font-semibold px-1">{t('3P%')}</th>
-              {adv && <><th className="text-right font-semibold px-1" title={t('Player impact estimate: share of everything that happened on the court')}>PIE</th><th className="text-right font-semibold px-1">{t('USG%')}</th><th className="text-right font-semibold px-2">{t('Net')}</th></>}
+              <th className="text-start font-semibold py-1 px-2 w-7">#</th>
+              <th className="text-start font-semibold py-1 pe-2">{t('Player')}</th>
+              <th className="text-end font-semibold px-1">{t('GP')}</th>
+              <th className="text-end font-semibold px-1">{t('MIN')}</th>
+              <th className="text-end font-semibold px-1">{t('PTS')}</th>
+              <th className="text-end font-semibold px-1">{t('REB')}</th>
+              <th className="text-end font-semibold px-1">{t('AST')}</th>
+              <th className="text-end font-semibold px-1">{t('FG%')}</th>
+              <th className="text-end font-semibold px-1">{t('3P%')}</th>
+              {adv && <><th className="text-end font-semibold px-1" title={t('Player impact estimate: share of everything that happened on the court')}>PIE</th><th className="text-end font-semibold px-1">{t('USG%')}</th><th className="text-end font-semibold px-2">{t('Net')}</th></>}
             </tr>
           </thead>
           <tbody>
             {players.map(p => (
               <tr key={p.id} className="border-t border-line/40 hover:bg-surface2/40">
                 <td className="py-1.5 px-2 text-faint">{p.number ?? ''}</td>
-                <td className="py-1.5 pr-2 font-sans whitespace-nowrap">
+                <td className="py-1.5 pe-2 font-sans whitespace-nowrap">
                   <Link to={playerHref('basketball', p.id, p.name)!} className="text-ink font-semibold hover:text-accent">{p.name}</Link>
-                  {p.position && <span className="ml-1.5 text-[10px] text-faint">{p.position}</span>}
-                  {p.injury && <span className="ml-1.5 rounded px-1 text-[9px] font-bold bg-loss/15 text-loss">{p.injury}</span>}
-                  {p.statsFrom && p.statsFrom !== 'current' && <span className="ml-1.5 rounded px-1 text-[9px] font-semibold bg-surface2 text-faint" title={t('No games this season yet: his last season in our leagues')}>{p.statsFrom.league ? `${p.statsFrom.league} ` : ''}{p.statsFrom.season}</span>}
+                  {p.position && <span className="ms-1.5 text-[10px] text-faint">{p.position}</span>}
+                  {p.injury && <span className="ms-1.5 rounded px-1 text-[9px] font-bold bg-loss/15 text-loss">{p.injury}</span>}
+                  {p.statsFrom && p.statsFrom !== 'current' && <span className="ms-1.5 rounded px-1 text-[9px] font-semibold bg-surface2 text-faint" title={t('No games this season yet: his last season in our leagues')}>{p.statsFrom.league ? `${p.statsFrom.league} ` : ''}{p.statsFrom.season}</span>}
                 </td>
-                <td className="text-right px-1 text-muted">{p.gp || '–'}</td>
-                <td className="text-right px-1 text-muted">{n(p.min)}</td>
-                <td className="text-right px-1 text-ink font-bold">{n(p.pts)}</td>
-                <td className="text-right px-1 text-muted">{n(p.reb)}</td>
-                <td className="text-right px-1 text-muted">{n(p.ast)}</td>
-                <td className="text-right px-1 text-muted">{n(p.fgPct)}</td>
-                <td className="text-right px-1 text-muted">{n(p.tpPct)}</td>
+                <td className="text-end px-1 text-muted">{p.gp || '–'}</td>
+                <td className="text-end px-1 text-muted">{n(p.min)}</td>
+                <td className="text-end px-1 text-ink font-bold">{n(p.pts)}</td>
+                <td className="text-end px-1 text-muted">{n(p.reb)}</td>
+                <td className="text-end px-1 text-muted">{n(p.ast)}</td>
+                <td className="text-end px-1 text-muted">{n(p.fgPct)}</td>
+                <td className="text-end px-1 text-muted">{n(p.tpPct)}</td>
                 {adv && <>
-                  <td className="text-right px-1 text-muted">{n(p.pie)}</td>
-                  <td className="text-right px-1 text-muted">{n(p.usg)}</td>
-                  <td className={`text-right px-2 ${p.net === null ? 'text-faint' : p.net > 0 ? 'text-win' : p.net < 0 ? 'text-loss' : 'text-muted'}`}>{p.net === null ? '–' : p.net > 0 ? `+${p.net}` : p.net}</td>
+                  <td className="text-end px-1 text-muted">{n(p.pie)}</td>
+                  <td className="text-end px-1 text-muted">{n(p.usg)}</td>
+                  <td className={`text-end px-2 ${p.net === null ? 'text-faint' : p.net > 0 ? 'text-win' : p.net < 0 ? 'text-loss' : 'text-muted'}`}>{p.net === null ? '–' : ltr(p.net > 0 ? `+${p.net}` : p.net)}</td>
                 </>}
               </tr>
             ))}

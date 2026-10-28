@@ -30,9 +30,10 @@ import { MODEL_INPUTS as BASKETBALL_INPUTS } from './bbModel.inputs';
 import { MODEL_INPUTS as NFL_INPUTS } from './nflModel.inputs';
 import { MODEL_INPUTS as TENNIS_INPUTS } from './tennisModel.inputs';
 export { HIW_TEXT, HIW_SPORTS, type HiwSport } from './howItWorks.text';
+import { ALL_LANGS, LANG_LOCALE, type SiteLang } from '../utils/langs';
 
-export type HiwLang = 'en' | 'es' | 'pt' | 'de' | 'fr' | 'it' | 'tr' | 'id' | 'hi' | 'pl' | 'el' | 'ru';
-export const HIW_LANGS: HiwLang[] = ['en', 'es', 'pt', 'de', 'fr', 'it', 'tr', 'id', 'hi', 'pl', 'el', 'ru'];
+export type HiwLang = SiteLang;
+export const HIW_LANGS: HiwLang[] = [...ALL_LANGS];
 /** Competitions with fewer finished games are left out of the table (too few to judge). */
 export const HIW_MIN_GAMES = 20;
 const DAYS = 365;
@@ -77,7 +78,7 @@ export function tr(lang: HiwLang, key: string, vars: Record<string, string | num
   return s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 }
 
-const LOCALE: Record<HiwLang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-BR', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
+const LOCALE: Record<HiwLang, string> = LANG_LOCALE;
 export const hiwDate = (iso: string, lang: HiwLang) => new Date(`${iso}T12:00:00Z`).toLocaleDateString(LOCALE[lang], { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 /* ---------- accuracy by competition: the sport's record, last 365 days ---------- */
@@ -177,7 +178,7 @@ export function faqAnswer(f: HiwFaq, lang: HiwLang): string {
 
 /* ---------- changelog: docs/changelog.json ---------- */
 
-export interface ChangelogEntry { date: string; sport: HiwSport | 'all'; kind: 'model' | 'site'; version: string | null; text: Record<HiwLang, string> }
+export interface ChangelogEntry { date: string; sport: HiwSport | 'all'; kind: 'model' | 'site'; version: string | null; text: { en: string } & Partial<Record<HiwLang, string>> } // a language without its own text shows the English
 const CHANGELOG_FILES = [process.env.CHANGELOG_FILE, path.resolve(__dirname, '../../../docs/changelog.json')].filter(Boolean) as string[];
 let changelogCache: { at: number; v: ChangelogEntry[] } | null = null;
 export function changelogAll(): ChangelogEntry[] {

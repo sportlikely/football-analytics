@@ -70,10 +70,10 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
   return (
     <div>
     <Link to={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff }) ?? ''} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
-      {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
+      {isLive && <span className="absolute start-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
         {favWhy.length > 0 && (
-          <span className="absolute -left-2.5 sm:-left-3 top-1/2 -translate-y-1/2 text-accent" title={t('Favorite: {0}', { 0: favWhy.map(f => f.name).join(', ') })}>
+          <span className="absolute -start-2.5 sm:-start-3 top-1/2 -translate-y-1/2 text-accent" title={t('Favorite: {0}', { 0: favWhy.map(f => f.name).join(', ') })}>
             <svg viewBox="0 0 24 24" className="w-3 h-3" fill="currentColor" aria-hidden><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z" /></svg>
           </span>
         )}
@@ -103,7 +103,7 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
               <span className={`text-[13px] truncate ${pick === side || won(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>
                 <span className="sm:hidden">{nick(team.name, g.league)}</span><span className="hidden sm:inline">{team.name}</span>
               </span>
-              {score !== null && <span className={`ml-auto pl-2 num text-[13px] font-extrabold tabular-nums ${isLive ? 'text-live' : done && !won(side) ? 'text-muted' : 'text-ink'}`}>{score}</span>}
+              {score !== null && <span className={`ms-auto ps-2 num text-[13px] font-extrabold tabular-nums ${isLive ? 'text-live' : done && !won(side) ? 'text-muted' : 'text-ink'}`}>{score}</span>}
             </div>
           )
         })}
@@ -147,7 +147,7 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
         {(isLive || done) && <ScorersToggle open={scOpen} onToggle={scToggle} />}
       </div>
     </Link>
-      {scOpen && <RowScorersLine href={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} live={isLive} homeName={nick(g.home.name, g.league)} awayName={nick(g.away.name, g.league)} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+      {scOpen && <RowScorersLine href={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!} live={isLive} homeName={nick(g.home.name, g.league)} awayName={nick(g.away.name, g.league)} className="px-3 sm:px-4 pb-2 ps-[3.6rem] sm:ps-[4.1rem]" />}
     </div>
   )
 }
@@ -206,14 +206,14 @@ export function StandTable({ title, rows, compact = false, highlight, league = 1
         <table className={`w-full text-sm ${compact ? '' : 'sm:min-w-[420px]'}`}>
           <thead>
             <tr className="text-[10px] uppercase tracking-wide text-faint">
-              <th className="text-left font-semibold py-1.5 px-1">{t('Team')}</th>
-              {conf && <th className="text-right font-semibold py-1.5 px-1" title={t('Conference games')}>{t('Conf')}</th>}
-              <th className="text-right font-semibold py-1.5 px-1">{t('W-L-T')}</th>
-              {!compact && <th className="hidden sm:table-cell text-right font-semibold py-1.5 px-1">{t('PCT')}</th>}
-              {!compact && <th className="hidden sm:table-cell text-right font-semibold py-1.5 px-1">{t('PF')}</th>}
-              {!compact && <th className="hidden sm:table-cell text-right font-semibold py-1.5 px-1">{t('PA')}</th>}
-              <th className="text-right font-semibold py-1.5 px-1">{t('Diff')}</th>
-              {!compact && <th className="text-right font-semibold py-1.5 px-1">{t('Streak')}</th>}
+              <th className="text-start font-semibold py-1.5 px-1">{t('Team')}</th>
+              {conf && <th className="text-end font-semibold py-1.5 px-1" title={t('Conference games')}>{t('Conf')}</th>}
+              <th className="text-end font-semibold py-1.5 px-1">{t('W-L-T')}</th>
+              {!compact && <th className="hidden sm:table-cell text-end font-semibold py-1.5 px-1">{t('PCT')}</th>}
+              {!compact && <th className="hidden sm:table-cell text-end font-semibold py-1.5 px-1">{t('PF')}</th>}
+              {!compact && <th className="hidden sm:table-cell text-end font-semibold py-1.5 px-1">{t('PA')}</th>}
+              <th className="text-end font-semibold py-1.5 px-1">{t('Diff')}</th>
+              {!compact && <th className="text-end font-semibold py-1.5 px-1">{t('Streak')}</th>}
             </tr>
           </thead>
           <tbody>
@@ -225,13 +225,13 @@ export function StandTable({ title, rows, compact = false, highlight, league = 1
                     <span className="truncate text-ink"><span className="sm:hidden">{nick(r.team.name, league)}</span><span className="hidden sm:inline">{r.team.name}</span></span>
                   </Link>
                 </td>
-                {conf && <td className="py-1.5 px-1 text-right num font-semibold text-ink">{r.confW ?? 0}-{r.confL ?? 0}</td>}
-                <td className={`py-1.5 px-1 text-right num ${conf ? 'text-muted' : 'font-semibold text-ink'}`}>{record(r)}</td>
-                {!compact && <td className="hidden sm:table-cell py-1.5 px-1 text-right num text-muted">{r.pct.toFixed(3).replace(/^0/, '')}</td>}
-                {!compact && <td className="hidden sm:table-cell py-1.5 px-1 text-right num text-muted">{r.pf}</td>}
-                {!compact && <td className="hidden sm:table-cell py-1.5 px-1 text-right num text-muted">{r.pa}</td>}
-                <td className={`py-1.5 px-1 text-right num font-semibold ${r.diff > 0 ? 'text-win' : r.diff < 0 ? 'text-loss' : 'text-muted'}`}>{r.diff > 0 ? '+' : ''}{r.diff}</td>
-                {!compact && <td className="py-1.5 px-1 text-right num text-muted">{r.streak || '–'}</td>}
+                {conf && <td className="py-1.5 px-1 text-end num font-semibold text-ink">{r.confW ?? 0}-{r.confL ?? 0}</td>}
+                <td className={`py-1.5 px-1 text-end num ${conf ? 'text-muted' : 'font-semibold text-ink'}`}>{record(r)}</td>
+                {!compact && <td className="hidden sm:table-cell py-1.5 px-1 text-end num text-muted">{r.pct.toFixed(3).replace(/^0/, '')}</td>}
+                {!compact && <td className="hidden sm:table-cell py-1.5 px-1 text-end num text-muted">{r.pf}</td>}
+                {!compact && <td className="hidden sm:table-cell py-1.5 px-1 text-end num text-muted">{r.pa}</td>}
+                <td className={`py-1.5 px-1 text-end num font-semibold ${r.diff > 0 ? 'text-win' : r.diff < 0 ? 'text-loss' : 'text-muted'}`}>{r.diff > 0 ? '+' : ''}{r.diff}</td>
+                {!compact && <td className="py-1.5 px-1 text-end num text-muted">{r.streak || '–'}</td>}
               </tr>
             ))}
           </tbody>

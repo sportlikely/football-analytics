@@ -163,11 +163,11 @@ function SetTable({ m }: { m: TMatch }) {
   return (
     <div className="overflow-x-auto">
       <table className="mx-auto text-xs num">
-        <thead><tr className="text-faint"><th className="px-3 text-left font-semibold" />{s.sets.map((_, i) => <th key={i} className="px-2.5 font-semibold">{t('Set {0}', { 0: i + 1 })}</th>)}{live && s.points && <th className="px-2.5 font-semibold">{t('Game')}</th>}</tr></thead>
+        <thead><tr className="text-faint"><th className="px-3 text-start font-semibold" />{s.sets.map((_, i) => <th key={i} className="px-2.5 font-semibold">{t('Set {0}', { 0: i + 1 })}</th>)}{live && s.points && <th className="px-2.5 font-semibold">{t('Game')}</th>}</tr></thead>
         <tbody>
           {([0, 1] as const).map(k => (
             <tr key={k}>
-              <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left whitespace-nowrap">{live && s.server === k + 1 && <span className="text-accent mr-1" title={t('Serving')}>●</span>}<PlayerName p={k === 0 ? m.home : m.away} short /></td>
+              <td className="px-3 py-0.5 text-muted font-semibold font-sans text-start whitespace-nowrap">{live && s.server === k + 1 && <span className="text-accent me-1" title={t('Serving')}>●</span>}<PlayerName p={k === 0 ? m.home : m.away} short /></td>
               {s.sets.map((x, i) => <td key={i} className={`px-2.5 text-center ${x[k] > x[1 - k] ? 'text-ink font-bold' : 'text-muted'}`}>{x[k]}</td>)}
               {live && s.points && <td className="px-2.5 text-center text-live font-bold">{s.points[k]}</td>}
             </tr>
@@ -240,10 +240,10 @@ function SetsCard({ m, p }: { m: TMatch; p: TPred }) {
             <div className="flex justify-between"><span className="text-muted">{t('Total games, median')}</span><span className="num font-bold text-ink">{g.median ?? '–'}</span></div>
             {typeof g.mean === 'number' && <div className="flex justify-between"><span className="text-muted">{t('Total games, average')}</span><span className="num font-bold text-ink">{g.mean.toFixed(1)}</span></div>}
             <table className="w-full text-xs num mt-2">
-              <thead><tr className="text-faint"><th className="text-left font-semibold py-1">{t('Games')}</th><th className="text-right font-semibold">{t('Over')}</th><th className="text-right font-semibold">{t('Under')}</th></tr></thead>
+              <thead><tr className="text-faint"><th className="text-start font-semibold py-1">{t('Games')}</th><th className="text-end font-semibold">{t('Over')}</th><th className="text-end font-semibold">{t('Under')}</th></tr></thead>
               <tbody>
                 {Object.entries(g.over).map(([line, v]) => (
-                  <tr key={line} className="border-t border-line/50"><td className="py-1">{line}</td><td className="text-right">{Math.round(v * 100)}%</td><td className="text-right">{Math.round((1 - v) * 100)}%</td></tr>
+                  <tr key={line} className="border-t border-line/50"><td className="py-1">{line}</td><td className="text-end">{Math.round(v * 100)}%</td><td className="text-end">{Math.round((1 - v) * 100)}%</td></tr>
                 ))}
               </tbody>
             </table>
@@ -260,7 +260,7 @@ function Compare({ m, rows, note }: { m: TMatch; rows: { label: string; h: numbe
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <thead><tr className="text-xs text-faint"><th className="text-left font-semibold py-1.5 w-[34%]"><PlayerName p={m.home} short /></th><th /><th className="text-right font-semibold w-[34%]"><PlayerName p={m.away} short /></th></tr></thead>
+        <thead><tr className="text-xs text-faint"><th className="text-start font-semibold py-1.5 w-[34%]"><PlayerName p={m.home} short /></th><th /><th className="text-end font-semibold w-[34%]"><PlayerName p={m.away} short /></th></tr></thead>
         <tbody>
           {rows.map(r => {
             const better = r.h == null || r.a == null || r.h === r.a ? 0 : (r.h > r.a) !== !!r.lowerBetter ? 1 : 2
@@ -269,7 +269,7 @@ function Compare({ m, rows, note }: { m: TMatch; rows: { label: string; h: numbe
               <tr key={r.label} className="border-t border-line/50">
                 <td className={`py-1.5 num ${better === 1 ? 'font-bold text-ink' : 'text-muted'}`}>{f(r.h)}</td>
                 <td className="py-1.5 text-center text-xs text-muted px-2">{r.label}</td>
-                <td className={`py-1.5 num text-right ${better === 2 ? 'font-bold text-ink' : 'text-muted'}`}>{f(r.a)}</td>
+                <td className={`py-1.5 num text-end ${better === 2 ? 'font-bold text-ink' : 'text-muted'}`}>{f(r.a)}</td>
               </tr>
             )
           })}
@@ -377,7 +377,7 @@ function H2H({ m, d }: { m: TMatch; d: Data }) {
                   <Link to={tennisHref.match(g)} className="flex items-center gap-3 py-2 text-sm hover:bg-surface2/50 rounded-lg px-1">
                     <span className="w-20 text-xs text-faint shrink-0">{new Date(g.start).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: '2-digit' })}</span>
                     <span className="min-w-0 flex-1 truncate">{g.tournament.name}{roundName(g) ? ` · ${roundName(g)}` : ''}<span className="block text-[11px] text-faint"><SurfaceTag surface={g.tournament.surface} /></span></span>
-                    <span className="text-xs text-right shrink-0"><span className="font-bold text-ink">{surname(homeWon ? m.home : m.away)}</span><span className="block num text-muted">{setsText(g.score, g.winner === 2)}</span></span>
+                    <span className="text-xs text-end shrink-0"><span className="font-bold text-ink">{surname(homeWon ? m.home : m.away)}</span><span className="block num text-muted">{setsText(g.score, g.winner === 2)}</span></span>
                   </Link>
                 </li>
               )

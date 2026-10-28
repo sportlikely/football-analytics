@@ -48,7 +48,7 @@ export function LiveRow({ g, showLeague = false }: { g: SGame; showLeague?: bool
         <span className="font-bold text-live tracking-wider whitespace-nowrap">{g.live?.label || tt("LIVE")}</span>
         {/* fix214: a long name gives way, the % never does ("Now: Prairie View A&M 64%" was cut before the number) */}
         {chance && (() => { const m = /^(.*?)\s*(\d+%)$/.exec(chance); return (
-          <span className="num font-bold text-accent flex min-w-0"><span className="truncate">{m ? m[1] : chance}</span>{m && <span className="shrink-0 pl-1" data-testid="live-pct">{m[2]}</span>}</span>) })()}
+          <span className="num font-bold text-accent flex min-w-0"><span className="truncate">{m ? m[1] : chance}</span>{m && <span className="shrink-0 ps-1" data-testid="live-pct">{m[2]}</span>}</span>) })()}
         {pick && <span className="text-muted truncate">{pick.text}{pick.ok !== null && <> <span className={pick.ok ? 'text-win font-bold' : 'text-loss font-bold'}>{pick.ok ? '✓' : '✗'}</span> {tt('so far')}</>}</span>}
       </div>
       {(['H', 'A'] as const).map((s, i) => {
@@ -196,7 +196,7 @@ export default function Games({ a }: { a: GamesAdapter }) {
                   <h1 className="font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink">{tt("Live now")}</h1>
                   <p className="mt-1 text-sm text-muted num">{live.length}</p>
                 </div>
-                <Link to={gamesHref} className="text-sm font-bold text-accent">{`← ${tt("All games")}`}</Link>
+                <Link to={gamesHref} className="text-sm font-bold text-accent"><span aria-hidden className="rtl-flip">←</span> {tt("All games")}</Link>
               </div>
               {live.length === 0 && <div className="card p-12 text-center text-muted">{a.noLive}</div>}
               <div className="space-y-2">
@@ -215,7 +215,7 @@ export default function Games({ a }: { a: GamesAdapter }) {
               <p className="mt-1 text-sm text-muted" data-testid="games-count">
                 {/* fix214: no count before the data ("0 games in the next 7 days" showed for ~2 s) */}
                 {d.loading ? <span className="inline-block align-middle h-4 w-44 rounded bg-surface2/60 animate-pulse" aria-label={tt("Loading…")} /> : a.countLine(upcoming.length, days)}
-                {league !== 'ALL' && !favMode && chosen?.href && <Link to={chosen.href} className="ml-3 font-bold text-accent">{tt("League page →")}</Link>}
+                {league !== 'ALL' && !favMode && chosen?.href && <Link to={chosen.href} className="ms-3 font-bold text-accent">{tt("League page →")}</Link>}
               </p>
             </div>
             <div className="seg">

@@ -121,7 +121,7 @@ export default function YourPicks({ sport, gameId, home, away }: { sport: 'fb' |
           {err && <p className="text-xs text-loss" role="alert">{err}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <span className="text-[11px] text-faint">{locked ? tt('Your picks are saved in your personal record.') : made ? tt('Saved. Tap again to remove a pick.') : (sport === 'bb' ? tt('Tap to pick before tip-off.') : tt('Tap to pick before kick-off.'))}</span>
-            <Link to="/football/my-picks" className="text-xs font-semibold text-accent hover:underline">{tt('My record')} →</Link>
+            <Link to="/football/my-picks" className="text-xs font-semibold text-accent hover:underline">{tt('My record')} <span aria-hidden className="rtl-flip">→</span></Link>
           </div>
         </div>
       )}

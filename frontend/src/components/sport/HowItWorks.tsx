@@ -83,7 +83,7 @@ export default function HowItWorks({ sport }: { sport: HowSport }) {
     </th>
   )
   const bullets = (keys: readonly string[]) => (
-    <ul className="mt-3 space-y-2 text-sm text-muted list-disc pl-5 marker:text-accent">{keys.map(k => <li key={k}>{t(k)}</li>)}</ul>
+    <ul className="mt-3 space-y-2 text-sm text-muted list-disc ps-5 marker:text-accent">{keys.map(k => <li key={k}>{t(k)}</li>)}</ul>
   )
 
   return (
@@ -136,7 +136,7 @@ export default function HowItWorks({ sport }: { sport: HowSport }) {
         <p className="mt-2 text-sm text-muted">
           {d.model.since ? t('{0} went live on {1}.', { 0: d.model.name, 1: date(d.model.since) }) : t('{0} is not live yet.', { 0: d.model.name })}
         </p>
-        <Link to="/changelog" className="inline-block mt-2 text-sm font-bold text-accent">{t('See every change in the changelog')} →</Link>
+        <Link to="/changelog" className="inline-block mt-2 text-sm font-bold text-accent">{t('See every change in the changelog')} <span aria-hidden className="rtl-flip">→</span></Link>
       </Card>
 
       <Card>
@@ -146,16 +146,16 @@ export default function HowItWorks({ sport }: { sport: HowSport }) {
           <>
             <div className="mt-4 overflow-x-auto -mx-2">
               <table className="w-full text-sm">
-                <thead className="text-left text-xs text-muted border-b border-line">
-                  <tr>{head('name', t('Competition'))}{head('n', t('Games'), 'text-right')}{head('main', t('Main pick right'), 'text-right')}{head('brier', t('Brier score'), 'text-right')}</tr>
+                <thead className="text-start text-xs text-muted border-b border-line">
+                  <tr>{head('name', t('Competition'))}{head('n', t('Games'), 'text-end')}{head('main', t('Main pick right'), 'text-end')}{head('brier', t('Brier score'), 'text-end')}</tr>
                 </thead>
                 <tbody className="divide-y divide-line/50">
                   {rows.map(r => (
                     <tr key={r.key}>
                       <td className="py-2 px-2 text-ink truncate max-w-[180px] sm:max-w-none">{r.label}</td>
-                      <td className="py-2 px-2 text-right num text-muted">{r.n}</td>
-                      <td className="py-2 px-2 text-right num font-bold text-ink">{r.main == null ? '–' : `${r.main}%`}</td>
-                      <td className="py-2 px-2 text-right num text-muted">{r.brier == null ? '–' : r.brier.toFixed(3)}</td>
+                      <td className="py-2 px-2 text-end num text-muted">{r.n}</td>
+                      <td className="py-2 px-2 text-end num font-bold text-ink">{r.main == null ? '–' : `${r.main}%`}</td>
+                      <td className="py-2 px-2 text-end num text-muted">{r.brier == null ? '–' : r.brier.toFixed(3)}</td>
                     </tr>
                   ))}
                 </tbody>

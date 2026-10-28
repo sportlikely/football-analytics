@@ -37,7 +37,7 @@ export default function SportSwitch() {
         aria-expanded={open}
         aria-label={t('Choose a sport')}
         title={current.name}
-        className="h-9 pl-2 pr-1.5 inline-flex items-center gap-1.5 rounded-xl border border-line/80 bg-surface hover:border-faint text-ink"
+        className="h-9 ps-2 pe-1.5 inline-flex items-center gap-1.5 rounded-xl border border-line/80 bg-surface hover:border-faint text-ink"
       >
         <span className="text-sm font-bold leading-none">{current.short ? <><span className="sm:hidden">{current.short}</span><span className="hidden sm:inline">{current.name}</span></> : current.name}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-muted">
@@ -45,7 +45,7 @@ export default function SportSwitch() {
         </svg>
       </button>
       {open && (
-        <div role="menu" className="absolute left-0 top-11 z-50 w-60 rounded-2xl border border-line/80 bg-surface shadow-lift p-1.5">
+        <div role="menu" className="absolute start-0 top-11 z-50 w-60 rounded-2xl border border-line/80 bg-surface shadow-lift p-1.5">
           {SPORTS.map(s => {
             const active = s.id === current.id
             return (

@@ -200,11 +200,11 @@ export default function NflGame() {
           {showQ && (
             <div className="overflow-x-auto">
               <table className="mx-auto text-xs num">
-                <thead><tr className="text-faint"><th className="px-3 text-left font-semibold" />{['Q1', 'Q2', 'Q3', 'Q4', ...(ot ? ['OT'] : [])].map(x => <th key={x} className="px-3 font-semibold">{t(x)}</th>)}<th className="px-3 font-semibold">{t('Total')}</th></tr></thead>
+                <thead><tr className="text-faint"><th className="px-3 text-start font-semibold" />{['Q1', 'Q2', 'Q3', 'Q4', ...(ot ? ['OT'] : [])].map(x => <th key={x} className="px-3 font-semibold">{t(x)}</th>)}<th className="px-3 font-semibold">{t('Total')}</th></tr></thead>
                 <tbody>
                   {(['home', 'away'] as const).map(s => (
                     <tr key={s}>
-                      <td className="px-3 py-0.5 text-muted font-semibold font-sans text-left"><NameLink to={href.nflTeam(g[s].id, g[s].name)}>{nick(g[s].name, g.league)}</NameLink></td>
+                      <td className="px-3 py-0.5 text-muted font-semibold font-sans text-start"><NameLink to={href.nflTeam(g[s].id, g[s].name)}>{nick(g[s].name, g.league)}</NameLink></td>
                       {q![s].slice(0, ot ? 5 : 4).map((v, i) => <td key={i} className="px-3 text-center text-ink">{v ?? '–'}</td>)}
                       <td className="px-3 text-center text-ink font-bold">{g.score ? g.score[s] : '–'}</td>
                     </tr>
@@ -515,12 +515,12 @@ function Players({ g, data, at }: { g: Game; data: { home: Groups; away: Groups 
           <Card key={pg.label} title={t(pg.label)} action={at ? <LiveBoxLabel at={at} /> : undefined}>
             <div className="overflow-x-auto -mx-1">
               <table className="w-full text-sm min-w-[520px]">
-                <thead><tr className="text-[10px] uppercase tracking-wide text-faint"><th className="text-left font-semibold py-1 px-1">{t('Player')}</th>{cols.map(c => <th key={c} className="text-right font-semibold py-1 px-1">{c}</th>)}</tr></thead>
+                <thead><tr className="text-[10px] uppercase tracking-wide text-faint"><th className="text-start font-semibold py-1 px-1">{t('Player')}</th>{cols.map(c => <th key={c} className="text-end font-semibold py-1 px-1">{c}</th>)}</tr></thead>
                 <tbody>
                   {rows.map(r => (
                     <tr key={`${r.team.id}-${r.id}`} className="border-t border-line/50">
                       <td className="py-1.5 px-1"><Link to={playerHref('american-football', r.id, r.name)!} className="flex items-center gap-2 hover:text-accent"><TeamLogo team={r.team} size={14} /><span className="truncate">{r.name}</span></Link></td>
-                      {cols.map(c => <td key={c} className="py-1.5 px-1 text-right num text-muted">{r.stats[c] ?? '–'}</td>)}
+                      {cols.map(c => <td key={c} className="py-1.5 px-1 text-end num text-muted">{r.stats[c] ?? '–'}</td>)}
                     </tr>
                   ))}
                 </tbody>

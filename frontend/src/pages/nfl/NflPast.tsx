@@ -21,11 +21,11 @@ export default function NflPast() {
   const row = (label: string, m: M | null | undefined, home?: number) => (
     <tr key={label} className="border-t border-line/50">
       <td className="py-1.5 text-ink">{label}</td>
-      <td className="text-right num">{m?.games ?? '–'}</td>
-      <td className="text-right num font-bold text-ink">{m ? `${m.hit}%` : '–'}</td>
-      <td className="text-right num text-muted">{m?.logLoss ?? '–'}</td>
-      <td className="text-right num text-muted">{m?.brier ?? '–'}</td>
-      <td className="text-right num text-muted">{home !== undefined ? `${home}%` : ''}</td>
+      <td className="text-end num">{m?.games ?? '–'}</td>
+      <td className="text-end num font-bold text-ink">{m ? `${m.hit}%` : '–'}</td>
+      <td className="text-end num text-muted">{m?.logLoss ?? '–'}</td>
+      <td className="text-end num text-muted">{m?.brier ?? '–'}</td>
+      <td className="text-end num text-muted">{home !== undefined ? `${home}%` : ''}</td>
     </tr>
   )
   const block = (name: string, r: Report | null) => (
@@ -33,7 +33,7 @@ export default function NflPast() {
       {!r ? <p className="text-sm text-muted">No report yet: it is built on the server after the season backfill (Admin → NFL data), or open /api/admin/nfl-model{name === 'College football' ? '?league=2&' : '?'}rebuild=1.</p> : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
-            <thead><tr className="text-faint text-[11px]"><th className="text-left font-semibold">Season (test)</th><th className="text-right font-semibold">Games</th><th className="text-right font-semibold">Hit</th><th className="text-right font-semibold">Log loss</th><th className="text-right font-semibold">Brier</th><th className="text-right font-semibold">Home team</th></tr></thead>
+            <thead><tr className="text-faint text-[11px]"><th className="text-start font-semibold">Season (test)</th><th className="text-end font-semibold">Games</th><th className="text-end font-semibold">Hit</th><th className="text-end font-semibold">Log loss</th><th className="text-end font-semibold">Brier</th><th className="text-end font-semibold">Home team</th></tr></thead>
             <tbody>
               {r.seasons.map(s => row(String(s.season), s.blend || s.ab, s.homeTeamHit))}
               {r.seasons.some(s => s.fbsOnly) && r.seasons.map(s => s.fbsOnly ? row(`${s.season} FBS vs FBS`, s.fbsOnly) : null)}
@@ -44,7 +44,7 @@ export default function NflPast() {
               {r.fbsFcs && row('FBS vs FCS, all', r.fbsFcs)}
             </tbody>
           </table>
-          <p className="mt-2 text-[11px] text-faint">Baselines: home team {r.baselines.homeTeam.hit}% (LL {r.baselines.homeTeam.logLoss}), better record {r.baselines.betterRecord.hit}%. Efficiency blend {r.blend?.used ? 'kept' : 'not kept'}.{r.levels ? ` Teams: ${Object.entries(r.levels).map(([k, n]) => `${k} ${n}`).join(', ')}.` : ''} Built {new Date(r.builtAt).toLocaleString()}.</p>
+          <p className="mt-2 text-[11px] text-faint">Baselines: home team {r.baselines.homeTeam.hit}% (LL {r.baselines.homeTeam.logLoss}), better record {r.baselines.betterRecord.hit}%. Efficiency blend {r.blend?.used ? 'kept' : 'not kept'}.{r.levels ? ` Teams: ${Object.entries(r.levels).map(([k, n]) => `${k} ${n}`).join(', ')}.` : ''} Built {new Date(r.builtAt).toLocaleString('en-GB')}.</p>
         </div>
       )}
     </Card>
@@ -58,15 +58,15 @@ export default function NflPast() {
       {!d ? <Skeleton rows={4} h="h-32" /> : <>{block('NFL', d.nfl)}{d.experiments && <Card title={`nfl-v2 experiments · test seasons ${d.experiments.testSeasons.join(', ')}`}>
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
-            <thead><tr className="text-faint text-[11px]"><th className="text-left font-semibold">Variant</th><th className="text-right font-semibold">Games</th><th className="text-right font-semibold">Hit</th><th className="text-right font-semibold">Log loss</th><th className="text-right font-semibold">Weeks 1–4 LL</th><th className="text-right font-semibold">Rest LL</th></tr></thead>
+            <thead><tr className="text-faint text-[11px]"><th className="text-start font-semibold">Variant</th><th className="text-end font-semibold">Games</th><th className="text-end font-semibold">Hit</th><th className="text-end font-semibold">Log loss</th><th className="text-end font-semibold">Weeks 1–4 LL</th><th className="text-end font-semibold">Rest LL</th></tr></thead>
             <tbody>{d.experiments.variants.map(v => (
               <tr key={v.id} className={`border-t border-line/50 ${v.id === d.experiments!.best ? 'text-accent' : ''}`}>
-                <td className="py-1.5">{v.id} · {v.name}</td><td className="text-right num">{v.total.games}</td><td className="text-right num font-bold">{v.total.hit}%</td>
-                <td className="text-right num">{v.total.logLoss}</td><td className="text-right num text-muted">{v.weeks1to4.logLoss ?? '–'}</td><td className="text-right num text-muted">{v.rest.logLoss ?? '–'}</td>
+                <td className="py-1.5">{v.id} · {v.name}</td><td className="text-end num">{v.total.games}</td><td className="text-end num font-bold">{v.total.hit}%</td>
+                <td className="text-end num">{v.total.logLoss}</td><td className="text-end num text-muted">{v.weeks1to4.logLoss ?? '–'}</td><td className="text-end num text-muted">{v.rest.logLoss ?? '–'}</td>
               </tr>
             ))}</tbody>
           </table>
-          <p className="mt-2 text-[11px] text-faint">Best {d.experiments.best}: {d.experiments.adopted ? 'adopted as nfl-v2' : 'nfl-v1 kept'} ({d.experiments.reason}). Built {new Date(d.experiments.builtAt).toLocaleString()}. Per season and calibration: /api/admin/nfl-model.</p>
+          <p className="mt-2 text-[11px] text-faint">Best {d.experiments.best}: {d.experiments.adopted ? 'adopted as nfl-v2' : 'nfl-v1 kept'} ({d.experiments.reason}). Built {new Date(d.experiments.builtAt).toLocaleString('en-GB')}. Per season and calibration: /api/admin/nfl-model.</p>
         </div>
       </Card>}{block('College football', d.college)}<NflCalibration r={d.calibration} /></>}
     </div>

@@ -19,7 +19,7 @@ const PROSE = [
   'text-[15px] sm:text-base text-muted leading-relaxed',
   '[&_h2]:font-display [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-ink [&_h2]:mt-8 [&_h2]:mb-2',
   '[&_h3]:font-display [&_h3]:text-lg [&_h3]:font-bold [&_h3]:text-ink [&_h3]:mt-6 [&_h3]:mb-2',
-  '[&_p]:my-3 [&_ul]:my-3 [&_ul]:pl-5 [&_ul]:list-disc [&_li]:my-1.5 [&_li::marker]:text-accent',
+  '[&_p]:my-3 [&_ul]:my-3 [&_ul]:ps-5 [&_ul]:list-disc [&_li]:my-1.5 [&_li::marker]:text-accent',
   '[&_strong]:text-ink [&_strong]:font-semibold [&_a]:text-accent [&_a]:font-semibold hover:[&_a]:underline'
 ].join(' ')
 
@@ -56,7 +56,7 @@ export default function Guide() {
   if (!g) return <Spinner />
   return (
     <article className="max-w-2xl mx-auto px-4 py-6 sm:py-10">
-      <Link to="/guides" className="text-sm text-muted hover:text-ink">← {tt("Guides")}</Link>
+      <Link to="/guides" className="text-sm text-muted hover:text-ink"><span aria-hidden className="rtl-flip">←</span> {tt("Guides")}</Link>
       <h1 className="mt-3 font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-ink leading-tight">{g.h1}</h1>
       <div className={`mt-4 ${PROSE}`} onClick={onClick} dangerouslySetInnerHTML={{ __html: g.html }} />
       {g.related.length > 0 && (

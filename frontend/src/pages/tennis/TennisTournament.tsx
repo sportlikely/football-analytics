@@ -70,7 +70,7 @@ export default function TennisTournament() {
                   <span className="w-10 num text-faint shrink-0">{c.year}</span>
                   {c.winner.id ? <Link to={tennisHref.player(c.winner.id, c.winner.name)!} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{c.winner.name}</Link> : <span className="min-w-0 truncate font-semibold text-ink">{c.winner.name}</span>}
                   <span className="hidden sm:inline min-w-0 truncate text-xs text-faint">{t('beat {0}', { 0: c.runnerUp })}</span>
-                  <span className="ml-auto num text-xs text-muted shrink-0">{c.score}</span>
+                  <span className="ms-auto num text-xs text-muted shrink-0">{c.score}</span>
                 </li>
               ))}
             </ul>

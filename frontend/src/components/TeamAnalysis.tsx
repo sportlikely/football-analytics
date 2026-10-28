@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { t, LOCALE } from '../lib/i18n'
+import { t, LOCALE, ltr } from '../lib/i18n'
 import RecordLink from './RecordLink'
 import { matchHref } from '../lib/links'
 import { MaybeLink } from './MaybeLink'
@@ -86,7 +86,7 @@ function ScoreBar({ label, v }: { label: string; v: number | undefined }) {
       <span className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden">
         <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(4, Math.min(100, v * 10))}%` }} />
       </span>
-      <span className="w-8 text-right text-xs font-bold text-ink num">{Math.min(10, Math.max(0, v)).toFixed(1)}</span>
+      <span className="w-8 text-end text-xs font-bold text-ink num">{Math.min(10, Math.max(0, v)).toFixed(1)}</span>
     </div>
   )
 }
@@ -164,15 +164,15 @@ function FormTable({ form }: { form: NonNullable<Analysis['form']> }) {
       <table className="w-full text-sm min-w-[420px]">
         <thead>
           <tr className="text-[11px] text-faint">
-            <th className="text-left font-medium px-1 py-1" />
-            {shown.map(([k, s]) => <th key={k} className="text-right font-medium px-1 py-1">{k}<span className="block text-[10px] text-faint/80">{s.n} {t("games")}</span></th>)}
+            <th className="text-start font-medium px-1 py-1" />
+            {shown.map(([k, s]) => <th key={k} className="text-end font-medium px-1 py-1">{k}<span className="block text-[10px] text-faint/80">{s.n} {t("games")}</span></th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map(([label, f]) => (
             <tr key={label} className="border-t border-line/40">
               <td className="px-1 py-2 text-muted text-xs">{label}</td>
-              {shown.map(([k, s]) => <td key={k} className="px-1 py-2 text-right num font-semibold text-ink">{f(s)}</td>)}
+              {shown.map(([k, s]) => <td key={k} className="px-1 py-2 text-end num font-semibold text-ink">{f(s)}</td>)}
             </tr>
           ))}
         </tbody>
@@ -266,7 +266,7 @@ export function TeamAnalysisCard({ a, full }: { a: Analysis | null | undefined; 
                 <span
                   key={i}
                   title={`${shortDate(g.date)} · ${g.home ? 'vs' : 'at'} ${g.opp} · ${g.gf}–${g.ga}${g.xgf !== null && g.xga !== null ? ` · xG ${g.xgf.toFixed(1)}–${g.xga.toFixed(1)}` : ''}`}
-                  className="flex items-center gap-1 rounded-lg bg-surface2/70 pl-1 pr-1.5 py-1"
+                  className="flex items-center gap-1 rounded-lg bg-surface2/70 ps-1 pe-1.5 py-1"
                 >
                   <span className={`w-5 h-5 rounded-md grid place-items-center text-[10px] font-extrabold text-bg ${RES_BG[g.res]}`}>{g.res}</span>
                   <img src={g.oppLogo} alt={g.opp} className="w-4 h-4 object-contain" loading="lazy" />
@@ -309,7 +309,7 @@ export function TeamRecordCard({ rec, teamName, sport = 'football' }: { rec: Tea
                   <span className="w-12 text-[11px] text-faint">{shortDate(g.date)}</span>
                   <span className="flex-1 min-w-0 truncate text-sm text-muted">{g.home ? 'vs' : 'at'} <span className="text-ink font-semibold">{g.opp}</span></span>
                   <span className="text-sm num font-bold text-ink">{g.score}</span>
-                  <span className="w-12 text-right text-[11px] text-muted">{g.pick}</span>
+                  <span className="w-12 text-end text-[11px] text-muted">{g.pick}</span>
                   <span className={`w-5 h-5 rounded-full grid place-items-center text-[10px] font-extrabold ${g.hit ? 'bg-win/20 text-win' : 'bg-loss/20 text-loss'}`} aria-label={g.hit ? t("Right") : t("Wrong")}>
                     {g.hit ? '✓' : '✗'}
                   </span>
@@ -340,7 +340,7 @@ export interface BbAnalysis {
   record: TeamRecord
   notes?: { kind: 'plus' | 'minus' | 'note'; text: string }[]
 }
-const signed = (x: number, d = 1) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x).toFixed(d)}`
+const signed = (x: number, d = 1) => ltr(`${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x).toFixed(d)}`)
 
 export function BbTeamAnalysisCard({ a, full }: { a: BbAnalysis | null | undefined; full: boolean }) {
   if (!a) return null

@@ -114,7 +114,7 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
             <span className="label">{t("Password")}</span>
             <div className="relative mt-1">
               <input
-                className={`${input} pr-16`}
+                className={`${input} pe-16`}
                 type={showPw ? 'text' : 'password'}
                 required
                 minLength={mode === 'signup' ? 8 : undefined}
@@ -129,7 +129,7 @@ export default function Login({ mode: initial }: { mode: 'login' | 'signup' }) {
                 type="button"
                 onClick={() => setShowPw(v => !v)}
                 aria-pressed={showPw}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-muted hover:text-ink"
+                className="absolute end-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-muted hover:text-ink"
               >
                 {showPw ? t("Hide") : t("Show")}
               </button>

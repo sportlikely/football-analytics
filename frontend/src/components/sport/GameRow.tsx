@@ -94,10 +94,10 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
   return (
     <div>
     <Link to={g.href} state={g.linkState} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
-      {isLive && <span className="absolute left-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
+      {isLive && <span className="absolute start-0 inset-y-0 w-0.5 bg-live" aria-hidden />}
       <div className="relative w-10 flex-shrink-0 text-center leading-tight">
         {g.favWhy.length > 0 && (
-          <span className="absolute -left-2.5 sm:-left-3 top-1/2 -translate-y-1/2 text-accent" title={tt("Favorite: {0}", { 0: g.favWhy.join(', ') })}>
+          <span className="absolute -start-2.5 sm:-start-3 top-1/2 -translate-y-1/2 text-accent" title={tt("Favorite: {0}", { 0: g.favWhy.join(', ') })}>
             <svg viewBox="0 0 24 24" className="w-3 h-3" fill="currentColor" aria-hidden><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z" /></svg>
           </span>
         )}
@@ -131,9 +131,9 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
               <Crest team={t} size={15} />
               <span data-testid="team-name" className={`text-[13px] truncate ${onSide(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>
                 <span className="sm:hidden">{t.short}</span><span className="hidden sm:inline">{t.name}</span>
-                {t.rank ? <span className="ml-1 text-[10px] font-semibold text-faint num">{t.rank}</span> : null}
+                {t.rank ? <span className="ms-1 text-[10px] font-semibold text-faint num">{t.rank}</span> : null}
               </span>
-              {score !== null && <span className="ml-auto pl-2 num text-[13px] font-extrabold tabular-nums text-live">{score}</span>}
+              {score !== null && <span className="ms-auto ps-2 num text-[13px] font-extrabold tabular-nums text-live">{score}</span>}
             </div>
           )
         })}
@@ -176,7 +176,7 @@ export default function GameRow({ g, showComp = false, showDay = false }: { g: S
         {scorable && <ScorersToggle open={scOpen} onToggle={scToggle} />}
       </div>
     </Link>
-      {scOpen && <RowScorersLine href={g.href} live={isLive} homeName={g.home.short} awayName={g.away.short} className="px-3 sm:px-4 pb-2 pl-[3.6rem] sm:pl-[4.1rem]" />}
+      {scOpen && <RowScorersLine href={g.href} live={isLive} homeName={g.home.short} awayName={g.away.short} className="px-3 sm:px-4 pb-2 ps-[3.6rem] sm:ps-[4.1rem]" />}
     </div>
   )
 }

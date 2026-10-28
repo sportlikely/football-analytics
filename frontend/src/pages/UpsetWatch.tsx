@@ -70,7 +70,7 @@ function WatchRow({ w, sport }: { w: Watch; sport: UpsetSport }) {
           <span className="text-faint mx-1.5">{tt("vs")}</span>
           <span className="font-bold text-loss">{w.underdog.name} <span className="num">({pct(w.underdog.p)})</span></span>
         </span>
-        <span className="text-xs text-muted sm:ml-auto sm:text-right min-w-0 sm:truncate sm:max-w-[45%]">{reasonText(w.reason, w.favourite.name, w.underdog.name)}</span>
+        <span className="text-xs text-muted sm:ms-auto sm:text-end min-w-0 sm:truncate sm:max-w-[45%]">{reasonText(w.reason, w.favourite.name, w.underdog.name)}</span>
       </Link>
     </li>
   )
@@ -123,7 +123,7 @@ export default function UpsetWatch({ sport = 'football' }: { sport?: UpsetSport 
             </div>
           ))}
           {data.total > data.upcoming.filter(w => w.top).length && (
-            <button type="button" onClick={() => setAll(x => !x)} className="w-full px-4 sm:px-5 py-2.5 text-sm font-bold text-accent hover:bg-surface2/50 text-left">
+            <button type="button" onClick={() => setAll(x => !x)} className="w-full px-4 sm:px-5 py-2.5 text-sm font-bold text-accent hover:bg-surface2/50 text-start">
               {all ? tt("Show the top {0} only", { 0: data.upcoming.filter(w => w.top).length }) : tt("Show all ({0})", { 0: data.total })}
             </button>
           )}
@@ -151,7 +151,7 @@ export default function UpsetWatch({ sport = 'football' }: { sport?: UpsetSport 
             ))}
           </ul>
           {rec.recent.length > 10 && (
-            <button type="button" onClick={() => setAllPast(x => !x)} className="w-full px-4 sm:px-5 py-2.5 text-sm font-bold text-accent hover:bg-surface2/50 text-left border-t border-line/50">
+            <button type="button" onClick={() => setAllPast(x => !x)} className="w-full px-4 sm:px-5 py-2.5 text-sm font-bold text-accent hover:bg-surface2/50 text-start border-t border-line/50">
               {allPast ? tt("Show the last 10 only") : tt("See all ({0})", { 0: rec.recent.length })}
             </button>
           )}

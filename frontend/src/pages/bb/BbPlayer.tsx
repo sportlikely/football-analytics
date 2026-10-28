@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
 import axios from 'axios'
 import { API_URL } from '../../lib/socket'
-import { t, LOCALE } from '../../lib/i18n'
+import { t, LOCALE, ltr } from '../../lib/i18n'
 import { Card, Skeleton, TeamLogo } from './parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
 import { FavStar } from '../../lib/favorites'
@@ -47,7 +47,7 @@ interface PlayerData {
 }
 
 const v = (x: number | null | undefined, suf = '') => (x === null || x === undefined ? '–' : `${x}${suf}`)
-const signed = (x: number | null | undefined) => (x === null || x === undefined ? '–' : x > 0 ? `+${x}` : `${x}`)
+const signed = (x: number | null | undefined) => (x === null || x === undefined ? '–' : ltr(x > 0 ? `+${x}` : `${x}`))
 const money = (x: number | null) => (x === null ? '–' : x >= 1e6 ? `$${(x / 1e6).toFixed(1)}M` : `$${Math.round(x / 1000)}K`)
 
 /** A basketball player: season numbers, form, game log; NBA players also bio, advanced stats, ranks, injury and contract. */
@@ -100,7 +100,7 @@ export default function BbPlayer() {
         aside={<>
         {(line || cur) && (
           <div className="w-full lg:w-[340px] shrink-0">
-          <div className="mb-1 text-right text-[11px] text-faint">{t('Per game')} · {line?.label || (cur ? `${cur.code} ${cur.season}` : '')}</div>
+          <div className="mb-1 text-end text-[11px] text-faint">{t('Per game')} · {line?.label || (cur ? `${cur.code} ${cur.season}` : '')}</div>
           <div className="grid grid-cols-3 gap-2">
             <Big label={t('Points')} value={v(line?.pts ?? cur?.pts)} />
             <Big label={t('Rebounds')} value={v(line?.reb ?? cur?.reb)} />
@@ -180,7 +180,7 @@ export default function BbPlayer() {
                   <li key={i} className="flex items-center gap-2 py-2">
                     <span className="num text-muted w-16">{c.season ?? '–'}</span>
                     <NameLink to={href.bbTeam(c.teamId, c.team)} className="truncate text-muted">{c.team ?? ''}</NameLink>
-                    <span className="ml-auto num font-bold text-ink">{money(c.amount)}</span>
+                    <span className="ms-auto num font-bold text-ink">{money(c.amount)}</span>
                   </li>
                 ))}
               </ul>
@@ -194,12 +194,12 @@ export default function BbPlayer() {
                 <table className="w-full text-xs num">
                   <thead>
                     <tr className="text-faint">
-                      <th className="text-left font-semibold py-1 px-2">{t('Season')}</th>
-                      <th className="text-right font-semibold px-1">{t('GP')}</th>
-                      <th className="text-right font-semibold px-1">{t('MIN')}</th>
-                      <th className="text-right font-semibold px-1">{t('PTS')}</th>
-                      <th className="text-right font-semibold px-1">{t('REB')}</th>
-                      <th className="text-right font-semibold px-2">{t('AST')}</th>
+                      <th className="text-start font-semibold py-1 px-2">{t('Season')}</th>
+                      <th className="text-end font-semibold px-1">{t('GP')}</th>
+                      <th className="text-end font-semibold px-1">{t('MIN')}</th>
+                      <th className="text-end font-semibold px-1">{t('PTS')}</th>
+                      <th className="text-end font-semibold px-1">{t('REB')}</th>
+                      <th className="text-end font-semibold px-2">{t('AST')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -207,13 +207,13 @@ export default function BbPlayer() {
                       <tr key={`${s.code}${s.season}`} className="border-t border-line/40">
                         <td className="py-1.5 px-2 font-sans whitespace-nowrap">
                           <span className="text-ink">{s.season}</span>
-                          <span className="ml-1.5 text-[10px] text-faint"><NameLink to={href.bbLeague(s.code)}>{s.code}</NameLink> · <NameLink to={href.bbTeam(s.team.id, s.team.name)}>{s.team.name}</NameLink></span>
+                          <span className="ms-1.5 text-[10px] text-faint"><NameLink to={href.bbLeague(s.code)}>{s.code}</NameLink> · <NameLink to={href.bbTeam(s.team.id, s.team.name)}>{s.team.name}</NameLink></span>
                         </td>
-                        <td className="text-right px-1 text-muted">{s.gp}</td>
-                        <td className="text-right px-1 text-muted">{v(s.min)}</td>
-                        <td className="text-right px-1 text-ink font-bold">{v(s.pts)}</td>
-                        <td className="text-right px-1 text-muted">{v(s.reb)}</td>
-                        <td className="text-right px-2 text-muted">{v(s.ast)}</td>
+                        <td className="text-end px-1 text-muted">{s.gp}</td>
+                        <td className="text-end px-1 text-muted">{v(s.min)}</td>
+                        <td className="text-end px-1 text-ink font-bold">{v(s.pts)}</td>
+                        <td className="text-end px-1 text-muted">{v(s.reb)}</td>
+                        <td className="text-end px-2 text-muted">{v(s.ast)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -240,7 +240,7 @@ function Big({ label, value }: { label: string; value: string }) {
 /** fix224: "Impact" — what he adds to his team in our player impact model, his rank, the team with and without him */
 function ImpactCard({ x }: { x: NonNullable<PlayerData['impact']> }) {
   const rec = (r: { won: number; lost: number }) => (r.won + r.lost ? `${r.won}–${r.lost}` : '–')
-  const sg = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}`
+  const sg = (n: number) => ltr(`${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}`)
   return (
     <Card title={t('Impact')} action={<span className="text-xs text-faint">{t('this season')}</span>}>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -293,11 +293,11 @@ function PointsChart({ form, log, team }: { form: PlayerData['form']; log: LogRo
   return (
     <div>
       <div className="relative flex items-end gap-1.5 h-36">
-        <span className="absolute left-0 right-0 border-t border-dashed border-line" style={{ bottom: `${(avg / max) * 100}%` }} />
+        <span className="absolute start-0 end-0 border-t border-dashed border-line" style={{ bottom: `${(avg / max) * 100}%` }} />
         {form.map(f => (
           <MaybeLink key={f.gameId} to={gameTo(f.gameId, f.kickoff, team, log.find(r => r.gameId === f.gameId))} className="group relative flex-1 h-full flex items-end" title={`${new Date(f.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}: ${f.pts} pts, ${f.min ?? '–'} min`}>
             <span className={`w-full rounded-t-md ${f.pts >= avg ? 'bg-accent' : 'bg-accent/40'} group-hover:opacity-80`} style={{ height: `${Math.max(3, (f.pts / max) * 100)}%` }} />
-            <span className="absolute -top-4 left-0 right-0 text-center text-[10px] num text-muted">{f.pts}</span>
+            <span className="absolute -top-4 start-0 end-0 text-center text-[10px] num text-muted">{f.pts}</span>
           </MaybeLink>
         ))}
       </div>
@@ -318,14 +318,14 @@ function GameLog({ log, team }: { log: LogRow[]; team: Side }) {
         <table className="w-full text-xs num">
           <thead>
             <tr className="text-faint">
-              <th className="text-left font-semibold py-1 px-2">{t('Game')}</th>
-              <th className="text-right font-semibold px-1">{t('MIN')}</th>
-              <th className="text-right font-semibold px-1">{t('PTS')}</th>
-              <th className="text-right font-semibold px-1">{t('REB')}</th>
-              <th className="text-right font-semibold px-1">{t('AST')}</th>
-              <th className="text-right font-semibold px-1">{t('FG')}</th>
-              <th className="text-right font-semibold px-1">{t('3PT')}</th>
-              {more && <><th className="text-right font-semibold px-1">{t('STL')}</th><th className="text-right font-semibold px-1">{t('BLK')}</th><th className="text-right font-semibold px-1">{t('TO')}</th><th className="text-right font-semibold px-1">+/−</th><th className="text-right font-semibold px-2">PIE</th></>}
+              <th className="text-start font-semibold py-1 px-2">{t('Game')}</th>
+              <th className="text-end font-semibold px-1">{t('MIN')}</th>
+              <th className="text-end font-semibold px-1">{t('PTS')}</th>
+              <th className="text-end font-semibold px-1">{t('REB')}</th>
+              <th className="text-end font-semibold px-1">{t('AST')}</th>
+              <th className="text-end font-semibold px-1">{t('FG')}</th>
+              <th className="text-end font-semibold px-1">{t('3PT')}</th>
+              {more && <><th className="text-end font-semibold px-1">{t('STL')}</th><th className="text-end font-semibold px-1">{t('BLK')}</th><th className="text-end font-semibold px-1">{t('TO')}</th><th className="text-end font-semibold px-1">+/−</th><th className="text-end font-semibold px-2">PIE</th></>}
             </tr>
           </thead>
           <tbody>
@@ -337,21 +337,21 @@ function GameLog({ log, team }: { log: LogRow[]; team: Side }) {
                     <span className="text-faint">{r.home ? t('vs') : '@'}</span>
                     <TeamLogo team={{ name: r.opponent, logo: r.opponentLogo }} size={14} />
                     <span className="text-ink truncate max-w-[110px]">{r.opponent}</span>
-                    {r.result && <span className={`ml-1 font-bold ${r.result.win ? 'text-win' : 'text-loss'}`}>{r.result.win ? t('W') : t('L')} {r.result.for}–{r.result.against}</span>}
+                    {r.result && <span className={`ms-1 font-bold ${r.result.win ? 'text-win' : 'text-loss'}`}>{r.result.win ? t('W') : t('L')} {r.result.for}–{r.result.against}</span>}
                   </MaybeLink>
                 </td>
-                <td className="text-right px-1 text-muted">{r.min !== null ? Math.round(r.min) : '–'}</td>
-                <td className="text-right px-1 text-ink font-bold">{v(r.pts)}</td>
-                <td className="text-right px-1 text-muted">{v(r.reb)}</td>
-                <td className="text-right px-1 text-muted">{v(r.ast)}</td>
-                <td className="text-right px-1 text-muted">{r.fgm ?? 0}/{r.fga ?? 0}</td>
-                <td className="text-right px-1 text-muted">{r.tpm ?? 0}/{r.tpa ?? 0}</td>
+                <td className="text-end px-1 text-muted">{r.min !== null ? Math.round(r.min) : '–'}</td>
+                <td className="text-end px-1 text-ink font-bold">{v(r.pts)}</td>
+                <td className="text-end px-1 text-muted">{v(r.reb)}</td>
+                <td className="text-end px-1 text-muted">{v(r.ast)}</td>
+                <td className="text-end px-1 text-muted">{r.fgm ?? 0}/{r.fga ?? 0}</td>
+                <td className="text-end px-1 text-muted">{r.tpm ?? 0}/{r.tpa ?? 0}</td>
                 {more && <>
-                  <td className="text-right px-1 text-muted">{v(r.stl)}</td>
-                  <td className="text-right px-1 text-muted">{v(r.blk)}</td>
-                  <td className="text-right px-1 text-muted">{v(r.tov)}</td>
-                  <td className={`text-right px-1 ${r.plusMinus == null ? 'text-faint' : r.plusMinus > 0 ? 'text-win' : r.plusMinus < 0 ? 'text-loss' : 'text-muted'}`}>{signed(r.plusMinus)}</td>
-                  <td className="text-right px-2 text-muted">{v(r.pie)}</td>
+                  <td className="text-end px-1 text-muted">{v(r.stl)}</td>
+                  <td className="text-end px-1 text-muted">{v(r.blk)}</td>
+                  <td className="text-end px-1 text-muted">{v(r.tov)}</td>
+                  <td className={`text-end px-1 ${r.plusMinus == null ? 'text-faint' : r.plusMinus > 0 ? 'text-win' : r.plusMinus < 0 ? 'text-loss' : 'text-muted'}`}>{signed(r.plusMinus)}</td>
+                  <td className="text-end px-2 text-muted">{v(r.pie)}</td>
                 </>}
               </tr>
             ))}

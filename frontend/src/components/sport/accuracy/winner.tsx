@@ -62,7 +62,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
       </Link>
     </li>
   )
-  const hitChip = (hit: boolean) => <span className={`ml-auto shrink-0 rounded-full px-2 text-[10px] font-bold ${hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{hit ? t('Hit') : t('Miss')}</span>
+  const hitChip = (hit: boolean) => <span className={`ms-auto shrink-0 rounded-full px-2 text-[10px] font-bold ${hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`}>{hit ? t('Hit') : t('Miss')}</span>
 
   return {
     title: o.title,
@@ -115,7 +115,7 @@ export function winnerAccuracy(o: WinnerOpts): AccuracyAdapter {
               </div>
               <ul className="divide-y divide-line/50">
                 {d.pending.map(r => line(r, '', (
-                  <span className="ml-auto shrink-0 text-[10px] text-faint">
+                  <span className="ms-auto shrink-0 text-[10px] text-faint">
                     {r.live ? <span className="inline-flex items-center gap-1 font-bold text-live"><span className="w-1.5 h-1.5 rounded-full bg-live animate-pulseDot" />{t('Live')}</span>
                       : r.preseason ? t('Pre-season') : `${new Date(r.kickoff).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })} · ${o.leagueName(r.code)}`}
                   </span>

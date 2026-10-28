@@ -63,7 +63,7 @@ export default function UnlockPrompt({ rid, status, what, premiumWhat, autoUnloc
           <div className="text-xs text-muted mt-1">
             {weekly ? tt("Your {0} free picks come back on Monday. Premium opens 60 matches a month; Pro opens every match.", { 0: u?.allowance ?? 2 }) : tt("{0}Pro is unlimited, and adds draw picks.", { 0: u ? tt("Your {0} unlocks renew on {1}. ", { 0: u.allowance, 1: resetDay(u.resetsAt) }) : '' })}
           </div>
-          <div className="mt-3 text-left"><div className="label pb-1.5">{tt("Pick packs")}</div><PickPacks compact onBought={() => setNeedPro(false)} /></div>
+          <div className="mt-3 text-start"><div className="label pb-1.5">{tt("Pick packs")}</div><PickPacks compact onBought={() => setNeedPro(false)} /></div>
           <div className="mt-3 flex justify-center">
             <Link to="/premium" className="px-4 py-2 rounded-xl border border-line text-ink text-sm font-extrabold hover:border-faint">{weekly ? tt("See plans") : tt("Upgrade to Pro")}</Link>
           </div>

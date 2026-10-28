@@ -110,7 +110,7 @@ export default function NflTeam() {
                     {gr.players.map(p => (
                       <li key={p.id}>
                         <Link to={playerHref('american-football', p.id, p.name)!} className="flex items-center gap-2 text-sm hover:text-accent">
-                          <span className="w-7 text-right num text-faint">{p.number ?? ''}</span>
+                          <span className="w-7 text-end num text-faint">{p.number ?? ''}</span>
                           <span className="w-9 text-[11px] font-bold text-muted">{p.position || ''}</span>
                           <span className="truncate text-ink">{p.name}</span>
                         </Link>
@@ -177,7 +177,7 @@ function TeamAnalysis({ a, d }: { a: Analysis; d: Data }) {
                 <div className="flex items-baseline justify-between gap-2 text-sm"><span className="text-muted truncate">{t(m.label)}</span><span className="num text-ink font-semibold">{m.text ?? '–'}</span></div>
                 <div className="mt-1 h-1.5 rounded-full bg-surface2 overflow-hidden"><div className={`h-full rounded-full ${m.score === null ? '' : m.score >= 8 ? 'bg-win' : m.score <= 3 ? 'bg-loss' : 'bg-accent'}`} style={{ width: `${(m.score ?? 0) * 10}%` }} /></div>
               </div>
-              <span className="w-8 text-right num font-display font-extrabold text-ink">{m.score ?? '–'}</span>
+              <span className="w-8 text-end num font-display font-extrabold text-ink">{m.score ?? '–'}</span>
             </div>
           ))}
         </div>

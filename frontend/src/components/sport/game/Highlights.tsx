@@ -51,7 +51,7 @@ export default function Highlights({ url }: { url: string }) {
             <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-accent text-bg grid place-items-center shadow-lift group-hover:scale-105 transition-transform">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>
             </span>
-            <span className="absolute left-4 right-4 bottom-3 text-left text-sm font-bold text-white line-clamp-2">{h.title}</span>
+            <span className="absolute start-4 end-4 bottom-3 text-start text-sm font-bold text-white line-clamp-2">{h.title}</span>
           </button>
         )}
       </div>

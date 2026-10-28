@@ -22,20 +22,20 @@ export default function TennisPast() {
   const row = (label: string, x: Tour) => (
     <tr key={label} className="border-t border-line/50">
       <td className="py-1.5 text-ink">{label}</td>
-      <td className="text-right num">{x.model.n}</td>
-      <td className="text-right num font-bold text-ink">{x.model.hit ?? '–'}%</td>
-      <td className="text-right num text-muted">{x.model.logLoss ?? '–'}</td>
-      <td className="text-right num text-muted">{x.baselines.eloOnly.logLoss ?? '–'}</td>
-      <td className="text-right num text-muted">{x.baselines.higherRanked.hit ?? '–'}%</td>
-      <td className="text-right num text-muted">{x.setsAndTotals.likelySetScoreHit ?? '–'}%</td>
-      <td className="text-right num text-muted">{x.setsAndTotals.totalGamesMAE ?? '–'}</td>
+      <td className="text-end num">{x.model.n}</td>
+      <td className="text-end num font-bold text-ink">{x.model.hit ?? '–'}%</td>
+      <td className="text-end num text-muted">{x.model.logLoss ?? '–'}</td>
+      <td className="text-end num text-muted">{x.baselines.eloOnly.logLoss ?? '–'}</td>
+      <td className="text-end num text-muted">{x.baselines.higherRanked.hit ?? '–'}%</td>
+      <td className="text-end num text-muted">{x.setsAndTotals.likelySetScoreHit ?? '–'}%</td>
+      <td className="text-end num text-muted">{x.setsAndTotals.totalGamesMAE ?? '–'}</td>
     </tr>
   )
   const table = (title: string, rows: Record<string, Tour> | undefined) => rows && (
     <Card title={title}>
       <div className="overflow-x-auto">
         <table className="w-full text-xs sm:text-sm">
-          <thead><tr className="text-faint text-[11px]"><th className="text-left font-semibold">Group</th><th className="text-right font-semibold">Matches</th><th className="text-right font-semibold">Hit</th><th className="text-right font-semibold">Log loss</th><th className="text-right font-semibold">Elo-only LL</th><th className="text-right font-semibold">Higher rank</th><th className="text-right font-semibold">Set score</th><th className="text-right font-semibold">Games MAE</th></tr></thead>
+          <thead><tr className="text-faint text-[11px]"><th className="text-start font-semibold">Group</th><th className="text-end font-semibold">Matches</th><th className="text-end font-semibold">Hit</th><th className="text-end font-semibold">Log loss</th><th className="text-end font-semibold">Elo-only LL</th><th className="text-end font-semibold">Higher rank</th><th className="text-end font-semibold">Set score</th><th className="text-end font-semibold">Games MAE</th></tr></thead>
           <tbody>{Object.entries(rows).filter(([, x]) => x?.model?.n).map(([k, x]) => row(k, x))}</tbody>
         </table>
       </div>
@@ -51,7 +51,7 @@ export default function TennisPast() {
       {d === undefined ? <Skeleton rows={4} h="h-32" /> : !r ? (
         <Card title="No report yet"><p className="text-sm text-muted">{d?.running ? 'The model is being built on the server.' : 'The report is built on the server once the history backfill is in (open /api/admin/tennis-model).'}</p></Card>
       ) : <>
-        <p className="text-sm text-muted">{r.model} · test {r.test.from} – {r.test.to} ({r.test.months} months, {r.test.matches.toLocaleString()} matches) · built {new Date(r.builtAt).toLocaleString()}</p>
+        <p className="text-sm text-muted">{r.model} · test {r.test.from} – {r.test.to} ({r.test.months} months, {r.test.matches.toLocaleString('en-GB')} matches) · built {new Date(r.builtAt).toLocaleString('en-GB')}</p>
         {table('By tour', r.tours)}
         {table('By surface', r.surfaces)}
         <Card title="Strong pick lines">
@@ -60,8 +60,8 @@ export default function TennisPast() {
         <Card title="By month">
           <div className="overflow-x-auto">
             <table className="w-full text-xs sm:text-sm">
-              <thead><tr className="text-faint text-[11px]"><th className="text-left font-semibold">Month</th><th className="text-right font-semibold">Matches</th><th className="text-right font-semibold">Hit</th><th className="text-right font-semibold">Log loss</th></tr></thead>
-              <tbody>{r.months.map(m => <tr key={m.month} className="border-t border-line/50"><td className="py-1 text-ink">{m.month}</td><td className="text-right num">{m.n}</td><td className="text-right num">{m.hit ?? '–'}%</td><td className="text-right num text-muted">{m.logLoss ?? '–'}</td></tr>)}</tbody>
+              <thead><tr className="text-faint text-[11px]"><th className="text-start font-semibold">Month</th><th className="text-end font-semibold">Matches</th><th className="text-end font-semibold">Hit</th><th className="text-end font-semibold">Log loss</th></tr></thead>
+              <tbody>{r.months.map(m => <tr key={m.month} className="border-t border-line/50"><td className="py-1 text-ink">{m.month}</td><td className="text-end num">{m.n}</td><td className="text-end num">{m.hit ?? '–'}%</td><td className="text-end num text-muted">{m.logLoss ?? '–'}</td></tr>)}</tbody>
             </table>
           </div>
         </Card>

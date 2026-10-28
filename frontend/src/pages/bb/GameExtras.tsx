@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
-import { t } from '../../lib/i18n'
+import { t, ltr } from '../../lib/i18n'
 import type { BbGame as Game } from '../../lib/bb'
 import { Card, TeamLogo } from './parts'
 import ModelParts from '../../components/sport/game/ModelParts'
@@ -57,13 +57,13 @@ export function MarketsCard({ g, m }: { g: Game; m: Markets }) {
         {/* winning margin */}
         <div>
           <div className="label mb-3">{t('Winning margin')}</div>
-          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-3 text-[11px] font-bold mb-1.5"><span className="truncate text-home">{H}</span><span /><span className="truncate text-right text-away">{A}</span></div>
+          <div className="grid grid-cols-[1fr_auto_1fr] gap-x-3 text-[11px] font-bold mb-1.5"><span className="truncate text-home">{H}</span><span /><span className="truncate text-end text-away">{A}</span></div>
           <ul className="space-y-2">
             {m.bands.map(b => (
               <li key={b.lo} className="grid grid-cols-[1fr_auto_1fr] gap-x-3 items-center text-sm">
                 <span className="num text-ink font-semibold">{pctTxt(b.home)}</span>
                 <span className="text-[11px] text-faint text-center w-24">{b.hi >= 99 ? t('by {0}+', { 0: b.lo }) : t('by {0}–{1}', { 0: b.lo, 1: b.hi })}</span>
-                <span className="num text-right text-ink font-semibold">{pctTxt(b.away)}</span>
+                <span className="num text-end text-ink font-semibold">{pctTxt(b.away)}</span>
               </li>
             ))}
           </ul>
@@ -81,7 +81,7 @@ export function MarketsCard({ g, m }: { g: Game; m: Markets }) {
                 <div className="grid grid-cols-[1fr_auto_1fr] gap-x-3 items-center">
                   <span className="num text-ink font-semibold">{pctTxt(s.home)}</span>
                   <span className="text-[11px] text-faint text-center w-24">{s.line} {t('pts')}</span>
-                  <span className="num text-right text-ink font-semibold">{pctTxt(s.away)}</span>
+                  <span className="num text-end text-ink font-semibold">{pctTxt(s.away)}</span>
                 </div>
                 <Split h={s.home} a={s.away} />
               </li>
@@ -170,7 +170,7 @@ export function CompareCard({ g, home, away, table, form }: {
           const team = sd === 'H' ? g.home : g.away
           const f = form ? (sd === 'H' ? form.home : form.away) : []
           return (
-            <div key={sd} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
+            <div key={sd} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-end' : 'sm:text-start'}`}>
               <span className="w-11 h-11 rounded-2xl bg-surface2/80 border border-line/60 grid place-items-center shrink-0"><TeamLogo team={team} size={28} /></span>
               <span className="min-w-0 max-w-full">
                 <NameLink to={href.bbTeam(team.id, team.name)} className="block text-sm font-bold text-ink leading-tight line-clamp-2">{team.name}</NameLink>
@@ -188,7 +188,7 @@ export function CompareCard({ g, home, away, table, form }: {
             <li key={r.label} className="grid grid-cols-[1fr_auto_1fr] gap-x-3 items-center py-2 text-sm">
               <span className={`num ${better === -1 ? 'text-ink font-bold' : 'text-muted'}`}>{r.h}</span>
               <span className="text-[11px] leading-tight text-faint text-center w-28 sm:w-40">{r.label}</span>
-              <span className={`num text-right ${better === 1 ? 'text-ink font-bold' : 'text-muted'}`}>{r.a}</span>
+              <span className={`num text-end ${better === 1 ? 'text-ink font-bold' : 'text-muted'}`}>{r.a}</span>
             </li>
           )
         })}
@@ -213,8 +213,8 @@ export function PlayersCard({ g, home, away, limit, title }: { g: Game; home: Ga
     const tone = s === 'H' ? { text: 'text-home', bg: 'bg-home', soft: 'from-home/20' } : { text: 'text-away', bg: 'bg-away', soft: 'from-away/20' }
     const tag = (p: GamePlayer) => (
       <>
-        {p.injury && <span className="ml-1.5 rounded px-1 py-px text-[9px] font-bold bg-loss/15 text-loss align-middle">{p.injury}</span>}
-        {p.statsFrom && p.statsFrom !== 'current' && <span className="ml-1.5 rounded px-1 py-px text-[9px] text-faint bg-surface2 align-middle">{p.statsFrom.season}</span>}
+        {p.injury && <span className="ms-1.5 rounded px-1 py-px text-[9px] font-bold bg-loss/15 text-loss align-middle">{p.injury}</span>}
+        {p.statsFrom && p.statsFrom !== 'current' && <span className="ms-1.5 rounded px-1 py-px text-[9px] text-faint bg-surface2 align-middle">{p.statsFrom.season}</span>}
       </>
     )
     return (
@@ -227,7 +227,7 @@ export function PlayersCard({ g, home, away, limit, title }: { g: Game; home: Ga
         {rows.length === 0 ? <p className="text-sm text-faint">{t('No player stats yet.')}</p> : (
           <>
             {top && (
-              <Link to={playerHref('basketball', top.id, top.name)!} className={`group flex items-center gap-3 rounded-2xl border border-line/60 bg-gradient-to-r ${tone.soft} to-transparent p-3 mb-3 hover:border-accent/40 transition-colors`}>
+              <Link to={playerHref('basketball', top.id, top.name)!} className={`group flex items-center gap-3 rounded-2xl border border-line/60 bg-gradient-to-r rtl:bg-gradient-to-l ${tone.soft} to-transparent p-3 mb-3 hover:border-accent/40 transition-colors`}>
                 <span className={`w-12 h-12 rounded-xl grid place-items-center font-display text-lg font-extrabold text-bg shrink-0 ${tone.bg}`}>{top.number ?? '★'}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-faint">{t('Top scorer')}{top.position ? ` · ${top.position}` : ''}</span>
@@ -244,7 +244,7 @@ export function PlayersCard({ g, home, away, limit, title }: { g: Game; home: Ga
               </Link>
             )}
             <div className="grid grid-cols-[1fr_2.5rem_2rem_2rem] sm:grid-cols-[1fr_6.5rem_2.25rem_2.25rem_2.5rem] gap-x-2 text-[10px] font-semibold uppercase tracking-wide text-faint px-1 pb-1">
-              <span>{t('Player')}</span><span className="text-right sm:text-left">{t('PTS')}</span><span className="text-right">{t('REB')}</span><span className="text-right">{t('AST')}</span><span className="text-right hidden sm:block">{adv ? 'PIE' : t('MIN')}</span>
+              <span>{t('Player')}</span><span className="text-end sm:text-start">{t('PTS')}</span><span className="text-end">{t('REB')}</span><span className="text-end">{t('AST')}</span><span className="text-end hidden sm:block">{adv ? 'PIE' : t('MIN')}</span>
             </div>
             <ul className="divide-y divide-line/40">
               {rows.map(p => (
@@ -254,17 +254,17 @@ export function PlayersCard({ g, home, away, limit, title }: { g: Game; home: Ga
                       <span className="w-6 h-6 rounded-md bg-surface2 grid place-items-center num text-[10px] font-bold text-muted shrink-0">{p.number ?? '–'}</span>
                       <span className="min-w-0 truncate">
                         <span className="font-semibold text-ink">{p.name}</span>
-                        {p.position && <span className="hidden sm:inline ml-1.5 text-[10px] text-faint">{p.position}</span>}
+                        {p.position && <span className="hidden sm:inline ms-1.5 text-[10px] text-faint">{p.position}</span>}
                         {tag(p)}
                       </span>
                     </span>
                     <span className="flex items-center gap-1.5">
                       <span className="hidden sm:block flex-1 h-1.5 rounded-full bg-surface2 overflow-hidden"><span className={`block h-full rounded-full ${tone.bg} opacity-80`} style={{ width: `${((p.pts ?? 0) / max) * 100}%` }} /></span>
-                      <span className="num font-bold text-ink w-full sm:w-7 text-right">{p.pts ?? '–'}</span>
+                      <span className="num font-bold text-ink w-full sm:w-7 text-end">{p.pts ?? '–'}</span>
                     </span>
-                    <span className="num text-right text-muted">{p.reb ?? '–'}</span>
-                    <span className="num text-right text-muted">{p.ast ?? '–'}</span>
-                    <span className="num text-right text-muted hidden sm:block">{adv ? (p.pie ?? '–') : (p.min ?? '–')}</span>
+                    <span className="num text-end text-muted">{p.reb ?? '–'}</span>
+                    <span className="num text-end text-muted">{p.ast ?? '–'}</span>
+                    <span className="num text-end text-muted hidden sm:block">{adv ? (p.pie ?? '–') : (p.min ?? '–')}</span>
                   </Link>
                 </li>
               ))}
@@ -292,7 +292,7 @@ export function ModelTable({ g, model, ratings }: {
 }) {
   const p = g.prediction!
   const r = ratings
-  const f = (x: number) => `${x > 0 ? '+' : ''}${x.toFixed(1)}`
+  const f = (x: number) => ltr(`${x > 0 ? '+' : ''}${x.toFixed(1)}`)
   const half = model.homeEdge / 2
   const rows: { label: string; h: string; a: string }[] = [
     { label: t('League average (points per team)'), h: model.avgPoints.toFixed(1), a: model.avgPoints.toFixed(1) }

@@ -36,7 +36,7 @@ function Text({ text }: { text: string }) {
   const out: JSX.Element[] = []
   let list: string[] = []
   const flush = () => {
-    if (list.length) out.push(<ul key={`l${out.length}`} className="list-disc pl-4 space-y-0.5">{list.map((x, i) => <li key={i}>{render(x)}</li>)}</ul>)
+    if (list.length) out.push(<ul key={`l${out.length}`} className="list-disc ps-4 space-y-0.5">{list.map((x, i) => <li key={i}>{render(x)}</li>)}</ul>)
     list = []
   }
   lines.forEach((ln, i) => {
@@ -120,7 +120,7 @@ export default function Assistant() {
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-label={open ? t("Close the assistant") : t("Ask the assistant")}
-        className={`fixed z-40 right-4 bottom-24 lg:bottom-6 lg:right-6 h-12 px-4 rounded-full shadow-lift border border-accent/40 bg-accent text-bg font-bold text-sm inline-flex items-center gap-2 transition-transform hover:scale-[1.03] ${open ? 'hidden lg:inline-flex' : ''}`}
+        className={`fixed z-40 end-4 bottom-24 lg:bottom-6 lg:end-6 h-12 px-4 rounded-full shadow-lift border border-accent/40 bg-accent text-bg font-bold text-sm inline-flex items-center gap-2 transition-transform hover:scale-[1.03] ${open ? 'hidden lg:inline-flex' : ''}`}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z" />
@@ -131,7 +131,7 @@ export default function Assistant() {
         <div
           role="dialog"
           aria-label={t("Assistant")}
-          className="fixed z-50 inset-x-0 bottom-0 top-14 sm:top-auto sm:inset-x-auto sm:right-4 sm:bottom-24 lg:right-6 lg:bottom-6 sm:w-[380px] sm:h-[560px] sm:max-h-[calc(100vh-7rem)] flex flex-col rounded-t-3xl sm:rounded-3xl border border-line bg-surface shadow-lift overflow-hidden"
+          className="fixed z-50 inset-x-0 bottom-0 top-14 sm:top-auto sm:inset-x-auto sm:end-4 sm:bottom-24 lg:end-6 lg:bottom-6 sm:w-[380px] sm:h-[560px] sm:max-h-[calc(100vh-7rem)] flex flex-col rounded-t-3xl sm:rounded-3xl border border-line bg-surface shadow-lift overflow-hidden"
         >
           <div className="flex items-center gap-3 px-4 py-3 border-b border-line/70 bg-surface2/50">
             <span className="w-8 h-8 rounded-full bg-accent text-bg grid place-items-center font-display font-extrabold">B</span>
@@ -157,7 +157,7 @@ export default function Assistant() {
               <>
                 {msgs.length === 0 && (
                   <div className="space-y-3">
-                    <div className="rounded-2xl rounded-tl-md bg-surface2/70 px-3.5 py-2.5 text-muted">
+                    <div className="rounded-2xl rounded-ss-md bg-surface2/70 px-3.5 py-2.5 text-muted">
                       {t("Hi")}{user.name ? ` ${user.name.split(' ')[0]}` : ''}{t("! Ask me why we picked a team, what the numbers mean, or anything about football.")}</div>
                     <div className="flex flex-wrap gap-1.5">
                       {suggestions.map(s => (
@@ -168,14 +168,14 @@ export default function Assistant() {
                 )}
                 {msgs.map((m, i) => (
                   <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[88%] px-3.5 py-2.5 rounded-2xl ${m.role === 'user' ? 'bg-accent text-bg rounded-tr-md' : 'bg-surface2/70 text-ink rounded-tl-md'}`}>
+                    <div className={`max-w-[88%] px-3.5 py-2.5 rounded-2xl ${m.role === 'user' ? 'bg-accent text-bg rounded-se-md' : 'bg-surface2/70 text-ink rounded-ss-md'}`}>
                       {m.role === 'user' ? m.content : <Text text={m.content} />}
                     </div>
                   </div>
                 ))}
                 {busy && (
                   <div className="flex justify-start">
-                    <div className="px-3.5 py-2.5 rounded-2xl rounded-tl-md bg-surface2/70 text-faint">
+                    <div className="px-3.5 py-2.5 rounded-2xl rounded-ss-md bg-surface2/70 text-faint">
                       <span className="inline-flex gap-1"><span className="animate-pulseDot">·</span><span className="animate-pulseDot [animation-delay:150ms]">·</span><span className="animate-pulseDot [animation-delay:300ms]">·</span></span>
                     </div>
                   </div>

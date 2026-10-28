@@ -46,9 +46,9 @@ export default function FeedbackButton() {
   }
 
   return (
-    <div className="fixed right-3 bottom-[4.6rem] xl:right-4 xl:bottom-5 z-40">
+    <div className="fixed end-3 bottom-[4.6rem] xl:end-4 xl:bottom-5 z-40">
       {open && (
-        <form onSubmit={send} className="menu-panel absolute right-0 bottom-12 w-[min(340px,calc(100vw-2rem))] rounded-2xl border border-line p-4 space-y-3 shadow-lift">
+        <form onSubmit={send} className="menu-panel absolute end-0 bottom-12 w-[min(340px,calc(100vw-2rem))] rounded-2xl border border-line p-4 space-y-3 shadow-lift">
           {sent ? (
             <p className="text-sm text-win font-semibold py-6 text-center">{tt("Thank you! We read every message.")}</p>
           ) : (<>

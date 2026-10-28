@@ -218,9 +218,9 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
                           </div>
                           <div className="relative h-3 rounded-full bg-surface2 overflow-hidden">
                             <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, b.hitRate ?? 0)}%` }} />
-                            {b.said !== null && <div className="absolute top-[-2px] bottom-[-2px] w-0.5 bg-ink/70" style={{ left: `${b.said}%` }} title={t("We said {0}%", { 0: b.said })} />}
+                            {b.said !== null && <div className="absolute top-[-2px] bottom-[-2px] w-0.5 bg-ink/70" style={{ insetInlineStart: `${b.said}%` }} title={t("We said {0}%", { 0: b.said })} />}
                           </div>
-                          <div className="text-right min-w-[92px]">
+                          <div className="text-end min-w-[92px]">
                             <div className="num text-sm font-extrabold text-ink">{pct(b.hitRate)} {t("right")}</div>
                           </div>
                         </div>
@@ -235,17 +235,17 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
 
           {access === 'admin' && leagueRows.length > 0 && (
             <Card>
-              <h2 className="font-display text-xl font-bold text-ink">{t("Our record by competition")} <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-faint">admin only</span></h2>
+              <h2 className="font-display text-xl font-bold text-ink">{t("Our record by competition")} <span className="ms-2 text-[11px] font-semibold uppercase tracking-wide text-faint">admin only</span></h2>
               <p className="text-sm text-muted mt-1 mb-4">{t("How often each call was right, league by league, in the period you picked.")}</p>
               <div className="overflow-x-auto -mx-1">
                 <table className={`w-full text-sm ${a.leagueCols.cols.length > 1 ? 'min-w-[600px]' : 'min-w-[420px]'}`}>
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wide text-faint">
-                      <th className="text-left font-semibold py-2 px-1">{t("Competition")}</th>
-                      <th className="text-right font-semibold py-2 px-1 w-14">{t("Games")}</th>
-                      {a.leagueCols.cols.length > 0 && <th className="text-right font-semibold py-2 px-1 w-20">{a.leagueCols.cols[0]}</th>}
-                      <th className="text-left font-semibold py-2 px-2 w-44">{a.leagueCols.main}</th>
-                      {a.leagueCols.cols.slice(1).map(c => <th key={c} className="text-right font-semibold py-2 px-1 w-20">{c}</th>)}
+                      <th className="text-start font-semibold py-2 px-1">{t("Competition")}</th>
+                      <th className="text-end font-semibold py-2 px-1 w-14">{t("Games")}</th>
+                      {a.leagueCols.cols.length > 0 && <th className="text-end font-semibold py-2 px-1 w-20">{a.leagueCols.cols[0]}</th>}
+                      <th className="text-start font-semibold py-2 px-2 w-44">{a.leagueCols.main}</th>
+                      {a.leagueCols.cols.slice(1).map(c => <th key={c} className="text-end font-semibold py-2 px-1 w-20">{c}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -260,15 +260,15 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
                               {few && <span className="shrink-0 rounded px-1 text-[9px] font-semibold text-faint bg-surface2" title={t("Under 20 games: too few to judge yet")}>{t("few games")}</span>}
                             </span>
                           </td>
-                          <td className="py-2 px-1 text-right num text-muted">{c.n}</td>
-                          {c.cols.length > 0 && <td className="py-2 px-1 text-right num font-bold text-ink">{typeof c.cols[0] === 'string' ? c.cols[0] : pct(c.cols[0])}</td>}
+                          <td className="py-2 px-1 text-end num text-muted">{c.n}</td>
+                          {c.cols.length > 0 && <td className="py-2 px-1 text-end num font-bold text-ink">{typeof c.cols[0] === 'string' ? c.cols[0] : pct(c.cols[0])}</td>}
                           <td className="py-2 px-2">
                             <span className="flex items-center gap-2">
                               <span className="flex-1 h-2 rounded-full bg-surface2 overflow-hidden"><span className={`block h-full rounded-full ${few ? 'bg-accent/50' : 'bg-accent'}`} style={{ width: `${Math.min(100, c.main ?? 0)}%` }} /></span>
-                              <span className={`num font-bold w-11 text-right ${few ? 'text-muted' : 'text-accent'}`}>{pct(c.main)}</span>
+                              <span className={`num font-bold w-11 text-end ${few ? 'text-muted' : 'text-accent'}`}>{pct(c.main)}</span>
                             </span>
                           </td>
-                          {c.cols.slice(1).map((v, i) => <td key={i} className="py-2 px-1 text-right num text-muted">{typeof v === 'string' ? v : pct(v)}</td>)}
+                          {c.cols.slice(1).map((v, i) => <td key={i} className="py-2 px-1 text-end num text-muted">{typeof v === 'string' ? v : pct(v)}</td>)}
                         </tr>
                       )
                     })}
@@ -288,15 +288,15 @@ export default function Accuracy({ a }: { a: AccuracyAdapter }) {
                 <table className={`w-full text-sm ${a.recentCols.length > 2 ? 'min-w-[800px]' : 'min-w-[480px]'}`}>
                   <thead>
                     <tr className="text-xs text-faint">
-                      <th className="text-left font-medium py-2">{t("Match")}</th>
+                      <th className="text-start font-medium py-2">{t("Match")}</th>
                       <th className="text-center font-medium py-2">{t("Score")}</th>
-                      {a.recentCols.map(c => <th key={c} className="text-left font-medium py-2">{c}</th>)}
+                      {a.recentCols.map(c => <th key={c} className="text-start font-medium py-2">{c}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {rec.recent.map(x => (
                       <tr key={x.id} className="border-t border-line/50">
-                        <td className="py-2 pr-2">
+                        <td className="py-2 pe-2">
                           <Link to={x.href} className="text-ink hover:text-accent">{x.home} – {x.away}</Link>
                           <div className="text-[11px] text-faint">
                             {new Date(x.date).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}{x.comp ? <> · <NameLink to={x.compHref}>{x.comp}</NameLink></> : ''}

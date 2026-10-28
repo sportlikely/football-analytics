@@ -233,6 +233,8 @@ function ThemeToggle({ theme, onToggle }: { theme: 'dark' | 'light'; onToggle: (
 
 /** Language: a small select in the header; changing it opens the same page under the other prefix. */
 function LangSwitch({ compact = false }: { compact?: boolean }) {
+  // fix257: the server's list (admins: every language; ar / he stay admin-only until PUBLIC_LANGS names them)
+  const { langs } = useAuth()
   // Header: globe + short code ("EN"), the full names are in the list. Footer: the full name.
   return (
     <label
@@ -254,12 +256,18 @@ function LangSwitch({ compact = false }: { compact?: boolean }) {
         aria-label={tt('Language')}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
       >
-        {(Object.keys(LANGS) as Lang[]).map(l => (
+        {langs.map(l => (
           <option key={l} value={l} className="text-ink bg-surface">{LANGS[l].name}</option>
         ))}
       </select>
     </label>
   )
+}
+
+/** fix257: the admin console and CRM are written in English only — marked as English, left to right, inside a page
+ *  that may be right to left (ar / he), so their sentences keep their punctuation and order */
+function EnglishOnly({ children }: { children: ReactNode }) {
+  return <div lang="en" dir="ltr">{children}</div>
 }
 
 function UserMenu() {
@@ -299,7 +307,7 @@ function UserMenu() {
         onClick={() => setOpen(v => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-xl border border-line/80 bg-surface hover:border-faint transition-colors"
+        className="flex items-center gap-2 ps-1 pe-2 py-1 rounded-xl border border-line/80 bg-surface hover:border-faint transition-colors"
         title={user.email}
       >
         <span className="w-7 h-7 rounded-lg bg-accent/15 text-accent grid place-items-center text-xs font-bold uppercase">
@@ -309,7 +317,7 @@ function UserMenu() {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`text-muted transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 mt-2 w-60 z-[60] menu-panel p-1.5">
+        <div role="menu" className="absolute end-0 mt-2 w-60 z-[60] menu-panel p-1.5">
           <div className="px-3 py-2 border-b border-line/60 mb-1">
             <div className="text-sm font-semibold text-ink truncate">{user.name || user.email.split('@')[0]}</div>
             <div className="text-[11px] text-faint truncate">{user.email}</div>
@@ -332,7 +340,7 @@ function UserMenu() {
             </>
           )}
           <div className="border-t border-line/60 mt-1 pt-1">
-            <button type="button" role="menuitem" onClick={() => { setOpen(false); logout() }} className={`${item} w-full text-left text-muted`}>
+            <button type="button" role="menuitem" onClick={() => { setOpen(false); logout() }} className={`${item} w-full text-start text-muted`}>
               {icon('M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9')}{tt("Sign out")}
             </button>
           </div>
@@ -531,7 +539,7 @@ function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
   const moreLabel = (
     <>
       {tt("More")}
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`inline ml-1 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden><path d="m6 9 6 6 6-6" /></svg>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`inline ms-1 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden><path d="m6 9 6 6 6-6" /></svg>
     </>
   )
   return (
@@ -543,7 +551,7 @@ function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
             {moreLabel}
           </button>
           {open && (
-            <div role="menu" className="absolute right-0 mt-2 w-52 z-[60] menu-panel p-1.5">
+            <div role="menu" className="absolute end-0 mt-2 w-52 z-[60] menu-panel p-1.5">
               {rest.map(i => (
                 <NavLink key={i.key} to={i.to} end={i.end} role="menuitem"
                   className={({ isActive }) => `block px-3 py-2 rounded-lg text-sm hover:bg-surface2 ${isActive ? 'text-ink font-bold' : 'text-ink'}`}>
@@ -555,7 +563,7 @@ function HeaderNav({ cls }: { cls: (a: { isActive: boolean }) => string }) {
         </div>
       )}
       {/* invisible copy of every tab + "More", used to measure what fits */}
-      <div aria-hidden className="absolute left-0 top-0 w-0 h-0 overflow-hidden invisible pointer-events-none">
+      <div aria-hidden className="absolute start-0 top-0 w-0 h-0 overflow-hidden invisible pointer-events-none">
         <div ref={probe} className="flex w-max">
           {items.map(i => <span key={i.key} className={cls({ isActive: true })}>{i.label}</span>)}
           <span className={cls({ isActive: true })}>{moreLabel}</span>
@@ -618,7 +626,7 @@ function BottomTabs() {
           </div>
         </div>
       )}
-      <nav aria-label={tt("Tabs")} className={`xl:hidden fixed left-3 right-3 bottom-3 z-40 grid ${tabs.length >= 5 ? 'grid-cols-6' : 'grid-cols-5'} gap-1 p-1.5 rounded-3xl bg-surface/85 backdrop-blur-xl border border-line/80 shadow-lift sm:max-w-lg sm:mx-auto`}>
+      <nav aria-label={tt("Tabs")} className={`xl:hidden fixed start-3 end-3 bottom-3 z-40 grid ${tabs.length >= 5 ? 'grid-cols-6' : 'grid-cols-5'} gap-1 p-1.5 rounded-3xl bg-surface/85 backdrop-blur-xl border border-line/80 shadow-lift sm:max-w-lg sm:mx-auto`}>
         {tabs.map(i => <span key={i.key} className="contents">{tab(i.to, i.tab!, !!i.end)}</span>)}
         <button onClick={() => setSearching(true)} className="h-14 flex flex-col items-center justify-center gap-1 rounded-2xl text-muted" aria-label={tt("Search")}>
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -714,10 +722,10 @@ function Shell() {
             <SportSwitch />
             <Logo />
             <HeaderNav cls={navCls} />
-            <div data-grow className="hidden lg:block flex-[1_1_320px] min-w-[var(--search-min,260px)] max-w-[420px] ml-auto">
+            <div data-grow className="hidden lg:block flex-[1_1_320px] min-w-[var(--search-min,260px)] max-w-[420px] ms-auto">
               <SearchBox />
             </div>
-            <div className="flex shrink-0 items-center gap-2 ml-auto lg:ml-0">
+            <div className="flex shrink-0 items-center gap-2 ms-auto lg:ms-0">
               <div
                 className={`hidden md:inline-flex items-center gap-2 px-2.5 2xl:px-3 py-1.5 h-9 rounded-full text-xs font-bold ${
                   connected ? 'text-live bg-live/10' : 'text-faint bg-surface2'
@@ -790,15 +798,15 @@ function Shell() {
             <Route path="/forgot" element={<Forgot />} />
             <Route path="/premium" element={<Premium />} />
             <Route path="/premium/packs" element={<Premium />} />
-            <Route path="/admin" element={<AdminOnly><ConsoleGate><Admin /></ConsoleGate></AdminOnly>} />
-            <Route path="/admin/:tab" element={<AdminOnly><ConsoleGate><Admin /></ConsoleGate></AdminOnly>} />
-            <Route path="/admin/act/:token" element={<AdminOnly><ConsoleGate><AdminAction /></ConsoleGate></AdminOnly>} />
+            <Route path="/admin" element={<AdminOnly><EnglishOnly><ConsoleGate><Admin /></ConsoleGate></EnglishOnly></AdminOnly>} />
+            <Route path="/admin/:tab" element={<AdminOnly><EnglishOnly><ConsoleGate><Admin /></ConsoleGate></EnglishOnly></AdminOnly>} />
+            <Route path="/admin/act/:token" element={<AdminOnly><EnglishOnly><ConsoleGate><AdminAction /></ConsoleGate></EnglishOnly></AdminOnly>} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/accessibility" element={<Accessibility />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/join/:code" element={<Join />} />
-            <Route path="/crm" element={<ConsoleGate><Crm /></ConsoleGate>} />
+            <Route path="/crm" element={<EnglishOnly><ConsoleGate><Crm /></ConsoleGate></EnglishOnly>} />
             <Route path="/basketball/*" element={<BbRoutes />} />
             <Route path="/tennis/*" element={<TennisRoutes />} />
             <Route path="/baseball/*" element={<SportSoon sport="baseball" />} />
@@ -820,7 +828,7 @@ function Shell() {
             <Link to="/premium" className="hover:text-ink">{tt("Premium")}</Link>
             <Link to="/contact" className="hover:text-ink">{tt("Contact us")}</Link>
             <FooterNfl />
-            <span className="ml-auto flex items-center gap-3"><FooterSocial /><LangSwitch compact /></span>
+            <span className="ms-auto flex items-center gap-3"><FooterSocial /><LangSwitch compact /></span>
           </div>
           <FooterHubs />
           <p>

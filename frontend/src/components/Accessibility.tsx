@@ -69,14 +69,14 @@ export default function AccessibilityMenu() {
       role="switch"
       aria-checked={p[k]}
       onClick={() => setP({ ...p, [k]: !p[k] })}
-      className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border text-left text-sm ${p[k] ? 'border-accent/60 bg-accent/10 text-ink' : 'border-line text-ink hover:bg-surface2/60'}`}
+      className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border text-start text-sm ${p[k] ? 'border-accent/60 bg-accent/10 text-ink' : 'border-line text-ink hover:bg-surface2/60'}`}
     >
       <span>
         <span className="block font-semibold">{label}</span>
         <span className="block text-xs text-muted">{hint}</span>
       </span>
       <span aria-hidden className={`w-10 h-6 rounded-full relative flex-shrink-0 transition-colors ${p[k] ? 'bg-accent' : 'bg-line'}`}>
-        <span className={`absolute top-1 w-4 h-4 rounded-full bg-surface transition-all ${p[k] ? 'left-5' : 'left-1'}`} />
+        <span className={`absolute top-1 w-4 h-4 rounded-full bg-surface transition-all ${p[k] ? 'start-5' : 'start-1'}`} />
       </span>
     </button>
   )
@@ -90,7 +90,7 @@ export default function AccessibilityMenu() {
         aria-controls="a11y-menu"
         aria-label={t("Accessibility menu")}
         title={t("Accessibility")}
-        className={`fixed z-40 left-3 bottom-[4.6rem] lg:bottom-6 lg:left-6 w-9 h-9 lg:w-12 lg:h-12 opacity-80 hover:opacity-100 focus:opacity-100 lg:opacity-100 rounded-full grid place-items-center shadow-lift border-2 ${active ? 'bg-accent text-bg border-accent' : 'bg-[#1d4ed8] text-white border-white/70'}`}
+        className={`fixed z-40 start-3 bottom-[4.6rem] lg:bottom-6 lg:start-6 w-9 h-9 lg:w-12 lg:h-12 opacity-80 hover:opacity-100 focus:opacity-100 lg:opacity-100 rounded-full grid place-items-center shadow-lift border-2 ${active ? 'bg-accent text-bg border-accent' : 'bg-[#1d4ed8] text-white border-white/70'}`}
       >
         {/* the universal accessibility icon */}
         <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -105,7 +105,7 @@ export default function AccessibilityMenu() {
           role="dialog"
           aria-modal="false"
           aria-label={t("Accessibility settings")}
-          className="fixed z-50 left-4 right-4 bottom-40 lg:bottom-20 lg:left-6 lg:right-auto lg:w-[360px] max-h-[70vh] overflow-y-auto rounded-3xl border border-line bg-surface shadow-lift p-4 space-y-3"
+          className="fixed z-50 start-4 end-4 bottom-40 lg:bottom-20 lg:start-6 lg:end-auto lg:w-[360px] max-h-[70vh] overflow-y-auto rounded-3xl border border-line bg-surface shadow-lift p-4 space-y-3"
         >
           <div className="flex items-center justify-between">
             <h2 className="font-display font-bold text-ink">{t("Accessibility")}</h2>

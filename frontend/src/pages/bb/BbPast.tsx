@@ -16,13 +16,13 @@ export default function BbPast() {
   const line = (label: string, m: M) => (
     <tr key={label} className="border-t border-line/50">
       <td className="py-1.5 text-ink">{label}</td>
-      <td className="text-right num">{m.games}</td>
-      <td className="text-right num font-bold text-ink">{m.hitRate ?? '–'}%</td>
-      <td className="text-right num text-muted">{m.homeWinRate ?? '–'}%</td>
-      <td className="text-right num text-muted">{m.logLoss ?? '–'}</td>
-      <td className="text-right num text-muted">{m.brier ?? '–'}</td>
-      <td className="text-right num text-muted">{m.maeMargin ?? '–'}</td>
-      <td className="text-right num text-muted">{m.maeTotal ?? '–'}</td>
+      <td className="text-end num">{m.games}</td>
+      <td className="text-end num font-bold text-ink">{m.hitRate ?? '–'}%</td>
+      <td className="text-end num text-muted">{m.homeWinRate ?? '–'}%</td>
+      <td className="text-end num text-muted">{m.logLoss ?? '–'}</td>
+      <td className="text-end num text-muted">{m.brier ?? '–'}</td>
+      <td className="text-end num text-muted">{m.maeMargin ?? '–'}</td>
+      <td className="text-end num text-muted">{m.maeTotal ?? '–'}</td>
     </tr>
   )
   return (
@@ -35,7 +35,7 @@ export default function BbPast() {
         <Card key={r.code} title={`${name(r.code)} · k ${r.params.k} · season carry-over ${r.params.r} · back-to-back ${r.params.b2b} pts`}>
           <div className="overflow-x-auto">
             <table className="w-full text-xs sm:text-sm">
-              <thead><tr className="text-faint text-[11px]"><th className="text-left font-semibold">Season</th><th className="text-right font-semibold">Games</th><th className="text-right font-semibold">Hit</th><th className="text-right font-semibold">Home wins</th><th className="text-right font-semibold">Log loss</th><th className="text-right font-semibold">Brier</th><th className="text-right font-semibold">Margin miss</th><th className="text-right font-semibold">Total miss</th></tr></thead>
+              <thead><tr className="text-faint text-[11px]"><th className="text-start font-semibold">Season</th><th className="text-end font-semibold">Games</th><th className="text-end font-semibold">Hit</th><th className="text-end font-semibold">Home wins</th><th className="text-end font-semibold">Log loss</th><th className="text-end font-semibold">Brier</th><th className="text-end font-semibold">Margin miss</th><th className="text-end font-semibold">Total miss</th></tr></thead>
               <tbody>
                 {line(`${r.tuneSeason} (tuning)`, r.tune)}
                 {Object.entries(r.test.bySeason).map(([s, m]) => line(s, m))}
@@ -43,7 +43,7 @@ export default function BbPast() {
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-[11px] text-faint">Now: {r.now.avgPoints} pts per team, home edge {r.now.homeEdge}, typical margin miss {r.now.sigma}, total miss {r.now.sigmaTotal}. Built {new Date(r.builtAt).toLocaleString()}.</p>
+          <p className="mt-2 text-[11px] text-faint">Now: {r.now.avgPoints} pts per team, home edge {r.now.homeEdge}, typical margin miss {r.now.sigma}, total miss {r.now.sigmaTotal}. Built {new Date(r.builtAt).toLocaleString('en-GB')}.</p>
         </Card>
       ))}
     </div>

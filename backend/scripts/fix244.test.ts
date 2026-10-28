@@ -91,14 +91,14 @@ test('sign-in pages are never counted', () => {
   assert.match(app, /httpOnly: true, sameSite: 'lax', secure: req\.secure, maxAge: PASS_MS/);
 });
 
-test('the Quick check page: 7 locales, Turnstile, VPN line, sign in', () => {
-  assert.deepEqual([...QC_LANGS], ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru']);
+test('the Quick check page: 14 locales, Turnstile, VPN line, sign in', () => {
+  assert.deepEqual([...QC_LANGS], ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru', 'ar', 'he']);
   const keys = Object.keys(QC_WORDS.en).sort();
   for (const l of QC_LANGS) {
     assert.deepEqual(Object.keys(QC_WORDS[l]).sort(), keys, l);
     if (l !== 'en') for (const k of keys) assert.notEqual((QC_WORDS[l] as any)[k], (QC_WORDS.en as any)[k], `${l}.${k} translated`);
     const h = quickCheckPage(l, '0x4AAAA-test');
-    assert.match(h, new RegExp(`<html lang="${l}">`));
+    assert.match(h, new RegExp(`<html lang="${l}"${l === 'ar' || l === 'he' ? ' dir="rtl"' : ''}>`));
     assert.ok(h.includes('challenges.cloudflare.com/turnstile'), 'Turnstile');
     assert.ok(h.includes(QC_WORDS[l].vpn.replace(/'/g, "'")) || h.includes(QC_WORDS[l].vpn.replace(/'/g, '&#39;')), 'VPN line');
     assert.ok(h.includes(`href="${l === 'en' ? '' : `/${l}`}/login"`), 'sign in link');
@@ -111,16 +111,19 @@ test('the Quick check page: 7 locales, Turnstile, VPN line, sign in', () => {
   assert.equal(qcLangOf('/es/football/matches'), 'es');
   assert.equal(qcLangOf('/football/matches'), 'en');
   assert.equal(qcLangOf('/tr/quick-check'), 'tr');
+  assert.equal(qcLangOf('/he/quick-check'), 'he');
+  assert.equal(qcLangOf('/ar'), 'ar');
+  assert.equal(qcLangOf('/arsenal'), 'en');
   assert.ok(!quickCheckPage('en', '</script><b>').includes('</script><b>'), 'site key escaped');
 });
 
-test('the app: no "status code 429", the Quick check on a proxy 429, strings in all 6 locales', () => {
+test('the app: no "status code 429", the Quick check on a proxy 429, strings in all 8 locales', () => {
   const fe = path.join(import.meta.dirname, '../../frontend/src');
   const pc = fs.readFileSync(path.join(fe, 'lib/proxyCheck.ts'), 'utf8');
   assert.match(pc, /data\.proxy && data\.check\) openQuickCheck\(\)/);
   assert.match(pc, /\/quick-check`/);
   assert.match(fs.readFileSync(path.join(fe, 'main.tsx'), 'utf8'), /watchProxyCheck\(\)/);
-  for (const l of ['de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru']) {
+  for (const l of ['de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', 'pl', 'el', 'ru', 'ar', 'he']) {
     const j = JSON.parse(fs.readFileSync(path.join(fe, `locales/${l}.json`), 'utf8'));
     for (const k of ['Too many requests, try again in a minute', 'Too many pages opened from this network. Please try again later, or sign in.'])
       assert.ok(j[k] && j[k] !== k, `${l}: ${k}`);

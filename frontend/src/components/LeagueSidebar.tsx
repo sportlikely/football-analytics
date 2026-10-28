@@ -87,13 +87,13 @@ export default function LeagueSidebar({
 
   const Row = ({ l, indent }: { l: SideLeague; indent?: boolean }) => (
     <li className="relative">
-      <button onClick={() => onSelect(l.code)} className={`side-item pr-9 ${indent ? 'pl-7' : ''} ${selected === l.code ? 'side-item-active' : ''}`}>
+      <button onClick={() => onSelect(l.code)} className={`side-item pe-9 ${indent ? 'ps-7' : ''} ${selected === l.code ? 'side-item-active' : ''}`}>
         {l.logo ? <img src={l.logo} alt="" className="w-5 h-5 object-contain shrink-0" /> : <Flag code={l.country} />}
         <span className="truncate">{indent ? l.short || l.name : l.name}</span>
         {l.note && <span className="shrink-0 text-[9px] font-bold uppercase text-faint">{l.note}</span>}
-        <span className="ml-auto num text-xs text-faint">{l.count || ''}</span>
+        <span className="ms-auto num text-xs text-faint">{l.count || ''}</span>
       </button>
-      <span className="absolute right-1.5 top-1/2 -translate-y-1/2"><FavStar size="sm" fav={l.fav} /></span>
+      <span className="absolute end-1.5 top-1/2 -translate-y-1/2"><FavStar size="sm" fav={l.fav} /></span>
     </li>
   )
   const Head = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
@@ -107,7 +107,7 @@ export default function LeagueSidebar({
         <li>
           <button onClick={() => onSelect('ALL')} className={`side-item ${selected === 'ALL' ? 'side-item-active' : ''}`}>
             <span className="w-5 h-5 rounded-md bg-surface2 grid place-items-center text-[10px] font-bold text-muted">∞</span>
-            {t('All leagues')}<span className="ml-auto num text-xs text-faint">{total}</span>
+            {t('All leagues')}<span className="ms-auto num text-xs text-faint">{total}</span>
           </button>
         </li>
         <li>
@@ -115,7 +115,7 @@ export default function LeagueSidebar({
             <span className="w-5 h-5 rounded-md bg-accent/15 grid place-items-center text-accent">
               <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="currentColor" aria-hidden><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z" /></svg>
             </span>
-            {t('My favorites')}<span className="ml-auto num text-xs text-faint">{favCount ?? ''}</span>
+            {t('My favorites')}<span className="ms-auto num text-xs text-faint">{favCount ?? ''}</span>
           </button>
         </li>
       </ul>
@@ -159,7 +159,7 @@ export default function LeagueSidebar({
               <button onClick={() => toggle(c)} className="side-item" aria-expanded={isOpen}>
                 <Flag code={c} />
                 <span className="truncate">{countryName(c)}</span>
-                <span className="ml-auto num text-xs text-faint">{n || ''}</span>
+                <span className="ms-auto num text-xs text-faint">{n || ''}</span>
                 <span className={`text-faint transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
               </button>
               {isOpen && <ul className="space-y-0.5">{list.map(l => <Row key={l.code} l={l} indent />)}</ul>}
@@ -252,7 +252,7 @@ export function LeagueBar({ country, name, logo, to, count }: { country: string;
         <span className="font-bold text-ink">{name}</span>
       </span>
       {logo && <img src={logo} alt="" className="w-3.5 h-3.5 object-contain opacity-80 shrink-0" />}
-      <span className="ml-auto text-[10px] font-semibold text-faint num shrink-0">{count}</span>
+      <span className="ms-auto text-[10px] font-semibold text-faint num shrink-0">{count}</span>
     </Link>
   )
 }

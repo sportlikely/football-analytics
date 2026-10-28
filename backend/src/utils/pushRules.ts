@@ -13,6 +13,7 @@
  *   upset          Pro: our outsider (20–45% before the game, the upset-watch rule) is ahead late
  */
 import { doubleChance, dcHit, type DC } from './doubleChance';
+import { LANG_LOCALE } from './langs';
 import { watchOf } from '../services/upsetAlerts'; // fix188: one upset-watch rule in every sport
 
 export const PUSH_SPORTS = ['football', 'basketball', 'american-football', 'tennis'] as const;
@@ -144,7 +145,7 @@ export function quietEnd(q: { from: number; to: number; tz: string }, t: number)
 /* ---------- words ---------- */
 
 export type Tx = (key: string, ...a: (string | number)[]) => string;
-const LOCALES: Record<string, string> = { en: 'en-GB', de: 'de-DE', es: 'es-ES', fr: 'fr-FR', it: 'it-IT', pt: 'pt-BR', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
+const LOCALES: Record<string, string> = LANG_LOCALE;
 export function timeIn(lang: string, tz: string, iso: string): string {
   try { return new Intl.DateTimeFormat(LOCALES[lang] || 'en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(new Date(iso)); } catch { return iso.slice(11, 16); }
 }

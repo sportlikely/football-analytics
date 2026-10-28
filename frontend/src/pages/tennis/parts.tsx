@@ -25,7 +25,7 @@ export function PlayerName({ p, short = false, bold = false, className = '' }: {
   const href = tennisHref.player(p.id, p.name)
   const name = short ? surname(p) : p.name
   const flag = flagOf(p.country)
-  const body = <>{flag && <span aria-hidden className="mr-1">{flag}</span>}<span className={bold ? 'font-bold text-ink' : ''}>{name}</span>{p.rank ? <span className="ml-1 text-[10px] font-semibold text-faint num">{p.rank}</span> : null}</>
+  const body = <>{flag && <span aria-hidden className="me-1">{flag}</span>}<span className={bold ? 'font-bold text-ink' : ''}>{name}</span>{p.rank ? <span className="ms-1 text-[10px] font-semibold text-faint num">{p.rank}</span> : null}</>
   return href ? <Link to={href} className={`hover:text-accent ${className}`}>{body}</Link> : <span className={className}>{body}</span>
 }
 
@@ -137,7 +137,7 @@ export function DrawTab({ m, rounds }: { m: TMatch | null; rounds: DrawRound[] }
                   const s = k === 1 ? x.home : x.away
                   return (
                     <div key={k} className="flex items-center justify-between gap-2">
-                      <span className={`truncate ${w === k ? 'font-bold text-ink' : w ? 'text-muted' : 'text-ink/85'}`}>{flagOf(s.country)} {s.name}{s.rank ? <span className="ml-1 text-[10px] text-faint num">{s.rank}</span> : null}</span>
+                      <span className={`truncate ${w === k ? 'font-bold text-ink' : w ? 'text-muted' : 'text-ink/85'}`}>{flagOf(s.country)} {s.name}{s.rank ? <span className="ms-1 text-[10px] text-faint num">{s.rank}</span> : null}</span>
                       <span className="num text-xs text-muted shrink-0 inline-flex gap-2">{x.score ? x.score.sets.map((v, i) => <span key={i}>{v[k - 1]}</span>) : null}</span>
                     </div>
                   )

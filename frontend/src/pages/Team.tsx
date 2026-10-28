@@ -8,7 +8,7 @@ import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
 import { TeamAnalysisCard, TeamRecordCard, type Analysis } from '../components/TeamAnalysis'
 import { nameKey } from '../lib/favorites'
-import { t, LOCALE } from '../lib/i18n'
+import { t, LOCALE, ltr } from '../lib/i18n'
 import { slModel } from '../lib/modelNames'
 import NameLink, { href } from '../components/sport/NameLink'
 import TeamForecast from '../components/sport/forecast/TeamForecast'
@@ -70,7 +70,7 @@ function FixtureRow({ f, teamId }: { f: Fixture; teamId: number }) {
         <span className="flex items-center gap-2 text-sm"><img src={f.home.logo} alt="" className="w-4 h-4 object-contain" /><span className={`truncate ${f.home.id === teamId ? 'font-bold text-ink' : 'text-muted'}`}>{f.home.name}</span></span>
         <span className="flex items-center gap-2 text-sm"><img src={f.away.logo} alt="" className="w-4 h-4 object-contain" /><span className={`truncate ${f.away.id === teamId ? 'font-bold text-ink' : 'text-muted'}`}>{f.away.name}</span></span>
       </span>
-      <span className="text-[11px] text-faint hidden sm:block w-40 truncate text-right">{f.compCode && !f.matchId ? <NameLink to={href.league(f.compCode)}>{f.comp}</NameLink> : f.comp}</span>
+      <span className="text-[11px] text-faint hidden sm:block w-40 truncate text-end">{f.compCode && !f.matchId ? <NameLink to={href.league(f.compCode)}>{f.comp}</NameLink> : f.comp}</span>
       {done ? (
         <span className="flex items-center gap-2">
           <span className="font-display font-bold text-sm num">{f.hg}–{f.ag}</span>
@@ -97,7 +97,7 @@ function Leaders({ items, label, squad }: { items: Leader[]; label: string; squa
             {s.detail && <span className="block truncate text-[11px] text-faint">{s.detail}</span>}
           </span>
           <span className="w-24 sm:w-32 h-2 rounded-full bg-surface2"><span className="block h-full rounded-full bg-accent" style={{ width: `${(s.value / max) * 100}%` }} /></span>
-          <span className="w-6 text-right font-display font-extrabold text-sm">{s.value}</span>
+          <span className="w-6 text-end font-display font-extrabold text-sm">{s.value}</span>
         </div>
       ))}
     </div>
@@ -198,7 +198,7 @@ export default function Team() {
                   <div className="font-display font-bold text-sm">{new Date(nextMatch.date).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
                   <div className="text-xs text-faint">{new Date(nextMatch.date).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
-                <div className="flex-1 flex items-center justify-end gap-3 min-w-0"><NameLink to={nextMatch.away.id === team.id ? null : href.team(nextMatch.away.id)} className="font-bold truncate text-right">{nextMatch.away.name}</NameLink><img src={nextMatch.away.logo} alt="" className="w-9 h-9 object-contain" /></div>
+                <div className="flex-1 flex items-center justify-end gap-3 min-w-0"><NameLink to={nextMatch.away.id === team.id ? null : href.team(nextMatch.away.id)} className="font-bold truncate text-end">{nextMatch.away.name}</NameLink><img src={nextMatch.away.logo} alt="" className="w-9 h-9 object-contain" /></div>
               </div>
               {nextMatch.matchId && <Link to={matchHref('football', nextMatch.matchId, { home: nextMatch.home.name, away: nextMatch.away.name, homeId: nextMatch.home.id, awayId: nextMatch.away.id, date: nextMatch.date })!} className="mt-4 inline-block text-sm font-bold text-accent">{t("{0} prediction and analysis →", { 0: slModel('football') })}</Link>}
             </Card>
@@ -214,15 +214,15 @@ export default function Team() {
                   <div className="overflow-x-auto -mx-2">
                     <table className={`w-full text-sm ${team.national ? 'min-w-[680px]' : 'min-w-[520px]'}`}>
                       <thead>
-                        <tr className="text-[11px] text-faint text-left">
+                        <tr className="text-[11px] text-faint text-start">
                           <th className="font-medium px-2 py-1 w-10">#</th>
                           <th className="font-medium px-2 py-1">{t("Player")}</th>
                           {hasClubs && <th className="font-medium px-2 py-1">{t("Club this season")}</th>}
-                          <th className="font-medium px-2 py-1 text-right w-12">{t("Age")}</th>
-                          {(hasStats || hasApps) && <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Apps") : <Pro />}</th>}
-                          {hasStats && <th className="font-medium px-2 py-1 text-right w-14">{t("Goals")}</th>}
-                          {hasStats && <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Assists") : <Pro />}</th>}
-                          {hasStats && <th className="font-medium px-2 py-1 text-right w-14">{full ? t("Rating") : <Pro />}</th>}
+                          <th className="font-medium px-2 py-1 text-end w-12">{t("Age")}</th>
+                          {(hasStats || hasApps) && <th className="font-medium px-2 py-1 text-end w-14">{full ? t("Apps") : <Pro />}</th>}
+                          {hasStats && <th className="font-medium px-2 py-1 text-end w-14">{t("Goals")}</th>}
+                          {hasStats && <th className="font-medium px-2 py-1 text-end w-14">{full ? t("Assists") : <Pro />}</th>}
+                          {hasStats && <th className="font-medium px-2 py-1 text-end w-14">{full ? t("Rating") : <Pro />}</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -240,11 +240,11 @@ export default function Team() {
                                 {p.club?.name ? <><NameLink to={href.team(p.club.id)} className="text-ink">{p.club.name}</NameLink>{(p.club.apps ?? 0) > 0 && <span className="block text-faint num">{t("{0} games · {1} goals", { 0: p.club.apps ?? 0, 1: p.club.goals ?? 0 })}</span>}</> : <span className="text-faint">–</span>}
                               </td>
                             )}
-                            <td className="px-2 py-2 text-right text-muted num">{p.age ?? ''}</td>
-                            {(hasStats || hasApps) && <td className="px-2 py-2 text-right num">{full ? p.apps ?? '–' : <span className="text-faint">·</span>}</td>}
-                            {hasStats && <td className="px-2 py-2 text-right num font-semibold">{p.goals ?? '–'}</td>}
-                            {hasStats && <td className="px-2 py-2 text-right num">{full ? p.assists ?? '–' : <span className="text-faint">·</span>}</td>}
-                            {hasStats && <td className={`px-2 py-2 text-right num font-bold ${full && p.rating ? (p.rating >= 7.3 ? 'text-win' : p.rating >= 6.9 ? 'text-accent' : 'text-draw') : 'text-faint'}`}>{full ? p.rating ?? '–' : '·'}</td>}
+                            <td className="px-2 py-2 text-end text-muted num">{p.age ?? ''}</td>
+                            {(hasStats || hasApps) && <td className="px-2 py-2 text-end num">{full ? p.apps ?? '–' : <span className="text-faint">·</span>}</td>}
+                            {hasStats && <td className="px-2 py-2 text-end num font-semibold">{p.goals ?? '–'}</td>}
+                            {hasStats && <td className="px-2 py-2 text-end num">{full ? p.assists ?? '–' : <span className="text-faint">·</span>}</td>}
+                            {hasStats && <td className={`px-2 py-2 text-end num font-bold ${full && p.rating ? (p.rating >= 7.3 ? 'text-win' : p.rating >= 6.9 ? 'text-accent' : 'text-draw') : 'text-faint'}`}>{full ? p.rating ?? '–' : '·'}</td>}
                           </tr>
                         ))}
                       </tbody>
@@ -270,7 +270,7 @@ export default function Team() {
                   [t('Goals scored'), standing.gf],
                   [t('Goals conceded'), standing.ga],
                   [t('Won · drawn · lost'), `${standing.won} · ${standing.drawn} · ${standing.lost}`],
-                  [t('Goal difference'), standing.gf - standing.ga > 0 ? `+${standing.gf - standing.ga}` : standing.gf - standing.ga]
+                  [t('Goal difference'), ltr(standing.gf - standing.ga > 0 ? `+${standing.gf - standing.ga}` : standing.gf - standing.ga)]
                 ].map(([k, v]) => (
                   <div key={String(k)} className="rounded-2xl bg-surface2/60 p-3.5">
                     <div className="text-[11px] text-faint">{k}</div>
@@ -298,15 +298,15 @@ export default function Team() {
           {rows.length > 0 && data.league && (
             <Card title={<NameLink to={href.league(data.league.id)}>{data.league.name}</NameLink>} action={<img src={data.league.logo} alt="" className="w-6 h-6 object-contain" />}>
               <table className="w-full text-sm">
-                <thead><tr className="text-[11px] text-faint"><th className="text-left font-medium py-1 w-8">#</th><th className="text-left font-medium py-1">{t("Team")}</th><th className="text-right font-medium py-1 w-10">P</th><th className="text-right font-medium py-1 w-12">{t("GD")}</th><th className="text-right font-medium py-1 w-12">{t("Pts")}</th></tr></thead>
+                <thead><tr className="text-[11px] text-faint"><th className="text-start font-medium py-1 w-8">#</th><th className="text-start font-medium py-1">{t("Team")}</th><th className="text-end font-medium py-1 w-10">P</th><th className="text-end font-medium py-1 w-12">{t("GD")}</th><th className="text-end font-medium py-1 w-12">{t("Pts")}</th></tr></thead>
                 <tbody>
                   {rows.map(r => (
                     <tr key={r.id} className={`border-t border-line/40 ${r.me ? 'bg-accent/10' : ''}`}>
-                      <td className="py-2 pl-1 font-display text-xs font-bold text-faint">{r.rank}</td>
+                      <td className="py-2 ps-1 font-display text-xs font-bold text-faint">{r.rank}</td>
                       <td className="py-2"><Link to={teamHref('football', r.id, r.name)!} className="flex items-center gap-2 min-w-0"><img src={r.logo} alt="" className="w-5 h-5 object-contain" /><span className={`truncate ${r.me ? 'font-bold text-ink' : 'text-muted hover:text-ink'}`}>{r.name}</span></Link></td>
-                      <td className="py-2 text-right num text-muted">{r.played}</td>
-                      <td className="py-2 text-right num text-muted">{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
-                      <td className="py-2 pr-1 text-right num font-bold">{r.points}</td>
+                      <td className="py-2 text-end num text-muted">{r.played}</td>
+                      <td className="py-2 text-end num text-muted">{ltr(r.gd > 0 ? `+${r.gd}` : r.gd)}</td>
+                      <td className="py-2 pe-1 text-end num font-bold">{r.points}</td>
                     </tr>
                   ))}
                 </tbody>

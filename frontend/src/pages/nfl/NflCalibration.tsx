@@ -17,7 +17,7 @@ export interface AfCalibReport {
   ncaaV2: { pass: boolean; reason: string; trainSeasons: number[]; testSeason: number; test2025: { whole: Cmp; conf: Cmp }; season2026: { season: number; whole: Cmp; conf: Cmp } | null; perSeason: ({ season: number; conf: Cmp } & Cmp)[] }
 }
 
-const th = 'text-right font-semibold'
+const th = 'text-end font-semibold'
 const sc = (s: S | null | undefined) => (s && s.games ? `${s.hit ?? '–'}% · ${s.logLoss ?? '–'} · ${s.brier ?? '–'}` : '–')
 const bands = (b: Band[]) => b.filter(x => x.n).map(x => `${x.lo}–${x.hi}%: ${x.said} → ${x.happened} (${x.n})`).join(' · ') || '–'
 
@@ -27,19 +27,19 @@ function LayerCard({ name, l }: { name: string; l: Layer }) {
     <Card title={`Calibration · ${name}`}>
       <div className="overflow-x-auto">
         <table className="w-full text-xs sm:text-sm">
-          <thead><tr className="text-faint text-[11px]"><th className="text-left font-semibold">Season (test)</th><th className={th}>Games</th><th className={th}>Raw: hit · LL · Brier</th><th className={th}>Calibrated</th><th className={th}>Fitted on</th></tr></thead>
+          <thead><tr className="text-faint text-[11px]"><th className="text-start font-semibold">Season (test)</th><th className={th}>Games</th><th className={th}>Raw: hit · LL · Brier</th><th className={th}>Calibrated</th><th className={th}>Fitted on</th></tr></thead>
           <tbody>
             {l.walkForward.seasons.map(s => (
               <tr key={s.season} className="border-t border-line/50">
-                <td className="py-1.5 text-ink">{s.season}</td><td className="text-right num">{s.raw.games}</td>
-                <td className="text-right num text-muted">{sc(s.raw)}</td><td className="text-right num font-bold text-ink">{sc(s.cal)}</td>
-                <td className="text-right num text-faint">{s.fitOn.length ? `${s.fitOn[0]}–${s.fitOn[s.fitOn.length - 1]}` : 'none'}</td>
+                <td className="py-1.5 text-ink">{s.season}</td><td className="text-end num">{s.raw.games}</td>
+                <td className="text-end num text-muted">{sc(s.raw)}</td><td className="text-end num font-bold text-ink">{sc(s.cal)}</td>
+                <td className="text-end num text-faint">{s.fitOn.length ? `${s.fitOn[0]}–${s.fitOn[s.fitOn.length - 1]}` : 'none'}</td>
               </tr>
             ))}
-            <tr className="border-t border-line/50"><td className="py-1.5 text-ink">All test seasons</td><td className="text-right num">{l.walkForward.total.raw.games}</td><td className="text-right num text-muted">{sc(l.walkForward.total.raw)}</td><td className="text-right num font-bold text-ink">{sc(l.walkForward.total.cal)}</td><td /></tr>
-            <tr className="border-t border-line/50"><td className="py-1.5 text-ink">This season, saved before kick-off</td><td className="text-right num">{l.saved.games}</td><td className="text-right num text-muted">{sc(l.saved.raw)}</td><td className="text-right num font-bold text-ink">{sc(l.saved.cal)}</td><td /></tr>
+            <tr className="border-t border-line/50"><td className="py-1.5 text-ink">All test seasons</td><td className="text-end num">{l.walkForward.total.raw.games}</td><td className="text-end num text-muted">{sc(l.walkForward.total.raw)}</td><td className="text-end num font-bold text-ink">{sc(l.walkForward.total.cal)}</td><td /></tr>
+            <tr className="border-t border-line/50"><td className="py-1.5 text-ink">This season, saved before kick-off</td><td className="text-end num">{l.saved.games}</td><td className="text-end num text-muted">{sc(l.saved.raw)}</td><td className="text-end num font-bold text-ink">{sc(l.saved.cal)}</td><td /></tr>
             {l.saved.bySeg && Object.entries(l.saved.bySeg).map(([k, v]) => (
-              <tr key={k} className="border-t border-line/50"><td className="py-1.5 text-muted">· {k === 'mismatch' ? 'FBS vs FCS' : k === 'conf' ? 'conference games' : 'other games'}</td><td className="text-right num">{v.raw.games}</td><td className="text-right num text-muted">{sc(v.raw)}</td><td className="text-right num text-ink">{sc(v.cal)}</td><td /></tr>
+              <tr key={k} className="border-t border-line/50"><td className="py-1.5 text-muted">· {k === 'mismatch' ? 'FBS vs FCS' : k === 'conf' ? 'conference games' : 'other games'}</td><td className="text-end num">{v.raw.games}</td><td className="text-end num text-muted">{sc(v.raw)}</td><td className="text-end num text-ink">{sc(v.cal)}</td><td /></tr>
             ))}
           </tbody>
         </table>
@@ -64,8 +64,8 @@ export default function NflCalibration({ r }: { r: AfCalibReport | null | undefi
   const v = r.ncaaV2
   const cmpRow = (label: string, c: Cmp | undefined) => (
     <tr key={label} className="border-t border-line/50">
-      <td className="py-1.5 text-ink">{label}</td><td className="text-right num">{c?.v1.games ?? '–'}</td>
-      <td className="text-right num text-muted">{sc(c?.v1)}</td><td className="text-right num font-bold text-ink">{sc(c?.v2)}</td>
+      <td className="py-1.5 text-ink">{label}</td><td className="text-end num">{c?.v1.games ?? '–'}</td>
+      <td className="text-end num text-muted">{sc(c?.v1)}</td><td className="text-end num font-bold text-ink">{sc(c?.v2)}</td>
     </tr>
   )
   return (
@@ -73,7 +73,7 @@ export default function NflCalibration({ r }: { r: AfCalibReport | null | undefi
       <Card title={`ncaa-v2 test · ${v.pass ? 'live' : 'ncaa-v1 kept'}`}>
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
-            <thead><tr className="text-faint text-[11px]"><th className="text-left font-semibold">Games</th><th className={th}>n</th><th className={th}>ncaa-v1: hit · LL · Brier</th><th className={th}>ncaa-v2</th></tr></thead>
+            <thead><tr className="text-faint text-[11px]"><th className="text-start font-semibold">Games</th><th className={th}>n</th><th className={th}>ncaa-v1: hit · LL · Brier</th><th className={th}>ncaa-v2</th></tr></thead>
             <tbody>
               {cmpRow(`${v.testSeason} whole season (test)`, v.test2025.whole)}
               {cmpRow(`${v.testSeason} conference games (gate)`, v.test2025.conf)}
@@ -82,7 +82,7 @@ export default function NflCalibration({ r }: { r: AfCalibReport | null | undefi
               {v.perSeason.map(s => cmpRow(`${s.season} walk-forward`, s))}
             </tbody>
           </table>
-          <p className="mt-2 text-[11px] text-faint">Gate: {v.reason}. Weights tuned on {v.trainSeasons.join(', ')} for the {v.testSeason} test (each walk-forward season on the seasons before it; live weights on 2021–2025). Built {new Date(r.at).toLocaleString()} in {r.seconds} s ({r.version}).</p>
+          <p className="mt-2 text-[11px] text-faint">Gate: {v.reason}. Weights tuned on {v.trainSeasons.join(', ')} for the {v.testSeason} test (each walk-forward season on the seasons before it; live weights on 2021–2025). Built {new Date(r.at).toLocaleString('en-GB')} in {r.seconds} s ({r.version}).</p>
         </div>
       </Card>
       <LayerCard name="NFL" l={r.nfl} />

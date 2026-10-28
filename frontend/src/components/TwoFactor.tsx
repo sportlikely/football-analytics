@@ -3,7 +3,7 @@ import axios from 'axios'
 import QRCode from 'qrcode'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
-import { t } from '../lib/i18n'
+import { t, LOCALE } from '../lib/i18n'
 
 const input =
   'w-full rounded-xl border border-line bg-surface2/60 px-3.5 py-2.5 text-sm text-ink placeholder:text-faint outline-none focus:border-accent focus:ring-2 focus:ring-accent/20'
@@ -201,7 +201,7 @@ export function TwoFactorCard() {
           </form>
         ) : setup ? (
           <form onSubmit={confirm} className="space-y-4">
-            <ol className="text-sm text-muted space-y-1 list-decimal pl-5">
+            <ol className="text-sm text-muted space-y-1 list-decimal ps-5">
               <li>{t("In your authenticator app, tap + and choose \"Scan a QR code\".")}</li>
               <li>{t("Scan this code (or type the setup key below).")}</li>
               <li>{t("Enter the 6-digit code the app shows for SportLikely.")}</li>
@@ -260,7 +260,7 @@ export function TwoFactorCard() {
       ) : (
         <div className="space-y-3">
           <p className="text-sm text-muted">
-            {t("On since {0}. Recovery codes left: {1}.", { 0: st.enabledAt ? new Date(st.enabledAt).toLocaleDateString() : '–', 1: st.recoveryLeft })}
+            {t("On since {0}. Recovery codes left: {1}.", { 0: st.enabledAt ? new Date(st.enabledAt).toLocaleDateString(LOCALE) : '–', 1: st.recoveryLeft })}
           </p>
           <div className="flex flex-wrap gap-3 text-sm">
             <button type="button" onClick={() => setMode('device')} className="font-semibold text-accent">{t("Add another device")}</button>

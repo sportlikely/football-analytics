@@ -44,7 +44,7 @@ function Tile({ label, value, sub, bad }: { label: string; value: string; sub?: 
   return (
     <div className="glass px-3 py-2.5">
       <div className="text-[11px] text-faint">{label}</div>
-      <div className={`font-display text-xl font-extrabold num ${bad ? 'text-loss' : 'text-ink'}`}>{value}{sub && <span className="ml-1 text-xs font-medium text-faint">{sub}</span>}</div>
+      <div className={`font-display text-xl font-extrabold num ${bad ? 'text-loss' : 'text-ink'}`}>{value}{sub && <span className="ms-1 text-xs font-medium text-faint">{sub}</span>}</div>
     </div>
   )
 }

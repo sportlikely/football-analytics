@@ -68,6 +68,7 @@
     "test:fix258": "tsc && node --no-warnings --test --test-force-exit scripts/fix258.test.mjs",
     "test:fix259": "node --no-warnings --test scripts/fix259.test.ts",
     "test:load": "tsc && node --no-warnings scripts/load-test.mjs",
+    "test:fix257": "tsc && node --no-warnings --test --test-force-exit scripts/fix257.test.mjs scripts/fix244.test.ts",
     "test:paint": "tsc && node --no-warnings scripts/paint-test.mjs"
   },
   "keywords": [

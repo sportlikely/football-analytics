@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import NameLink, { href } from '../../components/sport/NameLink'
-import { t, LOCALE } from '../../lib/i18n'
+import { t, LOCALE, ltr } from '../../lib/i18n'
 import type { BbGame as Game } from '../../lib/bb'
 import { Card, TeamLogo } from './parts'
 import { StandingsTable, type Standings, type StandRow } from './BbLeague'
@@ -22,7 +22,7 @@ function TeamsHead({ g, sub }: { g: Game; sub?: (s: Side) => ReactNode }) {
   const side = (s: Side) => {
     const team = s === 'H' ? g.home : g.away
     return (
-      <Link to={teamHref('basketball', team.id, team.name)!} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 group text-center ${s === 'A' ? 'sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
+      <Link to={teamHref('basketball', team.id, team.name)!} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 group text-center ${s === 'A' ? 'sm:flex-row-reverse sm:text-end' : 'sm:text-start'}`}>
         <span className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-surface2/80 border border-line/60 grid place-items-center shrink-0"><TeamLogo team={team} size={30} /></span>
         <span className="min-w-0 max-w-full">
           <span className="block font-display font-bold text-ink truncate group-hover:text-accent">{team.name}</span>
@@ -70,7 +70,7 @@ function StatLine({ r, a, b }: { r: Row; a: number; b: number }) {
       <div className="flex items-center justify-between gap-2 text-sm">
         <span className={`num w-16 ${better === 'H' ? 'font-extrabold text-ink' : 'text-muted'}`}>{fmt(a)}</span>
         <span className="text-[11px] font-semibold text-faint text-center truncate">{r.label}</span>
-        <span className={`num w-16 text-right ${better === 'A' ? 'font-extrabold text-ink' : 'text-muted'}`}>{fmt(b)}</span>
+        <span className={`num w-16 text-end ${better === 'A' ? 'font-extrabold text-ink' : 'text-muted'}`}>{fmt(b)}</span>
       </div>
       <div className="mt-1.5 grid grid-cols-2 gap-1.5">
         <div className="h-2 rounded-full bg-surface2 overflow-hidden flex justify-end">
@@ -158,7 +158,7 @@ function Tile({ label, value, tone, icon }: { label: string; value: ReactNode; t
 const Ico = {
   bed: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 18V7M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5" /><circle cx="7" cy="11" r="1.6" /></svg>,
   cal: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>,
-  next: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+  next: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 rtl-flip" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
 }
 
 /** fix229: a game of a team's schedule: the slug link from the team, the opponent and the day */
@@ -176,8 +176,8 @@ function Result({ b, team, nfl }: { b: Brief; team: { id: number; name: string }
         <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${b.home ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{b.home ? t('H') : t('A')}</span>
         {b.opponentLogo ? <img src={b.opponentLogo} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
         <span className="text-ink font-medium truncate">{b.opponent}</span>
-        {b.score && <span className="ml-auto num font-bold text-ink shrink-0">{b.score}</span>}
-        {margin !== null && b.result !== 'T' && <span className={`num text-[10px] w-8 text-right shrink-0 ${b.result === 'W' ? 'text-win' : 'text-loss'}`}>{b.result === 'W' ? '+' : '−'}{margin}</span>}
+        {b.score && <span className="ms-auto num font-bold text-ink shrink-0">{b.score}</span>}
+        {margin !== null && b.result !== 'T' && <span className={`num text-[10px] w-8 text-end shrink-0 ${b.result === 'W' ? 'text-win' : 'text-loss'}`}>{ltr(`${b.result === 'W' ? '+' : '−'}${margin}`)}</span>}
       </MaybeLink>
     </li>
   )
@@ -195,7 +195,7 @@ function Upcoming({ b, from, team, nfl }: { b: Brief; from: number; team: { id: 
         <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${b.home ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{b.home ? t('H') : t('A')}</span>
         {b.opponentLogo ? <img src={b.opponentLogo} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
         <span className="text-ink font-medium truncate">{b.opponent}</span>
-        <span className="ml-auto rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-muted num shrink-0">{t('+{0} d', { 0: days })}</span>
+        <span className="ms-auto rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-muted num shrink-0">{t('+{0} d', { 0: days })}</span>
       </MaybeLink>
     </li>
   )
@@ -227,8 +227,8 @@ export function RestTab({ g, home, away, sport = 'basketball' }: { g: Pick<Game,
           <span className={`w-1 h-6 rounded-full ${BG[s]}`} />
           <TeamLogo team={team} size={22} />
           <NameLink to={teamHref(team.id, team.name)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
-          {x.backToBack && <span className="ml-auto rounded-full bg-loss/15 text-loss px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{shortLabel}</span>}
-          {x.offBye && <span className="ml-auto rounded-full bg-win/15 text-win px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{t('Off a bye')}</span>}
+          {x.backToBack && <span className="ms-auto rounded-full bg-loss/15 text-loss px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{shortLabel}</span>}
+          {x.offBye && <span className="ms-auto rounded-full bg-win/15 text-win px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">{t('Off a bye')}</span>}
         </div>
         <div className="grid grid-cols-3 gap-2 mb-4">
           <Tile icon={Ico.bed} label={t('Rest')} tone={nfl ? (x.restDays === null ? 'none' : x.backToBack ? 'bad' : x.offBye ? 'good' : 'none') : restTone(x)} value={x.restDays === null ? '–' : x.backToBack && !nfl ? t('B2B') : t('{0} d', { 0: Math.floor(x.restDays) })} />
@@ -288,7 +288,7 @@ export function H2HTab({ g, list }: { g: Game; list: H2H[] }) {
           <div className="rounded-2xl border border-line/60 bg-surface2/40 p-4 sm:p-5">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
               {(['H', 'A'] as const).map((s, i) => (
-                <div key={s} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
+                <div key={s} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-end' : 'sm:text-start'}`}>
                   <span className="w-12 h-12 rounded-2xl bg-surface border border-line/60 grid place-items-center shrink-0"><TeamLogo team={teamOf(s)} size={30} /></span>
                   <span className="min-w-0 max-w-full">
                     <NameLink to={href.bbTeam(teamOf(s).id, teamOf(s).name)} className="block font-display font-bold text-ink truncate">{teamOf(s).name}</NameLink>
@@ -365,8 +365,8 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
     const team = s === 'H' ? g.home : g.away
     const d = x ? diff(x.r) : null
     return (
-      <div className={`relative overflow-hidden rounded-2xl border border-line/60 bg-surface2/40 p-4 ${s === 'A' ? 'text-right' : ''}`}>
-        <span className={`absolute top-0 ${s === 'H' ? 'left-0' : 'right-0'} w-1 h-full ${BG[s]}`} />
+      <div className={`relative overflow-hidden rounded-2xl border border-line/60 bg-surface2/40 p-4 ${s === 'A' ? 'text-end' : ''}`}>
+        <span className={`absolute top-0 ${s === 'H' ? 'start-0' : 'end-0'} w-1 h-full ${BG[s]}`} />
         <div className={`flex items-center gap-2 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
           <TeamLogo team={team} size={22} />
           <NameLink to={href.bbTeam(team.id, team.name)} className="font-display font-bold text-ink truncate">{team.name}</NameLink>
@@ -383,7 +383,7 @@ export function StandingsTab({ g, data }: { g: Game; data: Standings }) {
             </div>
             {d !== null && (
               <div>
-                <div className={`num text-lg font-bold leading-none ${d >= 0 ? 'text-win' : 'text-loss'}`}>{d > 0 ? '+' : ''}{d.toFixed(1)}</div>
+                <div className={`num text-lg font-bold leading-none ${d >= 0 ? 'text-win' : 'text-loss'}`}>{ltr(`${d > 0 ? '+' : ''}${d.toFixed(1)}`)}</div>
                 <div className="text-[10px] text-faint uppercase tracking-wide mt-1">{t('Margin')}</div>
               </div>
             )}

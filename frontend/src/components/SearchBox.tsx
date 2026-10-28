@@ -94,7 +94,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
         <Link key={`bl${l.code}`} to={leagueHref(sport, l.code, l.name)!} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
           {l.logo ? <img src={l.logo} alt="" width={24} height={24} className="w-6 h-6 object-contain" /> : <span className="w-6 h-6 rounded-full bg-surface2" />}
           <span className="text-sm font-semibold text-ink">{l.name}</span>
-          <span className="ml-auto text-[11px] text-faint">{l.country}</span>
+          <span className="ms-auto text-[11px] text-faint">{l.country}</span>
         </Link>
       ))}
       {hits.teams.length > 0 && <div className="label px-3 pt-2 pb-1">{tt("Teams")}</div>}
@@ -102,7 +102,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
         <Link key={`bt${x.id}`} to={teamHref(sport, x.id, x.name)!} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
           {x.logo ? <img src={x.logo} alt="" width={24} height={24} className="w-6 h-6 object-contain" /> : <span className="w-6 h-6 rounded-full bg-surface2" />}
           <span className="text-sm font-semibold text-ink">{x.name}</span>
-          <span className="ml-auto text-[11px] text-faint">{x.league}</span>
+          <span className="ms-auto text-[11px] text-faint">{x.league}</span>
         </Link>
       ))}
       {hits.players.length > 0 && <div className="label px-3 pt-2 pb-1">{tt("Players")}</div>}
@@ -111,7 +111,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
           {/* fix241: initials (+ flag) unless the photo is official — PlayerPhoto checks the source */}
           <PlayerPhoto src={p.photo} name={p.name} size={24} />
           <span className="text-sm font-semibold text-ink truncate">{p.name}</span>
-          <span className="ml-auto flex items-center gap-1.5 text-[11px] text-faint min-w-0">
+          <span className="ms-auto flex items-center gap-1.5 text-[11px] text-faint min-w-0">
             {p.teamLogo && <img src={p.teamLogo} alt="" width={14} height={14} className="w-3.5 h-3.5 object-contain flex-shrink-0" />}
             <span className="truncate">{[p.team, p.position].filter(Boolean).join(' · ')}</span>
           </span>
@@ -121,7 +121,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
       {hits.games.map(g => (
         <Link key={`bg${g.id}`} to={matchHref(sport, g.id, { home: g.home, away: g.away, date: g.kickoff })!} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
           <span className="text-sm text-ink font-medium truncate">{g.home} – {g.away}</span>
-          <span className="ml-auto text-[11px] text-faint whitespace-nowrap">{['Q1', 'Q2', 'Q3', 'Q4', 'OT', 'BT', 'HT', 'LIVE'].includes(g.status || '') ? tt("Live") : new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
+          <span className="ms-auto text-[11px] text-faint whitespace-nowrap">{['Q1', 'Q2', 'Q3', 'Q4', 'OT', 'BT', 'HT', 'LIVE'].includes(g.status || '') ? tt("Live") : new Date(g.kickoff).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>
         </Link>
       ))}
     </div>
@@ -167,7 +167,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
       </label>
 
       {show && (
-        <div className="absolute left-0 right-0 mt-2 z-[60] menu-panel p-2 max-h-[70vh] overflow-y-auto">
+        <div className="absolute start-0 end-0 mt-2 z-[60] menu-panel p-2 max-h-[70vh] overflow-y-auto">
           {loading && !any && <div className="px-3 py-3 text-sm text-faint">{tt("Searching…")}</div>}
           {!loading && !any && <div className="px-3 py-3 text-sm text-faint">{tt("Nothing found for \"")}{q.trim()}".</div>}
           {onBasketball && bbBlock}
@@ -183,7 +183,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
                 <Link key={c.code} to={leagueHref('football', c.code, c.name)!} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
                   {c.emblem ? <img src={c.emblem} alt="" width={24} height={24} className="w-6 h-6 object-contain" /> : <span className="w-6 h-6 rounded-full bg-surface2" />}
                   <span className="text-sm font-semibold text-ink">{c.name}</span>
-                  {c.country && <span className="ml-auto text-[11px] text-faint">{c.country}</span>}
+                  {c.country && <span className="ms-auto text-[11px] text-faint">{c.country}</span>}
                 </Link>
               ))}
             </div>
@@ -195,7 +195,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
                 <Link key={t.id} to={teamHref('football', t.id, t.name)!} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
                   <img src={t.logo} alt="" width={24} height={24} className="w-6 h-6 object-contain" />
                   <span className="text-sm font-semibold text-ink">{t.name}</span>
-                  {t.national && <span className="ml-auto text-[11px] text-faint">{tt("National team")}</span>}
+                  {t.national && <span className="ms-auto text-[11px] text-faint">{tt("National team")}</span>}
                 </Link>
               ))}
             </div>
@@ -217,7 +217,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
                   />
                   </span>
                   <span className="text-sm font-semibold text-ink truncate">{p.name}</span>
-                  <span className="ml-auto flex items-center gap-1.5 text-[11px] text-faint min-w-0">
+                  <span className="ms-auto flex items-center gap-1.5 text-[11px] text-faint min-w-0">
                     {p.team && <img src={p.teamLogo} alt="" width={14} height={14} className="w-3.5 h-3.5 object-contain flex-shrink-0" />}
                     <span className="truncate">{[p.team || p.country, p.position].filter(Boolean).join(' · ')}</span>
                   </span>
@@ -231,7 +231,7 @@ export default function SearchBox({ compact = false, onDone, initial = '' }: { c
               {matches.map(m => (
                 <Link key={m.id} to={matchHref('football', m.id, { home: m.home, away: m.away, date: m.utcDate })!} onClick={done} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-surface2">
                   <span className="text-sm text-ink font-medium truncate">{m.home} – {m.away}</span>
-                  <span className="ml-auto text-[11px] text-faint whitespace-nowrap">
+                  <span className="ms-auto text-[11px] text-faint whitespace-nowrap">
                     {['IN_PLAY', 'PAUSED'].includes(m.status) ? tt("Live") : new Date(m.utcDate).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}
                   </span>
                 </Link>

@@ -28,11 +28,13 @@ const { HIW_LANGS } = require('../dist/services/howItWorks.js');
 
 const NEW = ['id', 'hi', 'pl', 'el', 'ru'];
 const ALL = ['en', 'es', 'pt', 'de', 'fr', 'it', 'tr', ...NEW];
+/** fix257: the server's lists also hold ar / he (admin-only: not in hreflang or sitemaps until PUBLIC_LANGS names them) */
+const LISTED = [...ALL, 'ar', 'he'];
 const FRONT = path.resolve(here, '../../frontend/src');
 const pre = l => (l === 'en' ? '' : `/${l}`);
 
 test('every language list on the server has the 12 languages', () => {
-  for (const [name, list] of Object.entries({ QC_LANGS, EMAIL_LANGS, PUSH_LANGS, CAL_LANGS, HIW_LANGS })) assert.deepEqual([...list].sort(), [...ALL].sort(), name);
+  for (const [name, list] of Object.entries({ QC_LANGS, EMAIL_LANGS, PUSH_LANGS, CAL_LANGS, HIW_LANGS })) assert.deepEqual([...list].sort(), [...LISTED].sort(), name);
   const i18n = fs.readFileSync(path.join(FRONT, 'lib/i18n.ts'), 'utf8');
   for (const [l, loc] of [['id', 'id-ID'], ['hi', 'hi-IN'], ['pl', 'pl-PL'], ['el', 'el-GR'], ['ru', 'ru-RU']]) assert.ok(i18n.includes(`${l}: { name:`) && i18n.includes(`locale: '${loc}'`), `LANGS has ${l} (${loc})`);
 });

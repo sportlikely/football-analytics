@@ -15,7 +15,7 @@ export default function Accessibility() {
           Standard 5568) and to WCAG 2.1 level AA, which also covers the EU Accessibility Act.
         </p>
         <h2 className="font-display text-xl font-bold text-ink">What the site offers</h2>
-        <ul className="list-disc pl-5 space-y-1.5 text-muted">
+        <ul className="list-disc ps-5 space-y-1.5 text-muted">
           <li>An accessibility menu on every page (the blue button at the bottom left): larger text in three steps, high contrast, inverted colours, grayscale, a readable font, highlighted links, more line spacing, stopped animations and a bigger cursor. Your choices are remembered on your device.</li>
           <li>Light and dark mode (the sun / moon button at the top).</li>
           <li>Keyboard use: every link, tab and button can be reached with Tab and activated with Enter or Space; the focused element is clearly outlined; a "Skip to content" link appears on the first Tab press.</li>
@@ -24,7 +24,7 @@ export default function Accessibility() {
           <li>No content flashes; animations are short and can be switched off at any time with "Stop animations" in the accessibility menu.</li>
         </ul>
         <h2 className="font-display text-xl font-bold text-ink">Known limitations</h2>
-        <ul className="list-disc pl-5 space-y-1.5 text-muted">
+        <ul className="list-disc ps-5 space-y-1.5 text-muted">
           <li>The football pitch view of line-ups is a picture built from player names; the same line-ups are listed as text under it.</li>
           <li>Team crests, player photos and news pictures come from outside data providers and may have no description.</li>
           <li>Video highlights are embedded from YouTube and follow YouTube's accessibility.</li>
@@ -40,7 +40,7 @@ export default function Accessibility() {
 
 
       <p className="text-sm">
-        <Link to="/" className="font-semibold text-accent">← Back to the site</Link>
+        <Link to="/" className="font-semibold text-accent"><span aria-hidden className="rtl-flip">←</span> Back to the site</Link>
       </p>
     </div>
   )

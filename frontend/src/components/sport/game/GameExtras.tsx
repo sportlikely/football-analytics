@@ -195,8 +195,8 @@ function RefereeCard({ r }: { r: NonNullable<Extras['referee']> }) {
       <div className="font-semibold text-ink">{r.name}</div>
       {r.show ? (
         <table className="mt-3 w-full text-sm num">
-          <thead><tr className="text-[11px] text-faint"><th className="text-left font-normal" /><th className="text-right font-normal">{t('His games')}</th><th className="text-right font-normal">{t('League')}</th></tr></thead>
-          <tbody>{rows.map(x => <tr key={x.label} className="border-t border-line"><td className="py-1.5 text-muted">{x.label}</td><td className="py-1.5 text-right font-bold text-ink">{x.his}</td><td className="py-1.5 text-right text-muted">{x.lg}</td></tr>)}</tbody>
+          <thead><tr className="text-[11px] text-faint"><th className="text-start font-normal" /><th className="text-end font-normal">{t('His games')}</th><th className="text-end font-normal">{t('League')}</th></tr></thead>
+          <tbody>{rows.map(x => <tr key={x.label} className="border-t border-line"><td className="py-1.5 text-muted">{x.label}</td><td className="py-1.5 text-end font-bold text-ink">{x.his}</td><td className="py-1.5 text-end text-muted">{x.lg}</td></tr>)}</tbody>
         </table>
       ) : (
         <p className="mt-2 text-xs text-muted">{t('His numbers show from 10 games in this league this season.')}</p>

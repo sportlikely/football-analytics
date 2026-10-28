@@ -104,7 +104,7 @@ export default function LeagueFixCard() {
   if (!d) return <section className="card p-5 sm:p-6 mb-8">{head}<p className="text-sm text-faint">{msg || 'No test yet — it runs every night at 04:40 UTC (and 25 minutes after a restart).'}</p></section>
   const t = d.totals
   const leagues = d.leagues.filter(l => l.n >= d.rules.minReport && (all || l.hit < d.rules.under))
-  const th = 'pb-1 pr-3 font-normal'
+  const th = 'pb-1 pe-3 font-normal'
   return (
     <section className="card p-5 sm:p-6 mb-8">
       {head}
@@ -121,20 +121,20 @@ export default function LeagueFixCard() {
       <h3 className="font-semibold text-ink mt-4 text-sm">By group</h3>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="text-faint text-left"><th className={th}>Group</th><th className={th}>Games</th><th className={th}>Hit rate</th><th className={th}>Log loss</th><th className={th}>Draw picks</th><th className={th}>Leagues 52%+</th><th className={th}>Used</th></tr></thead>
+          <thead><tr className="text-faint text-start"><th className={th}>Group</th><th className={th}>Games</th><th className={th}>Hit rate</th><th className={th}>Log loss</th><th className={th}>Draw picks</th><th className={th}>Leagues 52%+</th><th className={th}>Used</th></tr></thead>
           <tbody>
             {d.groups.map(g => (
               <Fragment key={g.key}>
                 <tr className="border-t border-line/50 cursor-pointer" onClick={() => setOpen(open === g.key ? null : g.key)}>
-                  <td className="py-1.5 pr-3 text-ink whitespace-nowrap">{g.name}</td>
-                  <td className="py-1.5 pr-3 num">{g.n}<span className="text-faint"> +{g.nBacktest}</span></td>
-                  <td className="py-1.5 pr-3">{arrow(`${g.before.hit}%`, `${g.after.hit}%`, g.applied ? g.after.hit >= g.before.hit : null)}</td>
-                  <td className="py-1.5 pr-3">{arrow(g.before.logLoss, g.after.logLoss, g.applied ? g.after.logLoss <= g.before.logLoss : null)}</td>
-                  <td className="py-1.5 pr-3">{arrow(draws(g.before), draws(g.after), null)}</td>
-                  <td className="py-1.5 pr-3">{arrow(g.before.leaguesAbove, g.after.leaguesAbove, null)}</td>
-                  <td className="py-1.5 pr-3 text-xs">{g.applied ? <span className="text-win font-semibold">{LABEL[g.applied.cand]}{g.applied.variant === 'extended' ? ' + past seasons' : ''}</span> : <span className="text-faint">no change</span>}</td>
+                  <td className="py-1.5 pe-3 text-ink whitespace-nowrap">{g.name}</td>
+                  <td className="py-1.5 pe-3 num">{g.n}<span className="text-faint"> +{g.nBacktest}</span></td>
+                  <td className="py-1.5 pe-3">{arrow(`${g.before.hit}%`, `${g.after.hit}%`, g.applied ? g.after.hit >= g.before.hit : null)}</td>
+                  <td className="py-1.5 pe-3">{arrow(g.before.logLoss, g.after.logLoss, g.applied ? g.after.logLoss <= g.before.logLoss : null)}</td>
+                  <td className="py-1.5 pe-3">{arrow(draws(g.before), draws(g.after), null)}</td>
+                  <td className="py-1.5 pe-3">{arrow(g.before.leaguesAbove, g.after.leaguesAbove, null)}</td>
+                  <td className="py-1.5 pe-3 text-xs">{g.applied ? <span className="text-win font-semibold">{LABEL[g.applied.cand]}{g.applied.variant === 'extended' ? ' + past seasons' : ''}</span> : <span className="text-faint">no change</span>}</td>
                 </tr>
-                {open === g.key && <tr><td colSpan={7} className="pb-3 pl-2"><p className="text-xs text-ink">{g.action}</p><Verdicts v={g.verdicts} /></td></tr>}
+                {open === g.key && <tr><td colSpan={7} className="pb-3 ps-2"><p className="text-xs text-ink">{g.action}</p><Verdicts v={g.verdicts} /></td></tr>}
               </Fragment>
             ))}
           </tbody>
@@ -144,7 +144,7 @@ export default function LeagueFixCard() {
       <h3 className="font-semibold text-ink mt-5 text-sm">By league</h3>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="text-faint text-left">
+          <thead><tr className="text-faint text-start">
             <th className={th}>League</th><th className={th}>Games</th><th className={th}>Hit rate</th><th className={th}>Log loss (market)</th><th className={th}>Draw picks</th>
             <th className={th}>Results H/D/A</th><th className={th}>Our picks H/D/A</th><th className={th}>Home bias</th><th className={th}>Draw gap</th><th className={th}>Used</th>
           </tr></thead>
@@ -152,22 +152,22 @@ export default function LeagueFixCard() {
             {leagues.map(l => (
               <Fragment key={l.comp}>
                 <tr className="border-t border-line/50 cursor-pointer" onClick={() => setOpen(open === l.comp ? null : l.comp)}>
-                  <td className="py-1.5 pr-3 text-ink whitespace-nowrap">{l.name}<span className="block text-xs text-faint">{l.causes.join(', ') || '—'}</span>
+                  <td className="py-1.5 pe-3 text-ink whitespace-nowrap">{l.name}<span className="block text-xs text-faint">{l.causes.join(', ') || '—'}</span>
                     {/* fix259: a league under 50% */}
                     {l.hit < 50 && <span className="block mt-1" onClick={e => e.stopPropagation()}><CopyForClaude size="sm" req={() => leagueReq(l)} /></span>}
                   </td>
-                  <td className="py-1.5 pr-3 num">{l.n}</td>
-                  <td className={`py-1.5 pr-3 ${l.hit < 50 ? 'text-loss' : ''}`}>{arrow(`${l.hit}%`, `${l.after.hit}%`, l.applied ? l.after.hit >= l.hit : null)}</td>
-                  <td className="py-1.5 pr-3 whitespace-nowrap">{arrow(l.logLoss, l.after.logLoss, l.applied ? l.after.logLoss <= l.logLoss : null)}{l.marketLogLoss != null && <span className="text-faint"> ({l.marketLogLoss} vs {l.oursOnMarket}, {l.marketN})</span>}</td>
-                  <td className="py-1.5 pr-3">{arrow(l.picks[1], l.after.drawPicks, null)}</td>
-                  <td className="py-1.5 pr-3 num whitespace-nowrap">{split(l.outcomes)}</td>
-                  <td className="py-1.5 pr-3 num whitespace-nowrap">{split(l.picks)}</td>
-                  <td className="py-1.5 pr-3 num">{l.homeBias ?? '—'}</td>
-                  <td className="py-1.5 pr-3 num">{Math.round(l.drawGap * 100)} pts</td>
-                  <td className="py-1.5 pr-3 text-xs">{l.applied ? <span className="text-win">{l.via === 'group' ? 'group: ' : 'own: '}{l.applied}</span> : <span className="text-faint">no change</span>}</td>
+                  <td className="py-1.5 pe-3 num">{l.n}</td>
+                  <td className={`py-1.5 pe-3 ${l.hit < 50 ? 'text-loss' : ''}`}>{arrow(`${l.hit}%`, `${l.after.hit}%`, l.applied ? l.after.hit >= l.hit : null)}</td>
+                  <td className="py-1.5 pe-3 whitespace-nowrap">{arrow(l.logLoss, l.after.logLoss, l.applied ? l.after.logLoss <= l.logLoss : null)}{l.marketLogLoss != null && <span className="text-faint"> ({l.marketLogLoss} vs {l.oursOnMarket}, {l.marketN})</span>}</td>
+                  <td className="py-1.5 pe-3">{arrow(l.picks[1], l.after.drawPicks, null)}</td>
+                  <td className="py-1.5 pe-3 num whitespace-nowrap">{split(l.outcomes)}</td>
+                  <td className="py-1.5 pe-3 num whitespace-nowrap">{split(l.picks)}</td>
+                  <td className="py-1.5 pe-3 num">{l.homeBias ?? '—'}</td>
+                  <td className="py-1.5 pe-3 num">{Math.round(l.drawGap * 100)} pts</td>
+                  <td className="py-1.5 pe-3 text-xs">{l.applied ? <span className="text-win">{l.via === 'group' ? 'group: ' : 'own: '}{l.applied}</span> : <span className="text-faint">no change</span>}</td>
                 </tr>
                 {open === l.comp && (
-                  <tr><td colSpan={10} className="pb-3 pl-2">
+                  <tr><td colSpan={10} className="pb-3 ps-2">
                     {l.own ? <><p className="text-xs text-ink">Own test: {l.own.action}</p><Verdicts v={l.own.verdicts} /></> : <p className="text-xs text-faint">Under {d.rules.minLeague} games: uses its group's result.</p>}
                   </td></tr>
                 )}

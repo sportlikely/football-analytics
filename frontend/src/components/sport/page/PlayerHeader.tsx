@@ -46,7 +46,7 @@ export default function PlayerHeader(p: PlayerHeaderProps) {
               {photo ? <img src={photo} alt={p.name} onError={() => setBroken(photo)} className="w-full h-full object-cover" /> : (p.noPhoto ?? <PlayerInitials name={p.name} />)}
             </div>
             {p.teamBadge && (
-              <span className="absolute -bottom-2 -right-2 w-10 h-10 rounded-full bg-white grid place-items-center ring-2 ring-surface shadow-card overflow-hidden">{p.teamBadge}</span>
+              <span className="absolute -bottom-2 -end-2 w-10 h-10 rounded-full bg-white grid place-items-center ring-2 ring-surface shadow-card overflow-hidden">{p.teamBadge}</span>
             )}
           </div>
         </div>

@@ -107,7 +107,7 @@ export default function MorePredictions({ sport, id, rid, status, home, away }: 
         {yesNo ? (
           <div className="flex items-center gap-2">
             <div className="flex-1 h-2.5 rounded-full bg-surface2 overflow-hidden"><div className={`h-full rounded-full ${s.top === 0 ? 'bg-accent' : 'bg-muted/40'}`} style={{ width: `${s.p[0]}%` }} /></div>
-            <span className={`num text-sm font-bold w-14 text-right ${s.top === 0 ? 'text-accent' : 'text-ink'}`}>{s.p[0].toFixed(0)}%</span>
+            <span className={`num text-sm font-bold w-14 text-end ${s.top === 0 ? 'text-accent' : 'text-ink'}`}>{s.p[0].toFixed(0)}%</span>
           </div>
         ) : (
           <div className="space-y-1">
@@ -117,7 +117,7 @@ export default function MorePredictions({ sport, id, rid, status, home, away }: 
                 <div key={r.l} className="flex items-center gap-2 text-[13px]">
                   <span className={`w-32 sm:w-40 shrink-0 truncate ${top ? 'font-bold text-ink' : 'text-muted'}`} title={label(k, r.l)}>{label(k, r.l)}</span>
                   <div className="flex-1 h-2.5 rounded-full bg-surface2 overflow-hidden"><div className={`h-full rounded-full ${top ? 'bg-accent' : 'bg-muted/40'}`} style={{ width: `${Math.min(100, r.v)}%` }} /></div>
-                  <span className={`num w-12 text-right ${top ? 'font-bold text-accent' : 'text-ink'}`}>{r.v.toFixed(0)}%</span>
+                  <span className={`num w-12 text-end ${top ? 'font-bold text-accent' : 'text-ink'}`}>{r.v.toFixed(0)}%</span>
                   <span className="w-4 text-center" aria-hidden>{was ? (hit!.hit ? <span className="text-win">✓</span> : <span className="text-loss">●</span>) : ''}</span>
                 </div>
               )
@@ -155,10 +155,10 @@ export default function MorePredictions({ sport, id, rid, status, home, away }: 
           {grid && g6 && (
             <div className="mt-3 overflow-x-auto">
               <table className="text-xs num border-separate border-spacing-0.5 mx-auto">
-                <thead><tr><th className="px-1 text-faint font-normal text-left">{home} ↓ · {away} →</th>{g6[0].map((_, j) => <th key={j} className="px-1 text-faint font-semibold">{j}</th>)}</tr></thead>
+                <thead><tr><th className="px-1 text-faint font-normal text-start">{home} ↓ · {away} <span aria-hidden className="rtl-flip">→</span></th>{g6[0].map((_, j) => <th key={j} className="px-1 text-faint font-semibold">{j}</th>)}</tr></thead>
                 <tbody>
                   {g6.map((row, i) => (
-                    <tr key={i}><th className="px-1 text-faint font-semibold text-right">{i}</th>
+                    <tr key={i}><th className="px-1 text-faint font-semibold text-end">{i}</th>
                       {row.map((v, j) => {
                         const max = Math.max(...g6.flat())
                         return <td key={j} title={`${i}–${j}: ${v}%`} className="w-10 h-8 text-center rounded" style={{ background: `rgb(var(--accent) / ${Math.min(0.85, (v / max) * 0.85)})`, color: v / max > 0.55 ? 'rgb(var(--bg))' : undefined }}>{v.toFixed(1)}</td>

@@ -11,11 +11,11 @@ export default function ModelParts({ home, away, rows, total, note }: { home: Re
     <div className="mt-3">
       <table className="w-full text-xs num">
         <thead>
-          <tr className="text-faint"><th className="text-left font-semibold py-1">{t('Part')}</th><th className="text-right font-semibold w-24 truncate">{home}</th><th className="text-right font-semibold w-24 truncate">{away}</th></tr>
+          <tr className="text-faint"><th className="text-start font-semibold py-1">{t('Part')}</th><th className="text-end font-semibold w-24 truncate">{home}</th><th className="text-end font-semibold w-24 truncate">{away}</th></tr>
         </thead>
         <tbody>
-          {rows.map(x => <tr key={x.label} className="border-t border-line/40"><td className="py-1 text-muted font-sans">{x.label}</td><td className="text-right text-ink">{x.h}</td><td className="text-right text-ink">{x.a}</td></tr>)}
-          {total && <tr className="border-t border-line"><td className="py-1.5 font-sans font-bold text-ink">{total.label}</td><td className="text-right font-bold text-home">{total.h}</td><td className="text-right font-bold text-away">{total.a}</td></tr>}
+          {rows.map(x => <tr key={x.label} className="border-t border-line/40"><td className="py-1 text-muted font-sans">{x.label}</td><td className="text-end text-ink">{x.h}</td><td className="text-end text-ink">{x.a}</td></tr>)}
+          {total && <tr className="border-t border-line"><td className="py-1.5 font-sans font-bold text-ink">{total.label}</td><td className="text-end font-bold text-home">{total.h}</td><td className="text-end font-bold text-away">{total.a}</td></tr>}
         </tbody>
       </table>
       {note && <p className="mt-2 text-[11px] text-faint">{note}</p>}

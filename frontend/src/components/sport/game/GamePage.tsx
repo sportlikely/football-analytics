@@ -67,7 +67,7 @@ export function Section({ title, note, id, action, children }: { title: string; 
 function TeamHero({ s, align }: { s: HeroSide; align: 'left' | 'right' }) {
   return (
     <Link to={s.href} title={s.title}
-      className={`flex flex-col items-center text-center gap-2 sm:gap-4 min-w-0 hover:opacity-90 ${align === 'right' ? 'sm:flex-row-reverse sm:text-right' : 'sm:flex-row sm:text-left'}`}>
+      className={`flex flex-col items-center text-center gap-2 sm:gap-4 min-w-0 hover:opacity-90 ${align === 'right' ? 'sm:flex-row-reverse sm:text-end' : 'sm:flex-row sm:text-start'}`}>
       {s.logo}
       <div className="min-w-0 w-full sm:w-auto">
         <div className="font-sans font-extrabold text-[15px] sm:font-display sm:text-2xl text-ink leading-tight break-words sm:truncate">{s.name}</div>
@@ -110,7 +110,7 @@ export default function GamePage(p: GamePageProps) {
       {p.srTitle && <h1 className="sr-only">{p.srTitle}</h1>}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link to={p.back.to} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink transition-colors">
-          <span aria-hidden>←</span> {p.back.label}</Link>
+          <span aria-hidden className="rtl-flip">←</span> {p.back.label}</Link>
         {p.top}
       </div>
 
@@ -121,7 +121,7 @@ export default function GamePage(p: GamePageProps) {
             style={{ background: `radial-gradient(700px 260px at 50% 120%, rgb(var(${p.pickVar})), transparent 70%)` }} />
         )}
         {/* competition · round · date — centred and stacked on phones, one line on wider screens */}
-        <div className="relative mb-5 sm:mb-6 flex flex-col items-center gap-1 text-center sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:text-left text-sm text-muted">
+        <div className="relative mb-5 sm:mb-6 flex flex-col items-center gap-1 text-center sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:text-start text-sm text-muted">
           <div className="min-w-0 max-w-full flex flex-col items-center gap-0.5 sm:flex-row sm:items-center sm:gap-2">
             <span className="inline-flex items-center gap-2 max-w-full min-w-0">
               <Link to={p.league.href} className="inline-flex items-center gap-2 min-w-0 hover:text-ink">
@@ -185,8 +185,8 @@ export default function GamePage(p: GamePageProps) {
         {current.id === p.tabs[0].id && p.tabs.length > 1 && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {p.tabs.slice(1).map(x => (
-              <button key={x.id} type="button" onClick={() => p.onTab(x.id)} className="card p-4 text-left hover:border-accent/50 transition-colors">
-                <div className="font-display font-bold text-ink">{x.label} <span aria-hidden className="text-accent">→</span></div>
+              <button key={x.id} type="button" onClick={() => p.onTab(x.id)} className="card p-4 text-start hover:border-accent/50 transition-colors">
+                <div className="font-display font-bold text-ink">{x.label} <span aria-hidden className="text-accent rtl-flip">→</span></div>
                 <div className="text-xs text-muted mt-1">{x.hint}</div>
               </button>
             ))}

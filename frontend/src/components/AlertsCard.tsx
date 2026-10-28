@@ -128,7 +128,7 @@ export default function AlertsCard() {
               {toggle(t("Score"), t("Football goals; basketball and American football quarter ends and lead changes in the last 3 minutes; tennis sets."), s.score, () => save({ score: !s.score }))}
               {toggle(t("Final score"), t("The result, and whether our pick was right."), s.final, () => save({ final: !s.final }))}
               {toggle(t("Upset watch"), t("When the side we gave 20–45% is ahead late in the game."), s.pro && s.upset, () => save({ upset: !s.upset }), !s.pro,
-                !s.pro ? <Link to="/premium" className="ml-2 text-xs font-bold text-accent">Pro</Link> : null)}
+                !s.pro ? <Link to="/premium" className="ms-2 text-xs font-bold text-accent">Pro</Link> : null)}
               {toggle(t("Games I picked"), t("Also alerts for the games you made a pick on."), s.myPicks, () => save({ myPicks: !s.myPicks }))}
 
               <div className="flex flex-wrap gap-3">

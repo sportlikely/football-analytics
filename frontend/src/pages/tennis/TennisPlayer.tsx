@@ -110,7 +110,7 @@ export default function TennisPlayer() {
                   <li key={x.matchId} className="flex items-center gap-3 py-1.5 text-sm min-w-0">
                     <span className="w-10 num text-faint shrink-0">{x.year}</span>
                     <Link to={tennisHref.tournament(x.key)} className="min-w-0 truncate font-semibold text-ink hover:text-accent">{x.tournament}</Link>
-                    <span className="ml-auto shrink-0 text-xs text-muted">{[x.tier, surfaceName(x.surface)].filter(Boolean).join(' · ')}</span>
+                    <span className="ms-auto shrink-0 text-xs text-muted">{[x.tier, surfaceName(x.surface)].filter(Boolean).join(' · ')}</span>
                   </li>
                 ))}
               </ul>
@@ -133,7 +133,7 @@ export default function TennisPlayer() {
                   <li key={r.rank} className={`flex items-center gap-2 py-1.5 text-sm min-w-0 ${r.me ? 'bg-accent/10 -mx-2 px-2 rounded-lg' : ''}`}>
                     <span className="w-8 num text-faint shrink-0">{r.rank}</span>
                     {r.id && !r.me ? <Link to={tennisHref.player(r.id, r.name)!} className="min-w-0 truncate text-ink hover:text-accent">{flagOf(r.country)} {r.name}</Link> : <span className={`min-w-0 truncate ${r.me ? 'font-bold text-ink' : 'text-ink'}`}>{flagOf(r.country)} {r.name}</span>}
-                    <span className="ml-auto num text-xs text-muted shrink-0">{r.points !== null ? r.points.toLocaleString(LOCALE) : ''}</span>
+                    <span className="ms-auto num text-xs text-muted shrink-0">{r.points !== null ? r.points.toLocaleString(LOCALE) : ''}</span>
                   </li>
                 ))}
               </ul>
@@ -230,7 +230,7 @@ function AnalysisCard({ a }: { a: Analysis }) {
                 <div className="flex items-baseline justify-between gap-2 text-sm"><span className="text-muted truncate">{t(m.label)}</span><span className="num text-ink font-semibold">{m.text ?? '–'}</span></div>
                 <div className="mt-1 h-1.5 rounded-full bg-surface2 overflow-hidden"><div className={`h-full rounded-full ${m.score === null ? '' : m.score >= 8 ? 'bg-win' : m.score <= 3 ? 'bg-loss' : 'bg-accent'}`} style={{ width: `${(m.score ?? 0) * 10}%` }} /></div>
               </div>
-              <span className="w-8 text-right num font-display font-extrabold text-ink">{m.score ?? '–'}</span>
+              <span className="w-8 text-end num font-display font-extrabold text-ink">{m.score ?? '–'}</span>
             </div>
           ))}
         </div>

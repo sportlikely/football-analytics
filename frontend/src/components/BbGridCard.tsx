@@ -175,14 +175,14 @@ export default function BbGridCard() {
       {d.gate && (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Group</th><th className="pb-1 pr-3 font-normal">Whole season bb-v3 → v4</th><th className="pb-1 pr-3 font-normal">Games 1–25</th><th className="pb-1 pr-3 font-normal">Who played known</th><th className="pb-1 font-normal">Live</th></tr></thead>
+            <thead><tr className="text-faint text-start"><th className="pb-1 pe-3 font-normal">Group</th><th className="pb-1 pe-3 font-normal">Whole season bb-v3 → v4</th><th className="pb-1 pe-3 font-normal">Games 1–25</th><th className="pb-1 pe-3 font-normal">Who played known</th><th className="pb-1 font-normal">Live</th></tr></thead>
             <tbody>
               {Object.values(d.gate).map(g => (
                 <tr key={g.group} className="border-t border-line/50" title={g.leagues.join(', ')}>
-                  <td className="py-1.5 pr-3 text-ink font-semibold">{g.group}</td>
-                  <td className="py-1.5 pr-3 num">{ll(g.whole.v3)} → <b className={g.whole.v4.logLoss < g.whole.v3.logLoss ? 'text-win' : 'text-loss'}>{ll(g.whole.v4)}</b> <span className="text-faint">({g.whole.v4.games})</span></td>
-                  <td className="py-1.5 pr-3 num">{ll(g.first25.v3)} → <b className={g.first25.v4.logLoss < g.first25.v3.logLoss ? 'text-win' : 'text-loss'}>{ll(g.first25.v4)}</b> <span className="text-faint">({g.first25.v4.games})</span></td>
-                  <td className="py-1.5 pr-3 num text-muted">{ll(g.oracle.v4)}</td>
+                  <td className="py-1.5 pe-3 text-ink font-semibold">{g.group}</td>
+                  <td className="py-1.5 pe-3 num">{ll(g.whole.v3)} → <b className={g.whole.v4.logLoss < g.whole.v3.logLoss ? 'text-win' : 'text-loss'}>{ll(g.whole.v4)}</b> <span className="text-faint">({g.whole.v4.games})</span></td>
+                  <td className="py-1.5 pe-3 num">{ll(g.first25.v3)} → <b className={g.first25.v4.logLoss < g.first25.v3.logLoss ? 'text-win' : 'text-loss'}>{ll(g.first25.v4)}</b> <span className="text-faint">({g.first25.v4.games})</span></td>
+                  <td className="py-1.5 pe-3 num text-muted">{ll(g.oracle.v4)}</td>
                   <td className={`py-1.5 font-semibold ${g.pass ? 'text-win' : 'text-loss'}`} title={`${g.reason}${g.basis ? ` [${g.basis}]` : ''}`}>{g.pass ? 'bb-v4' : 'bb-v3'}{g.variant === 'shared' ? ' (shared)' : ''}</td>
                 </tr>
               ))}
@@ -263,15 +263,15 @@ export default function BbGridCard() {
             <p className="text-faint num">All leagues: {ls.years.test} {ls.total.test.shared} → {ls.total.test.used} ({ls.total.test.games}) · untouched {ls.years.check} {ls.total.check.shared} → {ls.total.check.used} ({ls.total.check.games}) · live {ls.total.live.shared} → {ls.total.live.used} ({ls.total.live.games}){lsPreview ? ' · preview' : ''}</p>
             <div className="mt-1 overflow-x-auto">
               <table className="w-full text-xs">
-                <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">League</th><th className="pb-1 pr-3 font-normal">Used</th><th className="pb-1 pr-3 font-normal">Test gain</th><th className="pb-1 pr-3 font-normal">Check shared → used</th><th className="pb-1 pr-3 font-normal">Home · stretch · sigma</th><th className="pb-1 font-normal">Split #1 / #3 / #4 / #6 / #7</th></tr></thead>
+                <thead><tr className="text-faint text-start"><th className="pb-1 pe-3 font-normal">League</th><th className="pb-1 pe-3 font-normal">Used</th><th className="pb-1 pe-3 font-normal">Test gain</th><th className="pb-1 pe-3 font-normal">Check shared → used</th><th className="pb-1 pe-3 font-normal">Home · stretch · sigma</th><th className="pb-1 font-normal">Split #1 / #3 / #4 / #6 / #7</th></tr></thead>
                 <tbody>
                   {ls.leagues.map(r => (
                     <tr key={r.league} className="border-t border-line/50" title={r.why}>
-                      <td className="py-1 pr-3 text-ink font-semibold">{r.league} <span className="text-faint font-normal">({r.games.train})</span></td>
-                      <td className={`py-1 pr-3 ${r.used === 'shared' ? 'text-faint' : 'text-win font-semibold'}`}>{r.used}{r.used === 'group' && r.group ? ` (${r.group})` : ''}</td>
-                      <td className="py-1 pr-3 num">{r.test.gain ?? '—'}</td>
-                      <td className="py-1 pr-3 num">{r.check.shared ?? '—'} → {r.check.used ?? '—'}</td>
-                      <td className="py-1 pr-3 num">{r.settings ? `${r.settings.home > 0 ? '+' : ''}${r.settings.home} · ×${r.settings.str} · ×${r.settings.sig}` : '—'}</td>
+                      <td className="py-1 pe-3 text-ink font-semibold">{r.league} <span className="text-faint font-normal">({r.games.train})</span></td>
+                      <td className={`py-1 pe-3 ${r.used === 'shared' ? 'text-faint' : 'text-win font-semibold'}`}>{r.used}{r.used === 'group' && r.group ? ` (${r.group})` : ''}</td>
+                      <td className="py-1 pe-3 num">{r.test.gain ?? '—'}</td>
+                      <td className="py-1 pe-3 num">{r.check.shared ?? '—'} → {r.check.used ?? '—'}</td>
+                      <td className="py-1 pe-3 num">{r.settings ? `${r.settings.home > 0 ? '+' : ''}${r.settings.home} · ×${r.settings.str} · ×${r.settings.sig}` : '—'}</td>
                       <td className="py-1 num">{[0, 2, 3, 5, 6].map(i => r.split[i]).join(' / ')}</td>
                     </tr>
                   ))}
@@ -305,12 +305,12 @@ export default function BbGridCard() {
               <p className={mr.gate.pass ? 'text-win' : 'text-loss'}>Gate: {mr.gate.reason}{mr.applied ? ' · stored' : ' · not stored'}</p>
               <div className="mt-1 overflow-x-auto">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">1,000 points split</th><th className="pb-1 pr-3 font-normal">NBA before → after</th><th className="pb-1 font-normal">Other leagues before → after</th></tr></thead>
+                  <thead><tr className="text-faint text-start"><th className="pb-1 pe-3 font-normal">1,000 points split</th><th className="pb-1 pe-3 font-normal">NBA before → after</th><th className="pb-1 font-normal">Other leagues before → after</th></tr></thead>
                   <tbody>
                     {ROWS.map((name, i) => (i === 11 ? null : (
                       <tr key={name} className={`border-t border-line/40 ${i === 3 ? 'text-ink font-semibold' : ''}`}>
-                        <td className="py-0.5 pr-3">{name}</td>
-                        <td className="py-0.5 pr-3 num">{mr.split.nba.before[i]} → {mr.split.nba.after[i]}</td>
+                        <td className="py-0.5 pe-3">{name}</td>
+                        <td className="py-0.5 pe-3 num">{mr.split.nba.before[i]} → {mr.split.nba.after[i]}</td>
                         <td className="py-0.5 num">{mr.split.other.before[i]} → {mr.split.other.after[i]}</td>
                       </tr>
                     )))}
@@ -323,14 +323,14 @@ export default function BbGridCard() {
           {d.miss.examples.length ? (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
-                <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Game</th><th className="pb-1 pr-3 font-normal">#4 (home view)</th><th className="pb-1 pr-3 font-normal">Home chance</th><th className="pb-1 pr-3 font-normal">Result</th><th className="pb-1 font-normal">#4 side won</th></tr></thead>
+                <thead><tr className="text-faint text-start"><th className="pb-1 pe-3 font-normal">Game</th><th className="pb-1 pe-3 font-normal">#4 (home view)</th><th className="pb-1 pe-3 font-normal">Home chance</th><th className="pb-1 pe-3 font-normal">Result</th><th className="pb-1 font-normal">#4 side won</th></tr></thead>
                 <tbody>
                   {d.miss.examples.map(x => (
                     <tr key={x.gameId} className="border-t border-line/40">
-                      <td className="py-0.5 pr-3 text-ink">{x.kickoff.slice(0, 10)} {x.home} – {x.away}</td>
-                      <td className="py-0.5 pr-3 num">{x.move > 0 ? '+' : ''}{x.move}</td>
-                      <td className="py-0.5 pr-3 num">{Math.round(x.pHome * 100)}%</td>
-                      <td className={`py-0.5 pr-3 num ${x.pickRight ? 'text-win' : 'text-loss'}`}>{x.score}</td>
+                      <td className="py-0.5 pe-3 text-ink">{x.kickoff.slice(0, 10)} {x.home} – {x.away}</td>
+                      <td className="py-0.5 pe-3 num">{x.move > 0 ? '+' : ''}{x.move}</td>
+                      <td className="py-0.5 pe-3 num">{Math.round(x.pHome * 100)}%</td>
+                      <td className={`py-0.5 pe-3 num ${x.pickRight ? 'text-win' : 'text-loss'}`}>{x.score}</td>
                       <td className={`py-0.5 ${x.fourRight ? 'text-win' : 'text-loss'}`}>{x.fourRight ? 'yes' : 'no'}</td>
                     </tr>
                   ))}
@@ -363,12 +363,12 @@ export default function BbGridCard() {
               </p>
               <div className="mt-1 overflow-x-auto">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Test {ir.test}</th><th className="pb-1 pr-3 font-normal">Games</th><th className="pb-1 font-normal">Log loss today → new</th></tr></thead>
+                  <thead><tr className="text-faint text-start"><th className="pb-1 pe-3 font-normal">Test {ir.test}</th><th className="pb-1 pe-3 font-normal">Games</th><th className="pb-1 font-normal">Log loss today → new</th></tr></thead>
                   <tbody>
                     {ir.gate.checks.map(c => (
                       <tr key={c.name} className="border-t border-line/40">
-                        <td className="py-0.5 pr-3 text-ink">{c.name}</td>
-                        <td className="py-0.5 pr-3 num">{c.games}</td>
+                        <td className="py-0.5 pe-3 text-ink">{c.name}</td>
+                        <td className="py-0.5 pe-3 num">{c.games}</td>
                         <td className="py-0.5 num">{c.cur.toFixed(4)} → <b className={c.better ? 'text-win' : c.worse ? 'text-loss' : 'text-muted'}>{c.next.toFixed(4)}</b></td>
                       </tr>
                     ))}
@@ -401,14 +401,14 @@ export default function BbGridCard() {
             <div className="mt-2 overflow-x-auto">
               <div className="text-faint mb-0.5">With / without their top player this season (margin a game) vs what #4 implies</div>
               <table className="w-full text-xs">
-                <thead><tr className="text-faint text-left"><th className="pb-1 pr-3 font-normal">Team · player</th><th className="pb-1 pr-3 font-normal">With</th><th className="pb-1 pr-3 font-normal">Without</th><th className="pb-1 pr-3 font-normal">Real gap</th><th className="pb-1 font-normal">Model before → after</th></tr></thead>
+                <thead><tr className="text-faint text-start"><th className="pb-1 pe-3 font-normal">Team · player</th><th className="pb-1 pe-3 font-normal">With</th><th className="pb-1 pe-3 font-normal">Without</th><th className="pb-1 pe-3 font-normal">Real gap</th><th className="pb-1 font-normal">Model before → after</th></tr></thead>
                 <tbody>
                   {d.impact.withWithout.map(x => (
                     <tr key={x.team} className="border-t border-line/40">
-                      <td className="py-0.5 pr-3 text-ink">{x.team} · {x.player}</td>
-                      <td className="py-0.5 pr-3 num">{x.with.margin > 0 ? '+' : ''}{x.with.margin} ({x.with.games})</td>
-                      <td className="py-0.5 pr-3 num">{x.without.margin > 0 ? '+' : ''}{x.without.margin} ({x.without.games})</td>
-                      <td className="py-0.5 pr-3 num font-semibold">{x.real}</td>
+                      <td className="py-0.5 pe-3 text-ink">{x.team} · {x.player}</td>
+                      <td className="py-0.5 pe-3 num">{x.with.margin > 0 ? '+' : ''}{x.with.margin} ({x.with.games})</td>
+                      <td className="py-0.5 pe-3 num">{x.without.margin > 0 ? '+' : ''}{x.without.margin} ({x.without.games})</td>
+                      <td className="py-0.5 pe-3 num font-semibold">{x.real}</td>
                       <td className="py-0.5 num">{x.before} → {x.after ?? '—'}</td>
                     </tr>
                   ))}

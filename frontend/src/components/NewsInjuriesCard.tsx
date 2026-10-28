@@ -39,7 +39,7 @@ export default function NewsInjuriesCard() {
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${x.state === 'active' ? 'bg-loss/15 text-loss' : 'bg-surface2 text-muted'}`}>{x.state === 'active' ? `${x.status}${x.injury ? ` (${x.injury})` : ''} until ${x.until.slice(0, 10)}` : x.state}</span>
                 {x.reviewed && x.state === 'active' && <span className="text-[10px] text-win font-bold">checked</span>}
                 {x.state === 'active' && (
-                  <span className="ml-auto flex gap-2">
+                  <span className="ms-auto flex gap-2">
                     {!x.reviewed && <button disabled={busy === x.id} onClick={() => act(x.id, 'ok')} type="button" className="text-xs font-semibold text-accent hover:underline disabled:opacity-50">OK</button>}
                     <button disabled={busy === x.id} onClick={() => act(x.id, 'dismiss')} type="button" className="text-xs font-semibold text-loss hover:underline disabled:opacity-50">Dismiss</button>
                   </span>

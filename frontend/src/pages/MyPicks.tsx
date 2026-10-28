@@ -107,8 +107,8 @@ export default function MyPicks({ initial = 'all' }: { initial?: 'all' | SportKe
                       <span className="block text-sm font-semibold text-ink truncate">{marketLabel(x.market)}</span>
                     </span>
                     <div className="hidden sm:block w-40 h-2 rounded-full bg-surface2 overflow-hidden"><div className="h-full bg-accent" style={{ width: `${p ?? 0}%` }} /></div>
-                    <span className="text-sm font-bold text-ink num w-14 text-right">{p !== null ? `${p}%` : '–'}</span>
-                    <span className="text-[11px] text-faint num w-20 text-right">{s ? `${s.hits}/${s.settled}` : '0/0'}</span>
+                    <span className="text-sm font-bold text-ink num w-14 text-end">{p !== null ? `${p}%` : '–'}</span>
+                    <span className="text-[11px] text-faint num w-20 text-end">{s ? `${s.hits}/${s.settled}` : '0/0'}</span>
                   </div>
                 )
               })}
@@ -120,7 +120,7 @@ export default function MyPicks({ initial = 'all' }: { initial?: 'all' | SportKe
             {list.length === 0 ? (
               <div className="text-sm text-faint space-y-2">
                 <p>{tt('No picks yet. Open any game and pick under "Your picks".')}</p>
-                <Link to={GAMES_HREF[sport === 'all' ? 'fb' : sport]} className="inline-block text-accent font-semibold hover:underline">{sport === 'all' || sport === 'fb' ? tt('See the matches') : tt('See the games')} →</Link>
+                <Link to={GAMES_HREF[sport === 'all' ? 'fb' : sport]} className="inline-block text-accent font-semibold hover:underline">{sport === 'all' || sport === 'fb' ? tt('See the matches') : tt('See the games')} <span aria-hidden className="rtl-flip">→</span></Link>
               </div>
             ) : (
               <ul className="divide-y divide-line/50">
@@ -133,7 +133,7 @@ export default function MyPicks({ initial = 'all' }: { initial?: 'all' | SportKe
                         <span className="font-semibold">{r.home || '?'} – {r.away || '?'}</span>
                         {r.league && <span className="text-faint text-xs"> · {r.league}</span>}
                       </Link>
-                      <span className="text-xs text-muted min-w-0 truncate w-full sm:w-auto sm:shrink-0 pl-[68px] sm:pl-0">{marketLabel(r.market)}: <b className="text-ink">{opt?.label || r.pick}</b></span>
+                      <span className="text-xs text-muted min-w-0 truncate w-full sm:w-auto sm:shrink-0 ps-[68px] sm:ps-0">{marketLabel(r.market)}: <b className="text-ink">{opt?.label || r.pick}</b></span>
                       <span className="shrink-0"><ResultBadge r={r.result} /></span>
                     </li>
                   )

@@ -232,7 +232,7 @@ html.a11y-motion *, html.a11y-motion *::before, html.a11y-motion *::after { anim
 html.a11y-contrast :focus-visible { outline-color: #ff0; }
 
 /* "Skip to content" link: hidden until it gets keyboard focus */
-.skip-link { position: absolute; left: 8px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 10px; background: rgb(var(--accent)); color: rgb(var(--bg)); font-weight: 700; }
+.skip-link { position: absolute; inset-inline-start: 8px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 10px; background: rgb(var(--accent)); color: rgb(var(--bg)); font-weight: 700; }
 .skip-link:focus { top: 8px; }
 
 /* Phones: iPhone Safari zooms into any field with text under 16px when it is tapped. Keep small fields at 16px there. */
@@ -243,3 +243,6 @@ html.a11y-contrast :focus-visible { outline-color: #ff0; }
 
 /* fix256: Devanagari letters join — letter-spacing (labels, uppercase tracking) pulls them apart */
 html:lang(hi) * { letter-spacing: 0 !important; }
+/* fix257: right to left (ar, he). The layout mirrors by itself (flex, grid and the logical classes ms-/me-/ps-/pe-/
+   start-/end-/text-start); a direction glyph or icon that must point the other way gets .rtl-flip. */
+[dir='rtl'] .rtl-flip { display: inline-block; transform: scaleX(-1); }

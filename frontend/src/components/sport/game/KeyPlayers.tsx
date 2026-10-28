@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { t } from '../../../lib/i18n'
+import { t, ltr } from '../../../lib/i18n'
 import NameLink from '../NameLink'
 import PlayerPhoto from '../PlayerPhoto'
 
@@ -40,8 +40,8 @@ function Side({ side, cls }: { side: KeySideT; cls: string }) {
               <div className="text-[11px] text-faint num truncate">{p.detail}</div>
             </div>
             {p.without !== null && (
-              <div className="shrink-0 text-right leading-tight" title={t('What our model takes off the team without him')}>
-                <div className={`num text-sm font-bold ${p.without <= -1.5 ? 'text-loss' : 'text-muted'}`}>{p.without > 0 ? '+' : p.without < 0 ? '−' : ''}{Math.abs(p.without).toFixed(1)}</div>
+              <div className="shrink-0 text-end leading-tight" title={t('What our model takes off the team without him')}>
+                <div className={`num text-sm font-bold ${p.without <= -1.5 ? 'text-loss' : 'text-muted'}`}>{ltr(`${p.without > 0 ? '+' : p.without < 0 ? '−' : ''}${Math.abs(p.without).toFixed(1)}`)}</div>
                 <div className="text-[10px] text-faint">{t('without him')}</div>
               </div>
             )}

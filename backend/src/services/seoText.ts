@@ -3,8 +3,10 @@
  * 140–155 characters, built from facts clause by clause (a clause goes in only if it fits), so it never stops
  * mid-word or ends with "…". Never the pick or a percentage.
  */
-export type Lang = 'en' | 'es' | 'pt' | 'de' | 'fr' | 'it' | 'tr' | 'id' | 'hi' | 'pl' | 'el' | 'ru';
-const LOCALE: Record<Lang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-PT', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU' };
+import { LANG_LOCALE } from '../utils/langs';
+
+export type Lang = 'en' | 'es' | 'pt' | 'de' | 'fr' | 'it' | 'tr' | 'id' | 'hi' | 'pl' | 'el' | 'ru' | 'ar' | 'he';
+const LOCALE: Record<Lang, string> = { en: 'en-GB', es: 'es-ES', pt: 'pt-PT', de: 'de-DE', fr: 'fr-FR', it: 'it-IT', tr: 'tr-TR', id: 'id-ID', hi: 'hi-IN', pl: 'pl-PL', el: 'el-GR', ru: 'ru-RU', ar: LANG_LOCALE.ar, he: LANG_LOCALE.he };
 
 interface Pack {
   form: string; lastMeeting: string; absences: string; table: string; record: string; thisWeek: string; leader: string; next: string;
@@ -156,7 +158,31 @@ const P: Record<Lang, Pack> = {
     teamFill: ['состав', 'статистика игроков', 'личные встречи', 'дома и в гостях', 'травмы'], leagueFill: ['форма', 'бомбардиры', 'личные встречи', 'последние результаты', 'все команды'],
     wdl: { W: 'В', D: 'Н', L: 'П' },
     prediction: 'прогноз', previewTitle: 'прогноз и обзор', predictions: 'прогнозы', tableStats: 'таблица и статистика', nextAndForm: 'ближайшие матчи, результаты и форма',
-    today: 'Прогнозы на футбол сегодня', todayBb: 'Прогнозы на баскетбол сегодня'
+    today: 'Прогнозы на футбол сегодня', todayBb: 'Прогнозы на баскетбол сегодня',
+  },
+  ar: {
+    form: 'المستوى', lastMeeting: 'آخر مواجهة', absences: 'غيابات مؤثرة', table: 'في الترتيب', record: 'السجل', thisWeek: 'مباريات هذا الأسبوع', leader: 'المتصدر', next: 'المباراة القادمة',
+    fbTails: ['معاينة مجانية واختيارنا للفرصة المزدوجة.', 'معاينة مجانية واختيارنا.', 'معاينة مجانية.'],
+    bbTails: ['معاينة مجانية وفارق النقاط المتوقع واختيارنا.', 'معاينة مجانية واختيارنا.', 'معاينة مجانية.'],
+    teamTails: ['المباريات والنتائج والمستوى وتوقعاتنا.', 'المباريات والنتائج والتوقعات.', 'التوقعات.'],
+    leagueTails: ['الترتيب والمباريات وتوقعاتنا لكل مباراة.', 'الترتيب والمباريات والتوقعات.', 'التوقعات.'],
+    fbFill: ['المواجهات المباشرة', 'الأهداف المتوقعة', 'التشكيلات', 'أيام الراحة', 'جدول الترتيب', 'أخبار الفريقين'], bbFill: ['المواجهات المباشرة', 'أيام الراحة', 'أبرز اللاعبين', 'مجموع النقاط', 'السجل على أرضه وخارجها', 'آخر النتائج'],
+    teamFill: ['قائمة الفريق', 'إحصاءات اللاعبين', 'المواجهات المباشرة', 'السجل على أرضه وخارجها', 'الإصابات'], leagueFill: ['المستوى', 'الهدافون', 'المواجهات المباشرة', 'آخر النتائج', 'كل الفرق'],
+    wdl: { W: 'ف', D: 'ت', L: 'خ' },
+    prediction: 'توقع', previewTitle: 'توقع ومعاينة', predictions: 'توقعات', tableStats: 'الترتيب والإحصاءات', nextAndForm: 'المباريات القادمة والنتائج والمستوى',
+    today: 'توقعات كرة القدم اليوم', todayBb: 'توقعات كرة السلة اليوم'
+  },
+  he: {
+    form: 'כושר', lastMeeting: 'מפגש אחרון', absences: 'חיסורים משמעותיים', table: 'בטבלה', record: 'מאזן', thisWeek: 'משחקים השבוע', leader: 'מוליכה', next: 'המשחק הבא',
+    fbTails: ['סקירה חינם והבחירה שלנו בדאבל צ\'אנס.', 'סקירה חינם והבחירה שלנו.', 'סקירה חינם.'],
+    bbTails: ['סקירה חינם, הפרש צפוי והבחירה שלנו.', 'סקירה חינם והבחירה שלנו.', 'סקירה חינם.'],
+    teamTails: ['לוח משחקים, תוצאות, כושר והתחזיות שלנו.', 'לוח משחקים, תוצאות ותחזיות.', 'תחזיות.'],
+    leagueTails: ['טבלה, לוח משחקים והתחזיות שלנו לכל משחק.', 'טבלה, לוח משחקים ותחזיות.', 'תחזיות.'],
+    fbFill: ['ראש בראש', 'שערים צפויים', 'הרכבים', 'ימי מנוחה', 'טבלת הליגה', 'חדשות הקבוצות'], bbFill: ['ראש בראש', 'ימי מנוחה', 'שחקני מפתח', 'סך הנקודות', 'מאזן בית וחוץ', 'תוצאות אחרונות'],
+    teamFill: ['סגל', 'סטטיסטיקות שחקנים', 'ראש בראש', 'מאזן בית וחוץ', 'פציעות'], leagueFill: ['כושר', 'כובשים מובילים', 'ראש בראש', 'תוצאות אחרונות', 'כל הקבוצות'],
+    wdl: { W: 'נ', D: 'ת', L: 'ה' },
+    prediction: 'תחזית', previewTitle: 'תחזית וסקירה', predictions: 'תחזיות', tableStats: 'טבלה וסטטיסטיקות', nextAndForm: 'משחקים קרובים, תוצאות וכושר',
+    today: 'תחזיות כדורגל להיום', todayBb: 'תחזיות כדורסל להיום'
   }
 };
 export const pack = (l: Lang) => P[l];
@@ -200,7 +226,9 @@ export const STATIC: Record<string, Record<Lang, string>> = {
     hi: 'सार्वजनिक रूप से परखी गई खेल भविष्यवाणियाँ: फ़ुटबॉल लीग, कप और राष्ट्रीय टीमें, साथ में बास्केटबॉल। हर मैच के लिए फ़ॉर्म, आमने-सामने और हमारा डबल चांस।',
     pl: 'Prognozy sportowe sprawdzane publicznie: ligi, puchary i reprezentacje w piłce nożnej oraz koszykówka. Forma, bezpośrednie mecze i podwójna szansa.',
     el: 'Αθλητικές προβλέψεις που ελέγχονται δημόσια: πρωταθλήματα, κύπελλα και εθνικές ομάδες ποδοσφαίρου, και μπάσκετ. Φόρμα, αναμετρήσεις και διπλή ευκαιρία.',
-    ru: 'Спортивные прогнозы с открытой проверкой: футбольные лиги, кубки и сборные, а также баскетбол. Форма, личные встречи и наш двойной шанс на каждый матч.'
+    ru: 'Спортивные прогнозы с открытой проверкой: футбольные лиги, кубки и сборные, а также баскетбол. Форма, личные встречи и наш двойной шанс на каждый матч.',
+    ar: 'توقعات رياضية مختبرة علنًا: دوريات وكؤوس ومنتخبات كرة القدم، إضافة إلى كرة السلة. المستوى والمواجهات المباشرة واختيار الفرصة المزدوجة لكل مباراة.',
+    he: 'תחזיות ספורט שנבדקות בגלוי מול התוצאות: ליגות, גביעים ונבחרות בכדורגל, וגם כדורסל. כושר, ראש בראש והבחירה שלנו בדאבל צ\'אנס לכל משחק שאנחנו מכסים.'
   },
   matches: {
     en: 'Today’s and upcoming football matches with free previews: form, head-to-head, table and our double-chance pick for top leagues, cups and national teams.',
@@ -214,7 +242,9 @@ export const STATIC: Record<string, Record<Lang, string>> = {
     hi: 'आज और आने वाले फ़ुटबॉल मैच मुफ़्त प्रीव्यू के साथ: फ़ॉर्म, आमने-सामने और अंक तालिका, साथ में लीग, कप और राष्ट्रीय टीमों के लिए हमारा डबल चांस।',
     pl: 'Dzisiejsze i nadchodzące mecze piłkarskie z darmową zapowiedzią: forma, bezpośrednie mecze i tabela oraz nasza podwójna szansa dla lig, pucharów i kadr.',
     el: 'Σημερινοί και επόμενοι αγώνες ποδοσφαίρου με δωρεάν προεπισκόπηση: φόρμα, αναμετρήσεις, βαθμολογία και η διπλή ευκαιρία μας για λίγκες και κύπελλα.',
-    ru: 'Футбольные матчи сегодня и скоро с бесплатным обзором: форма, личные встречи и таблица, а также наш двойной шанс для лиг, кубков и национальных сборных.'
+    ru: 'Футбольные матчи сегодня и скоро с бесплатным обзором: форма, личные встречи и таблица, а также наш двойной шанс для лиг, кубков и национальных сборных.',
+    ar: 'مباريات كرة القدم اليوم والقادمة مع معاينات مجانية: المستوى والمواجهات المباشرة والترتيب، واختيارنا للفرصة المزدوجة في الدوريات والكؤوس والمنتخبات.',
+    he: 'משחקי הכדורגל של היום והימים הקרובים עם סקירה מקדימה חינם: כושר, ראש בראש ומיקום בטבלה, והבחירה שלנו בדאבל צ\'אנס לליגות הבכירות, לגביעים ולנבחרות.'
   },
   basketball: {
     en: 'Basketball predictions for the NBA, EuroLeague, EuroCup and top national leagues: free previews, form, rest days and head-to-head, saved before tip-off.',
@@ -228,7 +258,9 @@ export const STATIC: Record<string, Record<Lang, string>> = {
     hi: 'NBA, EuroLeague, EuroCup और शीर्ष लीगों के लिए बास्केटबॉल भविष्यवाणियाँ: मुफ़्त प्रीव्यू, फ़ॉर्म, आराम के दिन और आमने-सामने, मैच से पहले सहेजी गईं।',
     pl: 'Prognozy koszykarskie dla NBA, Euroligi, EuroCupu i czołowych lig: darmowa zapowiedź, forma, dni odpoczynku i bezpośrednie mecze, zapisane przed meczem.',
     el: 'Προβλέψεις μπάσκετ για NBA, EuroLeague, EuroCup και κορυφαία πρωταθλήματα: δωρεάν προεπισκόπηση, φόρμα, ξεκούραση και αναμετρήσεις, πριν από το τζάμπολ.',
-    ru: 'Прогнозы на баскетбол: НБА, Евролига, Еврокубок и ведущие лиги. Бесплатный обзор, форма, дни отдыха и личные встречи, сохранённые до начала матча.'
+    ru: 'Прогнозы на баскетбол: НБА, Евролига, Еврокубок и ведущие лиги. Бесплатный обзор, форма, дни отдыха и личные встречи, сохранённые до начала матча.',
+    ar: 'توقعات كرة السلة لدوري NBA وEuroLeague وEuroCup وأبرز الدوريات: معاينات مجانية والمستوى وأيام الراحة والمواجهات المباشرة، محفوظة قبل البداية.',
+    he: 'תחזיות כדורסל ל-NBA, ל-EuroLeague, ל-EuroCup ולליגות הלאומיות הבכירות: סקירה מקדימה חינם, כושר, ימי מנוחה וראש בראש, והכול נשמר מראש לפני ההקפצה.'
   },
   today: {
     en: 'Football predictions today: every match of the day by league, with a short preview of form and head-to-head and our double-chance pick. Updated every day.',
@@ -242,7 +274,9 @@ export const STATIC: Record<string, Record<Lang, string>> = {
     hi: 'आज की फ़ुटबॉल भविष्यवाणियाँ: लीग के हिसाब से दिन के सभी मैच, फ़ॉर्म और आमने-सामने के छोटे प्रीव्यू और हमारे डबल चांस के साथ। हर दिन अपडेट होती हैं।',
     pl: 'Prognozy piłkarskie na dziś: wszystkie mecze dnia według lig, z krótką zapowiedzią formy i bezpośrednich meczów oraz naszą podwójną szansą. Codziennie.',
     el: 'Προβλέψεις ποδοσφαίρου σήμερα: όλοι οι αγώνες της ημέρας ανά λίγκα, με σύντομη ματιά σε φόρμα και αναμετρήσεις και τη διπλή ευκαιρία μας. Κάθε μέρα.',
-    ru: 'Прогнозы на футбол сегодня: все матчи дня по лигам, с коротким обзором формы и личных встреч и нашим двойным шансом. Обновляется каждый день.'
+    ru: 'Прогнозы на футбол сегодня: все матчи дня по лигам, с коротким обзором формы и личных встреч и нашим двойным шансом. Обновляется каждый день.',
+    ar: 'توقعات كرة القدم اليوم: كل مباريات اليوم حسب الدوري، مع معاينة قصيرة للمستوى والمواجهات المباشرة واختيارنا للفرصة المزدوجة. يتم التحديث كل يوم.',
+    he: 'תחזיות כדורגל להיום: כל משחקי היום לפי ליגה, עם סקירה מקדימה קצרה של הכושר והמפגשים בין הקבוצות, והבחירה שלנו בדאבל צ\'אנס. מתעדכן כל יום מחדש.'
   },
   todayBb: {
     en: 'Basketball predictions today: every game of the day by league, with a one-line preview of records, form and head-to-head, and our pick. Updated every day.',
@@ -256,7 +290,9 @@ export const STATIC: Record<string, Record<Lang, string>> = {
     hi: 'आज की बास्केटबॉल भविष्यवाणियाँ: लीग के हिसाब से दिन के सभी मैच, रिकॉर्ड, फ़ॉर्म और आमने-सामने के छोटे प्रीव्यू और हमारे पिक के साथ। हर दिन अपडेट।',
     pl: 'Prognozy koszykarskie na dziś: wszystkie mecze dnia według lig, z krótką zapowiedzią bilansu, formy i bezpośrednich meczów oraz naszym typem. Codziennie.',
     el: 'Προβλέψεις μπάσκετ σήμερα: όλοι οι αγώνες της ημέρας ανά λίγκα, με σύντομη ματιά σε ρεκόρ, φόρμα και αναμετρήσεις, και η επιλογή μας. Κάθε μέρα.',
-    ru: 'Прогнозы на баскетбол сегодня: все матчи дня по лигам, с коротким обзором статистики, формы и личных встреч и нашим выбором. Обновляется каждый день.'
+    ru: 'Прогнозы на баскетбол сегодня: все матчи дня по лигам, с коротким обзором статистики, формы и личных встреч и нашим выбором. Обновляется каждый день.',
+    ar: 'توقعات كرة السلة اليوم: كل مباريات اليوم حسب الدوري، مع سطر واحد عن سجل الفريقين والمستوى والمواجهات المباشرة، واختيارنا للفائز. يتم التحديث كل يوم.',
+    he: 'תחזיות כדורסל להיום: כל משחקי היום לפי ליגה, עם שורה אחת על המאזן, הכושר והמפגשים הקודמים בין הקבוצות, והבחירה שלנו למנצחת. מתעדכן כל יום מחדש.'
   },
   premium: {
     en: 'SportLikely Premium and Pro: full win, draw and loss chances, goals markets, team analysis, draw picks and upset watch for every match we cover.',
@@ -270,7 +306,9 @@ export const STATIC: Record<string, Record<Lang, string>> = {
     hi: 'SportLikely Premium और Pro: जीत, ड्रॉ और हार की पूरी संभावनाएँ, गोल बाज़ार, टीम विश्लेषण, ड्रॉ पिक और उलटफेर पर नज़र, हमारे कवर किए हर मैच के लिए।',
     pl: 'SportLikely Premium i Pro: pełne szanse na wygraną, remis i porażkę, rynki goli, analiza drużyn, typy na remis i niespodzianki pod lupą dla każdego meczu.',
     el: 'SportLikely Premium και Pro: πλήρεις πιθανότητες νίκης, ισοπαλίας και ήττας, αγορές γκολ, ανάλυση ομάδων, επιλογές ισοπαλίας και εκπλήξεις σε κάθε αγώνα.',
-    ru: 'SportLikely Premium и Pro: полные шансы на победу, ничью и поражение, рынки голов, анализ команд, выбор ничьей и возможные сенсации для каждого матча.'
+    ru: 'SportLikely Premium и Pro: полные шансы на победу, ничью и поражение, рынки голов, анализ команд, выбор ничьей и возможные сенсации для каждого матча.',
+    ar: 'SportLikely Premium وPro: احتمالات كاملة للفوز والتعادل والخسارة، وتوقعات الأهداف، وتحليل الفرق، واختيارات التعادل ومراقبة المفاجآت لكل مباراة.',
+    he: 'SportLikely Premium ו-Pro: סיכויי ניצחון, תיקו והפסד מלאים, תחזיות שערים, ניתוח קבוצות מעמיק, בחירות תיקו ומעקב הפתעות לכל משחק שאנחנו מכסים.'
   },
   generic: {
     en: 'Sports predictions tested in public: football now, basketball and more sports coming. Free previews and our double-chance pick for every match.',
@@ -284,7 +322,9 @@ export const STATIC: Record<string, Record<Lang, string>> = {
     hi: 'सार्वजनिक रूप से परखी गई खेल भविष्यवाणियाँ: अभी फ़ुटबॉल, जल्द ही बास्केटबॉल और दूसरे खेल। हर मैच के लिए मुफ़्त प्रीव्यू और हमारा डबल चांस पिक।',
     pl: 'Prognozy sportowe sprawdzane publicznie: teraz piłka nożna, wkrótce koszykówka i inne sporty. Darmowa zapowiedź i nasza podwójna szansa na każdy mecz.',
     el: 'Αθλητικές προβλέψεις που ελέγχονται δημόσια: τώρα ποδόσφαιρο, σύντομα μπάσκετ και άλλα αθλήματα. Δωρεάν προεπισκόπηση και διπλή ευκαιρία σε κάθε αγώνα.',
-    ru: 'Спортивные прогнозы с открытой проверкой: сейчас футбол, скоро баскетбол и другие виды спорта. Бесплатный обзор и наш двойной шанс на каждый матч.'
+    ru: 'Спортивные прогнозы с открытой проверкой: сейчас футбол, скоро баскетбол и другие виды спорта. Бесплатный обзор и наш двойной шанс на каждый матч.',
+    ar: 'توقعات رياضية مختبرة علنًا أمام النتائج: كرة القدم الآن، وكرة السلة ورياضات أخرى قريبًا. معاينات مجانية واختيارنا للفرصة المزدوجة لكل مباراة.',
+    he: 'תחזיות ספורט שנבדקות בגלוי מול התוצאות: כדורגל עכשיו, כדורסל וענפים נוספים בקרוב. סקירה חינם והבחירה שלנו בדאבל צ\'אנס לכל משחק שאנחנו מכסים.'
   }
 };
 
@@ -303,7 +343,9 @@ const UI: Record<Lang, Record<UiKey, string>> = {
   hi: { matches: 'फ़ुटबॉल मैच', today: 'आज', basketball: 'बास्केटबॉल', recentForm: 'हाल की फ़ॉर्म', lastMeetings: 'पिछली भिड़ंतें', lastResults: 'पिछले नतीजे', nextGames: 'अगले मैच', table: 'अंक तालिका', standings: 'अंक तालिका', thisWeek: 'इस सप्ताह', absences: 'ग़ैरहाज़िर', team: 'टीम', last: 'पिछले', season: 'सीज़न', matchPreview: 'मैच प्रीव्यू', gamePreview: 'मैच प्रीव्यू', competitions: 'प्रतियोगिताएँ', leagues: 'लीग' },
   pl: { matches: 'Mecze piłkarskie', today: 'Dziś', basketball: 'Koszykówka', recentForm: 'Ostatnia forma', lastMeetings: 'Ostatnie mecze bezpośrednie', lastResults: 'Ostatnie wyniki', nextGames: 'Kolejne mecze', table: 'Tabela', standings: 'Tabela', thisWeek: 'Ten tydzień', absences: 'Nieobecni', team: 'Drużyna', last: 'ostatnie', season: 'Sezon', matchPreview: 'Zapowiedź', gamePreview: 'Zapowiedź', competitions: 'Rozgrywki', leagues: 'Ligi' },
   el: { matches: 'Αγώνες ποδοσφαίρου', today: 'Σήμερα', basketball: 'Μπάσκετ', recentForm: 'Πρόσφατη φόρμα', lastMeetings: 'Τελευταίες αναμετρήσεις', lastResults: 'Τελευταία αποτελέσματα', nextGames: 'Επόμενοι αγώνες', table: 'Βαθμολογία', standings: 'Βαθμολογία', thisWeek: 'Αυτή την εβδομάδα', absences: 'Απουσίες', team: 'Ομάδα', last: 'τελευταίοι', season: 'Σεζόν', matchPreview: 'Προεπισκόπηση', gamePreview: 'Προεπισκόπηση', competitions: 'Διοργανώσεις', leagues: 'Πρωταθλήματα' },
-  ru: { matches: 'Футбольные матчи', today: 'Сегодня', basketball: 'Баскетбол', recentForm: 'Текущая форма', lastMeetings: 'Последние встречи', lastResults: 'Последние результаты', nextGames: 'Ближайшие матчи', table: 'Таблица', standings: 'Таблица', thisWeek: 'На этой неделе', absences: 'Потери', team: 'Команда', last: 'последние', season: 'Сезон', matchPreview: 'Обзор матча', gamePreview: 'Обзор матча', competitions: 'Турниры', leagues: 'Лиги' }
+  ru: { matches: 'Футбольные матчи', today: 'Сегодня', basketball: 'Баскетбол', recentForm: 'Текущая форма', lastMeetings: 'Последние встречи', lastResults: 'Последние результаты', nextGames: 'Ближайшие матчи', table: 'Таблица', standings: 'Таблица', thisWeek: 'На этой неделе', absences: 'Потери', team: 'Команда', last: 'последние', season: 'Сезон', matchPreview: 'Обзор матча', gamePreview: 'Обзор матча', competitions: 'Турниры', leagues: 'Лиги' },
+  ar: { matches: 'مباريات كرة القدم', today: 'اليوم', basketball: 'كرة السلة', recentForm: 'المستوى الأخير', lastMeetings: 'آخر المواجهات', lastResults: 'آخر النتائج', nextGames: 'المباريات القادمة', table: 'الترتيب', standings: 'الترتيب', thisWeek: 'هذا الأسبوع', absences: 'الغيابات', team: 'الفريق', last: 'آخر', season: 'الموسم', matchPreview: 'معاينة المباراة', gamePreview: 'معاينة المباراة', competitions: 'البطولات', leagues: 'الدوريات' },
+  he: { matches: 'משחקי כדורגל', today: 'היום', basketball: 'כדורסל', recentForm: 'כושר אחרון', lastMeetings: 'מפגשים אחרונים', lastResults: 'תוצאות אחרונות', nextGames: 'המשחקים הבאים', table: 'טבלה', standings: 'טבלה', thisWeek: 'השבוע', absences: 'חיסורים', team: 'קבוצה', last: 'אחרונים', season: 'עונה', matchPreview: 'סקירה לפני המשחק', gamePreview: 'סקירה לפני המשחק', competitions: 'תחרויות', leagues: 'ליגות' }
 };
 export const ui = (l: Lang, k: UiKey) => UI[l][k];
 /** Long date in the page's language ("15 October 2026", "15 de octubre de 2026"). */

@@ -77,12 +77,12 @@ function Tug({ r, max, total, hn, an }: { r: Row; max: number; total: number; hn
         </span>
       </div>
       <div className="mt-1.5 flex items-center gap-2">
-        <span className={`w-9 text-right num text-xs ${side === 'H' ? 'font-bold text-ink' : 'text-muted'}`}>{fmt(score10(r.home))}</span>
+        <span className={`w-9 text-end num text-xs ${side === 'H' ? 'font-bold text-ink' : 'text-muted'}`}>{fmt(score10(r.home))}</span>
         <div className="relative flex-1 h-2.5 rounded-full bg-surface2">
           <span className="absolute left-1/2 top-[-3px] bottom-[-3px] w-px bg-line" aria-hidden />
           {side && (
             <span
-              className={`absolute top-0 bottom-0 rounded-full ${side === 'H' ? 'bg-home right-1/2' : 'bg-away left-1/2'}`}
+              className={`absolute top-0 bottom-0 rounded-full ${side === 'H' ? 'bg-home end-1/2' : 'bg-away start-1/2'}`}
               style={{ width: `${Math.max(2, width)}%` }}
             />
           )}

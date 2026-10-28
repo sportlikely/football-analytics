@@ -16,7 +16,7 @@ import CountUp from '../components/CountUp'
 import { RevealCover } from '../components/Reveal'
 import PredictionStory from '../components/PredictionStory'
 import { FavStar, nameKey as favKey } from '../lib/favorites'
-import { t as tt, LOCALE, lang } from '../lib/i18n'
+import { t as tt, LOCALE, lang, ltr } from '../lib/i18n'
 import GamePage, { HeroLogo, GameNews } from '../components/sport/game/GamePage'
 import Highlights from '../components/sport/game/Highlights'
 import { newerFootballLive, tickedMinute } from '../lib/liveState'
@@ -239,7 +239,7 @@ function StatsPanel({ home, away, hs, as, keys }: { home: Team; away: Team; hs: 
     <div>
       <div className="flex items-center justify-between text-xs font-semibold mb-3">
         <TeamName team={home} short className="text-home truncate" />
-        <TeamName team={away} short className="text-away truncate text-right" />
+        <TeamName team={away} short className="text-away truncate text-end" />
       </div>
       {poss && (
         <div className="mb-5">
@@ -260,15 +260,15 @@ function StatsPanel({ home, away, hs, as, keys }: { home: Team; away: Team; hs: 
             const lead = h === a ? null : h > a ? 'H' : 'A'
             return (
               <div key={k} className="grid grid-cols-[52px_1fr_52px] items-center gap-3 text-sm">
-                <span className={`num font-semibold text-right ${lead === 'H' ? 'text-ink' : 'text-muted'}`}>{fmt(k, h)}</span>
+                <span className={`num font-semibold text-end ${lead === 'H' ? 'text-ink' : 'text-muted'}`}>{fmt(k, h)}</span>
                 <div>
                   <div className="text-[11px] text-faint text-center mb-1">{STAT_LABELS[k]}</div>
                   <div className="flex h-1.5 gap-0.5">
                     <div className="flex-1 flex justify-end">
-                      <div className={`h-full rounded-l-full bg-home transition-all ${lead === 'A' ? 'opacity-50' : ''}`} style={{ width: `${(h / total) * 100}%` }} />
+                      <div className={`h-full rounded-s-full bg-home transition-all ${lead === 'A' ? 'opacity-50' : ''}`} style={{ width: `${(h / total) * 100}%` }} />
                     </div>
                     <div className="flex-1">
-                      <div className={`h-full rounded-r-full bg-away transition-all ${lead === 'H' ? 'opacity-50' : ''}`} style={{ width: `${(a / total) * 100}%` }} />
+                      <div className={`h-full rounded-e-full bg-away transition-all ${lead === 'H' ? 'opacity-50' : ''}`} style={{ width: `${(a / total) * 100}%` }} />
                     </div>
                   </div>
                 </div>
@@ -316,32 +316,32 @@ function GridBreakdown({ p, home, away }: { p: Prediction; home: Team; away: Tea
       <table className="w-full text-xs">
         <thead>
           <tr className="text-faint">
-            <th className="text-left font-medium py-1">{tt("Parameter")}</th>
-            <th className="text-right font-medium py-1 w-12">{tt("Rel.")}</th>
-            <th className="text-right font-medium py-1 w-16">{hn}</th>
-            <th className="text-right font-medium py-1 w-16">{an}</th>
-            <th className="text-right font-medium py-1 w-16">{tt("Edge")}</th>
+            <th className="text-start font-medium py-1">{tt("Parameter")}</th>
+            <th className="text-end font-medium py-1 w-12">{tt("Rel.")}</th>
+            <th className="text-end font-medium py-1 w-16">{hn}</th>
+            <th className="text-end font-medium py-1 w-16">{an}</th>
+            <th className="text-end font-medium py-1 w-16">{tt("Edge")}</th>
           </tr>
         </thead>
         <tbody>
           {teamRows.map(r => (
             <tr key={r.id} className="border-t border-line/40" title={r.note}>
               <td className="py-1 text-muted">{tt(r.name)}</td>
-              <td className="py-1 text-right num text-faint">{r.rel}</td>
-              <td className="py-1 text-right num text-ink">{Math.round(score10(r.home) * 10) / 10}</td>
-              <td className="py-1 text-right num text-ink">{Math.round(score10(r.away) * 10) / 10}</td>
-              <td className={`py-1 text-right num font-semibold ${r.edge > 0 ? 'text-home' : r.edge < 0 ? 'text-away' : 'text-faint'}`}>
-                {r.edge > 0 ? '+' : ''}{r.edge}
+              <td className="py-1 text-end num text-faint">{r.rel}</td>
+              <td className="py-1 text-end num text-ink">{Math.round(score10(r.home) * 10) / 10}</td>
+              <td className="py-1 text-end num text-ink">{Math.round(score10(r.away) * 10) / 10}</td>
+              <td className={`py-1 text-end num font-semibold ${r.edge > 0 ? 'text-home' : r.edge < 0 ? 'text-away' : 'text-faint'}`}>
+                {ltr(`${r.edge > 0 ? '+' : ''}${r.edge}`)}
               </td>
             </tr>
           ))}
           <tr className="border-t border-line/70 font-semibold">
             <td className="py-1 text-ink">{tt("Total")}</td>
             <td />
-            <td className="py-1 text-right num text-ink">{g.totals.home}</td>
-            <td className="py-1 text-right num text-ink">{g.totals.away}</td>
-            <td className={`py-1 text-right num ${g.totals.home > g.totals.away ? 'text-home' : 'text-away'}`}>
-              {g.totals.home - g.totals.away > 0 ? '+' : ''}{Math.round((g.totals.home - g.totals.away) * 10) / 10}
+            <td className="py-1 text-end num text-ink">{g.totals.home}</td>
+            <td className="py-1 text-end num text-ink">{g.totals.away}</td>
+            <td className={`py-1 text-end num ${g.totals.home > g.totals.away ? 'text-home' : 'text-away'}`}>
+              {ltr(`${g.totals.home - g.totals.away > 0 ? '+' : ''}${Math.round((g.totals.home - g.totals.away) * 10) / 10}`)}
             </td>
           </tr>
         </tbody>
@@ -694,9 +694,9 @@ function MatchDetail() {
   const eventsBlock = events.length > 0 ? (
     <Section title={tt("Match events")}>
       <div className="grid grid-cols-[1fr_56px_1fr] items-center pb-2 mb-1 border-b border-line/60 text-xs font-semibold">
-        <span className="flex items-center justify-end gap-1.5 pr-3 min-w-0"><span className="truncate text-home">{tname(home)}</span>{home.crest && <img src={home.crest} alt="" className="w-4 h-4 object-contain shrink-0" />}</span>
+        <span className="flex items-center justify-end gap-1.5 pe-3 min-w-0"><span className="truncate text-home">{tname(home)}</span>{home.crest && <img src={home.crest} alt="" className="w-4 h-4 object-contain shrink-0" />}</span>
         <span className="text-center text-[10px] text-faint">{tt('Min')}</span>
-        <span className="flex items-center gap-1.5 pl-3 min-w-0">{away.crest && <img src={away.crest} alt="" className="w-4 h-4 object-contain shrink-0" />}<span className="truncate text-away">{tname(away)}</span></span>
+        <span className="flex items-center gap-1.5 ps-3 min-w-0">{away.crest && <img src={away.crest} alt="" className="w-4 h-4 object-contain shrink-0" />}<span className="truncate text-away">{tname(away)}</span></span>
       </div>
       <ol className="relative">
         <div className="absolute left-1/2 top-0 bottom-0 w-px bg-line/70 -translate-x-1/2" />
@@ -704,7 +704,7 @@ function MatchDetail() {
           const isHome = e.teamId === home.id
           return (
             <li key={i} className="relative grid grid-cols-[1fr_56px_1fr] items-center py-1.5 text-sm">
-              <div className={isHome ? 'text-right pr-3' : ''}>
+              <div className={isHome ? 'text-end pe-3' : ''}>
                 {isHome && <EventText e={e} align="right" />}
               </div>
               <div className="flex items-center justify-center">
@@ -712,7 +712,7 @@ function MatchDetail() {
                   {e.minute}'{e.extra ? `+${e.extra}` : ''}
                 </span>
               </div>
-              <div className={!isHome ? 'pl-3' : ''}>{!isHome && <EventText e={e} align="left" />}</div>
+              <div className={!isHome ? 'ps-3' : ''}>{!isHome && <EventText e={e} align="left" />}</div>
             </li>
           )
         })}
@@ -820,7 +820,7 @@ function MatchDetail() {
                       friendly={/friendl/i.test(m.competition.name || '')}
                     />
                     {guessFirstOn() && ['SCHEDULED', 'TIMED'].includes(m.status) && (
-                      <div className="mt-2 text-right">
+                      <div className="mt-2 text-end">
                         <button type="button" onClick={() => hideMatch(matchId)} className="text-xs text-faint hover:text-ink underline underline-offset-4">{tt("Hide prediction again")}</button>
                       </div>
                     )}
@@ -845,7 +845,7 @@ function MatchDetail() {
                         <span>{tt("Home advantage (Elo points)")}</span>
                         <span className="num text-ink">{p.factors.homeAdvantage}</span>
                         <span>{tt("Squad value adjustment (Elo points, + favours")}{' '}{home.shortName || home.name})</span>
-                        <span className="num text-ink">{p.factors.homeForm > 0 ? '+' : ''}{p.factors.homeForm}</span>
+                        <span className="num text-ink">{ltr(`${p.factors.homeForm > 0 ? '+' : ''}${p.factors.homeForm}`)}</span>
                         <span>{tt("Matches rated")}</span>
                         <span className="num text-ink">{p.factors.gamesPlayed.home} / {p.factors.gamesPlayed.away}</span>
                       </div>
@@ -1089,13 +1089,13 @@ function MatchDetail() {
         <div className="flex flex-wrap gap-x-6 gap-y-1 justify-center text-xs text-faint">
           {m.venue && <span>{tt("Venue")}{' '}<span className="text-muted">{m.venue}</span> <span className="text-faint">({home.shortName || home.name})</span></span>}
           {referee && <span>{tt("Referee")}{' '}<span className="text-muted">{referee.name}</span></span>}
-          {m.attendance && <span>{tt("Attendance")}{' '}<span className="num text-muted">{m.attendance.toLocaleString()}</span></span>}
+          {m.attendance && <span>{tt("Attendance")}{' '}<span className="num text-muted">{m.attendance.toLocaleString(LOCALE)}</span></span>}
         </div>
       ) : undefined}
       afterHero={<>
         {lang === 'en' && details?.preview?.text && <MatchPreview text={details.preview.text} />}
         <p className="mt-3 text-xs text-muted">
-          <Link to="/guides/win-percentages" className="hover:text-ink">{tt("New here? How to read our numbers")} <span aria-hidden className="text-accent">→</span></Link>
+          <Link to="/guides/win-percentages" className="hover:text-ink">{tt("New here? How to read our numbers")} <span aria-hidden className="text-accent rtl-flip">→</span></Link>
         </p>
         {details.partial && <p className="mt-4 text-xs text-faint animate-pulse">{error ? `${tt("Could not load match:")} ${error}` : tt("Loading match…")}</p>}
       </>}
@@ -1139,7 +1139,7 @@ function LiveChance({ p, home, away, paused }: { p: Prediction; home: Team; away
           <span className="text-sm font-bold text-ink">{tt("Live win chance")}</span>
         </div>
         <span className="num text-xs font-semibold text-live">
-          {paused ? tt("HT") : `${Math.min(90, l.minute)}'${l.minute > 90 ? '+' : ''}`} · {l.score[0]}-{l.score[1]}
+          {paused ? tt("HT") : ltr(`${Math.min(90, l.minute)}'${l.minute > 90 ? '+' : ''}`)} · {l.score[0]}-{l.score[1]}
         </span>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-3">
@@ -1199,7 +1199,7 @@ function LineupChange({ p, home, away }: { p: Prediction; home: Team; away: Team
   const hn = home.shortName || home.name, an = away.shortName || away.name
   const items: [string, number, number][] = [[hn, b.home, p.home], ['Draw', b.draw, p.draw], [an, b.away, p.away]]
   const moved = items.some(([, x, y]) => Math.abs(y - x) >= 1)
-  const d = (x: number, y: number) => { const v = Math.round((y - x) * 10) / 10; return v === 0 ? '±0' : `${v > 0 ? '+' : ''}${v}` }
+  const d = (x: number, y: number) => { const v = Math.round((y - x) * 10) / 10; return ltr(v === 0 ? '±0' : `${v > 0 ? '+' : ''}${v}`) }
   return (
     <div className="mt-4 rounded-xl border border-accent/30 bg-accent/5 p-3 sm:p-4">
       <div className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{tt("Updated with the confirmed lineups")}</div>
@@ -1208,7 +1208,7 @@ function LineupChange({ p, home, away }: { p: Prediction; home: Team; away: Team
           {items.map(([label, x, y]) => (
             <div key={label} className="rounded-lg bg-surface2/60 py-2">
               <div className="text-[11px] text-faint truncate px-1">{label}</div>
-              <div className="num text-sm text-ink"><span className="text-faint">{Math.round(x)}%</span> → <b>{Math.round(y)}%</b></div>
+              <div className="num text-sm text-ink"><span className="text-faint">{Math.round(x)}%</span> <span aria-hidden className="rtl-flip">→</span> <b>{Math.round(y)}%</b></div>
               <div className={`num text-[11px] font-bold ${y - x >= 1 ? 'text-win' : y - x <= -1 ? 'text-loss' : 'text-faint'}`}>{d(x, y)}</div>
             </div>
           ))}
@@ -1336,7 +1336,7 @@ function OutcomeTile({ k, label, v, top = false, inPick = false, dimOut = true, 
   return (
     <div className={`rounded-xl p-3 sm:p-4 text-center transition-opacity ${inPick ? 'border-2 border-accent/80' : 'border border-line/70'} ${top ? fill : 'bg-surface2/40'} ${!inPick && dimOut ? 'opacity-50' : ''} ${roll && inPick ? 'animate-pop' : ''}`}>
       <div className="text-[11px] text-faint mb-1 truncate">
-        <span className={`font-bold mr-1 ${inPick ? 'text-accent' : ''}`}>{k === 'H' ? '1' : k === 'D' ? 'X' : '2'}</span>
+        <span className={`font-bold me-1 ${inPick ? 'text-accent' : ''}`}>{k === 'H' ? '1' : k === 'D' ? 'X' : '2'}</span>
         {label}
       </div>
       <div className={`num text-2xl sm:text-3xl font-extrabold ${top ? color : 'text-ink/80'}`}><CountUp value={v} decimals={1} suffix="%" animate={roll} delay={delay} /></div>
@@ -1384,7 +1384,7 @@ function GoalsPanel({ p, home, away, roll }: { p: Prediction; home: Team; away: 
                 <span className="h-2 rounded-full bg-surface2 overflow-hidden">
                   <span className="block h-full rounded-full bg-accent transition-[width] duration-1000 ease-out" style={{ width: `${Math.round(x.v)}%`, transitionDelay: `${i * 90}ms` }} />
                 </span>
-                <span className="num font-bold text-ink text-right"><CountUp value={x.v} suffix="%" animate={roll} delay={300 + i * 90} /></span>
+                <span className="num font-bold text-ink text-end"><CountUp value={x.v} suffix="%" animate={roll} delay={300 + i * 90} /></span>
               </div>
             ))}
           </div>
@@ -1419,7 +1419,7 @@ function GoalsPanel({ p, home, away, roll }: { p: Prediction; home: Team; away: 
             <div className="mt-2 grid grid-cols-3 text-sm">
               <span><span className="text-muted">{hn}</span> <b className="num text-ink">{Math.round(fh)}%</b></span>
               <span className="text-center"><span className="text-muted">{tt("No goal")}</span> <b className="num text-ink">{Math.round(none)}%</b></span>
-              <span className="text-right"><span className="text-muted">{an}</span> <b className="num text-ink">{Math.round(fa)}%</b></span>
+              <span className="text-end"><span className="text-muted">{an}</span> <b className="num text-ink">{Math.round(fa)}%</b></span>
             </div>
           </div>
         )
@@ -1433,7 +1433,7 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
     <div className="rounded-xl bg-surface2/60 border border-line/50 px-3 py-2.5 text-center">
       <div className="num text-lg font-bold text-ink">
         {value}
-        {sub && <span className="text-xs text-faint font-medium ml-1">{sub}</span>}
+        {sub && <span className="text-xs text-faint font-medium ms-1">{sub}</span>}
       </div>
       <div className="text-[11px] text-faint">{label}</div>
     </div>
@@ -1457,8 +1457,8 @@ function EventText({ e, align }: { e: { kind: string; text: string; sub?: string
 function EventIcon({ kind }: { kind: string }) {
   const box = 'inline-grid place-items-center w-4 h-4 shrink-0 leading-none'
   if (kind === 'goal') return <span className={`${box} text-[13px]`} title={tt('Goal')}>⚽</span>
-  if (kind === 'pen') return <span className={`${box} relative text-[13px]`} title={tt('Penalty')}>⚽<span className="absolute -right-1.5 -bottom-1 text-[8px] font-extrabold text-ink">P</span></span>
-  if (kind === 'own') return <span className={`${box} relative text-[13px]`} title={tt('Own goal')}><span className="opacity-60">⚽</span><span className="absolute -right-2 -bottom-1 text-[8px] font-extrabold text-loss">OG</span></span>
+  if (kind === 'pen') return <span className={`${box} relative text-[13px]`} title={tt('Penalty')}>⚽<span className="absolute -end-1.5 -bottom-1 text-[8px] font-extrabold text-ink">P</span></span>
+  if (kind === 'own') return <span className={`${box} relative text-[13px]`} title={tt('Own goal')}><span className="opacity-60">⚽</span><span className="absolute -end-2 -bottom-1 text-[8px] font-extrabold text-loss">OG</span></span>
   if (kind === 'missed') return <span className={`${box} relative text-[13px]`} title={tt('Missed penalty')}><span className="opacity-40">⚽</span><span className="absolute inset-0 grid place-items-center text-loss text-[14px] font-extrabold">✕</span></span>
   if (kind === 'yellow') return <span className={box} title={tt('Yellow card')}><span className="w-2.5 h-3.5 rounded-[2px] bg-draw" /></span>
   if (kind === 'red') return <span className={box} title={tt('Red card')}><span className="w-2.5 h-3.5 rounded-[2px] bg-live" /></span>
@@ -1499,7 +1499,7 @@ function SideTitle({ team, side, right }: { team: Team; side: SideK; right?: Rea
       <span className={`w-1 h-6 rounded-full ${SIDE_BG[side]}`} />
       {team.crest && <img src={team.crest} alt="" className="w-6 h-6 object-contain" />}
       <TeamName team={team} className="font-display font-bold text-ink truncate" />
-      {right && <span className="ml-auto shrink-0">{right}</span>}
+      {right && <span className="ms-auto shrink-0">{right}</span>}
     </div>
   )
 }
@@ -1520,7 +1520,7 @@ function TeamsHead({ home, away, sub }: { home: Team; away: Team; sub?: (s: Side
   const side = (s: SideK) => {
     const team = s === 'H' ? home : away
     return (
-      <div className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${s === 'A' ? 'sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
+      <div className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${s === 'A' ? 'sm:flex-row-reverse sm:text-end' : 'sm:text-start'}`}>
         <CrestBox team={team} />
         <span className="min-w-0 max-w-full">
           <TeamName team={team} className="block font-display font-bold text-ink truncate" />
@@ -1556,7 +1556,7 @@ function ToneTile({ label, value, tone, icon }: { label: string; value: ReactNod
 const ICO = {
   bed: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 18V7M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5" /><circle cx="7" cy="11" r="1.6" /></svg>,
   cal: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>,
-  next: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>,
+  next: <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 rtl-flip" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>,
   clock: <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></svg>
 }
 const RES_CLS: Record<string, string> = { W: 'bg-win/15 text-win', D: 'bg-surface2 text-muted', L: 'bg-loss/15 text-loss' }
@@ -1572,7 +1572,7 @@ function TeamPanel({ team, side, row, recent }: { team: Team; side: SideK; row: 
         <div className="grid grid-cols-3 gap-2 mb-3">
           <ToneTile label={tt("Points")} value={row.points} tone="none" />
           <ToneTile label="W-D-L" value={<span className="text-base">{row.won}-{row.draw}-{row.lost}</span>} tone="none" />
-          <ToneTile label={tt("GD")} value={`${row.goalDifference > 0 ? '+' : ''}${row.goalDifference}`} tone={row.goalDifference > 0 ? 'good' : row.goalDifference < 0 ? 'bad' : 'none'} />
+          <ToneTile label={tt("GD")} value={ltr(`${row.goalDifference > 0 ? '+' : ''}${row.goalDifference}`)} tone={row.goalDifference > 0 ? 'good' : row.goalDifference < 0 ? 'bad' : 'none'} />
         </div>
       ) : (
         <p className="text-xs text-faint mb-3">{tt("No league table for this competition.")}</p>
@@ -1599,7 +1599,7 @@ function TeamPanel({ team, side, row, recent }: { team: Team; side: SideK; row: 
                   <span className={`rounded px-1 text-[9px] font-bold shrink-0 ${isHome ? 'bg-home/15 text-home' : 'bg-surface2 text-muted'}`}>{isHome ? tt("H") : tt("A")}</span>
                   {opp.crest ? <img src={opp.crest} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
                   <TeamName team={opp} className="text-ink font-medium truncate" />
-                  <NameLink to={hrefOf.match(m.id, fbSides(m))} className="ml-auto num font-bold text-ink shrink-0">{gf}–{ga}</NameLink>
+                  <NameLink to={hrefOf.match(m.id, fbSides(m))} className="ms-auto num font-bold text-ink shrink-0">{gf}–{ga}</NameLink>
                 </RowLink>
               </li>
             )
@@ -1629,7 +1629,7 @@ function H2H({ h2h, home, away }: { h2h: H2HData; home: Team; away: Team }) {
           {(['H', 'A'] as const).map((s, i) => {
             const team = s === 'H' ? home : away
             return (
-              <div key={s} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-right' : 'sm:text-left'}`}>
+              <div key={s} className={`flex flex-col sm:flex-row items-center gap-2 sm:gap-3 min-w-0 text-center ${i === 1 ? 'order-3 sm:flex-row-reverse sm:text-end' : 'sm:text-start'}`}>
                 <CrestBox team={team} />
                 <span className="min-w-0 max-w-full">
                   <TeamName team={team} className="block font-display font-bold text-ink truncate" />
@@ -1733,7 +1733,7 @@ function InjuryList({ team, list }: { team: Team; list: Injury[] }) {
       <div className="flex items-center gap-2 mb-1">
         {team.crest && <img src={team.crest} alt="" className="w-6 h-6 object-contain" />}
         <TeamName team={team} short className="font-display font-bold text-ink" />
-        <span className="ml-auto num text-xs text-faint">{list.filter(x => x.out).length} {tt("out")} · {list.filter(x => !x.out).length} {tt("doubtful")}</span>
+        <span className="ms-auto num text-xs text-faint">{list.filter(x => x.out).length} {tt("out")} · {list.filter(x => !x.out).length} {tt("doubtful")}</span>
       </div>
       {list.length > 0 && (
         <p className={`text-xs mb-3 ${key ? 'text-loss font-semibold' : 'text-faint'}`}>
@@ -1809,7 +1809,7 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
       {f.opponentCrest ? <img src={f.opponentCrest} alt="" className="w-4 h-4 object-contain shrink-0" loading="lazy" /> : <span className="w-4 h-4 shrink-0" />}
       <span className="min-w-0 truncate">
         <NameLink to={f.opponentId ? footballTeamHref(f.opponentId, f.opponent) : null} className="text-ink font-medium">{f.opponent}</NameLink>
-        {f.competition && <NameLink to={hrefOf.league(f.competitionCode)} className="hidden sm:inline text-[10px] text-faint ml-1.5">{f.competition}</NameLink>}
+        {f.competition && <NameLink to={hrefOf.league(f.competitionCode)} className="hidden sm:inline text-[10px] text-faint ms-1.5">{f.competition}</NameLink>}
       </span>
     </>
   )
@@ -1833,7 +1833,7 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
                     <span className={`w-6 h-6 rounded-md grid place-items-center text-[10px] font-extrabold shrink-0 ${r ? RES_CLS[r] : 'bg-surface2 text-faint'}`}>{r || '–'}</span>
                     <span className="num text-faint w-12 shrink-0">{date(f)}</span>
                     {opp(f)}
-                    {f.score && <span className="ml-auto num font-bold text-ink shrink-0">{f.score.replace('-', '–')}</span>}
+                    {f.score && <span className="ms-auto num font-bold text-ink shrink-0">{f.score.replace('-', '–')}</span>}
                   </RowLink>
                 </li>
               )
@@ -1851,7 +1851,7 @@ function RestPanel({ team, side, s }: { team: Team; side: SideK; s: TeamSchedule
                   <span className="w-6 h-6 rounded-md grid place-items-center border border-dashed border-line text-faint shrink-0">{ICO.clock}</span>
                   <span className="num text-faint w-12 shrink-0">{date(f)}</span>
                   {opp(f)}
-                  <span className="ml-auto rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-muted num shrink-0">+{tt("{0} d", { 0: Math.floor(f.days) })}</span>
+                  <span className="ms-auto rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-muted num shrink-0">+{tt("{0} d", { 0: Math.floor(f.days) })}</span>
                 </RowLink>
               </li>
             ))}
@@ -1912,7 +1912,7 @@ function CmpLine({ r }: { r: CmpRow }) {
       <div className="flex items-center justify-between gap-2 text-sm">
         <span className={`num w-16 ${better === 'H' ? 'font-extrabold text-ink' : 'text-muted'}`}>{r.text(r.hv)}</span>
         <span className="text-[11px] font-semibold text-faint text-center truncate">{r.label}</span>
-        <span className={`num w-16 text-right ${better === 'A' ? 'font-extrabold text-ink' : 'text-muted'}`}>{r.text(r.av)}</span>
+        <span className={`num w-16 text-end ${better === 'A' ? 'font-extrabold text-ink' : 'text-muted'}`}>{r.text(r.av)}</span>
       </div>
       <div className="mt-1.5 grid grid-cols-2 gap-1.5">
         <div className="h-2 rounded-full bg-surface2 overflow-hidden flex justify-end">
@@ -1961,7 +1961,7 @@ function AveragesPanel({ home, away, h, a, form }: { home: Team; away: Team; h: 
         const gd = Math.round((x.goalsFor - x.goalsAgainst) * 10) / 10
         return (
           <>
-            <span className="block text-[11px] text-faint num">{x.record.won}-{x.record.draw}-{x.record.lost} · <span className={gd > 0 ? 'text-win' : gd < 0 ? 'text-loss' : ''}>{gd > 0 ? '+' : ''}{gd}</span> {tt("goals/game")}</span>
+            <span className="block text-[11px] text-faint num">{x.record.won}-{x.record.draw}-{x.record.lost} · <span className={gd > 0 ? 'text-win' : gd < 0 ? 'text-loss' : ''}>{ltr(`${gd > 0 ? '+' : ''}${gd}`)}</span> {tt("goals/game")}</span>
             {form && <FormChips f={s === 'H' ? form.home : form.away} align={s === 'A' ? 'right' : 'left'} />}
           </>
         )
@@ -2017,8 +2017,8 @@ function LeagueTable({ tables: show, name, home, away }: { tables: StandingsTabl
   const card = (s: SideK, x: { r: TableRow; of: number } | null) => {
     const team = s === 'H' ? home : away
     return (
-      <div className={`relative overflow-hidden rounded-2xl border border-line/60 bg-surface2/40 p-4 ${s === 'A' ? 'text-right' : ''}`}>
-        <span className={`absolute top-0 ${s === 'H' ? 'left-0' : 'right-0'} w-1 h-full ${SIDE_BG[s]}`} />
+      <div className={`relative overflow-hidden rounded-2xl border border-line/60 bg-surface2/40 p-4 ${s === 'A' ? 'text-end' : ''}`}>
+        <span className={`absolute top-0 ${s === 'H' ? 'start-0' : 'end-0'} w-1 h-full ${SIDE_BG[s]}`} />
         <div className={`flex items-center gap-2 ${s === 'A' ? 'flex-row-reverse' : ''}`}>
           {team.crest && <img src={team.crest} alt="" className="w-[22px] h-[22px] object-contain" />}
           <TeamName team={team} className="font-display font-bold text-ink truncate" />
@@ -2038,7 +2038,7 @@ function LeagueTable({ tables: show, name, home, away }: { tables: StandingsTabl
               <div className="text-[10px] text-faint uppercase tracking-wide mt-1">W-D-L</div>
             </div>
             <div>
-              <div className={`num text-lg font-bold leading-none ${x.r.goalDifference > 0 ? 'text-win' : x.r.goalDifference < 0 ? 'text-loss' : 'text-ink'}`}>{x.r.goalDifference > 0 ? '+' : ''}{x.r.goalDifference}</div>
+              <div className={`num text-lg font-bold leading-none ${x.r.goalDifference > 0 ? 'text-win' : x.r.goalDifference < 0 ? 'text-loss' : 'text-ink'}`}>{ltr(`${x.r.goalDifference > 0 ? '+' : ''}${x.r.goalDifference}`)}</div>
               <div className="text-[10px] text-faint uppercase tracking-wide mt-1">{tt("GD")}</div>
             </div>
           </div>
@@ -2069,16 +2069,16 @@ function LeagueTable({ tables: show, name, home, away }: { tables: StandingsTabl
             <table className="w-full table-fixed text-xs sm:text-sm">
               <thead>
                 <tr className="text-faint text-[10px] uppercase tracking-wide">
-                  <th className="text-left font-semibold py-1.5 w-9">#</th>
-                  <th className="text-left font-semibold py-1.5">{tt("Team")}</th>
-                  <th className="text-right font-semibold py-1.5 num w-8 sm:w-10">P</th>
-                  <th className="hidden sm:table-cell text-right font-semibold py-1.5 num w-10">W</th>
-                  <th className="hidden sm:table-cell text-right font-semibold py-1.5 num w-10">D</th>
-                  <th className="hidden sm:table-cell text-right font-semibold py-1.5 num w-10">L</th>
-                  <th className="hidden sm:table-cell text-right font-semibold py-1.5 num w-16">{tt("Goals")}</th>
-                  <th className="text-right font-semibold py-1.5 num w-10 sm:w-12">{tt("GD")}</th>
+                  <th className="text-start font-semibold py-1.5 w-9">#</th>
+                  <th className="text-start font-semibold py-1.5">{tt("Team")}</th>
+                  <th className="text-end font-semibold py-1.5 num w-8 sm:w-10">P</th>
+                  <th className="hidden sm:table-cell text-end font-semibold py-1.5 num w-10">W</th>
+                  <th className="hidden sm:table-cell text-end font-semibold py-1.5 num w-10">D</th>
+                  <th className="hidden sm:table-cell text-end font-semibold py-1.5 num w-10">L</th>
+                  <th className="hidden sm:table-cell text-end font-semibold py-1.5 num w-16">{tt("Goals")}</th>
+                  <th className="text-end font-semibold py-1.5 num w-10 sm:w-12">{tt("GD")}</th>
                   {hasForm && <th className="hidden lg:table-cell text-center font-semibold py-1.5 w-32">{tt("Form")}</th>}
-                  <th className="text-right font-semibold py-1.5 pr-2 num w-10 sm:w-12">{tt("Pts")}</th>
+                  <th className="text-end font-semibold py-1.5 pe-2 num w-10 sm:w-12">{tt("Pts")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -2088,27 +2088,27 @@ function LeagueTable({ tables: show, name, home, away }: { tables: StandingsTabl
                   return (
                     <tr key={r.team.id} className={`border-t border-line/40 ${side === 'H' ? 'bg-home/10' : side === 'A' ? 'bg-away/10' : 'hover:bg-surface2/40'}`}>
                       <td className="py-1.5 relative">
-                        {side && <span className={`absolute left-0 inset-y-1 w-[3px] rounded-full ${SIDE_BG[side]}`} />}
-                        <span className={`ml-1.5 inline-grid place-items-center w-5 h-5 rounded-md num text-[10px] font-bold ${r.position <= 4 && show.length === 1 ? 'bg-accent/15 text-accent' : 'text-faint'}`}>{r.position}</span>
+                        {side && <span className={`absolute start-0 inset-y-1 w-[3px] rounded-full ${SIDE_BG[side]}`} />}
+                        <span className={`ms-1.5 inline-grid place-items-center w-5 h-5 rounded-md num text-[10px] font-bold ${r.position <= 4 && show.length === 1 ? 'bg-accent/15 text-accent' : 'text-faint'}`}>{r.position}</span>
                       </td>
-                      <td className="py-1.5 pr-2">
+                      <td className="py-1.5 pe-2">
                         <span className="flex items-center gap-2 min-w-0">
                           {r.team.crest ? <img src={r.team.crest} alt="" className="w-[18px] h-[18px] object-contain flex-shrink-0" /> : <span className="w-[18px] h-[18px] rounded-full bg-surface2 flex-shrink-0" />}
                           <TeamName team={r.team} short className={`truncate ${side ? 'font-bold text-ink' : 'text-ink'}`} />
                         </span>
                       </td>
-                      <td className="py-1.5 text-right num text-muted">{r.playedGames}</td>
-                      <td className="hidden sm:table-cell py-1.5 text-right num text-muted">{r.won}</td>
-                      <td className="hidden sm:table-cell py-1.5 text-right num text-muted">{r.draw}</td>
-                      <td className="hidden sm:table-cell py-1.5 text-right num text-muted">{r.lost}</td>
-                      <td className="hidden sm:table-cell py-1.5 text-right num text-muted">{r.goalsFor}:{r.goalsAgainst}</td>
-                      <td className={`py-1.5 text-right num font-semibold ${r.goalDifference > 0 ? 'text-win' : r.goalDifference < 0 ? 'text-loss' : 'text-muted'}`}>{r.goalDifference > 0 ? '+' : ''}{r.goalDifference}</td>
+                      <td className="py-1.5 text-end num text-muted">{r.playedGames}</td>
+                      <td className="hidden sm:table-cell py-1.5 text-end num text-muted">{r.won}</td>
+                      <td className="hidden sm:table-cell py-1.5 text-end num text-muted">{r.draw}</td>
+                      <td className="hidden sm:table-cell py-1.5 text-end num text-muted">{r.lost}</td>
+                      <td className="hidden sm:table-cell py-1.5 text-end num text-muted">{r.goalsFor}:{r.goalsAgainst}</td>
+                      <td className={`py-1.5 text-end num font-semibold ${r.goalDifference > 0 ? 'text-win' : r.goalDifference < 0 ? 'text-loss' : 'text-muted'}`}>{r.goalDifference > 0 ? '+' : ''}{r.goalDifference}</td>
                       {hasForm && (
                         <td className="hidden lg:table-cell py-1.5">
                           <span className="flex justify-center gap-0.5">{f.map((x, j) => <span key={j} className={`w-4 h-4 rounded text-[8px] font-extrabold grid place-items-center ${FORM_CLS[x] || 'bg-line text-muted'}`}>{x}</span>)}</span>
                         </td>
                       )}
-                      <td className="py-1.5 pr-2 text-right num font-extrabold text-ink">{r.points}</td>
+                      <td className="py-1.5 pe-2 text-end num font-extrabold text-ink">{r.points}</td>
                     </tr>
                   )
                 })}
@@ -2247,7 +2247,7 @@ function XiList({ team, side, of, code }: { team: Team; side: 'home' | 'away'; o
                     <li key={pl.id} className="flex items-center gap-2.5 text-sm">
                       <span className={`num w-6 h-6 rounded-full grid place-items-center text-[11px] font-bold text-white shrink-0 ${side === 'home' ? 'bg-home' : 'bg-away'}`}>{pl.shirtNumber ?? ''}</span>
                       {href ? <Link to={href} className="text-ink hover:text-accent truncate">{pl.name}</Link> : <span className="text-ink truncate">{pl.name}</span>}
-                      {typeof pl.starts === 'number' && !!of && <span className="ml-auto num text-[11px] text-faint whitespace-nowrap">{tt("started {0} of {1}", { 0: pl.starts, 1: of })}</span>}
+                      {typeof pl.starts === 'number' && !!of && <span className="ms-auto num text-[11px] text-faint whitespace-nowrap">{tt("started {0} of {1}", { 0: pl.starts, 1: of })}</span>}
                     </li>
                   )
                 })}
@@ -2278,7 +2278,7 @@ function Pitch({ home, away, probable = false, code }: { home: Team; away: Team;
   const dots = [...place(home, true), ...place(away, false)]
   const ofOf = (t: Team) => (probable ? t.basedOn : undefined)
   const head = (t: Team, side: 'home' | 'away') => (
-    <div className={`flex items-center gap-2 min-w-0 ${side === 'away' ? 'flex-row-reverse text-right' : ''}`}>
+    <div className={`flex items-center gap-2 min-w-0 ${side === 'away' ? 'flex-row-reverse text-end' : ''}`}>
       <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${side === 'home' ? 'bg-home' : 'bg-away'}`} />
       {t.crest && <img src={t.crest} alt="" className="w-6 h-6 object-contain shrink-0" />}
       <span className="min-w-0">
@@ -2420,11 +2420,11 @@ function LivePitch({ m, home, away, live }: { m: Match; home: Team; away: Team; 
             <div key={`${teamId}-${pl.id}`} className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center w-[72px] sm:w-[84px]" style={{ left: `${x}%`, top: `${y}%` }} title={title}>
               <div className={`relative w-7 h-7 sm:w-9 sm:h-9 rounded-full grid place-items-center text-[11px] sm:text-xs font-extrabold num shadow-[0_2px_6px_rgba(0,0,0,0.45)] ${isHome ? 'bg-home text-white' : 'bg-away text-white'} ${red ? 'opacity-40 grayscale' : ''}`}>
                 {cur.shirtNumber ?? pl.shirtNumber ?? ''}
-                {goals > 0 && <Mark cls="-top-1.5 -right-2 w-4 h-4 bg-white text-black ring-1 ring-black/30">{goals > 1 ? goals : '⚽'}</Mark>}
-                {assists > 0 && <Mark cls="-bottom-1 -right-2 w-4 h-4 bg-accent text-black">A</Mark>}
-                {own > 0 && <Mark cls="-top-1.5 -left-2 w-4 h-4 bg-loss text-white">{tt("OG")}</Mark>}
-                {(yellow || red) && <span className={`absolute -top-1 -left-1.5 w-2.5 h-3.5 rounded-[2px] ring-1 ring-black/30 ${red ? 'bg-loss' : 'bg-draw'}`} />}
-                {chain.length > 0 && <Mark cls="-bottom-1 -left-2 w-4 h-4 bg-win text-black">⇅</Mark>}
+                {goals > 0 && <Mark cls="-top-1.5 -end-2 w-4 h-4 bg-white text-black ring-1 ring-black/30">{goals > 1 ? goals : '⚽'}</Mark>}
+                {assists > 0 && <Mark cls="-bottom-1 -end-2 w-4 h-4 bg-accent text-black">A</Mark>}
+                {own > 0 && <Mark cls="-top-1.5 -start-2 w-4 h-4 bg-loss text-white">{tt("OG")}</Mark>}
+                {(yellow || red) && <span className={`absolute -top-1 -start-1.5 w-2.5 h-3.5 rounded-[2px] ring-1 ring-black/30 ${red ? 'bg-loss' : 'bg-draw'}`} />}
+                {chain.length > 0 && <Mark cls="-bottom-1 -start-2 w-4 h-4 bg-win text-black">⇅</Mark>}
               </div>
               {(() => {
                 const href = lineupHref(cur, isHome ? home : away, m.competition?.code)
@@ -2464,7 +2464,7 @@ function Bench({ team, code }: { team: Team; code?: string }) {
         <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted">
           {bench.map(pl => (
             <li key={pl.id} className="flex items-center gap-2 min-w-0">
-              <span className="num w-5 text-right text-faint">{pl.shirtNumber ?? ''}</span>
+              <span className="num w-5 text-end text-faint">{pl.shirtNumber ?? ''}</span>
               {(() => {
                 const href = lineupHref(pl, team, code)
                 return href ? <Link to={href} className="truncate hover:text-ink hover:underline">{pl.name}</Link> : <span className="truncate">{pl.name}</span>

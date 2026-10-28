@@ -1,4 +1,4 @@
-import { t } from '../../../lib/i18n'
+import { t, isRtl } from '../../../lib/i18n'
 
 /**
  * fix174: the live win chance block every winner sport shows (basketball's since fix110, NFL + college now): each
@@ -43,7 +43,7 @@ export function LiveChancePanel({ home, away, now, before, status, words }: { ho
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-surface/70 border border-line/60 px-3 py-2">
         <span className="text-xs text-muted">{words?.score ?? t('Projected final score')}</span>
-        <span className="text-right leading-tight">
+        <span className="text-end leading-tight">
           <span className="block num text-sm font-extrabold text-ink whitespace-nowrap">{now.score.home} – {now.score.away}</span>
           <span className="block num text-[11px] text-faint whitespace-nowrap">{words?.total ?? t('{0} points in total', { 0: now.total })}</span>
         </span>
@@ -57,7 +57,8 @@ export function SwingChart({ points, home, away, periods = 4, live = false }: { 
   if (points.length < 2) return null
   const W = 600, H = 150, PAD = 6
   const maxT = Math.max(1, ...points.map(x => x.t))
-  const x = (v: number) => PAD + ((W - 2 * PAD) * v) / maxT
+  // fix257: time runs from the start side (right to left in ar / he)
+  const x = (v: number) => { const px = PAD + ((W - 2 * PAD) * v) / maxT; return isRtl ? W - px : px }
   const y = (p: number) => PAD + ((H - 2 * PAD) * (100 - p)) / 100
   const path = points.map((q, i) => `${i ? 'L' : 'M'}${x(q.t).toFixed(1)},${y(q.p).toFixed(1)}`).join(' ')
   const area = `${path} L${x(points[points.length - 1].t).toFixed(1)},${y(50)} L${x(points[0].t).toFixed(1)},${y(50)} Z`

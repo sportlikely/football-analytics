@@ -17,7 +17,7 @@ export default function NewsChange({ home, away, before, after, players, extra }
     return (
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className={`font-semibold truncate ${cls}`}>{label}</span>
-        <span className="num whitespace-nowrap"><span className="text-faint">{Math.round(b)}%</span> <span className="text-faint">→</span> <b className="text-ink">{Math.round(a)}%</b> <span className={d > 0 ? 'text-win' : d < 0 ? 'text-loss' : 'text-faint'}>({d > 0 ? '+' : ''}{d})</span></span>
+        <span className="num whitespace-nowrap"><span className="text-faint">{Math.round(b)}%</span> <span aria-hidden className="text-faint rtl-flip">→</span> <b className="text-ink">{Math.round(a)}%</b> <span className={d > 0 ? 'text-win' : d < 0 ? 'text-loss' : 'text-faint'}>({d > 0 ? '+' : ''}{d})</span></span>
       </div>
     )
   }
@@ -39,7 +39,7 @@ export default function NewsChange({ home, away, before, after, players, extra }
               <li key={`${p.side}${p.id}`} className="flex items-center gap-2 text-sm min-w-0">
                 <span className={`w-1.5 h-4 rounded-full shrink-0 ${p.side === 'H' ? 'bg-home' : 'bg-away'}`} />
                 <NameLink to={p.href} className="text-ink truncate">{p.name}</NameLink>
-                {p.detail && <span className="ml-auto text-[11px] text-faint whitespace-nowrap">{p.detail}</span>}
+                {p.detail && <span className="ms-auto text-[11px] text-faint whitespace-nowrap">{p.detail}</span>}
               </li>
             ))}
           </ul>
