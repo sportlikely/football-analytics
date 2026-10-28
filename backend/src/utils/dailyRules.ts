@@ -8,6 +8,8 @@
  *  - the bar: a paired bootstrap on the per-game log-loss differences (candidate − champion) over both 60-day
  *    windows, 2,000 resamples; promote when the candidate is better in both windows, better in ≥ 90% of the
  *    resamples, and its hit rate is not down by more than 0.5 pp. (Replaces fix113's fixed −0.003.)
+ *  - fix254 (churn: promoted on −0.0001, 28 Oct): the gain in the last window must be ≥ 0.0005 log loss per game, and
+ *    at most one promotion in 7 days (a guardrail rollback is never held back).
  */
 
 export type P3 = [number, number, number];
@@ -15,6 +17,7 @@ export type P3 = [number, number, number];
 export const DAILY_RULES = {
   windowDays: 60, minGames: 300, resamples: 2000, confidence: 0.9, maxHitDrop: 0.5,
   guardGames: 100, guardWorse: 0.005, mixOffWorse: 0.005,
+  minGain: 0.0005, minDaysBetween: 7, // fix254
   mixWeights: [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], anchorWeights: [0.1, 0.2, 0.3, 0.4], groupMinGames: 300,
   quietDays: 30 // data health warns after this many days without a promotion while the best candidate is better in both windows
 };
@@ -174,7 +177,18 @@ export function preJudge(W: Win, Wp: Win, R = DAILY_RULES): Verdict | null {
   if (Wp.s.n < R.minGames) return { pass: false, why: `${Wp.s.n} games in the previous 60 days (< ${R.minGames})`, boot: null, gap: `needs ${R.minGames - Wp.s.n} more games in the previous window` };
   if (W.s.diff >= 0) return { pass: false, why: `not better in the last 60 days (${sg(W.s.diff)})`, boot: null, gap: `last 60 days ${sg(W.s.diff)}: needs below 0` };
   if (Wp.s.diff >= 0) return { pass: false, why: `not better in the previous 60 days (${sg(Wp.s.diff)})`, boot: null, gap: `previous 60 days ${sg(Wp.s.diff)}: needs below 0` };
+  // fix254: a gain this small is noise — no change for it
+  if (W.s.diff > -R.minGain + 1e-12) return { pass: false, why: `gain too small in the last 60 days (${sg(W.s.diff)}, needs ≤ −${R.minGain})`, boot: null, gap: `last 60 days ${sg(W.s.diff)}: needs ≤ −${R.minGain}` };
   return null;
+}
+/**
+ * fix254: days left before the next promotion may happen (0 = allowed). `lastPromotion` = the date (YYYY-MM-DD) of the
+ * last 'promote' decision; rollbacks don't count and are never held back.
+ */
+export function promotionWait(lastPromotion: string | null | undefined, today: string, R = DAILY_RULES): number {
+  if (!lastPromotion) return 0;
+  const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${lastPromotion}T00:00:00Z`)) / 86400000);
+  return Number.isFinite(days) ? Math.max(0, R.minDaysBetween - days) : 0;
 }
 export function finishJudge(W: Win, Wp: Win, boot: Boot, R = DAILY_RULES): Verdict {
   const hitDrop = Math.round((W.s.hitB - W.s.hitC) * 10) / 10;

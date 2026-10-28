@@ -3,6 +3,8 @@
  * finished) by how sure we were, said vs happened. Error when a band of 50+ games is more than 5 points off, with
  * 100+ games in all (utils/afCalib.ts calibCheck). American football, basketball and tennis count only predictions made
  * with their calibration layer (p_raw saved: fix220, fix222), so the check measures the layer, not the weeks before it.
+ * fix254: football and tennis with a recent calibration layer live (services/recentCalib.ts): only the predictions made
+ * with it; the line names the layer and the last nightly decision.
  * Cached 30 minutes (the records are read from the tables).
  */
 import { db } from '../db';
@@ -10,6 +12,7 @@ import { calibCheck } from '../utils/afCalib';
 import { winnerByConfidence } from '../utils/winnerBands';
 import { publicRecord } from './tracking';
 import { isPreseason } from './bbModel';
+import { recentHealthRows, recentCalibLine } from './recentCalib';
 
 export const CALIB_SPORTS = ['football', 'basketball', 'nfl', 'tennis'] as const;
 type Sport = (typeof CALIB_SPORTS)[number];
@@ -17,6 +20,11 @@ const NAME: Record<Sport, string> = { football: 'Football', basketball: 'Basketb
 interface Line { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items: string[] }
 
 function byConfidence(sport: Sport): { rows: { n: number; said: number | null; hitRate: number | null; label?: string }[]; note: string } {
+  // fix254: with a recent calibration layer live, only the predictions made with it count (as fix220 / fix222 did)
+  if (sport === 'football' || sport === 'tennis') {
+    const r = recentHealthRows(sport);
+    if (r) return { rows: r, note: sport === 'football' ? 'result picks made with the recent calibration layer (fix254)' : 'winner picks made with the recent calibration layer (fix254)' };
+  }
   if (sport === 'football') return { rows: publicRecord(30).byConfidence, note: 'result picks (home / draw / away)' };
   const since = new Date(Date.now() - 30 * 86400000).toISOString();
   const picks = (list: { p: number; won: boolean }[]) => winnerByConfidence(list.map(r => ({ p: Math.max(r.p, 1 - r.p), hit: (r.p >= 0.5) === r.won })));
@@ -44,6 +52,7 @@ export function calibrationLine(sport: Sport): Line {
     const { rows, note } = byConfidence(sport);
     const c = calibCheck(rows);
     const items = rows.filter(r => r.n).map(r => `${r.label ?? ''}: said ${r.said ?? '–'}%, happened ${r.hitRate ?? '–'}% (${r.n} games)`);
+    if (sport === 'football' || sport === 'tennis') items.push(recentCalibLine(sport));
     const detail = !c.enough ? `collecting: ${c.total} of 100 games in the last 30 days (${note})`
       : c.fail ? `${c.worst!.label ?? ''} said ${c.worst!.said}%, happened ${c.worst!.hitRate}% over ${c.worst!.n} games (${c.worst!.gap > 0 ? '+' : ''}${c.worst!.gap} points; 5 allowed) · ${note}`
         : `every band of 50+ games within 5 points (${c.total} games, ${note})`;

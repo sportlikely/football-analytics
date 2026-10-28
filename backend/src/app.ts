@@ -108,7 +108,7 @@ import { forwardToWorker, fetchFromWorker } from './services/forward';
 import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, pastMatch, type LinkAnswer } from './services/slugs';
 import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
 import { archivedAsset } from './services/assetArchive';
-import { definePage, getPage, fallbackQuery, refreshPages, pageCacheStatus, pageMemStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
+import { definePage, getPage, fallbackQuery, refreshPages, pageCacheStatus, pageMemStatus, pageHotStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions, viewIdOf, makePass, readPass, PASS_COOKIE, PASS_MS } from './services/proxyGuard';
@@ -131,6 +131,7 @@ import { calendarToken, resetCalendarToken, calendarIcs, asCalLang, tokenHint, T
 import { tuneV3Full, tuneStatus, isTuning } from './services/v3Tuner';
 import { cleanName, mayHaveSponsor, NAME_KEYS } from './services/sponsorNames';
 import { hiddenModels, v3MixBacktest, featureModelStatus, setConfig as setModelConfig, setMixLive } from './services/featureModel';
+import { runRecentCalibration, recentCalibStatus } from './services/recentCalib';
 import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, dailyRunning } from './services/modelDaily';
 import { nflProbe, nflCurrentSeason, asLeague, asLeagues, LEAGUES } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
@@ -175,7 +176,9 @@ const saveOne = builder('more predictions (save)', saveOneB);
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders, openSettleReviews, decideSettle, SettleError } from './services/unsettled';
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, crawlerCheck, costCapped } from './services/afUsage';
-import { noteCrawlerResponse, inGoogleRanges, crawlerReport } from './services/crawlerIps';
+import { noteCrawlerResponse, inGoogleRanges, crawlerReport, noteGooglebotSample } from './services/crawlerIps';
+import { makeTrustProxy } from './utils/clientIp';
+import { engineOfUa } from './utils/crawlerRanges';
 import { botGate, isBotUa } from './services/botGate';
 import { pageReaderStatus } from './services/pageReader';
 import { createHash, randomBytes } from 'node:crypto';
@@ -221,7 +224,8 @@ const isActionGet = (req: express.Request) =>
 const app = express();
 // Middleware (CSP off: the site loads Google Fonts and club crests from other hosts)
 // Railway terminates TLS in front of us: trust the first proxy so req.ip / req.secure are real
-app.set('trust proxy', 1);
+// fix254: and every internal / Railway hop after it — req.ip = the rightmost hop that is not a proxy (utils/clientIp.ts)
+app.set('trust proxy', makeTrustProxy(ip => networkOf(ip)?.asn ?? null));
 // fix140: bad bots get nothing (before every other middleware). ShapBot alone (~17 pages a minute on /team + /player)
 // used up the API-Football quota on 16 Oct. Search engines (Googlebot, bingbot, Applebot, DuckDuckBot) stay allowed;
 // the same list is disallowed in robots.txt.
@@ -242,6 +246,7 @@ if (!isWorker) app.use((req, res, next) => {
     (req as any).slCrawler = c;
     if (c.ok) (req as any).verifiedCrawler = true;
   }
+  if (engineOfUa(ua) === 'google') noteGooglebotSample(req);
   if (claimsCrawler(ua) || inGoogleRanges(req.ip)) res.once('finish', () => noteCrawlerResponse(uaKey(ua), req.ip, (req as any).slCrawler?.ok ? (req as any).slCrawler.how : null, res.statusCode, req.path));
   next();
 });
@@ -3938,6 +3943,14 @@ app.get('/api/bb/wf', (req, res) => res.json({ data: bbWalkForward(String(req.qu
 app.get('/api/admin/live-book', (_req, res) => res.json({ data: liveBookStatus(), timestamp: new Date().toISOString() }));
 // Football: daily self-learning log (last 30 days); ?run=1 runs today's job now, ?report=1 (re)sends the morning report,
 // ?preview=1 builds the report text without sending
+// fix254: the recent calibration layers (football, tennis): live layer + last runs; ?run=football|tennis runs one now
+app.get('/api/admin/recent-calibration', async (req, res) => {
+  try {
+    const run = String(req.query.run || '');
+    if (run === 'football' || run === 'tennis') { const d = await runRecentCalibration(run); res.json({ data: { decision: d.decision, reason: d.reason, windows: d.windows, bands: d.bands } }); return; }
+    res.json({ data: recentCalibStatus() });
+  } catch (e: any) { sendError(res, e, 'Recent calibration failed'); }
+});
 app.get('/api/admin/model-daily', async (req, res) => {
   try {
     if (req.query.run === '1') { if (dailyRunning()) { res.json({ data: { running: true } }); return; } void runModelDaily(true); res.json({ data: { started: true } }); return; }
@@ -4081,7 +4094,7 @@ function perfSummaryText(): string {
     topStalls: (w.topStalls || []).slice(0, 20).map((s: any) => ({ at: s.at, ms: s.ms, job: s.job ? String(s.job).slice(0, 300) : null })),
     jobs: topJobs(w.jobs, 30), memByJob: (w.memByJob || []).slice(0, 10)
   };
-  const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), slowRequests: slowRequests(), seoMisses: seoMissStatus(), htmlBy: htmlByStatus(), hours };
+  const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), pageHot: pageHotStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), slowRequests: slowRequests(), seoMisses: seoMissStatus(), htmlBy: htmlByStatus(), hours };
   let text = JSON.stringify({ data: body, timestamp: new Date().toISOString() });
   if (text.length > PERF_MAX) { body.hours = hours.slice(-6); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
   if (text.length > PERF_MAX) { body.hours = []; body.web.jobs = body.web.jobs.slice(0, 10); if (body.worker?.jobs) body.worker.jobs = body.worker.jobs.slice(0, 10); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
@@ -4093,7 +4106,7 @@ app.get('/api/perf', async (req, res) => {
   if (req.query.full !== '1') return res.type('application/json').send(perfSummaryText());
   // the old detail: this process's numbers, the worker's report and the stored pages (listed by the worker)
   const { shared: _shared, ...worker } = workerHealth() as any;
-  const head = JSON.stringify({ process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker, pageMemory: pageMemStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), threadJobs: threadJobStatus() });
+  const head = JSON.stringify({ process: ROLE, ...perfStatus(), history: perfHours('web'), memory: memorySizing(), worker, pageMemory: pageMemStatus(), pageHot: pageHotStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), threadJobs: threadJobStatus() });
   let pages = 'null';
   if (isWeb) {
     const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';

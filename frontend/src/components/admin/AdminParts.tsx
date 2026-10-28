@@ -277,14 +277,26 @@ export function NeedsYouCard({ ctx, reload }: { ctx: Ctx; reload: () => void }) 
 /** fix253: the daily list for Claude — open site-error groups, top 10 with counts (copy it into a session) */
 export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
   const f = ctx.summary?.forClaude
+  const dc = ctx.summary?.dataCheck
   const [copied, setCopied] = useState(false)
   if (!f) return <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Loading…</section>
   const text = [`SportLikely site errors, ${f.day}: ${f.open} open group(s). Top ${f.top.length}:`,
-    ...f.top.map((x, i) => `${i + 1}. ${x.count}× “${x.message}” on ${x.page}${x.where ? ` at ${x.where}` : ''} (last ${x.lastAt.slice(0, 16).replace('T', ' ')} UTC; builds ${x.builds.join(', ') || '?'})`)].join('\n')
+    ...f.top.map((x, i) => `${i + 1}. ${x.count}× “${x.message}” on ${x.page}${x.where ? ` at ${x.where}` : ''} (last ${x.lastAt.slice(0, 16).replace('T', ' ')} UTC; builds ${x.builds.join(', ') || '?'})`),
+    // fix254: the top-scorer check's differences
+    ...(dc && dc.differences.length ? [``, `Top-scorer check ${dc.at.slice(0, 16).replace('T', ' ')} UTC: ${dc.matched} of ${dc.checked} match. Differences:`,
+      ...dc.differences.map(x => `- ${x.league}${x.player ? ` · ${x.player}` : ''}: ${x.detail}${x.reason ? ` (why: ${x.reason})` : ''}`),
+      ...(dc.more ? [`… and ${dc.more} more`] : []),
+      ...(dc.under.length ? [`Under 90% for 7+ days: ${dc.under.map(u => `${u.name} ${u.share}%`).join(', ')}`] : [])] : [])].join('\n')
   const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }).catch(() => undefined)
   return (
     <section className="card p-5 sm:p-6 mb-8">
-      {!f.open ? <p className="text-sm text-win">No open site errors ✓</p> : (
+      {!f.open && dc?.differences.length ? (
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+          <p className="text-sm text-win">No open site errors ✓</p>
+          <button type="button" onClick={copy} className="h-8 px-3 rounded-lg text-xs font-semibold bg-surface2 border border-line text-ink">{copied ? 'Copied ✓' : 'Copy for Claude'}</button>
+        </div>
+      ) : null}
+      {!f.open ? (dc?.differences.length ? null : <p className="text-sm text-win">No open site errors ✓</p>) : (
         <>
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
             <p className="text-sm text-muted"><b className="num text-ink">{f.open}</b> open group(s); the 10 with most reports:</p>
@@ -300,6 +312,17 @@ export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
             ))}
           </ol>
         </>
+      )}
+      {dc && dc.differences.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-line/60">
+          <p className="text-sm text-muted mb-1">Top-scorer check ({day(dc.at)}): <b className="num text-ink">{dc.matched}</b> of {dc.checked} match · {dc.differences.length + dc.more} difference(s){dc.under.length ? <> · <span className="text-loss">under 90% for 7+ days: {dc.under.map(u => `${u.name} ${u.share}%`).join(', ')}</span></> : null}</p>
+          <ul className="divide-y divide-line/50 text-[12px]">
+            {dc.differences.slice(0, 12).map((x, i) => (
+              <li key={i} className="py-1.5 break-words"><span className="text-ink">{x.league}{x.player ? ` · ${x.player}` : ''}</span> <span className="text-faint">{x.detail}{x.reason ? ` — ${x.reason}` : ''}</span></li>
+            ))}
+          </ul>
+          {dc.differences.length + dc.more > 12 && <p className="text-[11px] text-faint mt-1">+ {dc.differences.length + dc.more - 12} more</p>}
+        </div>
       )}
     </section>
   )

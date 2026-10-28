@@ -91,6 +91,17 @@ Research behind the feature model / v3-mix: `all-data-test-model-oct-2026.md`, `
     run on a made-up record: an over-rated home side fixed, a calibrated league untouched, a harmful setting rolled back).
   - Not run on real data in the session (no database copy, the server is not reachable from here): the table before →
     after is what the first server run shows on the card.
+- **fix254 (28 Oct 2026): churn and calibration.** The daily job promoted on −0.0001 (28 Oct). Now a candidate needs a
+  gain ≥ 0.0005 log loss per game in the last 60 days (DAILY_RULES.minGain) and promotions are at most once in 7 days
+  (minDaysBetween; the guardrail rollback is never held: "held" in the reason). Calibration data health failed (50–60%
+  said 54%, happened 59.8%, 326 games): the recent calibration layer (utils/recentCalib.ts, services/recentCalib.ts) —
+  isotonic regression of "pick right" on the pick's chance, blocks shrunk toward their own chance (30 games), applied to
+  the top chance only (the others keep their proportion, the favourite never changes), walk-forward (each 60-day window
+  calibrated by a fit on the 180 days before it), promoted nightly (04:30 UTC) by the same rules (300+ games per window,
+  better in both, gain ≥ 0.0005, bootstrap 90%, at most once a week) with the guardrail (worse than no layer by > 0.005
+  over 100+ games since it went live → removed). Applied in tracking.freezePredictions to every shown football
+  prediction (feat-v1 left alone); predictions.p_pre keeps the 1X2 before it (the next fit's input). Admin:
+  /api/admin/recent-calibration (?run=football). Not run on real data in the session (no database copy).
 - **Morning report**: 07:00 Asia/Jerusalem (Intl time zone, DST-aware; waits for the job until 09:00) to ADMIN_EMAILS,
   plain text: champion, today's change or "No change", yesterday and last 30 days (games, picks right, log loss v3-mix /
   v3 / feature / bookmakers, 60%+ hit rate), data health + unsettled games, next 3 challengers. Stored in `model_daily`.

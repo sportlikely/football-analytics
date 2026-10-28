@@ -551,6 +551,24 @@ thread's maxMs 1,755, /api/basketball/game/:id avg 2.3 s / max 11.6 s, ~900 /bas
 - The cluster (step 6) is not built: nothing blocks the web thread any more (Yarin, 27 Oct).
 - **Profiler off by default** (CPU_PROFILE=1 turns it on): its 5-min swap was the remaining block (321 ms in the load test; the live short blocks of 160–220 ms every ~5 min, mostly (program)). **Load test** (27 Oct, 10 Oct copy, 1,000 visitors × 5 min): 296,628 requests, 980 req/s, p50 2 ms · p95 8 ms · p99 15 ms, 0 × 5xx, 0 network errors, longest web block 97 ms → PASS. Once in the run every route's max reached ~4 s at the same moment while the web thread was free (97 ms): suspected this PC (load client, web and the worker's model builds on one machine) — the live route max tells.
 
+## fix254 — disk-bound reads (28 Oct)
+
+- Indexed one-row lookups took 1.7–1.9 s (page_cache built_at by idx_page_cache_meta, shared_state versions): SQLite's
+  default 2 MB cache per connection kept losing the hot index pages, every miss a volume read.
+- Every connection: `cache_size` (readers 256 MB, worker 128 MB, web 64 MB, job threads 64 MB; all together ≤ 1/4 of the
+  container limit, else scaled), `mmap_size` 1 GB (pages from the OS cache, shared), `temp_store = MEMORY` — utils/dbTune.ts.
+- Hot keys in memory on the web: each page build's time + its views' ETags come with the 'page' message, the builds of the
+  last 3 min again every 30 s ('page-meta'); a key is read from the disk once per web process (older than 6 days or the
+  page's keepMs = read again: cleanPageCache may have dropped it). State versions: the worker sends its whole list every
+  30 s ('state-vers'); the web reads the table only at start and when no list came for 90 s.
+- /api/slug-of/* and /api/public/results: the 1-s rule for verified search engines too (deadline.ALWAYS_CUT).
+- Railway volume latency: services/volumeProbe.ts, every 15 min (32 random 4 KB reads of the database file + one 4 KB
+  write + fsync), in data health "Disk" and "Slow reads (3 h)" (which also shows the web's longest stall, target ≤ 500 ms)
+  and /api/admin/db-space (`volumeLatency`).
+- Trust proxy (fix254 item 1): req.ip = the rightmost X-Forwarded-For hop that is not loopback / private / CGNAT /
+  link-local / ULA / Railway (AS400940); the Googlebot-UA log in Admin → Visitors → Search engines shows the chain.
+- Test: npm run test:fix254.
+
 ## fix250 — nothing ever waits (27 Oct)
 
 Live 27 Oct 00:40 (acaabb2): 0 stalls, reader queue 0, yet game routes 5–12 s and a blank page under the header. The

@@ -195,3 +195,11 @@ Live 25 Oct (data health): 60–70% said 64.3%, happened 53.8% (78 matches); 80%
   model on 2025 H1, refit 2024 – 2025 H1; 2025 H2 = the untouched check; 2026 reported, never fitted
   (TENNIS_LS_YEARS). Built with the report (TENNIS_CALIB_VERSION fix223-1 forces one rebuild); the calibration layer is
   fitted on the chances with the settings and applied after them (predictRow). Report: sport_calib 'tennis' → settings.
+
+## fix254 — the recent calibration layer (28 Oct 2026)
+
+Data health failed: 60–70% said 64.9%, happened 74% (77 games). On top of the season layer, a recent layer
+(utils/recentCalib.ts: isotonic on the pick's chance, walk-forward, the football daily job's promotion rules and
+guardrail) is refitted nightly from 04:30 UTC (services/recentCalib.ts) on matches made with the season layer (p_raw
+saved); predictRow applies it last, tennis_predictions.p_pre keeps the chance before it. Data health "Calibration
+(Tennis)" counts only predictions made with a live recent layer. Admin: /api/admin/recent-calibration?run=tennis.

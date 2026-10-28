@@ -9,6 +9,10 @@
  *
  * Runs once a week (Monday morning UTC) and on demand; the report is stored and emailed to ADMIN_EMAILS when email
  * is set up. About 80 players; the first run of a week costs a few hundred API-Football calls, later ones are cached.
+ *
+ * fix254: no "Needs you" email asking Yarin to compare players — the differences go to the "For Claude" list (Admin →
+ * Needs you, `auditForClaude`); an email goes only when a league stays under 90% for 7 days (utils/auditStreak.ts), at
+ * most once a week per league.
  */
 import { db } from '../db';
 import { pubPath } from './slugs';
@@ -18,10 +22,13 @@ import { findPlayer, playerPage, FD_TO_AF } from './playerPage';
 import { afRemaining } from './apiFootball';
 import { getAfScorers } from './afMatches';
 import { emailEnabled, sendEmail } from './email';
-import { renderAdminMail, adminUrl, israelTime, siteUrl, type AdminMail } from './adminMail';
+import { renderAdminMail, adminUrl, israelTime, type AdminMail } from './adminMail';
 import { every, after } from './perf';
+import { leaguesUnderFor, dueForEmail, STREAK_DAYS, STREAK_SHARE, type AuditRun } from '../utils/auditStreak';
 
 db.exec(`CREATE TABLE IF NOT EXISTS data_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, json TEXT NOT NULL)`);
+// fix254: when each league was last emailed for staying under 90%
+db.exec(`CREATE TABLE IF NOT EXISTS data_audit_mail (league TEXT PRIMARY KEY, sent_at TEXT NOT NULL)`);
 
 const LEAGUES = ['PL', 'PD', 'SA', 'BL1', 'FL1', 'DED', 'PPL', 'ELC'];
 // other leagues from API-Football (their scorer lists carry API-Football player ids: no name matching needed)
@@ -245,41 +252,58 @@ const LEAGUE_NAME: Record<string, string> = {
 };
 const leagueName = (c?: string) => (c ? LEAGUE_NAME[c] || c : '');
 
-/** The data-check email (fix239: the admin template). Sent only when something needs a look (emailReport). */
-export function auditEmail(report: any) {
-  const issues: AuditIssue[] = report.issues || [];
-  const action = issues.filter(i => i.kind !== 'sanity' && i.kind !== 'lag');
-  const quirks = issues.filter(i => i.kind === 'sanity');
-  const lag = issues.filter(i => i.kind === 'lag');
-  const pct = report.checked ? Math.round((report.matched / report.checked) * 1000) / 10 : 0;
+/** fix254: the runs of the last `days` + 7 days (league numbers only) */
+export function recentAuditRuns(days = STREAK_DAYS + 7): AuditRun[] {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  return (db.prepare(`SELECT at, json FROM data_audit WHERE at >= ? ORDER BY id`).all(since) as any[])
+    .map(r => { try { const j = JSON.parse(r.json); return { at: r.at, byLeague: j.byLeague || {} }; } catch { return null; } })
+    .filter(Boolean) as AuditRun[];
+}
+
+/** fix254: the "For Claude" part of the check: the latest run's differences, and the leagues under 90% for 7+ days */
+export function auditForClaude(report: any = lastDataAudit(), runs: AuditRun[] = recentAuditRuns(), now = Date.now()) {
+  if (!report) return null;
+  const issues: AuditIssue[] = (report.issues || []).filter((i: AuditIssue) => i.kind === 'mismatch' || i.kind === 'not-found');
+  return {
+    at: report.at as string, checked: report.checked as number, matched: report.matched as number,
+    differences: issues.slice(0, 40).map(i => ({ league: leagueName(i.league), player: i.player || null, detail: i.detail, reason: i.reason || null })),
+    more: Math.max(0, issues.length - 40),
+    under: leaguesUnderFor(runs, now).map(u => ({ ...u, name: leagueName(u.league) }))
+  };
+}
+
+/** The email (fix239's admin template), fix254: only for leagues under 90% for 7 days — the differences are on the For Claude list. */
+export function auditEmail(report: any, under: { league: string; since: string; share: number }[]) {
   const by = report.byLeague || {};
   const leagues = Object.keys(by).map(c => `${leagueName(c)} ${by[c].matched}/${by[c].checked - (by[c].lag || 0)}`).join(' · ');
-  const n = action.length;
+  const n = under.length;
   const mail: AdminMail = {
-    label: 'Data check', tone: n ? 'warn' : 'ok',
-    title: n ? `${n} top scorer${n === 1 ? '' : 's'} to look at` : 'Everything on the site matches',
-    what: `${pct}% of the top scorers (${report.matched} of ${report.checked}) match the official lists in the morning check of ${israelTime(report.at)}.`,
-    todo: n ? 'Open each player below and compare with the league’s own list; a difference that is still there after a week is worth telling Claude.' : null,
+    label: 'Data check', tone: 'warn',
+    title: `${n} league${n === 1 ? '' : 's'} under ${Math.round(STREAK_SHARE * 100)}% for ${STREAK_DAYS} days`,
+    what: `In the daily top-scorer check, ${under.map(u => `${leagueName(u.league)} (${u.share}% now, under since ${israelTime(u.since)})`).join(', ')} stayed under ${Math.round(STREAK_SHARE * 100)}% of players matching the official lists for ${STREAK_DAYS} days in a row.`,
+    todo: 'Nothing to compare by hand: the differences are on the “For Claude” list (Admin → Needs you). Open a session with Claude and paste that list.',
     rows: [
-      ...action.map(i => ({ title: `${i.player || leagueName(i.league)} (${leagueName(i.league)})`, titleHref: i.playerId ? siteUrl(`/player/${i.playerId}`) : null, detail: i.reason ? `${i.detail} — why: ${i.reason}` : i.detail, tone: 'warn' as const })),
-      ...(lag.length ? [{ title: `Still updating after a game: ${lag.length}, checked again tomorrow`, detail: lag.slice(0, 6).map(q => `${q.player || ''}: ${q.detail}`).join(' · ') }] : []),
-      ...(leagues ? [{ title: 'League by league', detail: leagues }] : []),
-      ...(quirks.length ? [{ title: `Provider quirks: ${quirks.length}, no action needed`, detail: quirks.slice(0, 6).map(q => `${q.player || ''}: ${q.detail}`).join(' · ') }] : [])
+      ...under.map(u => ({ title: leagueName(u.league), detail: `${u.share}% matching, under ${Math.round(STREAK_SHARE * 100)}% since ${israelTime(u.since)}`, tone: 'warn' as const })),
+      ...(leagues ? [{ title: 'League by league (today)', detail: leagues }] : [])
     ],
-    buttons: [{ text: 'Open in Admin', href: adminUrl('data') }],
-    footer: 'Runs every morning after the night’s games; differences between the two data providers usually clear within a few days.'
+    buttons: [{ text: 'Open the For Claude list', href: adminUrl('needs-you') }],
+    footer: 'Sent at most once a week per league; one-day differences between the two data providers are not emailed.'
   };
-  const subject = n ? `Needs you: ${n} top scorer${n === 1 ? '' : 's'} to look at (data check)` : `Data check: ${pct}% match, all good`;
+  const subject = `Data check: ${under.map(u => leagueName(u.league)).join(', ')} under ${Math.round(STREAK_SHARE * 100)}% for ${STREAK_DAYS} days`;
   return { subject, ...renderAdminMail(mail) };
 }
 
-// fix239: an email only when something needs a look; a clean check is stored (Admin → Data) and sends nothing
+// fix254: an email only when a league stays under 90% for 7 days (at most once a week per league)
 async function emailReport(report: any) {
   const to = (process.env.ADMIN_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
   if (!emailEnabled || !to.length) return;
-  if (!(report.issues || []).some((i: AuditIssue) => i.kind !== 'sanity' && i.kind !== 'lag')) return;
-  const { subject, html, text } = auditEmail(report);
+  const sent = Object.fromEntries((db.prepare(`SELECT league, sent_at FROM data_audit_mail`).all() as any[]).map(r => [r.league, r.sent_at]));
+  const due = dueForEmail(leaguesUnderFor(recentAuditRuns()), sent);
+  if (!due.length) return;
+  const { subject, html, text } = auditEmail(report, due);
   for (const addr of to) await sendEmail(addr, subject, html, text);
+  const at = new Date().toISOString();
+  for (const u of due) db.prepare(`INSERT OR REPLACE INTO data_audit_mail (league, sent_at) VALUES (?, ?)`).run(u.league, at);
 }
 
 /** Every hour: run once a day, 04:00–10:59 UTC (morning, after the night's games are in), or now if none has run. */

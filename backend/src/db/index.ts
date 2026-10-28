@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import logger from '../utils/logger';
+import { tuneDb } from '../utils/dbTune';
 
 // Minimal typing for node:sqlite (not in @types/node 20). Loaded via require so
 // the compiler doesn't need a module declaration for it.
@@ -47,6 +48,8 @@ if (!DB_READ_ONLY) db.exec(`PRAGMA journal_size_limit = ${64 * 1048576}`);
 // fix202: the web process and the worker process write the same file: a writer waits up to 5 s for the other's lock
 db.exec('PRAGMA busy_timeout = 5000');
 db.exec('PRAGMA foreign_keys = ON');
+// fix254: a real page cache, the file memory-mapped, temp tables in memory (utils/dbTune.ts)
+tuneDb(db, !threads.isMainThread ? 'thread' : process.env.SL_ROLE === 'web' ? 'web' : process.env.SL_ROLE === 'worker' ? 'worker' : 'all');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS predictions (

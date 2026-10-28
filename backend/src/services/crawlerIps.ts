@@ -19,6 +19,8 @@ import { isWeb, isWorker } from './role';
 import { deferred } from './deferredWrites';
 import { every, after } from './perf';
 import { onState, publishState } from './shared';
+import { networkOf } from './asn';
+import { clientOf } from '../utils/clientIp';
 import { CrawlerRanges, RANGE_SOURCES, SEED_RANGES, parseRangeFile, listedCrawler, engineOfUa, Engine } from '../utils/crawlerRanges';
 
 const FILE = path.join(process.env.DATA_DIR || path.resolve(process.cwd(), 'data'), 'geo', 'crawler-ranges.json');
@@ -91,7 +93,9 @@ export const crawlerRangesStatus = () => ({ status, ranges: ranges.size, at: sav
 
 type EngineDay = { requests: number; verified: number; byList: number; byDns: number; refused: number; s429: number; s503: number; api: number };
 export type DnsSample = { at: string; ip: string; system: string; publicDns: string; forward: string; ok: boolean };
-type Day = { day: string; engines: Record<Engine, EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number }; refusedRecent: string[]; sample: DnsSample | null };
+/** fix254: one Googlebot-UA request as it reached us — every hop of the address chain, to see who the client really is */
+export type UaSample = { at: string; path: string; socket: string; xff: string; realIp: string; reqIp: string; client: string; asn: string; inGoogle: boolean; googleHop: string | null };
+type Day = { day: string; engines: Record<Engine, EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number }; refusedRecent: string[]; sample: DnsSample | null; uaLog?: UaSample[] };
 const today = () => new Date().toISOString().slice(0, 10);
 const blank = (): EngineDay => ({ requests: 0, verified: 0, byList: 0, byDns: 0, refused: 0, s429: 0, s503: 0, api: 0 });
 const fresh = (): Day => ({ day: today(), engines: { google: blank(), bing: blank(), apple: blank() }, googleRanges: { requests: 0, refused: 0, s429: 0, s503: 0 }, refusedRecent: [], sample: null });
@@ -107,7 +111,11 @@ function flush() {
   dirty = false;
   try {
     up.run(cur.day, JSON.stringify(cur));
-    if (!isWeb) db.prepare(`DELETE FROM crawler_day WHERE day < ?`).run(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
+    if (!isWeb) {
+      db.prepare(`DELETE FROM crawler_day WHERE day < ?`).run(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
+      // fix254: the Googlebot-UA log holds addresses (privacy: only the security log keeps addresses longer) — 3 days
+      dropOldUaLogs();
+    }
   } catch (e: any) { logger.warn(`crawler day flush: ${e.message}`); }
 }
 function roll() { if (cur.day !== today()) { flush(); cur = fresh(); } }
@@ -139,6 +147,48 @@ export function noteCrawlerResponse(ua: string, ip: string | undefined, how: 'li
     dirty = true;
   } catch { /* counting never breaks a request */ }
 }
+/** fix254: Googlebot-UA log — 20 a day, one per 72-minute slot (spread over the day), each with the whole chain */
+export const UA_LOG_MAX = 20;
+const SLOT_MS = 86400000 / UA_LOG_MAX;
+const lastSlot = { day: '', slot: -1 };
+export function noteGooglebotSample(req: { ip?: string; path?: string; socket?: { remoteAddress?: string }; headers: Record<string, any> }, now = Date.now()) {
+  try {
+    roll();
+    const slot = Math.floor((now % 86400000) / SLOT_MS);
+    if (lastSlot.day === cur.day && lastSlot.slot === slot) return;
+    const log = (cur.uaLog ||= []);
+    if (log.length >= UA_LOG_MAX) return;
+    lastSlot.day = cur.day; lastSlot.slot = slot;
+    const socket = req.socket?.remoteAddress || '';
+    const xff = String(req.headers['x-forwarded-for'] || '');
+    const asnOf = (ip: string) => networkOf(ip)?.asn ?? null;
+    const reqIp = req.ip || '';
+    const nw = reqIp ? networkOf(reqIp) : null;
+    const hops = [...xff.split(',').map(x => x.trim()).filter(Boolean), socket];
+    log.push({
+      at: new Date(now).toISOString(), path: String(req.path || '').slice(0, 100), socket, xff: xff.slice(0, 300),
+      realIp: String(req.headers['x-real-ip'] || '').slice(0, 60), reqIp, client: clientOf(socket, xff, asnOf),
+      asn: nw ? `AS${nw.asn} ${nw.name}` : 'not a listed network', inGoogle: inGoogleRanges(reqIp),
+      googleHop: hops.find(h => inGoogleRanges(h)) || null
+    });
+    dirty = true;
+  } catch { /* logging never breaks a request */ }
+}
+/** keep the address log 3 days (the day counts stay 30) */
+function dropOldUaLogs() {
+  const cut = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+  const rows = db.prepare(`SELECT day, data FROM crawler_day WHERE day < ? AND data LIKE '%"uaLog"%'`).all(cut) as { day: string; data: string }[];
+  for (const r of rows) { const d = JSON.parse(r.data); delete d.uaLog; db.prepare(`UPDATE crawler_day SET data = ? WHERE day = ?`).run(JSON.stringify(d), r.day); }
+}
+/** fix254: what the log says, in one line (data health + the reply): is req.ip the client, and is any hop Google's? */
+export function uaLogSummary(d: Day | null): string {
+  const l = d?.uaLog || [];
+  if (!l.length) return 'no Googlebot-UA request logged yet';
+  const same = l.filter(x => x.reqIp === x.client).length, google = l.filter(x => x.inGoogle).length, anyHop = l.filter(x => x.googleHop).length;
+  const xffHops = Math.max(...l.map(x => x.xff ? x.xff.split(',').length : 0));
+  return `${l.length} logged: req.ip = rightmost non-proxy hop in ${same}, in Google's list ${google} (any hop ${anyHop}), up to ${xffHops} X-Forwarded-For hop(s)`;
+}
+
 /** web: the day's DNS sample for a Google crawl address is still to take */
 export const wantsDnsSample = (ip: string) => { roll(); return !cur.sample && (ip.startsWith('66.249.') || inGoogleRanges(ip)); };
 export function noteDnsSample(s: DnsSample) { roll(); if (!cur.sample) { cur.sample = s; dirty = true; } }
@@ -161,6 +211,7 @@ export function crawlerHealth() {
   const g = d.engines.google, gr = d.googleRanges;
   const level: 'ok' | 'warn' | 'fail' = gr.refused > 0 ? 'fail' : g.requests >= 20 && g.verified * 2 < g.requests ? 'warn' : 'ok';
   const items = [...d.refusedRecent.slice(-10)];
+  items.push(`Googlebot-UA log: ${uaLogSummary(d)}`);
   if (d.sample) items.push(`DNS sample ${d.sample.at.slice(11, 16)} ${d.sample.ip}: system ${d.sample.system} · public ${d.sample.publicDns} · forward ${d.sample.forward}`);
   return [{
     id: 'crawlers-verified', label: 'Search engines verified', level,

@@ -21,6 +21,8 @@ import { isWeb, runsJobs } from './role';
 
 export const DEADLINE_MS = Number(process.env.DEADLINE_MS) || 900;
 const SLOW_MS = 1000;
+/** fix254: routes cut at DEADLINE_MS for everyone, verified search engines included */
+export const ALWAYS_CUT = /^\/api\/(slug-of\/|public\/results$)/;
 const LATE_FRESH_MS = Number(process.env.LATE_FRESH_MS) || 15_000;
 const LATE_KEEP_MS = 30 * 60_000;
 const LATE_MAX_BYTES = (Number(process.env.LATE_MEM_MAX_MB) || 32) * 1048576;
@@ -161,7 +163,8 @@ export function deadlineStart(opts: DeadlineOpts) {
     if (!api && !page) return next();
     const l = loc(res);
     l.slT0 = performance.now();
-    const crawler = opts.crawler(req);
+    // fix254: the app's own JSON lookups keep the 1-s rule for search engines too (slug-of 9.1 s, results 4.0 s, 28 Oct)
+    const crawler = opts.crawler(req) && !ALWAYS_CUT.test(req.path);
     res.once('finish', () => {
       clearTimeout(l.slTimer);
       const ms = performance.now() - l.slT0;

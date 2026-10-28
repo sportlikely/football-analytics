@@ -19,7 +19,10 @@ type EngineDay = { requests: number; verified: number; byList: number; byDns: nu
 interface CrawlerDay {
   day: string; engines: Record<'google' | 'bing' | 'apple', EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number }
   refusedRecent: string[]; sample: { at: string; ip: string; system: string; publicDns: string; forward: string; ok: boolean } | null
+  uaLog?: UaSample[]
 }
+// fix254: 20 Googlebot-UA requests a day as they reached us (socket, X-Forwarded-For chain, req.ip, network, Google's list)
+interface UaSample { at: string; path: string; socket: string; xff: string; realIp: string; reqIp: string; client: string; asn: string; inGoogle: boolean; googleHop: string | null }
 interface Crawlers { today: CrawlerDay | null; yesterday: CrawlerDay | null; lists: { status: string; ranges: number; at: string | null } }
 // fix199: who is calling today — the top user-agents and data-centre / proxy networks
 type Mark = 'search-engine' | 'seo-tool' | 'data-centre' | 'script' | 'browser'
@@ -102,6 +105,18 @@ function CrawlersCard({ c }: { c: Crawlers }) {
         </li>
       </ul>
       {d.refusedRecent.length > 0 && <ul className="mt-1 text-[11px] text-loss space-y-0.5">{d.refusedRecent.slice(-5).map((x, i) => <li key={i} className="truncate" title={x}>{x}</li>)}</ul>}
+      {d.uaLog && d.uaLog.length > 0 && (
+        <details className="mt-1">
+          <summary className="text-[11px] text-ink cursor-pointer">Googlebot user-agent log ({d.uaLog.length}) · in Google’s list: {d.uaLog.filter(x => x.inGoogle).length}</summary>
+          <ul className="mt-1 space-y-1 text-[11px] text-faint">
+            {d.uaLog.map((x, i) => (
+              <li key={i} className="break-words">
+                <span className="num">{x.at.slice(11, 16)}</span> {x.path} · socket {x.socket || '—'} · X-Forwarded-For {x.xff || '—'}{x.realIp ? ` · X-Real-IP ${x.realIp}` : ''} · req.ip <span className="text-ink">{x.reqIp}</span>{x.client !== x.reqIp ? ` (client would be ${x.client})` : ''} · {x.asn} · <span className={x.inGoogle ? 'text-win' : 'text-loss'}>{x.inGoogle ? 'in Google’s list' : 'not in Google’s list'}</span>{x.googleHop && !x.inGoogle ? ` (Google address in the chain: ${x.googleHop})` : ''}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {d.sample && <p className="mt-1 text-[11px] text-faint break-words">DNS sample {d.sample.at.slice(11, 16)} UTC, {d.sample.ip}: system resolver {d.sample.system} · public resolver {d.sample.publicDns} · {d.sample.forward} → {d.sample.ok ? 'verified' : 'not verified'}</p>}
     </div>
   )

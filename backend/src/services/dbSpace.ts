@@ -21,8 +21,9 @@ import { runsJobs } from './role';
 import { every, after, heavy } from './perf';
 import { runRetention, type RetentionResult } from '../utils/retention';
 import { diskVerdict, growthPerDay } from '../utils/diskRules';
-import { readerHourRows } from './perfHistory';
+import { readerHourRows, perfHours } from './perfHistory';
 import type { Check } from './dataHealth';
+import { volumeLatency, volumeLine, volumeTick } from './volumeProbe';
 
 if (runsJobs) {
   db.exec(`CREATE TABLE IF NOT EXISTS db_size_days (day TEXT PRIMARY KEY, db_bytes INTEGER NOT NULL, wal_bytes INTEGER NOT NULL,
@@ -246,7 +247,7 @@ export function dbSpaceStatus() {
     files: f, volume: v, perDay, growth7d: perDay != null ? perDay * 7 : null,
     verdict: diskVerdict({ volFree: v?.free ?? null, volTotal: v?.total ?? null, dbBytes: f.db, walBytes: f.wal, growth7d: perDay != null ? perDay * 7 : null }),
     report: rep ? { at: rep.at, ms: rep.ms, pageSize: rep.pageSize, pages: rep.pages, freePages: rep.freePages, autoVacuum: rep.autoVacuum, top: rep.rows.slice(0, 15).map(x => ({ ...x, growth7d: grow.get(x.name) ?? null })) } : null,
-    history: hist, checkpoint: ckpt, retention: lastRetention, vacuum: lastVacuum, convert
+    history: hist, checkpoint: ckpt, retention: lastRetention, vacuum: lastVacuum, convert, volumeLatency: volumeLatency()
   };
 }
 
@@ -257,6 +258,7 @@ export function diskHealth(): Check[] {
   const items: string[] = [];
   items.push(`Database file ${GB(s.files.db)} + WAL ${MB(s.files.wal)}${s.report ? ` · free pages ${MB(s.report.freePages * s.report.pageSize)} · incremental vacuum ${s.report.autoVacuum === 2 ? 'on' : 'off'}` : ''}`);
   if (s.checkpoint.lastTruncate) items.push(`Last WAL truncate ${s.checkpoint.lastTruncate.at.slice(11, 16)} UTC: ${s.checkpoint.lastTruncate.busy ? `blocked by a reader (${s.checkpoint.busyStreak} in a row)` : 'done'}, WAL ${MB(s.checkpoint.lastTruncate.walAfter)}`);
+  items.push(volumeLine()); // fix254
   if (s.retention) items.push(`Retention ${s.retention.at.slice(11, 16)} UTC: ${s.retention.deleted.toLocaleString('en-US')} old rows deleted${s.retention.results.length ? ` (${s.retention.results.map(r => `${r.table} ${r.deleted}${r.error ? ' error' : ''}`).join(', ')})` : ''}`);
   if (s.vacuum) items.push(`Vacuum ${s.vacuum.at.slice(11, 16)} UTC: ${MB(s.vacuum.freedPages * s.vacuum.pageSize)} given back, file ${GB(s.vacuum.fileBefore)} → ${GB(s.vacuum.fileAfter)}`);
   if (s.convert) items.push(`Full vacuum ${String(s.convert.at).slice(0, 16).replace('T', ' ')} UTC: ${s.convert.msg}`);
@@ -280,12 +282,15 @@ export function diskHealth(): Check[] {
     slow = Number((db.prepare(`SELECT COALESCE(SUM(n - crawler), 0) AS n FROM slow_requests WHERE minute >= ?`).get(since) as any)?.n || 0);
   } catch { /* no table yet */ }
   const over = hours.reduce((t, h) => t + h.over500, 0), max = Math.max(0, ...hours.map(h => h.maxMs));
+  // fix254: + the web thread's longest stall (target: none over 500 ms)
+  let stallMs = 0;
+  try { stallMs = Math.max(0, ...perfHours('web', 3).map(h => h.worstMs)); } catch { /* no rows */ }
   const worst = hours.slice().sort((a, b) => b.maxMs - a.maxMs)[0];
   checks.push({
     id: 'slow-reads', label: 'Slow reads (3 h)',
-    level: !hours.length ? 'ok' : over || slow ? 'warn' : 'ok',
-    detail: !hours.length ? 'No numbers yet' : `${over} read(s) over 500 ms in the last 3 h, longest ${max.toLocaleString('en-US')} ms; ${slow} public request(s) over 1 s (target: none of either)`,
-    items: [...hours.map(h => `${h.hour.slice(11)}:00 UTC: ${h.reads.toLocaleString('en-US')} reads, ${h.over500} over 500 ms, longest ${h.maxMs} ms`), ...(worst?.top && worst.maxMs > 500 ? [`Longest: ${worst.top}`] : [])]
+    level: !hours.length ? 'ok' : over || slow || stallMs > 500 ? 'warn' : 'ok',
+    detail: !hours.length ? 'No numbers yet' : `${over} read(s) over 500 ms in the last 3 h, longest ${max.toLocaleString('en-US')} ms; ${slow} public request(s) over 1 s; longest web stall ${stallMs.toLocaleString('en-US')} ms (target: none of these)`,
+    items: [volumeLine(), ...hours.map(h => `${h.hour.slice(11)}:00 UTC: ${h.reads.toLocaleString('en-US')} reads, ${h.over500} over 500 ms, longest ${h.maxMs} ms`), ...(worst?.top && worst.maxMs > 500 ? [`Longest: ${worst.top}`] : [])]
   });
   return checks;
 }
@@ -301,6 +306,9 @@ export function startDbSpaceScheduler() {
   after('db retention', () => retentionTick(), 6 * 60 * 1000).unref();
   every('db retention', () => retentionTick(), 3600 * 1000).unref();
   every('db vacuum', () => vacuumTick(), 10 * 60 * 1000).unref();
+  // fix254: the volume's read / fsync latency
+  after('volume latency', () => volumeTick(), 2 * 60 * 1000).unref();
+  every('volume latency', () => volumeTick(), 15 * 60 * 1000).unref();
   // the size report: once a day at 01:10 UTC (dbstat reads every page), and 30 min after a start when the last is old
   const report = () => heavy('db size report', () => sizeReport().then(() => undefined));
   after('db size report', () => { const r = storedReport(); if (!r || Date.now() - Date.parse(r.at) > 20 * 3600 * 1000) return report(); }, 30 * 60 * 1000).unref();

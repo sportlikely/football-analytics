@@ -52,6 +52,7 @@ import { isWeb, isWorker } from './role';
 import { onState, publishState } from './shared';
 import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
 import { buildLayer, applyLayer, type LeagueLayer } from '../utils/sportCalib';
+import { calibrateTennis, recentState } from './recentCalibState';
 import { probSettings, applyUsed, type UsedProbSet, type LsYears } from '../utils/leagueSettings';
 
 export const TENNIS_MODEL = 'tennis-v1';
@@ -72,6 +73,8 @@ db.exec(`
 `);
 // fix222: the model's own chance beside the calibrated one shown (null = saved before the layer)
 try { db.exec(`ALTER TABLE tennis_predictions ADD COLUMN p_raw REAL`); } catch { /* there already, or a read-only connection */ }
+// fix254: the chance before the recent calibration layer (services/recentCalibState.ts; null = saved before it: p1)
+try { db.exec(`ALTER TABLE tennis_predictions ADD COLUMN p_pre REAL`); } catch { /* there already, or a read-only connection */ }
 /*
  * fix200: in the worker thread every write is collected (`sink`) and sent to the main thread, which applies them in one
  * transaction; what the worker stored itself is read back from `overlay` until then.
@@ -1370,7 +1373,7 @@ export async function applyNewResults(): Promise<number> {
 }
 
 export interface TennisPred {
-  p1: number; p2: number; p1Raw: number; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
+  p1: number; p2: number; p1Raw: number; p1Pre: number; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
   sets: Record<string, number>; games: ReturnType<typeof gamesSummary>; why: string[];
   numbers: { eloSurface: [number, number]; eloOverall: [number, number]; servePoint: [number, number]; pElo: number; pPoint: number; mode: string; bo?: number; rule?: number }
 }
@@ -1388,12 +1391,15 @@ function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): 
   const pRaw = p;
   p = applyUsed(tennisCalib()?.settings, tennisSegment(cat, R.surf[i]), p, false); // fix223: the tour × surface settings first
   p = applyLayer(tennisCalib()?.layer, cat, p);
+  // fix254: then the recent layer (fitted nightly on the last months' matches, promoted by the model's rules)
+  const pPre = p;
+  p = calibrateTennis(p);
   const sc = rescale(b.pa, b.pb, R.bo[i], R.rule[i], p);
   const d = matchDist(sc.pa, sc.pb, R.bo[i], R.rule[i], true);
   const line = tennisStrongLine(cat) / 100;
   const pct = (x: number) => Math.round(x * 1000) / 10;
   return {
-    p1: pct(p), p2: pct(1 - p), p1Raw: pct(pRaw), pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
+    p1: pct(p), p2: pct(1 - p), p1Raw: pct(pRaw), p1Pre: pct(pPre), pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
     firstSetP1: pct(d.first), sets: Object.fromEntries(Object.entries(d.sets).sort().map(([k, v]) => [k, pct(v)])), games: gamesSummary(d.games!, R.bo[i]),
     why: whyLines(L, R, i, names, a, b, f),
     numbers: { eloSurface: [Math.round(a.a.s), Math.round(a.b.s)], eloOverall: [Math.round(a.a.o), Math.round(a.b.o)], servePoint: [pct(b.pa), pct(b.pb)], pElo: pct(pE), pPoint: pct(pP), mode: s.mode, bo: R.bo[i], rule: R.rule[i] }
@@ -1451,15 +1457,15 @@ export async function saveTennisPredictions(): Promise<number> {
     if (!parseInto(L.c, R, { ...r, winner: 0 }, true)) continue;
     const i = R.n - 1;
     const prev = Date.parse((madeAt.get(r.id) as any)?.made_at || '');
-    const moved = Math.max(L.builtAt, Date.parse(tennisCalib()?.at || '') || 0, L.changed.get(R.p1[i]) || 0, L.changed.get(R.p2[i]) || 0);
+    const moved = Math.max(L.builtAt, Date.parse(tennisCalib()?.at || '') || 0, Date.parse(recentState('tennis')?.at || '') || 0, L.changed.get(R.p1[i]) || 0, L.changed.get(R.p2[i]) || 0);
     if (Number.isFinite(prev) && prev > moved && now.getTime() - prev < 6 * 3600000) { R.n--; predsSkipped++; continue; } // unchanged
     names.push([r.p1_name || 'Player 1', r.p2_name || 'Player 2']);
   }
   applyRules(L.c, R);
   grow(L);
-  const UP = `INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at, p_raw)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET model = excluded.model, scheduled_at = excluded.scheduled_at, cat = excluded.cat,
-    p1 = excluded.p1, p_raw = excluded.p_raw, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
+  const UP = `INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at, p_raw, p_pre)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET model = excluded.model, scheduled_at = excluded.scheduled_at, cat = excluded.cat,
+    p1 = excluded.p1, p_raw = excluded.p_raw, p_pre = excluded.p_pre, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
     WHERE tennis_predictions.scheduled_at IS NULL OR tennis_predictions.scheduled_at > excluded.made_at`;
   const out: { id: number; at: string; pr: TennisPred }[] = [];
   for (let i = 0; i < R.n; i++) {
@@ -1469,7 +1475,7 @@ export async function saveTennisPredictions(): Promise<number> {
   const at = new Date().toISOString();
   // a match that started while we were computing keeps the prediction it had at the start (and the SQL guard above)
   const params = (o: typeof out[number]) => [o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
-    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at, o.pr.p1Raw / 100];
+    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at, o.pr.p1Raw / 100, o.pr.p1Pre / 100];
   if (sink) { for (const o of out) if (Date.parse(o.at) > Date.now()) sink.push({ sql: UP, params: params(o) }); return out.length; } // fix200: the worker
   const up = db.prepare(UP);
   for (let k = 0; k < out.length; k += 200) {

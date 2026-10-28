@@ -7,6 +7,7 @@ import { db } from '../db';
 import { afSettledUnchecked, checkFdFinal, noteAfSettled } from './fdReconcile';
 import logger from '../utils/logger';
 import { Prediction } from './predictionModel';
+import { calibrateFootball } from './recentCalibState';
 import { doubleChance, dcHit, DC_STRONG, type DC } from '../utils/doubleChance';
 
 const LIVE_OR_DONE = new Set(['IN_PLAY', 'PAUSED', 'FINISHED', 'AWARDED']);
@@ -26,6 +27,9 @@ if (!(db.prepare(`PRAGMA table_info(predictions)`).all() as any[]).some(c => c.n
 // ones — the nightly league test starts from these
 if (!(db.prepare(`PRAGMA table_info(predictions)`).all() as any[]).some(c => c.name === 'layer_raw'))
   db.exec(`ALTER TABLE predictions ADD COLUMN layer_raw TEXT`);
+// fix254: the 1X2 before the recent calibration layer ("[home, draw, away]" in %; null = no layer: the shown one)
+if (!(db.prepare(`PRAGMA table_info(predictions)`).all() as any[]).some(c => c.name === 'p_pre'))
+  db.exec(`ALTER TABLE predictions ADD COLUMN p_pre TEXT`);
 
 const upsertStmt = db.prepare(`
   INSERT INTO predictions (
@@ -33,8 +37,8 @@ const upsertStmt = db.prepare(`
     home_team_id, home_team, away_team_id, away_team,
     p_home, p_draw, p_away, xg_home, xg_away, over25, btts, confidence,
     games_home, games_away, odds_home, odds_draw, odds_away,
-    locked, settled, created_at, updated_at, draw_streak, payload, layer_raw
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
+    locked, settled, created_at, updated_at, draw_streak, payload, layer_raw, p_pre
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(match_id, model) DO UPDATE SET
     utc_date = excluded.utc_date,
     p_home = excluded.p_home, p_draw = excluded.p_draw, p_away = excluded.p_away,
@@ -43,7 +47,7 @@ const upsertStmt = db.prepare(`
     games_home = excluded.games_home, games_away = excluded.games_away,
     draw_streak = excluded.draw_streak,
     payload = excluded.payload,
-    layer_raw = excluded.layer_raw,
+    layer_raw = excluded.layer_raw, p_pre = excluded.p_pre,
     odds_home = COALESCE(excluded.odds_home, predictions.odds_home),
     odds_draw = COALESCE(excluded.odds_draw, predictions.odds_draw),
     odds_away = COALESCE(excluded.odds_away, predictions.odds_away),
@@ -117,7 +121,8 @@ function recordPredictionsTx(matches: any[]) {
       now,
       p.drawStreak ? Math.min(p.drawStreak.home, p.drawStreak.away) : null,
       JSON.stringify(p),
-      (p as any).league?.raw ? JSON.stringify((p as any).league.raw) : null
+      (p as any).league?.raw ? JSON.stringify((p as any).league.raw) : null,
+      (p as any).pre ? JSON.stringify([(p as any).pre.home, (p as any).pre.draw, (p as any).pre.away]) : null
     );
     if (Number(res.changes) > 0) saved++;
     }
@@ -140,7 +145,9 @@ const frozenStmt = db.prepare(`
  * Rows saved before the full payload was stored (≤ 26 Sep 2026) keep their saved 1X2 and goals figures; the
  * breakdown and scores from the recalculation are dropped, because they would be hindsight.
  */
-export function freezePredictions(match: any, computed: Prediction[]): Prediction[] {
+export function freezePredictions(match: any, computedIn: Prediction[]): Prediction[] {
+  // fix254: the shown 1X2 = the recent calibration layer on the models' own (services/recentCalibState.ts)
+  const computed = calibrateFootball(computedIn);
   if (!match || !LIVE_OR_DONE.has(match.status)) return computed;
   let rows: any[] = [];
   try { rows = frozenStmt.all(match.id) as any[]; } catch { return computed; }

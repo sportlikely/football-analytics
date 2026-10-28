@@ -44,7 +44,7 @@ import {
   dropFeatureState, FittedModel, FeatState
 } from './featureModel';
 import {
-  DAILY_RULES, candidateList, chooseAnchor, chooseWeight, groupOfDiv, mixP, anchorP, paired, preJudge, finishJudge, pairedBootstrapAsync, closeness,
+  DAILY_RULES, candidateList, chooseAnchor, chooseWeight, groupOfDiv, mixP, anchorP, paired, preJudge, finishJudge, pairedBootstrapAsync, closeness, promotionWait,
   type P3, type Spec, type CandSpec, type FitKind
 } from '../utils/dailyRules';
 import { learningStatus } from './modelDailyHealth';
@@ -310,7 +310,14 @@ export async function runModelDaily(force = false): Promise<any> {
     let decision = 'keep', reason = games.W.length < R.minGames
       ? `No change: only ${games.W.length} scored league games in the last 60 days (rules need ${R.minGames}).`
       : `No change: no candidate passed the bar${bestCand ? ` (closest: ${bestCand.label} — ${bestCand.why})` : ''}.`;
-    if (passing.length) {
+    // fix254: at most one promotion in 7 days (the guardrail's rollback above is never held back)
+    const lastPromo: any = db.prepare(`SELECT date FROM model_daily WHERE decision = 'promote' AND date < ? ORDER BY date DESC LIMIT 1`).get(today);
+    const wait = promotionWait(lastPromo?.date, today, R);
+    if (passing.length && wait > 0) {
+      reason = `No change: ${passing[0].label} passed the bar (last 60 days ${passing[0].dW.toFixed(4)}), but the last promotion was on ${lastPromo.date} — at most one in ${R.minDaysBetween} days (${wait} day(s) to go).`;
+      (challengers as any).held = { id: passing[0].id, lastPromotion: lastPromo.date, wait };
+      saveChampion(champ);
+    } else if (passing.length) {
       const win = passing[0];
       const x = scored.find(s => s.c.id === win.id)!;
       const before: Omit<Champion, 'prev'> = { ...champ };

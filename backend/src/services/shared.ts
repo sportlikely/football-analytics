@@ -230,9 +230,33 @@ async function loadNow(key: string) {
   applied.set(key, { ver: row.ver, at: Date.now(), ms: Date.now() - t0, bytes: row.bytes, maxStepMs: Math.round(maxStepMs) });
 }
 
+/*
+ * fix254: the version list lives in memory. The worker holds every key's version (read once at its start, then each
+ * publish) and sends the whole list every 30 s; the web compares it with what it applied — the 30-s check never reads
+ * the disk while the worker is there ("SELECT key, ver FROM shared_state" 1.7–1.9 s on 28 Oct). The read from the table
+ * stays for the start-up and for when no list came for 90 s (the worker restarting).
+ */
+const vers = new Map<string, number>();
+let versLoaded = false;
+let versAt = 0;
+function workerVers(): [string, number][] {
+  if (!versLoaded) {
+    try { for (const r of db.prepare(versSql()).all() as any[]) if (!vers.has(r.key) || vers.get(r.key)! < r.ver) vers.set(r.key, r.ver); versLoaded = true; } catch { /* next round */ }
+  }
+  for (const [k, p] of published) if ((vers.get(k) || 0) < p.ver) vers.set(k, p.ver);
+  return [...vers];
+}
+/** web: the worker's list arrived — load what is newer */
+export function applyVers(list: [string, number][]) {
+  versAt = Date.now();
+  for (const [k, v] of list) queueLoad(k, v);
+}
+export const versFromWorker = () => Date.now() - versAt < 90_000;
+
 /** web: every state newer than what this process holds (start-up, and the 30-s check for missed messages) */
-export async function loadNewerStates(): Promise<void> {
+export async function loadNewerStates(force = false): Promise<void> {
   if (!isWeb) return;
+  if (!force && versFromWorker()) return chain;
   let rows: { key: string; ver: number }[];
   const sql = versSql();
   try { rows = pageReaderOn() ? await readSql(sql, [], true) : (db.prepare(sql).all() as any[]); } catch { rows = db.prepare(sql).all() as any[]; }
@@ -242,8 +266,10 @@ export async function loadNewerStates(): Promise<void> {
 
 if (isWeb) {
   onIpc('state', m => queueLoad(String(m.key), Number(m.ver)));
+  onIpc('state-vers', m => { if (Array.isArray(m.vers)) applyVers(m.vers as [string, number][]); });
   setInterval(() => { void loadNewerStates(); }, 30 * 1000).unref();
 }
+if (isWorker) setInterval(() => { try { sendIpc({ t: 'state-vers', vers: workerVers() }); } catch { /* next round */ } }, 30 * 1000).unref();
 
 /** worker: the last copy a key was published with (a module skips a publish when nothing changed) */
 export const publishedAt = (key: string) => published.get(key)?.at || 0;

@@ -209,7 +209,7 @@ const loadState = async () => {
   if (!isWeb) { markReady({ loadMs: 0, states: 0 }); markStartupDone(); return; }
   const t0 = Date.now();
   setJob('start: state load');
-  try { loadLiveRows(); await loadNewerStates(); } catch (e: any) { logger.warn(`start: state load: ${e?.message || e}`); } finally { setJob(null); }
+  try { loadLiveRows(); await loadNewerStates(true); } catch (e: any) { logger.warn(`start: state load: ${e?.message || e}`); } finally { setJob(null); }
   markReady({ loadMs: Date.now() - t0, states: Object.keys(sharedStatus()).length });
   markStartupDone();
   logger.info(`start: ${Object.keys(sharedStatus()).length} shared state(s) loaded in ${Date.now() - t0} ms — ready`);

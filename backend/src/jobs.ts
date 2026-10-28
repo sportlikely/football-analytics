@@ -36,6 +36,7 @@ import { ensureIndexes } from './services/dbIndexes';
 import { warmHubs } from './services/hubs';
 import { startFeatureModelScheduler } from './services/featureModel';
 import { startModelDailyScheduler } from './services/modelDaily';
+import { startRecentCalibScheduler } from './services/recentCalib';
 import { startNflScheduler, backfillPlayerGames } from './services/nfl';
 import { markFresh, markFailed } from './services/freshness';
 import { startDataHealthScheduler } from './services/dataHealth';
@@ -264,6 +265,7 @@ export function startJobs() {
     // Feature model + v3-mix (state every 30 min), daily champion / challenger at 04:00 UTC, report at 07:00 Jerusalem
     ['feature model', () => startFeatureModelScheduler()],
     ['model daily', () => startModelDailyScheduler()],
+    ['recent calibration', () => startRecentCalibScheduler()], // fix254
     ['news', () => startNewsScheduler()],
     ['data audit', () => startDataAuditScheduler()],
     ['data health', () => startDataHealthScheduler()],

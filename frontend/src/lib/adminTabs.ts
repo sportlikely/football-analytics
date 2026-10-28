@@ -27,12 +27,20 @@ export interface AdminSummary {
   /** handled by the site (information only) */
   injuriesToReview: number; bbResultsToCheck: number; done24h: number
   forClaude: ForClaude | null
+  /** fix254: the top-scorer check's differences (no email for them) */
+  dataCheck?: DataCheckForClaude | null
   visitorsToday: number; signupsToday: number; accounts: number; paying: number
   siteErrorsOpen: number; siteErrors24h: number; failedSignIns24h: number
   backupOk: boolean | null; lastBackupAt: string | null; at: string
 }
 /** fix253: the daily "for Claude" list (open site-error groups, top 10) */
 export interface ForClaude { day: string; open: number; top: { message: string; page: string; where: string | null; count: number; firstAt: string; lastAt: string; builds: string[] }[] }
+/** fix254: the daily top-scorer check — differences go here instead of an email; leagues under 90% for 7+ days */
+export interface DataCheckForClaude {
+  at: string; checked: number; matched: number; more: number
+  differences: { league: string; player: string | null; detail: string; reason: string | null }[]
+  under: { league: string; name: string; since: string; share: number }[]
+}
 export interface HealthCheck { id: string; label: string; level: Level; detail: string; items?: string[] }
 
 export interface AdminCardDef {
@@ -53,7 +61,7 @@ export const ADMIN_CARDS: AdminCardDef[] = [
   // ---------- Needs you ----------
   { id: 'needs-you', tab: 'needs-you', title: 'Waiting for you', what: 'Only what a person must handle: messages from customers and payment problems. Everything else the site decides by itself.', todo: 'Answer the messages; each one leaves once it is marked answered.' },
   { id: 'done-for-you', tab: 'needs-you', title: 'Done for you', what: 'Every decision the site made by itself (injury news applied, results corrected or voided, site errors closed), with why and the source.', todo: 'Nothing — press Undo within 24 hours if one is wrong.', checks: ['done-for-you'] },
-  { id: 'for-claude', tab: 'needs-you', title: 'For Claude today', what: 'Site errors still open, grouped by message: the 10 with the most reports, with their counts and builds. They close by themselves after 24 hours with no report once a newer build is live.', todo: 'Nothing to press — paste the list to Claude when you have a session open.', status: s => (s.forClaude?.open ? 'warn' : 'ok') },
+  { id: 'for-claude', tab: 'needs-you', title: 'For Claude today', what: 'Site errors still open, grouped by message: the 10 with the most reports, with their counts and builds. They close by themselves after 24 hours with no report once a newer build is live. Also the top-scorer check’s differences (players whose page and the official list disagree): no email for those; an email comes only when a league stays under 90% for 7 days.', todo: 'Nothing to press — paste the list to Claude when you have a session open.', status: s => (s.forClaude?.open || s.dataCheck?.under.length ? 'warn' : 'ok') },
 
   // ---------- Visitors & users ----------
   { id: 'visitors', tab: 'users', title: 'Visitors', what: 'How many people opened the site today, this week and this month, and from which countries (never their address).', todo: 'Nothing — it is information only.' },
