@@ -54,6 +54,7 @@ import { deployErrorsHealth } from './deployErrors';
 import { slowRequestsHealth } from './deadline';
 import { upsetTextHealth } from './upsetHealth';
 import { crawlerHealth } from './crawlerIps';
+import { edgeStatus } from './edgeHops';
 import { modelDailyHealth } from './modelDailyHealth';
 import { leagueFixHealth } from './leagueFixHealth';
 import { diskHealth } from './dbSpace';
@@ -474,7 +475,7 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // fix242: upset watch — the favourite named in the text is the side with the higher win %, a reason on every game, max 10 a week
   try { checks.push(...upsetTextHealth(now)); } catch (e: any) { logger.warn(`upset watch health: ${e?.message || e}`); }
   // fix245: search engines verified (list / DNS); fail when a request from Google's ranges got a 429 / 503 today
-  try { checks.push(...crawlerHealth()); } catch (e: any) { logger.warn(`crawler health: ${e?.message || e}`); }
+  try { checks.push(...crawlerHealth(edgeStatus())); } catch (e: any) { logger.warn(`crawler health: ${e?.message || e}`); }
   // fix251: the football daily learning — warn after 30 days without a promotion while the best candidate is better in both windows
   try { checks.push(...modelDailyHealth(now)); } catch (e: any) { logger.warn(`model daily health: ${e?.message || e}`); }
   // fix255: a league with 60+ games under 50% on 1X2 on each of the last 30 days (the nightly league test)

@@ -178,6 +178,7 @@ const saveOne = builder('more predictions (save)', saveOneB);
 import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Providers as SettleProviders, openSettleReviews, decideSettle, SettleError } from './services/unsettled';
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, crawlerCheck, costCapped } from './services/afUsage';
+import { clientIpMiddleware } from './services/edgeHops';
 import { noteCrawlerResponse, inGoogleRanges, crawlerReport, noteGooglebotSample } from './services/crawlerIps';
 import { makeTrustProxy } from './utils/clientIp';
 import { engineOfUa } from './utils/crawlerRanges';
@@ -229,6 +230,9 @@ const app = express();
 // Railway terminates TLS in front of us: trust the first proxy so req.ip / req.secure are real
 // fix254: and every internal / Railway hop after it — req.ip = the rightmost hop that is not a proxy (utils/clientIp.ts)
 app.set('trust proxy', makeTrustProxy(ip => networkOf(ip)?.asn ?? null));
+// fix262: then req.ip = the hop just left of Railway's edge (learned edge ranges, only with the edge headers) — before
+// everything that reads it (crawler check, data-centre check, Quick check, visitors, security log)
+app.use(clientIpMiddleware);
 // fix140: bad bots get nothing (before every other middleware). ShapBot alone (~17 pages a minute on /team + /player)
 // used up the API-Football quota on 16 Oct. Search engines (Googlebot, bingbot, Applebot, DuckDuckBot) stay allowed;
 // the same list is disallowed in robots.txt.

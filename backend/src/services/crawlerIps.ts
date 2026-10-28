@@ -20,7 +20,7 @@ import { deferred } from './deferredWrites';
 import { every, after } from './perf';
 import { onState, publishState } from './shared';
 import { networkOf } from './asn';
-import { clientOf } from '../utils/clientIp';
+import { clientOf, hasEdgeHeader } from '../utils/clientIp';
 import { CrawlerRanges, RANGE_SOURCES, SEED_RANGES, parseRangeFile, listedCrawler, engineOfUa, Engine } from '../utils/crawlerRanges';
 
 const FILE = path.join(process.env.DATA_DIR || path.resolve(process.cwd(), 'data'), 'geo', 'crawler-ranges.json');
@@ -94,17 +94,30 @@ export const crawlerRangesStatus = () => ({ status, ranges: ranges.size, at: sav
 type EngineDay = { requests: number; verified: number; byList: number; byDns: number; refused: number; s429: number; s503: number; api: number };
 export type DnsSample = { at: string; ip: string; system: string; publicDns: string; forward: string; ok: boolean };
 /** fix254: one Googlebot-UA request as it reached us — every hop of the address chain, to see who the client really is */
-export type UaSample = { at: string; path: string; socket: string; xff: string; realIp: string; reqIp: string; client: string; asn: string; inGoogle: boolean; googleHop: string | null };
-type Day = { day: string; engines: Record<Engine, EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number }; refusedRecent: string[]; sample: DnsSample | null; uaLog?: UaSample[] };
+export type UaSample = { at: string; path: string; socket: string; xff: string; realIp: string; reqIp: string; client: string; asn: string; inGoogle: boolean; googleHop: string | null; edge?: boolean; oldRule?: string };
+type Counts = { engines: Record<Engine, EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number } };
+/** fix262: `since` = when the counts start on the fixed client address; the day's counts before it are in `before262`
+ *  (they were taken on Railway's edge address); `networks` = the clients' listed networks (names + counts, no address) */
+type Day = Counts & { day: string; refusedRecent: string[]; sample: DnsSample | null; uaLog?: UaSample[]; since?: string; before262?: Counts; networks?: Record<string, number>; edgeRequests?: number; requestsAll?: number };
 const today = () => new Date().toISOString().slice(0, 10);
 const blank = (): EngineDay => ({ requests: 0, verified: 0, byList: 0, byDns: 0, refused: 0, s429: 0, s503: 0, api: 0 });
-const fresh = (): Day => ({ day: today(), engines: { google: blank(), bing: blank(), apple: blank() }, googleRanges: { requests: 0, refused: 0, s429: 0, s503: 0 }, refusedRecent: [], sample: null });
+const fresh = (): Day => ({ day: today(), engines: { google: blank(), bing: blank(), apple: blank() }, googleRanges: { requests: 0, refused: 0, s429: 0, s503: 0 }, refusedRecent: [], sample: null, since: new Date().toISOString() });
 
 db.exec(`CREATE TABLE IF NOT EXISTS crawler_day (day TEXT PRIMARY KEY, data TEXT NOT NULL)`);
 let cur: Day = fresh();
+let dirty0 = false;
 // a restart keeps the day's numbers
-try { const r = db.prepare(`SELECT data FROM crawler_day WHERE day = ?`).get(cur.day) as any; if (r?.data) cur = { ...fresh(), ...JSON.parse(r.data) }; } catch { /* none */ }
-let dirty = false;
+try {
+  const r = db.prepare(`SELECT data FROM crawler_day WHERE day = ?`).get(cur.day) as any;
+  if (r?.data) {
+    const old = JSON.parse(r.data);
+    // fix262: the counts taken before the fix (on the edge address) move aside; today's restart on the right address
+    if (old.since) cur = { ...fresh(), ...old };
+    else if (isWeb || !isWorker) { const f = fresh(); cur = { ...f, ...old, engines: f.engines, googleRanges: f.googleRanges, refusedRecent: [], since: f.since, before262: { engines: old.engines, googleRanges: old.googleRanges } }; dirty0 = true; }
+    else cur = { ...fresh(), ...old };
+  }
+} catch { /* none */ }
+let dirty = dirty0;
 const up = deferred(`INSERT OR REPLACE INTO crawler_day (day, data) VALUES (?, ?)`);
 function flush() {
   if (!dirty) return;
@@ -167,9 +180,11 @@ export function noteGooglebotSample(req: { ip?: string; path?: string; socket?: 
     const hops = [...xff.split(',').map(x => x.trim()).filter(Boolean), socket];
     log.push({
       at: new Date(now).toISOString(), path: String(req.path || '').slice(0, 100), socket, xff: xff.slice(0, 300),
-      realIp: String(req.headers['x-real-ip'] || '').slice(0, 60), reqIp, client: clientOf(socket, xff, asnOf),
+      realIp: String(req.headers['x-real-ip'] || '').slice(0, 60), reqIp, client: reqIp,
       asn: nw ? `AS${nw.asn} ${nw.name}` : 'not a listed network', inGoogle: inGoogleRanges(reqIp),
-      googleHop: hops.find(h => inGoogleRanges(h)) || null
+      googleHop: hops.find(h => inGoogleRanges(h)) || null,
+      // fix262: did the edge headers come, and what fix254's rule (rightmost non-private hop) would have taken
+      edge: hasEdgeHeader(req.headers), oldRule: clientOf(socket, xff, asnOf)
     });
     dirty = true;
   } catch { /* logging never breaks a request */ }
@@ -184,9 +199,12 @@ function dropOldUaLogs() {
 export function uaLogSummary(d: Day | null): string {
   const l = d?.uaLog || [];
   if (!l.length) return 'no Googlebot-UA request logged yet';
-  const same = l.filter(x => x.reqIp === x.client).length, google = l.filter(x => x.inGoogle).length, anyHop = l.filter(x => x.googleHop).length;
+  const google = l.filter(x => x.inGoogle).length, anyHop = l.filter(x => x.googleHop).length;
   const xffHops = Math.max(...l.map(x => x.xff ? x.xff.split(',').length : 0));
-  return `${l.length} logged: req.ip = rightmost non-proxy hop in ${same}, in Google's list ${google} (any hop ${anyHop}), up to ${xffHops} X-Forwarded-For hop(s)`;
+  // fix262: the samples taken since the fix carry `oldRule`; req.ip ≠ fix254's rule = the edge hop was skipped
+  const fixed = l.filter(x => x.oldRule !== undefined), skipped = fixed.filter(x => x.oldRule !== x.reqIp).length, edge = fixed.filter(x => x.edge).length;
+  return `${l.length} logged: req.ip in Google's list ${google} (any hop ${anyHop}), up to ${xffHops} X-Forwarded-For hop(s)` +
+    (fixed.length ? ` · since fix262: ${fixed.length} with the edge headers on ${edge}, Railway's edge hop skipped in ${skipped}` : '');
 }
 
 /** web: the day's DNS sample for a Google crawl address is still to take */
@@ -205,17 +223,39 @@ export function crawlerReport() {
   return { today: crawlerDay(), yesterday: crawlerDay(y), lists: crawlerRangesStatus() };
 }
 
+/** fix262 (web): every request's client network (a listed data-centre / proxy network name, or none) — counts only */
+export function noteClientNetwork(name: string | null, viaEdge: boolean) {
+  try {
+    roll();
+    cur.requestsAll = (cur.requestsAll || 0) + 1;
+    if (viaEdge) cur.edgeRequests = (cur.edgeRequests || 0) + 1;
+    dirty = true;
+    if (!name) return;
+    const n = (cur.networks ||= {});
+    if (n[name] !== undefined || Object.keys(n).length < 50) n[name] = (n[name] || 0) + 1;
+  } catch { /* counting never breaks a request */ }
+}
+/** fix262: the networks line (data health + the reply) */
+export function networksLine(d: Day | null): string {
+  if (!d?.requestsAll) return 'client networks: none counted yet';
+  const top = Object.entries(d.networks || {}).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k} ${v}`).join(', ');
+  return `client networks since ${(d.since || '').slice(11, 16)} UTC: ${d.requestsAll} requests (${d.edgeRequests || 0} via Railway's edge headers), from listed data-centre / proxy networks: ${top || 'none'}`;
+}
+
 /** data health "Search engines verified": fail when any request from Google's own ranges got a 429 or 503 today */
-export function crawlerHealth() {
+export function crawlerHealth(edge?: { ranges: { range: string; lefts: number; share: number }[]; windowRequests: number }) {
   const d = crawlerDay() || fresh();
   const g = d.engines.google, gr = d.googleRanges;
   const level: 'ok' | 'warn' | 'fail' = gr.refused > 0 ? 'fail' : g.requests >= 20 && g.verified * 2 < g.requests ? 'warn' : 'ok';
   const items = [...d.refusedRecent.slice(-10)];
   items.push(`Googlebot-UA log: ${uaLogSummary(d)}`);
+  if (edge) items.push(`Railway edge ranges (fix262, learned): ${edge.ranges.map(r => `${r.range} (${r.lefts}+ clients, ${Math.round(r.share * 100)}%)`).join(', ') || 'none yet'}`);
+  items.push(networksLine(d));
+  if (d.before262) { const b = d.before262.engines.google; items.push(`before the fix262 deploy today (counted on the edge address): Googlebot ${b.requests} requests, ${b.verified} verified, ${b.refused} refused; from Google's ranges ${d.before262.googleRanges.requests}`); }
   if (d.sample) items.push(`DNS sample ${d.sample.at.slice(11, 16)} ${d.sample.ip}: system ${d.sample.system} · public ${d.sample.publicDns} · forward ${d.sample.forward}`);
   return [{
     id: 'crawlers-verified', label: 'Search engines verified', level,
-    detail: `Googlebot today: ${g.requests} requests, ${g.verified} verified (${g.byList} by Google's list, ${g.byDns} by DNS), ${g.refused} refused · from Google's ranges: ${gr.refused} got 429 / 503 (${gr.s429} / ${gr.s503}) · Bing ${d.engines.bing.verified}/${d.engines.bing.requests}, Apple ${d.engines.apple.verified}/${d.engines.apple.requests} verified · lists: ${status}`,
+    detail: `Googlebot ${d.before262 ? `since ${(d.since || '').slice(11, 16)} UTC` : 'today'}: ${g.requests} requests, ${g.verified} verified (${g.byList} by Google's list, ${g.byDns} by DNS), ${g.refused} refused · from Google's ranges: ${gr.refused} got 429 / 503 (${gr.s429} / ${gr.s503}) · Bing ${d.engines.bing.verified}/${d.engines.bing.requests}, Apple ${d.engines.apple.verified}/${d.engines.apple.requests} verified · lists: ${status}`,
     ...(items.length ? { items } : {})
   }];
 }
