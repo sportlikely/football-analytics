@@ -70,8 +70,8 @@ test('(1) wiring: state loads are the big pool\'s background reads; page times t
   assert.match(src('services/workerRoutes.ts'), /readSql\(COPY_SQL, \[k\], false, poolForBytes\(sizes\.get\(k\)\)\)/);
   assert.match(src('workers/pageReader.ts'), /tuneDb\(db, 'readerSmall', workerData\.readers\)/);
   const { cacheMbFor } = requireCjs(path.join(DIST, 'utils/dbTune.js'));
-  assert.equal(cacheMbFor('readerSmall', null), 64);
-  assert.ok(cacheMbFor('reader', 4096, 4) < 256, 'four reader threads fit the container: scaled');
+  assert.equal(cacheMbFor('readerSmall', null), 512); // fix269 (was 64)
+  assert.ok(cacheMbFor('reader', 4096, 4) < 1024, 'four reader threads fit the container: scaled');
 });
 
 /* ---------- (2) the page list in the web's memory ---------- */

@@ -551,6 +551,34 @@ thread's maxMs 1,755, /api/basketball/game/:id avg 2.3 s / max 11.6 s, ~900 /bas
 - The cluster (step 6) is not built: nothing blocks the web thread any more (Yarin, 27 Oct).
 - **Profiler off by default** (CPU_PROFILE=1 turns it on): its 5-min swap was the remaining block (321 ms in the load test; the live short blocks of 160–220 ms every ~5 min, mostly (program)). **Load test** (27 Oct, 10 Oct copy, 1,000 visitors × 5 min): 296,628 requests, 980 req/s, p50 2 ms · p95 8 ms · p99 15 ms, 0 × 5xx, 0 network errors, longest web block 97 ms → PASS. Once in the run every route's max reached ~4 s at the same moment while the web thread was free (97 ms): suspected this PC (load client, web and the worker's model builds on one machine) — the live route max tells.
 
+## fix269 — survive a slow volume (28 Oct)
+
+- Seen: the volume probe (fix254) on 28 Oct: worst p95 5,358 ms, worst 4 KB read 7,564 ms, worst fsync 15,078 ms
+  (later p95 68 ms). Every stored-copy read and every commit went to the volume.
+- **Page cache** (utils/dbTune.ts): reader threads big pool 1 GB a thread, small pool 512 MB a thread (2 + 2 = 3 GB at
+  most; filled only by pages actually read), worker 128 MB, web 64 MB, mmap 2 GB (SQLite caps it at its build maximum),
+  temp_store memory. All caches together ≤ ¼ of the container limit (8 GB → big ≈ 630 MB, small ≈ 315 MB; 16 GB+ → full
+  size). Each thread has its own cache: a key read twice by two threads is read from the disk once per thread. WAL frames
+  (what was written since the last checkpoint — fresh builds) are read through the cache, not the map.
+  Proof: /api/perf → pageReader.repeatReads (first = not read in the last hour, repeat = read before: thread time
+  max / avg, over 50 ms) and pageReader.cache (the sizes and the container limit). A repeat over 50 ms = not in memory.
+- **Held copies on the web** (services/pageCache.ts): a key whose page has `warm` queries or is stored row by row
+  (lists, homes, standings, news, guides, config, records, sitemaps / SEO homes) is "held": own budget PAGE_HOLD_MB
+  (300 MB, least recently used out), apart from the 48 MB / 400 copies of the rest. When the worker says the key has a
+  newer copy ('page', 'page-meta', 'page-meta-all', or getPage's ≤ 60 s check) a held copy is not dropped: the views it
+  had are read in the reader threads after every request's read ('bg'), the old copy is sent meanwhile, the new one
+  replaces it once every view is in. A read that fails / times out (10 s) or a view that is gone keeps the old copy; the
+  next push or check retries. /api/perf → pageMem.held (copies, MB, refreshed / failed / kept / dropped, longest refresh).
+  The first read of a key after a web start still reads the disk.
+- **Writes**: synchronous was never set — FULL, an fsync of the WAL on every commit. Now NORMAL on every connection
+  (WAL: never corrupt; a power cut can lose the commits since the last checkpoint, all rebuilt by the jobs). Checkpoints:
+  only the worker's upkeep thread (dbSpace.ts: PASSIVE 5 min, TRUNCATE 30 min). The web process and every job thread run
+  wal_autocheckpoint = 0 (a commit past 1,000 WAL pages ran a checkpoint + fsync on the committing thread); the worker's
+  own connection 0 while the upkeep thread is up, back to 1,000 if it stops.
+- **Data health "Volume latency"** (volumeProbe.volumeHealth, in diskHealth): probe every 10 min (was 15), 24 h kept;
+  red when a run in the last hour had p95 > 500 ms, yellow when one in the last 24 h did; each hour listed (runs, worst
+  p95 / read / fsync) + the cache sizes and the write settings. Test: npm run test:fix269.
+
 ## fix266 — admins get the same speed as visitors (28 Oct)
 
 - Seen: /api/perf 28 Oct 17:05 (14 min after a deploy): signed out /api/matches/upcoming 0.29–0.45 s (stored copy); as

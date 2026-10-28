@@ -112,22 +112,42 @@ const parseKey = (key: string) => {
 // page_cache and is read again when asked for). The worker keeps none: it held every page it ever built.
 // fix221: the web process keeps the views it sent (text + gzip), not the page: the body is read and parsed only if asked for
 // fix248: etags = ETags read in the reader thread for this request (etagOf never reads a big row on the web thread)
-type Mem = { builtAt: number; checkedAt: number; body?: any; variants: Map<string, View | null>; rows?: Rows | null; bytes: number; etags?: Map<string, string | null> };
+// fix269: held = a list / home / standings / news / config copy (a page the worker keeps warm, or a list stored row by
+// row): the web keeps it in its own budget (PAGE_HOLD_MB, default 300 MB, least recently used out first) and, when the
+// worker says the key changed, reads the new copy in the background while the old one is still sent — a stalled
+// volume (4 KB reads up to 7.6 s, 28 Oct) delays the refresh, never a visitor
+type Mem = { builtAt: number; checkedAt: number; body?: any; variants: Map<string, View | null>; rows?: Rows | null; bytes: number; etags?: Map<string, string | null>; held?: boolean };
 const mem = new Map<string, Mem>();
 const MEM_MAX = Number(process.env.PAGE_MEM_MAX) || 400;
 const MEM_MAX_BYTES = (Number(process.env.PAGE_MEM_MAX_MB) || 48) * 1048576;
-let memBytes = 0;
+const HOLD_MAX_BYTES = (Number(process.env.PAGE_HOLD_MB) || 300) * 1048576;
+let memBytes = 0, holdBytes = 0, holdCopies = 0;
+const holdStats = { refreshed: 0, failed: 0, kept: 0, dropped: 0, maxRefreshMs: 0 };
+const holdOf = (key: string) => { const d = defs.get(parseKey(key).name); return !!d && (!!d.rows || !!d.warm?.length); };
+const addBytes = (m: Mem, b: number) => { if (m.held) holdBytes += b; else memBytes += b; };
 function memGet(key: string): Mem | undefined {
   const m = mem.get(key);
   if (m) { mem.delete(key); mem.set(key, m); } // most recently used last
   return m;
 }
-function memDel(key: string) { const m = mem.get(key); if (m) { memBytes -= m.bytes; mem.delete(key); } }
+function memDel(key: string) { const m = mem.get(key); if (m) { addBytes(m, -m.bytes); if (m.held) holdCopies--; mem.delete(key); } }
 function memSet(key: string, m: Mem) {
   memDel(key);
+  m.held = isWeb && holdOf(key);
   mem.set(key, m);
-  memBytes += m.bytes;
-  for (const k of mem.keys()) { if (mem.size <= MEM_MAX && memBytes <= MEM_MAX_BYTES) break; if (k !== key) memDel(k); }
+  addBytes(m, m.bytes);
+  if (m.held) holdCopies++;
+  trimMem(key);
+}
+/** least recently used out first, each kind within its own budget (the key just set stays) */
+function trimMem(keep: string) {
+  const over = () => ({ plain: mem.size - holdCopies > MEM_MAX || memBytes > MEM_MAX_BYTES, held: holdBytes > HOLD_MAX_BYTES });
+  let o = over();
+  if (!o.plain && !o.held) return;
+  for (const [k, m] of mem) {
+    if (k === keep) continue;
+    if (m.held ? o.held : o.plain) { if (m.held) holdStats.dropped++; memDel(k); o = over(); if (!o.plain && !o.held) break; }
+  }
 }
 const stats = new Map<string, { builtAt: number; ms: number; kb: number; builds: number; requested: number }>();
 const statOf = (key: string) => {
@@ -241,7 +261,7 @@ function readRow(key: string, withBody = !isWeb): Mem | null {
   if (!row) return null;
   try { return { builtAt: row.built_at, checkedAt: Date.now(), body: JSON.parse(row.json), variants: new Map(), bytes: row.json.length * 2 }; } catch { return null; }
 }
-const grow = (key: string, m: Mem, b: number) => { if (b && mem.get(key) === m) { m.bytes += b; memBytes += b; } };
+const grow = (key: string, m: Mem, b: number) => { if (b && mem.get(key) === m) { m.bytes += b; addBytes(m, b); if (m.held && holdBytes > HOLD_MAX_BYTES) trimMem(key); } };
 function bodyOf(key: string, m: Mem) {
   if (m.body === undefined) {
     const row: any = db.prepare(`SELECT json FROM page_cache WHERE key = ?`).get(key);
@@ -410,6 +430,45 @@ function noteRecentBuild(key: string, at: number, etags: Record<string, string>,
   builtEtags.delete(key); builtEtags.set(key, { at, etags });
   if (builtEtags.size > 100_000) builtEtags.delete(builtEtags.keys().next().value as string);
 }
+/*
+ * fix269 (web): the worker says a key has a newer copy. A plain copy is dropped (read again when asked for); a held one
+ * stays and is sent while the new copy's views — the ones the old copy had — are read in the reader threads after
+ * every request's read ('bg'); the new copy replaces it once all are in. A read that fails (a stalled volume: 10 s
+ * timeout) keeps the old copy; the next message or getPage's check (≤ 60 s) tries again.
+ */
+const refreshing = new Map<string, number>();
+function newerCopy(key: string, at: number) {
+  const cur = mem.get(key);
+  if (!cur || !(cur.builtAt < at)) return;
+  if (!cur.held || !pageReaderOn()) { memDel(key); return; }
+  holdStats.kept++;
+  void refreshHeld(key, cur, at);
+}
+async function refreshHeld(key: string, cur: Mem, at: number) {
+  if ((refreshing.get(key) || 0) >= at) return;
+  refreshing.set(key, at);
+  const t0 = Date.now();
+  try {
+    const next: Mem = { builtAt: at, checkedAt: Date.now(), variants: new Map(), bytes: 0 };
+    for (const v of [...cur.variants.keys(), ...(cur.rows !== undefined ? ['rows'] : [])]) {
+      const r = await readStored(`${key}#${v}`, at, poolForBytes(viewBytes(key, v, at)), 'bg');
+      if (refreshing.get(key) !== at) return; // a newer copy is being read
+      if (!r && (v === 'rows' ? cur.rows : cur.variants.get(v))) throw new Error(`view ${v} of ${at} not there`); // (never a copy with a view lost)
+      if (v === 'rows') { next.rows = r ? parseRows(r.text) : null; next.bytes += r ? r.text.length * 2 : 0; continue; }
+      next.variants.set(v, r ? { text: r.text, etag: r.etag || `"${at.toString(36)}-${v}"`, gz: r.gz } : null);
+      next.bytes += r ? r.text.length * 2 + (r.gz?.length || 0) : 0;
+    }
+    const now = mem.get(key);
+    if (now && now.builtAt >= at) return;
+    memSet(key, next);
+    holdStats.refreshed++;
+    holdStats.maxRefreshMs = Math.max(holdStats.maxRefreshMs, Date.now() - t0);
+  } catch (e: any) {
+    holdStats.failed++;
+    logger.warn(`held copy ${key}: new copy not read in time (${e?.message || e}) — the old one is still sent`);
+  } finally { if (refreshing.get(key) === at) refreshing.delete(key); }
+}
+
 if (isWorker) setInterval(() => {
   const cut = Date.now() - 3 * 60_000;
   for (const [k, b] of recentBuilds) if (b.at < cut) recentBuilds.delete(k);
@@ -420,8 +479,7 @@ if (isWeb) onIpc('page-meta', m => {
   hotStats.messages++;
   for (const [key, at, etags, kb] of m.builds as [string, number, Record<string, string>, Record<string, number> | undefined][]) {
     hotSet(key, { at, etags, kb });
-    const cur = mem.get(key);
-    if (cur && cur.builtAt < at) memDel(key);
+    newerCopy(key, at);
   }
 });
 
@@ -477,8 +535,7 @@ if (isWeb) onIpc('page-meta-all', m => {
   for (const [key, at, kb, etags] of (m.rows as [string, number, Record<string, number>, Record<string, string> | undefined][]) || []) {
     incoming.keys.add(key);
     hotSet(key, { at, kb, etags });
-    const cur = mem.get(key);
-    if (cur && cur.builtAt < at) memDel(key);
+    newerCopy(key, at);
   }
   if (!m.last) return;
   // keys cleaned up since the last list (held from before this list began, not in it) are gone
@@ -494,8 +551,7 @@ if (isWorker) setTimeout(() => { void sendPageList(); }, Number(process.env.PAGE
 if (isWeb) onIpc('page', m => {
   const key = String(m.key);
   if (Number(m.builtAt) > 0) { hotStats.messages++; hotSet(key, { at: Number(m.builtAt), etags: (m.etags as Record<string, string>) || undefined, kb: (m.kb as Record<string, number>) || undefined }); }
-  const cur = mem.get(key);
-  if (cur && cur.builtAt < Number(m.builtAt)) memDel(key);
+  newerCopy(key, Number(m.builtAt));
   for (const w of waiters.get(key) || []) w();
   waiters.delete(key);
 });
@@ -547,7 +603,8 @@ export async function getPage(name: string, q: Query = {}, opts: { waitMs?: numb
   // web: the worker may have rebuilt it without the message reaching us (restart): look at the row now and then
   if (m && isWeb && Date.now() - m.checkedAt > Math.min(def.freshMs, 60_000)) {
     m.checkedAt = Date.now();
-    if ((await builtAtAsync(key)) > m.builtAt) { memDel(key); m = mem.get(key); }
+    const at = await builtAtAsync(key);
+    if (at > m.builtAt) { newerCopy(key, at); m = mem.get(key); } // fix269: a held copy stays until the new one is read
   }
   if (!m) {
     const row = await readRowAsync(key);
@@ -556,7 +613,8 @@ export async function getPage(name: string, q: Query = {}, opts: { waitMs?: numb
   if (m) {
     const mm = m;
     const over = Date.now() - m.builtAt - freshOf(def, () => bodyOf(key, mm));
-    if (over > 0) {
+    // fix269: a held copy whose newer copy is being read is not asked for again
+    if (over > 0 && !((refreshing.get(key) || 0) > m.builtAt)) {
       if (runsJobs) { noteRequested(key, def); void buildQueued(key); } else askWorker(key);
     }
     await prefetch(key, m, opts.views, opts.etags);
@@ -725,12 +783,16 @@ export function pageCacheStatus() {
 }
 
 /** tests: forget this process's copies (the next read comes from the table) */
-export const _forgetPageMemory = () => { mem.clear(); memBytes = 0; };
+export const _forgetPageMemory = () => { mem.clear(); memBytes = 0; holdBytes = 0; holdCopies = 0; };
 /** tests: a page's definition (fix221: the big-list test swaps the builder for real-size data, keeping the views) */
 export const _pageDef = (name: string) => defs.get(name);
 /** fix266 (tests): the first round's order */
 export const _firstOrder = (keys: string[], stale: (key: string) => boolean) => firstOrder(new Set(keys), key => stale(key));
 /** /api/perf: this process's in-memory copies (fix210: capped) */
-export const pageMemStatus = () => ({ copies: mem.size, mb: Math.round(memBytes / 1048576), maxCopies: MEM_MAX, maxMb: Math.round(MEM_MAX_BYTES / 1048576) });
+export const pageMemStatus = () => ({
+  copies: mem.size - holdCopies, mb: Math.round(memBytes / 1048576), maxCopies: MEM_MAX, maxMb: Math.round(MEM_MAX_BYTES / 1048576),
+  // fix269: the held lists / homes / standings / news / config copies
+  held: { copies: holdCopies, mb: Math.round(holdBytes / 1048576), maxMb: Math.round(HOLD_MAX_BYTES / 1048576), refreshing: refreshing.size, ...holdStats }
+});
 /** tests (fix263): every warm key */
 export const _warmKeys = () => [...defs.values()].flatMap(d => (d.warm || []).map(q => pageKey(d.name, q)));

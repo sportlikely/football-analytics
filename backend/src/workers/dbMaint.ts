@@ -8,6 +8,8 @@ import sqlite from 'node:sqlite';
 
 const db = new sqlite.DatabaseSync(String(workerData.file));
 db.exec('PRAGMA busy_timeout = 1000');
+// fix269: synchronous NORMAL like every connection (a checkpoint still syncs the database file before the WAL starts over)
+db.exec('PRAGMA synchronous = NORMAL');
 // the WAL is cut back to this size when it starts over (a checkpoint that caught up)
 db.exec(`PRAGMA journal_size_limit = ${Number(workerData.walLimit) || 64 * 1048576}`);
 

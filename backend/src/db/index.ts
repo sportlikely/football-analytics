@@ -48,6 +48,16 @@ if (!DB_READ_ONLY) db.exec(`PRAGMA journal_size_limit = ${64 * 1048576}`);
 // fix202: the web process and the worker process write the same file: a writer waits up to 5 s for the other's lock
 db.exec('PRAGMA busy_timeout = 5000');
 db.exec('PRAGMA foreign_keys = ON');
+/*
+ * fix269: a commit no longer waits for the volume. synchronous was never set: SQLite's default FULL fsyncs the WAL on
+ * every commit (the volume's worst fsync 15 s, 28 Oct). NORMAL in WAL mode: the database is never corrupted; a power
+ * cut can lose the last commits before a checkpoint — every one of them is rebuilt or re-fetched by the jobs. The WAL is
+ * written back only by the worker's upkeep thread (services/dbSpace.ts: PASSIVE every 5 min, TRUNCATE every 30 min):
+ * the web process and job threads never checkpoint (a commit past 1,000 WAL pages ran one on the committing thread);
+ * the worker's own connection stops when its upkeep thread is up (dbSpace.ts sets it, and back to 1,000 without it).
+ */
+if (!DB_READ_ONLY) db.exec('PRAGMA synchronous = NORMAL');
+if (!DB_READ_ONLY && (!threads.isMainThread || process.env.SL_ROLE === 'web')) db.exec('PRAGMA wal_autocheckpoint = 0');
 // fix254: a real page cache, the file memory-mapped, temp tables in memory (utils/dbTune.ts)
 tuneDb(db, !threads.isMainThread ? 'thread' : process.env.SL_ROLE === 'web' ? 'web' : process.env.SL_ROLE === 'worker' ? 'worker' : 'all');
 

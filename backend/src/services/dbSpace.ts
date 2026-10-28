@@ -23,7 +23,8 @@ import { runRetention, type RetentionResult } from '../utils/retention';
 import { diskVerdict, growthPerDay } from '../utils/diskRules';
 import { readerHourRows, perfHours } from './perfHistory';
 import type { Check } from './dataHealth';
-import { volumeLatency, volumeLine, volumeTick } from './volumeProbe';
+import { volumeLatency, volumeLine, volumeTick, volumeHealth } from './volumeProbe';
+import { cachePlan } from '../utils/dbTune';
 
 if (runsJobs) {
   db.exec(`CREATE TABLE IF NOT EXISTS db_size_days (day TEXT PRIMARY KEY, db_bytes INTEGER NOT NULL, wal_bytes INTEGER NOT NULL,
@@ -71,10 +72,11 @@ function maint<T = any>(msg: Record<string, unknown>, timeoutMs = 60_000): Promi
       waiting.delete(m.id); clearTimeout(p.timer);
       if (m.error) p.reject(new Error(m.error)); else p.resolve({ ...m.out, ms: Math.round(m.ms) });
     });
-    const down = (e: Error) => { if (thread === t) thread = null; for (const [id, p] of waiting) { clearTimeout(p.timer); waiting.delete(id); p.reject(e); } };
+    const down = (e: Error) => { if (thread === t) { thread = null; autoCheckpoint(true); } for (const [id, p] of waiting) { clearTimeout(p.timer); waiting.delete(id); p.reject(e); } };
     t.on('error', e => { logger.warn(`db upkeep thread: ${e.message}`); down(e); });
     t.on('exit', c => down(new Error(`db upkeep thread stopped (${c})`)));
     thread = t;
+    autoCheckpoint(false);
   }
   const t = thread, id = ++seq;
   return new Promise<T>((resolve, reject) => {
@@ -87,6 +89,19 @@ function maint<T = any>(msg: Record<string, unknown>, timeoutMs = 60_000): Promi
 }
 
 /* ---------- checkpoints ---------- */
+
+/*
+ * fix269: only the upkeep thread writes the WAL back. While it is up this process's own connection never checkpoints
+ * (wal_autocheckpoint 0: a commit past 1,000 WAL pages ran a checkpoint + fsync on the worker's thread); without the
+ * thread SQLite's own (1,000 pages) is back, so the WAL can never grow without end.
+ */
+let autoCkpt: number | null = null;
+function autoCheckpoint(on: boolean) {
+  const pages = on ? 1000 : 0;
+  if (autoCkpt === pages) return;
+  try { db.exec(`PRAGMA wal_autocheckpoint = ${pages}`); autoCkpt = pages; } catch { /* read-only */ }
+}
+export const autoCheckpointPages = () => autoCkpt;
 
 type Ckpt = { at: string; mode: string; busy: number; log: number; checkpointed: number; ms: number; walAfter: number };
 const ckpt: { last: Ckpt | null; lastTruncate: Ckpt | null; busyStreak: number; errors: number } = { last: null, lastTruncate: null, busyStreak: 0, errors: 0 };
@@ -274,6 +289,8 @@ export function diskHealth(): Check[] {
       + `${v.daysToFull != null ? ` · full in ${Math.floor(v.daysToFull)} days at this rate` : ''}${v.reasons.length ? ` — ${v.reasons.join('; ')}` : ''}`,
     items
   }];
+  // fix269: the volume's own latency, by hour, + what the connections run with
+  checks.push(volumeHealth(Date.now(), undefined, volumeNotes()));
   // the proof for fix249: no reader-thread read over 500 ms and no slow public request for 3 hours
   const hours = readerHourRows(3);
   let slow = 0;
@@ -295,6 +312,18 @@ export function diskHealth(): Check[] {
   return checks;
 }
 
+/** fix269: how the connections are set up against a slow volume (data health "Volume latency") */
+function volumeNotes(): string[] {
+  const p = cachePlan();
+  let sync = '?';
+  try { sync = ['OFF', 'NORMAL', 'FULL', 'EXTRA'][Number(Object.values(db.prepare('PRAGMA synchronous').get() as any)[0])] || '?'; } catch { /* ignore */ }
+  const ac = autoCheckpointPages();
+  return [
+    `Reader threads' page cache: big pool ${p.readers.big} × ${p.bigMb} MB, small pool ${p.readers.small} × ${p.smallMb} MB (${p.readersTotalMb.toLocaleString('en-US')} MB at most, filled by pages read) · worker ${p.workerMb} MB · web ${p.webMb} MB · file mapped up to ${p.mmapMb.toLocaleString('en-US')} MB · container limit ${p.limitMb != null ? `${p.limitMb.toLocaleString('en-US')} MB` : 'not set'}`,
+    `Writes: synchronous ${sync} (no fsync per commit) · WAL written back by the upkeep thread only${ac === 0 ? '' : ac == null ? ' (thread not started yet)' : ' — upkeep thread down: SQLite checkpoints itself'}`
+  ];
+}
+
 /* ---------- schedule (jobs.ts) ---------- */
 
 export function startDbSpaceScheduler() {
@@ -308,7 +337,7 @@ export function startDbSpaceScheduler() {
   every('db vacuum', () => vacuumTick(), 10 * 60 * 1000).unref();
   // fix254: the volume's read / fsync latency
   after('volume latency', () => volumeTick(), 2 * 60 * 1000).unref();
-  every('volume latency', () => volumeTick(), 15 * 60 * 1000).unref();
+  every('volume latency', () => volumeTick(), 10 * 60 * 1000).unref(); // fix269: was 15 min
   // the size report: once a day at 01:10 UTC (dbstat reads every page), and 30 min after a start when the last is old
   const report = () => heavy('db size report', () => sizeReport().then(() => undefined));
   after('db size report', () => { const r = storedReport(); if (!r || Date.now() - Date.parse(r.at) > 20 * 3600 * 1000) return report(); }, 30 * 60 * 1000).unref();

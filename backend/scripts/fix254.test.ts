@@ -199,14 +199,15 @@ test('(1) req.ip = the rightmost hop that is not a proxy (internal / CGNAT / Rai
   assert.match(read('src/app.ts'), /app\.set\('trust proxy', makeTrustProxy\(/);
 });
 
-test('(2) page cache: 256 MB readers, 64 MB web, scaled down in a small container; mmap + temp in memory', () => {
-  assert.equal(cacheMbFor('reader', null), 256);
+// fix269: readers 1 GB (big pool) / 512 MB (small), mmap 2 GB (scripts/fix269.test.mjs)
+test('(2) page cache: 1 GB readers, 64 MB web, scaled down in a small container; mmap + temp in memory', () => {
+  assert.equal(cacheMbFor('reader', null), 1024);
   assert.equal(cacheMbFor('web', null), 64);
-  assert.equal(cacheMbFor('reader', 8192), 256);
-  assert.ok(cacheMbFor('reader', 1024) < 256 && cacheMbFor('reader', 1024) >= 16);
+  assert.equal(cacheMbFor('reader', 16384), 1024);
+  assert.ok(cacheMbFor('reader', 1024) < 1024 && cacheMbFor('reader', 1024) >= 16);
   const p = tunePragmas('reader', null);
-  assert.ok(p.includes('PRAGMA cache_size = -262144'));
-  assert.ok(p.some((x: string) => /mmap_size = 1073741824/.test(x)) && p.includes('PRAGMA temp_store = MEMORY'));
+  assert.ok(p.includes('PRAGMA cache_size = -1048576'));
+  assert.ok(p.some((x: string) => /mmap_size = 2147483648/.test(x)) && p.includes('PRAGMA temp_store = MEMORY'));
   assert.match(read('src/workers/pageReader.ts'), /tuneDb\(db, 'reader'[,)]/);
   assert.match(read('src/db/index.ts'), /tuneDb\(db,/);
 });

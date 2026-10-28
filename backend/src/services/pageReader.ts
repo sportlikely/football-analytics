@@ -9,6 +9,7 @@ import path from 'node:path';
 import { Worker, isMainThread } from 'node:worker_threads';
 import logger from '../utils/logger';
 import { DB_FILE } from '../db';
+import { cachePlan } from '../utils/dbTune';
 
 export type ReadRow = { text: string; etag: string | null; gz: Buffer | null };
 
@@ -110,11 +111,35 @@ function noteHour(ms: number, what: string) {
   if (ms > h.maxMs) { h.maxMs = ms; h.top = what.slice(0, 200); }
 }
 export const readerHours = (): ReaderHour[] => hours.map(h => ({ ...h }));
+/*
+ * fix269: the proof that the hot set is in memory — the same statement + arguments (or stored key) read again within
+ * the hour: its time in the thread (the disk part) should be near 0 the second time. first = a read not seen in the
+ * last hour; repeat = seen before. A repeat over 50 ms in the thread was not in that thread's cache (or the map).
+ */
+const seenAt = new Map<string, number>();
+type ReadClass = { reads: number; over50: number; over500: number; maxThreadMs: number; sumThreadMs: number };
+const repeatStats: Record<'first' | 'repeat', ReadClass> = {
+  first: { reads: 0, over50: 0, over500: 0, maxThreadMs: 0, sumThreadMs: 0 },
+  repeat: { reads: 0, over50: 0, over500: 0, maxThreadMs: 0, sumThreadMs: 0 }
+};
+function noteRepeat(what: string, threadMs: number | undefined) {
+  if (threadMs == null) return;
+  const now = Date.now(), k = what.slice(0, 240), seen = seenAt.get(k);
+  const c = repeatStats[seen && now - seen < 3600_000 ? 'repeat' : 'first'];
+  c.reads++; c.sumThreadMs += threadMs; c.maxThreadMs = Math.max(c.maxThreadMs, Math.round(threadMs));
+  if (threadMs > 50) c.over50++;
+  if (threadMs > 500) c.over500++;
+  seenAt.delete(k); seenAt.set(k, now);
+  if (seenAt.size > 20_000) seenAt.delete(seenAt.keys().next().value as string);
+}
+const classOut = (c: ReadClass) => ({ reads: c.reads, over50: c.over50, over500: c.over500, maxThreadMs: c.maxThreadMs, avgThreadMs: c.reads ? Math.round((c.sumThreadMs / c.reads) * 10) / 10 : 0 });
+export const repeatReads = () => ({ first: classOut(repeatStats.first), repeat: classOut(repeatStats.repeat) });
 const poolStatus = (p: Pool) => ({ size: SIZES[p], threads: slots[p].filter(x => !!x.w).length, busy: slots[p].filter(x => !!x.job).length, queued: queues[p].req.length + queues[p].bg.length, ...poolStats[p] });
 /** /api/perf: the reader threads (top-level fields = the small pool, as before; `pools` = both) */
 export const pageReaderStatus = () => ({
   on: slots.small.some(x => !!x.w), threads: slots.small.filter(x => !!x.w).length, size: SIZE, pending: pending.size,
-  inflight: slots.small.map(x => x.inflight), ...stats, pools: { small: poolStatus('small'), big: poolStatus('big') }, slowest, slowLog: slowLog.slice().reverse()
+  inflight: slots.small.map(x => x.inflight), ...stats, pools: { small: poolStatus('small'), big: poolStatus('big') }, slowest, slowLog: slowLog.slice().reverse(),
+  cache: cachePlan({ small: SIZES.small, big: SIZES.big }), repeatReads: repeatReads() // fix269
 });
 
 function failSlot(slot: Slot, e: Error) {
@@ -128,7 +153,7 @@ function start(slot: Slot): Worker | null {
   const f = threadFile();
   if (!f) return null;
   try {
-    const t = new Worker(f.file, { workerData: { file: DB_FILE, pool: slot.pool, readers: SIZES.small + SIZES.big }, execArgv: f.execArgv, resourceLimits: { maxOldGenerationSizeMb: 256 } });
+    const t = new Worker(f.file, { workerData: { file: DB_FILE, pool: slot.pool, readers: { small: SIZES.small, big: SIZES.big } }, execArgv: f.execArgv, resourceLimits: { maxOldGenerationSizeMb: 256 } });
     t.unref();
     t.on('message', (m: any) => {
       if (slot.job?.id === m?.id) { slot.job = null; slot.inflight = 0; }
@@ -173,13 +198,14 @@ export const poolForBytes = (bytes: number | null | undefined): Pool => (bytes !
  * fix263: `pool` — the caller knows the view's size from the worker's list (pageCache hot meta): under 64 KB "small",
  * else (or unknown) "big"; a request's read either way ('req': before any background load).
  */
-export function readStored(key: string, builtAt: number, pool: Pool = 'big'): Promise<ReadRow | null> {
-  return ask({ key, builtAt }, pool, 'req').then(async m => {
+export function readStored(key: string, builtAt: number, pool: Pool = 'big', prio: Prio = 'req'): Promise<ReadRow | null> {
+  // fix269: prio 'bg' = the web refreshing a copy it holds (pageCache.ts): every request's read goes first
+  return ask({ key, builtAt }, pool, prio).then(async m => {
     const r = m.row;
     if (!r) return null;
     // fix250: a view over 2 MB is stored in parts (pageCache.ts): each part read on its own, spread over the threads
     const n = partsCount(r.text);
-    const text = n ? (await Promise.all(Array.from({ length: n }, (_, i) => ask({ key: partKey(key, i), builtAt }, 'big', 'req').then(p => { if (!p.row) throw new Error(`${key}: part ${i} missing`); return p.row.text as string; })))).join("") : r.text;
+    const text = n ? (await Promise.all(Array.from({ length: n }, (_, i) => ask({ key: partKey(key, i), builtAt }, 'big', prio).then(p => { if (!p.row) throw new Error(`${key}: part ${i} missing`); return p.row.text as string; })))).join("") : r.text;
     return { text, etag: r.etag, gz: r.gz ? asBuffer(r.gz) : null };
   });
 }
@@ -226,6 +252,7 @@ function ask(msg: { sql?: string; key?: string; [k: string]: unknown }, pool: Po
         stats.reads++; stats.maxMs = Math.max(stats.maxMs, ms); ps.reads++; ps.maxMs = Math.max(ps.maxMs, ms); ps.maxWaitMs = Math.max(ps.maxWaitMs, waitMs);
         if (pool === 'small') noteSmallSize(what, r?.bytes);
         noteSlow(ms, what, r?.ms, r?.bytes, pool, waitMs);
+        noteRepeat(what, r?.ms);
         noteHour(ms, `${pool} · ${r?.ms != null ? `thread ${Math.round(r.ms)} ms · ` : ''}${what}`);
         resolve(r);
       },
