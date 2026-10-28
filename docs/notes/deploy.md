@@ -83,3 +83,18 @@ had the Admin → Site health crash fixed by fix260).
 
 With "Wait for CI" on, Railway waits for both workflows on the commit: "Site check" (this note) and "Docker build
 (Railway check)" (fix265).
+
+## Timing (measured 28 Oct 2026)
+
+- Site check gate, run #9 on `da338e2`: **8 min 13 s** push → green (17:39:13 → 17:47:26 UTC): typecheck + parity + build
+  2.7 min; then side by side test:links 4.5 min and 8 test:site parts of ~77 page opens each, 41–61 s per part plus ~1.5
+  min of setup (checkout, npm ci, Chromium). Every job is capped at 15 min.
+- The full matrix (nightly): ~7,400 page opens, 48 min on one 4-core machine; in CI 8 parts of ~930 opens.
+- Runs #1 / #2 (fix260) failed before any job: GitHub rejected the workflow file (YAML: an unquoted ": " inside an
+  expression; fixed in fix260b). #3 / #4 were cancelled by newer pushes (cancel-in-progress), #5 by hand at 13 min (the
+  full matrix on a push, parts 7–9 min each). #8 (the first gate) failed on three cold first opens on 2-core runners
+  (fixed in fix260e: ready = /health ready + the worker answering, admin copies warmed, a timing-only failure re-opened
+  once). #10 (fix267) failed on a real intermittent 503 of a signed-out worker read (fix260e: asked once more on a new
+  connection).
+- 28 Oct 18:03–18:19 UTC: the site answered 502 / nothing for ~16 min after a restart although the new process reported
+  ready at 18:05:14 (code identical to the 17:37 deploy, which answered normally) — to look at in Railway's logs.

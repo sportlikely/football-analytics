@@ -63,17 +63,22 @@ export function fetchFromWorker(req: express.Request, timeoutMs = 20_000, pathOv
   headers[INTERNAL_HEADER] = internalKey();
   delete headers['content-length'];
   delete headers['accept-encoding']; // the answer is stored as it is
-  return new Promise<WorkerAnswer>((resolve, reject) => {
-    const up = http.request({ host: '127.0.0.1', port: WORKER_PORT, method: 'GET', path: pathOverride || req.originalUrl, headers, agent }, r => {
+  const once = (fresh: boolean) => new Promise<WorkerAnswer>((resolve, reject) => {
+    let answered = false, timedOut = false;
+    const up = http.request({ host: '127.0.0.1', port: WORKER_PORT, method: 'GET', path: pathOverride || req.originalUrl, headers, agent: fresh ? false : agent }, r => {
+      answered = true;
       const chunks: Buffer[] = [];
       r.on('data', (c: Buffer) => chunks.push(c));
       r.on('end', () => resolve({ status: r.statusCode || 502, headers: r.headers, body: Buffer.concat(chunks) }));
       r.on('error', reject);
     });
-    up.setTimeout(timeoutMs, () => up.destroy(new Error(`worker took over ${Math.round(timeoutMs / 1000)} s`)));
-    up.on('error', reject);
+    up.setTimeout(timeoutMs, () => { timedOut = true; up.destroy(new Error(`worker took over ${Math.round(timeoutMs / 1000)} s`)); });
+    // fix260e: a kept-alive socket the worker closed at that moment (no answer yet, not a time-out): once more on a new
+    // connection (the Site check saw a signed-out /api/leagues/AF39/standings 503 from it)
+    up.on('error', e => (!answered && !timedOut && !fresh && workerConnected() ? once(true).then(resolve, reject) : reject(e)));
     up.end();
   });
+  return once(false);
 }
 
 /** worker: only the web process may call the worker's port */
