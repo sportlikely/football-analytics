@@ -219,6 +219,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   `dataAudit.ts`, `seo.ts`, `proxyGuard.ts` + `proxyScrapers.ts` (fix199: data-centre / proxy scrapers, rules in docs/notes/security.md).
 - Player photos (fix211, OFF since fix241): `playerPhotos.ts` keeps the Wikidata / Commons matcher behind `photosOn()` (false:
   Wikimedia is not an official source); `purgeUnofficialPhotos()` at worker start, data-health "Photo sources: official only".
+- Player careers (fix267): `services/playerCareers.ts` (providers' seasons → `player_seasons`, `player_careers`, queue + worker job
+  "player careers", data health "Player careers", `/api/admin/player-careers`), pure parts `utils/careers.ts`; every sport's player
+  page renders `components/sport/CareerTable.tsx` (`npm run parity` → scripts/career-check.ts).
 - Push alerts (fix226): `pushAlerts.ts` (settings / devices on the web; detect + send only in the worker, after each live
   tick), rules in `utils/pushRules.ts`, Web Push crypto in `utils/webPush.ts` (no library), words `locales/push/<lang>.json`,
   keys `VAPID_PUBLIC` / `VAPID_PRIVATE` (never change them). Frontend `public/sw.js`, `lib/push.ts`, `components/AlertsCard.tsx`.

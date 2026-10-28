@@ -13,6 +13,7 @@ import { PlayerInitials } from '../../components/sport/PlayerPhoto'
 import { flagOf, isoOfCountry } from '../../lib/tennis'
 import { teamHref, leagueHref, matchHref } from '../../lib/links'
 import { MaybeLink } from '../../components/MaybeLink'
+import CareerTable, { type CareerData } from '../../components/sport/CareerTable'
 
 interface Side { id: number; name: string; logo: string | null }
 interface SeasonRow { code: string; league: string; season: string; team: Side; gp: number; starts: number; min: number | null; pts: number | null; reb: number | null; ast: number | null; fgPct: number | null; tpPct: number | null; ftPct: number | null; tpm: number | null }
@@ -44,6 +45,8 @@ interface PlayerData {
     injury: { status: string; comment: string | null; reported: string | null } | null
     contract: { season: number | null; team: string | null; teamId?: number | null; amount: number | null; type: string | null; status: string | null }[] | null
   } | null
+  /** fix267: the whole career (shared career table) */
+  careerTable?: CareerData
 }
 
 const v = (x: number | null | undefined, suf = '') => (x === null || x === undefined ? '–' : `${x}${suf}`)
@@ -187,43 +190,17 @@ export default function BbPlayer() {
             </Card>
           )}
 
-          {/* seasons in our data */}
-          {d.seasons.length > 0 && (
-            <Card title={t('Seasons')}>
-              <div className="overflow-x-auto -mx-2">
-                <table className="w-full text-xs num">
-                  <thead>
-                    <tr className="text-faint">
-                      <th className="text-start font-semibold py-1 px-2">{t('Season')}</th>
-                      <th className="text-end font-semibold px-1">{t('GP')}</th>
-                      <th className="text-end font-semibold px-1">{t('MIN')}</th>
-                      <th className="text-end font-semibold px-1">{t('PTS')}</th>
-                      <th className="text-end font-semibold px-1">{t('REB')}</th>
-                      <th className="text-end font-semibold px-2">{t('AST')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.seasons.map(s => (
-                      <tr key={`${s.code}${s.season}`} className="border-t border-line/40">
-                        <td className="py-1.5 px-2 font-sans whitespace-nowrap">
-                          <span className="text-ink">{s.season}</span>
-                          <span className="ms-1.5 text-[10px] text-faint"><NameLink to={href.bbLeague(s.code)}>{s.code}</NameLink> · <NameLink to={href.bbTeam(s.team.id, s.team.name)}>{s.team.name}</NameLink></span>
-                        </td>
-                        <td className="text-end px-1 text-muted">{s.gp}</td>
-                        <td className="text-end px-1 text-muted">{v(s.min)}</td>
-                        <td className="text-end px-1 text-ink font-bold">{v(s.pts)}</td>
-                        <td className="text-end px-1 text-muted">{v(s.reb)}</td>
-                        <td className="text-end px-2 text-muted">{v(s.ast)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="mt-3 text-[11px] text-faint">{t('Games in our leagues, pre-season not counted.')}</p>
-            </Card>
-          )}
         </div>
       </div>
+
+      {/* fix267: the whole career — every season in every league (NBA from balldontlie, other leagues from API-Basketball,
+          this season from our box scores), the shared career table */}
+      {d.careerTable && (
+        <Card title={t('Career')} action={d.careerTable.seasons > 0 ? <span className="text-xs text-faint">{t('{n, plural, one {# season} other {# seasons}}', { n: d.careerTable.seasons })}{d.careerTable.from ? t(' since {0}', { 0: d.careerTable.from }) : ''}</span> : undefined}>
+          <CareerTable data={d.careerTable} teamHref={x => teamHref('basketball', x.id, x.name)} leagueHref={code => leagueHref('basketball', code)}
+            note={t('Per-game averages, pre-season not counted.')} />
+        </Card>
+      )}
     </div>
   )
 }

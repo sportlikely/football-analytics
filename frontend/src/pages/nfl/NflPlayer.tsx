@@ -8,9 +8,10 @@ import { FavStar } from '../../lib/favorites'
 import { LeagueSwitch } from './parts'
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import PlayerHeader, { Chip } from '../../components/sport/page/PlayerHeader'
-import NameLink, { href } from '../../components/sport/NameLink'
+import { href } from '../../components/sport/NameLink'
 import { teamHref, matchHref } from '../../lib/links'
 import { MaybeLink } from '../../components/MaybeLink'
+import CareerTable, { type CareerData } from '../../components/sport/CareerTable'
 
 interface Data {
   player: { id: number; name: string; position: string | null; group: string | null; number: number | null; age: number | null; height: string | null; weight: string | null; college: string | null; experience: number | null; image: string | null }
@@ -18,15 +19,10 @@ interface Data {
   season: number; games: number
   totals: Record<string, Record<string, string>>
   log: { game: NflGame; teamId: number; groups: Record<string, Record<string, string>> }[]
-  // fix174
-  career?: { season: number; league: number; team: { id: number; name: string; logo: string | null } | null; games: number; stats: Record<string, number> }[]
+  /** fix267: the whole career (shared career table, columns by position) */
+  careerTable?: CareerData
   injury?: { status: string | null; description: string | null; date: string | null } | null
 }
-const CAREER_COLS: { key: string; label: string }[] = [
-  { key: 'passYds', label: 'Pass yds' }, { key: 'passTd', label: 'Pass TD' }, { key: 'rushYds', label: 'Rush yds' }, { key: 'rushTd', label: 'Rush TD' },
-  { key: 'rec', label: 'Rec' }, { key: 'recYds', label: 'Rec yds' }, { key: 'recTd', label: 'Rec TD' }, { key: 'tackles', label: 'Tackles' }, { key: 'sacks', label: 'Sacks' }, { key: 'ints', label: 'INT' }
-]
-
 /** NFL player page (fix137): bio, season totals by group, game log. Pictures from API-Sports only. */
 export default function NflPlayer() {
   const id = useEntityId()
@@ -88,28 +84,11 @@ export default function NflPlayer() {
           </div>
         )}
       </Card>
-      {d.career && d.career.length > 0 && (() => {
-        const cols = CAREER_COLS.filter(c => d.career!.some(s => s.stats[c.key]))
-        return (
-          <Card title={t('Career by season')}>
-            <div className="overflow-x-auto -mx-1">
-              <table className="w-full text-sm min-w-[480px]">
-                <thead><tr className="text-[10px] uppercase tracking-wide text-faint"><th className="text-start font-semibold py-1 px-1">{t('Season')}</th><th className="text-start font-semibold py-1 px-1">{t('Team')}</th><th className="text-end font-semibold py-1 px-1">{t('GP')}</th>{cols.map(c => <th key={c.key} className="text-end font-semibold py-1 px-1">{t(c.label)}</th>)}</tr></thead>
-                <tbody>
-                  {d.career!.map(s => (
-                    <tr key={`${s.season}${s.team?.id}`} className="border-t border-line/50">
-                      <td className="py-1.5 px-1 num text-muted">{s.season}</td>
-                      <td className="py-1.5 px-1">{s.team ? <span className="flex items-center gap-1.5 min-w-0"><TeamLogo team={s.team} size={14} /><NameLink to={href.nflTeam(s.team.id, s.team.name)} className="truncate text-ink">{s.team.name}</NameLink></span> : '–'}</td>
-                      <td className="py-1.5 px-1 text-end num text-muted">{s.games}</td>
-                      {cols.map(c => <td key={c.key} className="py-1.5 px-1 text-end num text-ink">{s.stats[c.key] ?? '–'}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )
-      })()}
+      {d.careerTable && (
+        <Card title={t('Career')} action={d.careerTable.seasons > 0 ? <span className="text-xs text-faint">{t('{n, plural, one {# season} other {# seasons}}', { n: d.careerTable.seasons })}{d.careerTable.from ? t(' since {0}', { 0: d.careerTable.from }) : ''}</span> : undefined}>
+          <CareerTable data={d.careerTable} teamHref={x => href.nflTeam(x.id, x.name)} note={t('Season totals, pre-season not counted.')} />
+        </Card>
+      )}
       {d.log.length > 0 && (
         <Card title={t('Game log')}>
           <ul className="divide-y divide-line/50">

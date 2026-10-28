@@ -284,6 +284,9 @@ export const NFL_DONE = ['FT', 'AOT'];
 /** Requests we may still spend today, keeping a reserve for the live games and the probe. */
 const RESERVE = 25;
 const budget = () => (remainingDay === null ? Infinity : remainingDay - RESERVE);
+/** fix267: player careers (/players/statistics per season), only while the day's quota is above the reserve */
+export const nflCall = (path: string, params: Record<string, string | number> = {}) => nfl(path, params);
+export const nflBudgetLeft = () => budget();
 
 const upsert = db.prepare(`INSERT INTO nfl_games (game_id, season, week, stage, kickoff, home_id, home_name, home_logo, away_id, away_name, away_logo, status, home_pts, away_pts, quarters, venue, updated_at, league, clock)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

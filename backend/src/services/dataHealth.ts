@@ -58,6 +58,7 @@ import { edgeStatus } from './edgeHops';
 import { modelDailyHealth } from './modelDailyHealth';
 import { leagueFixHealth } from './leagueFixHealth';
 import { diskHealth } from './dbSpace';
+import { careerHealth } from './playerCareers';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -438,6 +439,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   // fix226: push alerts — failed device sends (warn > 5%) and no alert sent twice to anyone
   try { checks.push(...pushHealth(now)); } catch (e: any) { logger.warn(`push health: ${e?.message || e}`); }
   try { checks.push(photoSourceHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
+  // fix267: "Player careers" — the share of each sport's top 100 players with a complete career
+  try { checks.push(careerHealth()); } catch (e: any) { logger.warn(`career health: ${e?.message || e}`); }
   // fix217: basketball leagues (NBA first) — the last 30 days' hit rate against the league's backtest (50+ games)
   try {
     const list = bbLiveVsBacktest(now);

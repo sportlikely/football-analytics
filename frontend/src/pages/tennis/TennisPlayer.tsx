@@ -15,6 +15,7 @@ import { useNews, NewsRows } from '../../components/NewsList'
 import { tennisSGame } from '../../components/sport/games/tennis'
 import { FormList, type Played } from './parts'
 import { TeamDifficulty } from '../../components/sport/game/GameExtras'
+import CareerTable, { type CareerData } from '../../components/sport/CareerTable'
 
 interface Measure { id: string; label: string; value: number | null; text: string | null; rank: number | null; of: number | null; score: number | null }
 interface Analysis { matches: number; measures: Measure[]; strengths: Measure[]; weaknesses: Measure[]; locked?: boolean; notesCount?: number }
@@ -33,6 +34,8 @@ interface Data {
   /** fix193c: the ranking around the player (the team page's mini table) and the titles in our data (career) */
   around: { tour: 'atp' | 'wta'; date: string; rows: { rank: number; id: number | null; name: string; country: string | null; points: number | null; me: boolean }[] } | null
   titles: { matchId: number; year: number; tournament: string; key: string; tier: string; surface: string | null }[]
+  /** fix267: year by year over the whole career (shared career table) */
+  careerTable?: CareerData
 }
 
 /** Strength / weakness sentences (fixed rules): what the number says, the value and the rank on the tour (52 weeks). */
@@ -159,6 +162,14 @@ export default function TennisPlayer() {
           )}
         </div>
       </div>
+
+      {/* fix267: the whole career year by year — titles, finals, W–L overall and per surface, Grand Slam results, rank */}
+      {d.careerTable && (
+        <Card title={t('Career')} action={d.careerTable.seasons > 0 ? <span className="text-xs text-faint">{t('{n, plural, one {# season} other {# seasons}}', { n: d.careerTable.seasons })}{d.careerTable.from ? t(' since {0}', { 0: d.careerTable.from }) : ''}</span> : undefined}>
+          <CareerTable data={d.careerTable} wide={420}
+            note={t('Tour-level main-draw matches: Grand Slams, 1000s, 500s, 250s, the Finals and the Olympics. Rank = the ranking at the end of the year (this year: now). Grand Slams: W = won, F = final, SF = semi-final, QF = quarter-final, R16 … = the round lost in.')} />
+        </Card>
+      )}
     </div>
   )
 }

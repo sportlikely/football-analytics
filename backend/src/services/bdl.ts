@@ -77,6 +77,8 @@ async function get(path: string, params: Record<string, string | string[]> = {})
     }
   }
 }
+/** fix267: player careers (season averages per player and season) */
+export const bdlCall = (path: string, params: Record<string, string | string[]> = {}) => get(path, params);
 async function getAll(path: string, params: Record<string, string | string[]>, onPage: (rows: any[]) => void, maxPages = 400) {
   let cursor: string | null = null;
   for (let p = 0; p < maxPages; p++) {

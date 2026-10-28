@@ -140,7 +140,9 @@ import { nflProbe, nflCurrentSeason, asLeague, asLeagues, LEAGUES } from './serv
 import { winnerUpsetReport } from './services/winnerUpsets';
 import { withNflPrediction, nflQbWithout, nflRatings, nflTeamModel, nflTeamRecord, nflRecord, nflAccuracy, nflModelReport, retrain as nflRetrain, NFL_MODEL, NCAA_MODEL } from './services/nflModel';
 import { leagueForecast, leagueView, visibleIds, teamForecastCodes, teamHistory, gameMeaning, seasonForecastAdmin, allLeagues, runSeasonForecast, runSeasonAccuracy, type FcSport, extremesFor } from './services/seasonForecast';
-import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame as nflGameB, nflStandings, nflTeam as nflTeamB, nflPlayer as nflPlayerB, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflPlayerCareer, nflPlayerInjury, nflTeamRow } from './services/nflSite';
+import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflLiveGames, nflRecentResults, nflGame as nflGameB, nflStandings, nflTeam as nflTeamB, nflPlayer as nflPlayerB, nflLeaders, nflSeasonsHeld, allowedSeason, leagueOfTeamId, nflSearch, nflBoxSeasons, nflPlayerInjury, nflTeamRow } from './services/nflSite';
+import { careerFor, nflLiveLines, nflGroup, tennisLiveLines, buildCareer, careerMeta, storedLines } from './services/playerCareers';
+import { careerView } from './utils/careers';
 import { nflLiveNow, nflLiveCurve } from './services/nflLive';
 import { nflSchedule, nflGameStandings, nflStarters, nflBeforeAfter, nflPreview, nflEvents, nflKeyPlayers } from './services/nflGameExtras';
 import { askAssistant, assistantConfigured, messagesToday, assistantStats } from './services/assistant';
@@ -1567,6 +1569,19 @@ app.get('/api/admin/af-usage', (_req, res) => {
 app.get('/api/admin/nfl-college-debug', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: require('./services/nflSite').collegeListsDebug() }); } catch (e) { sendError(res, e, 'College debug failed'); }
+});
+// fix267: one player's career — what is stored and, with refresh=1, built again now from the providers (how many
+// seasons the provider gave)
+app.get('/api/admin/player-careers', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const sport = String(req.query.sport || '') as 'basketball' | 'american-football' | 'tennis';
+  const id = parseInt(String(req.query.id || ''), 10);
+  if (!['basketball', 'american-football', 'tennis'].includes(sport) || !(id > 0)) return res.status(400).json({ error: 'sport=basketball|american-football|tennis&id=<player id>' });
+  try {
+    const built = req.query.refresh === '1' ? await buildCareer(sport, id) : null;
+    const v = careerView(sport, storedLines(sport, id));
+    res.json({ data: { built, meta: careerMeta(sport, id), seasons: v.seasons, from: v.from, sources: v.sources, parts: v.parts, rows: v.rows.length } });
+  } catch (e) { sendError(res, e, 'Failed to build the career'); }
 });
 app.get('/api/admin/nfl-probe', async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -3619,8 +3634,11 @@ app.get('/api/nfl/player/:id(\\d+)', (req, res) => {
     const season = allowedSeason(req.query.season, nflAdmin(req), pt ? leagueOfTeamId(pt) : nflLg(req));
     const d = season ? nflPlayer(pid, season) : null;
     if (!d) return res.status(404).json({ error: 'Player not found' });
-    // fix174: career by season and the injury report line, like the football and basketball player pages
-    res.json({ data: { ...d, career: nflPlayerCareer(pid), injury: nflPlayerInjury(pid) } });
+    // fix174: the injury report line, like the football and basketball player pages; fix267: the whole career (every
+    // season the provider has; the current one from our box scores) on the shared career table
+    const cur = nflCurrentSeason(pt ? leagueOfTeamId(pt) : 1) ?? season!;
+    const careerTable = careerFor('american-football', pid, { live: nflLiveLines(nflBoxSeasons(pid, cur)), liveFrom: cur, group: nflGroup(d.player?.position ?? null) });
+    res.json({ data: { ...d, careerTable, injury: nflPlayerInjury(pid) } });
   } catch (e) { sendError(res, e, 'Failed to load player'); }
 });
 // fix144: Upset watch for every sport (Pro; model only) and the NFL accuracy page (admins, like basketball's for now)
@@ -3741,9 +3759,11 @@ app.get('/api/tennis/player/:id(\\d+)', (req, res) => {
     const f = fullFor(req, tennisRid);
     // fix193b: like the other sports — our record on the player is public; model tiles, the 1–10 scores and the
     // strengths / weaknesses are paid (free: a locked preview with how many we found)
-    const d = tennisPlayer(parseInt(req.params.id, 10), typeof f === 'function' ? (rid: number) => f(-rid - 4e9) : f, isPaid(req.access || 'anon'), tnAdmin(req));
+    const pid = parseInt(req.params.id, 10);
+    const d = tennisPlayer(pid, typeof f === 'function' ? (rid: number) => f(-rid - 4e9) : f, isPaid(req.access || 'anon'), tnAdmin(req));
     if (!d) return res.status(404).json({ error: 'Player not found' });
-    res.json({ data: d });
+    // fix267: year by year over the whole career (this year live from our feed)
+    res.json({ data: { ...d, careerTable: careerFor('tennis', pid, { live: tennisLiveLines(pid), liveFrom: new Date().getUTCFullYear() }) } });
   } catch (e) { sendError(res, e, 'Failed to load the player'); }
 });
 app.get('/api/tennis/rankings', (req, res) => {

@@ -117,4 +117,9 @@ export interface ParityProvides { sport: ParitySport; keys: readonly ParityKey[]
  * Props of a shared component that only football passes, with the reason (Component.prop → reason). Anything not
  * listed here fails the check when basketball and NFL don't pass it too.
  */
-export const FOOTBALL_ONLY_PROPS: Record<string, string> = {}
+export const FOOTBALL_ONLY_PROPS: Record<string, string> = {
+  // fix267: football's career rows are one row per season across every competition; tapping one opens that season's
+  // per-competition detail above the table. The other sports' rows are already one per season and league.
+  'CareerTable.onRow': 'opens the season detail football shows per competition (other sports: already one row per league)',
+  'CareerTable.active': 'marks the season whose detail is open (goes with onRow)'
+}

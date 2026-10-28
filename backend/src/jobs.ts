@@ -26,6 +26,7 @@ import { startDataAuditScheduler } from './services/dataAudit';
 import { startNewsScheduler } from './services/news';
 import { startBasketballScheduler } from './services/basketball';
 import { startBdlScheduler } from './services/bdl';
+import { careerTick } from './services/playerCareers';
 import { startBackups, localList, localPath } from './services/backup';
 import { restoreFromKeep, restoreFromBackups } from './services/staffConsole';
 import { startAsn } from './services/asn';
@@ -170,6 +171,9 @@ export function startJobs() {
     const b = await restoreFromBackups(localList().map(f => localPath(f.name)).filter((f): f is string => !!f));
     if (fromKeep.length || b.lost.length) logger.warn(`console logins: ${fromKeep.length} restored from the protected copy; lost by the security log ${b.lost.length}, restored ${b.restored.length} from ${b.from || 'no backup'}${b.error ? ` (${b.error})` : ''}`);
   }, 20 * 1000).unref();
+  // fix267: whole careers on the player pages (basketball, American football, tennis): pages asked first, the top 100
+  // per sport monthly, the current season weekly — a few players every 5 minutes (services/playerCareers.ts)
+  after('player careers', () => every('player careers', () => careerTick(), 5 * 60 * 1000).unref(), 8 * 60 * 1000).unref();
   if (photosOn()) {
     after('player photos', () => photosTick(), 4 * 60 * 1000).unref();
     every('player photos', () => photosTick(), 20 * 60 * 1000).unref();

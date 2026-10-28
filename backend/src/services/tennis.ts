@@ -170,6 +170,9 @@ async function tn(path: string, params: Record<string, string | number | boolean
   return o.raw ? res : res.json();
 }
 
+/** fix267: player careers (the 1968–2014 results archive by name), on the bulk budget */
+export const tennisCall = (path: string, params: Record<string, string | number | boolean | undefined> = {}) => tn(path, params, { kind: 'bulk' });
+
 /** Every page of a list endpoint (limit 200, offset paging), up to `maxPages`. */
 async function pages(path: string, params: Record<string, any>, maxPages: number, kind: 'core' | 'bulk', onPage: (rows: any[]) => void | Promise<void>): Promise<number> {
   let offset = 0, n = 0;

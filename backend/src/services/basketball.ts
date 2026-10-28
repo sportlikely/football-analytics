@@ -186,6 +186,8 @@ async function bb(path: string, params: Record<string, string | number> = {}): P
   return json;
 }
 export const bbGet = (path: string, params: Record<string, string | number> = {}) => bb(path, params);
+/** fix267: requests left today (null = not known yet) — player careers keep 300 for the live jobs */
+export const bbRemainingDay = () => remainingDay;
 
 const markSync = (key: string, info: any = null) =>
   db.prepare(`INSERT OR REPLACE INTO bb_sync (key, done_at, info) VALUES (?, ?, ?)`).run(key, new Date().toISOString(), info ? JSON.stringify(info) : null);

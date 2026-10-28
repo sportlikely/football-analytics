@@ -17,6 +17,22 @@ import { runsJobs } from './role';
 import { onState, publishState } from './shared';
 import { photoUrl } from './playerPhotos';
 import { playerImpact } from './keyPlayers';
+import { careerFor, bbLiveLines, nbaCurrentLine } from './playerCareers';
+
+/**
+ * fix267: the whole career (every season the providers have, services/playerCareers.ts) with the current season live:
+ * our box scores, and for the NBA balldontlie's daily season averages (they have steals and blocks).
+ */
+function careerTable(id: number, seasons: Parameters<typeof bbLiveLines>[0], bdl: any | null) {
+  const cur = bdlSeasonNow();
+  const live = bbLiveLines(seasons).filter(l => l.order >= cur);
+  if (bdl) {
+    const ours = live.find(l => l.league?.code === 'NBA');
+    const nba = nbaCurrentLine(bdl.id, ours?.team ?? null);
+    if (nba) return careerFor('basketball', id, { live: [...live.filter(l => l.league?.code !== 'NBA'), nba], liveFrom: cur });
+  }
+  return careerFor('basketball', id, { live, liveFrom: cur });
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS bb_roster (
@@ -172,7 +188,7 @@ export async function bbPlayer(id: number) {
     const team = { id: ros.team_id, name: ros.home_id === ros.team_id ? ros.home_name : ros.away_name, logo: ros.home_id === ros.team_id ? ros.home_logo : ros.away_logo };
     const isNbaR = ros.code === 'NBA';
     const b = isNbaR ? bdlPlayerOf(ros.name, team.name) : null;
-    return { player: { id, name: displayName(ros.name, b), team, league: { code: ros.code, name: leagueName(ros.code) }, ...photoOf(id) }, bio: rosterBio, current: null, seasons: [], form: [], log: [], nba: b ? await nbaPart(b, team.name, ros.name) : null };
+    return { player: { id, name: displayName(ros.name, b), team, league: { code: ros.code, name: leagueName(ros.code) }, ...photoOf(id) }, bio: rosterBio, current: null, seasons: [], form: [], log: [], nba: b ? await nbaPart(b, team.name, ros.name) : null, careerTable: careerTable(id, [], b) };
   }
   const last = rows[0];
   const teamOf = (r: any) => (r.team_id === r.home_id ? { id: r.home_id, name: r.home_name, logo: r.home_logo } : { id: r.away_id, name: r.away_name, logo: r.away_logo });
@@ -235,7 +251,8 @@ export async function bbPlayer(id: number) {
     log,
     nba,
     // fix224: "Impact" — his rating, rank in the league, his team's record with and without him this season
-    impact: playerImpact(id)
+    impact: playerImpact(id),
+    careerTable: careerTable(id, seasons, bdl)
   };
 }
 

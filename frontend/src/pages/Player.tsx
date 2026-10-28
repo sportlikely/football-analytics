@@ -11,6 +11,7 @@ import NameLink, { href } from '../components/sport/NameLink'
 import { tNodes } from '../lib/tNodes'
 import { teamHref as footballTeamOf, playerHref, leagueHref } from '../lib/links'
 import { tg } from '../lib/genText'
+import CareerTable, { type CareerData, type CareerRow } from '../components/sport/CareerTable'
 
 /**
  * Player page: /player/<API-Football id>. /player/find?name=&team=&c=&n= looks a scorer up first (Football-Data ids).
@@ -97,6 +98,25 @@ const mon = (d: string) => new Date(d).toLocaleDateString(LOCALE, { month: 'shor
 const span = (a: string | null, b: string | null) => (a && b ? (mon(a) === mon(b) ? mon(a) : `${mon(a)} – ${mon(b)}`) : '')
 
 const teamHref = (t: SiteTeam) => footballTeamOf('football', t.id, t.name)!
+
+/** fix267: the club career in the shared career table's shape (every sport's player page renders CareerTable) */
+function footballCareer(data: PlayerData, full: boolean): CareerData {
+  const rows: CareerRow[] = data.seasons.map(s => {
+    const clubs = [...new Map(s.rows.filter(r => r.team).map(r => [r.team!.id, r.team!])).values()].map(c => ({ id: c.id, name: c.name, logo: c.logo }))
+    return { season: s.label, order: s.season, kind: 'regular', league: null, team: clubs[0] || null, also: clubs.slice(1), gp: null,
+      stats: { apps: s.totals.apps, goals: s.totals.goals, assists: s.totals.assists ?? 0, minutes: s.totals.minutes ?? 0 } }
+  })
+  const best = rows.filter(r => (r.stats.goals as number) > 0).sort((a, b) => (b.stats.goals as number) - (a.stats.goals as number))[0]
+  return {
+    sport: 'football', group: null,
+    columns: [{ key: 'apps', kind: 'int' }, { key: 'goals', kind: 'int', accent: true }, ...(full ? [{ key: 'assists', kind: 'int' as const }, { key: 'minutes', kind: 'int' as const }] : [])],
+    parts: ['regular'], rows,
+    totals: data.career ? { regular: { gp: 0, stats: { apps: data.career.apps, goals: data.career.goals, assists: data.career.assists ?? 0, minutes: data.career.minutes ?? 0 } } } : {},
+    highs: best ? [{ key: 'goals', value: best.stats.goals as number, season: best.season }] : [],
+    seasons: data.career?.seasons ?? rows.length, from: data.career?.from ?? null,
+    partial: !!data.careerPartial, partialWhy: data.careerPartial ? 'loading' : null, sources: ['API-Football']
+  }
+}
 
 export default function Player() {
   const id = useEntityId() || ''
@@ -298,56 +318,10 @@ export default function Player() {
           title={tt("Club career")}
           action={data.career ? <span className="text-[11px] text-faint">{tt("{n, plural, one {# season} other {# seasons}}", { n: data.career.seasons })}{data.career.from ? tt(" since {0}", { 0: data.career.from }) : ''}</span> : undefined}
         >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[520px]">
-              <thead>
-                <tr className="text-[11px] text-faint">
-                  <th className="text-start font-medium py-1.5 ps-2 w-20">{tt("Season")}</th>
-                  <th className="text-start font-medium py-1.5">{tt("Club")}</th>
-                  <th className="text-end font-medium py-1.5 num w-12">{tt("Apps")}</th>
-                  <th className="text-end font-medium py-1.5 num w-12">{tt("Goals")}</th>
-                  {full && <th className="text-end font-medium py-1.5 num w-12">{tt("Ast")}</th>}
-                  {full && <th className="text-end font-medium py-1.5 num w-16 pe-2">{tt("Min")}</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {data.seasons.map((s, i) => {
-                  const clubs = [...new Map(s.rows.filter(r => r.team).map(r => [r.team!.id, r.team!])).values()]
-                  return (
-                    <tr
-                      key={s.season}
-                      onClick={() => { setSi(i); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
-                      className={`border-t border-line/50 cursor-pointer hover:bg-surface2/40 ${si === i ? 'bg-accent/5' : ''}`}
-                    >
-                      <td className="py-2 ps-2 num text-muted">{s.label}</td>
-                      <td className="py-2">
-                        <span className="flex items-center gap-2 min-w-0">
-                          {clubs.map(c => <img key={c.id} src={c.logo} alt="" className="w-4 h-4 object-contain" />)}
-                          <span className="truncate text-ink">{clubs.map((c, k) => <span key={c.id}>{k > 0 && ' · '}<NameLink to={teamHref(c)}>{c.name}</NameLink></span>)}</span>
-                        </span>
-                      </td>
-                      <td className="py-2 text-end num text-muted">{s.totals.apps}</td>
-                      <td className="py-2 text-end num font-bold text-ink">{s.totals.goals}</td>
-                      {full && <td className="py-2 text-end num text-muted">{s.totals.assists ?? 0}</td>}
-                      {full && <td className="py-2 pe-2 text-end num text-muted">{(s.totals.minutes ?? 0).toLocaleString(LOCALE)}</td>}
-                    </tr>
-                  )
-                })}
-                {data.career && (
-                  <tr className="border-t-2 border-line">
-                    <td className="py-2 ps-2 font-bold text-ink" colSpan={2}>{tt("Total")}</td>
-                    <td className="py-2 text-end num font-bold text-ink">{data.career.apps}</td>
-                    <td className="py-2 text-end num font-extrabold text-accent">{data.career.goals}</td>
-                    {full && <td className="py-2 text-end num font-bold text-ink">{data.career.assists ?? 0}</td>}
-                    {full && <td className="py-2 pe-2 text-end num font-bold text-ink">{(data.career.minutes ?? 0).toLocaleString(LOCALE)}</td>}
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-[11px] text-faint">
-            {tt("Official club games in every competition (friendlies left out). Tap a season to see it in detail.")}{data.careerPartial ? tt(" Some older seasons are still loading: they appear within a day.") : ''}
-          </p>
+          {/* fix267: the shared career table of every sport (tap a season to see it in detail) */}
+          <CareerTable data={footballCareer(data, full)} teamHref={x => teamHref({ id: x.id!, name: x.name, logo: x.logo || '' })}
+            onRow={(_r, i) => { setSi(i); window.scrollTo({ top: 0, behavior: 'smooth' }) }} active={si} wide={360}
+            note={tt("Official club games in every competition (friendlies left out). Tap a season to see it in detail.")} />
         </Card>
       )}
 

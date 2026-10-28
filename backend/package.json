@@ -80,7 +80,8 @@
     "test:load": "tsc && node --no-warnings scripts/load-test.mjs",
     "test:fix257": "tsc && node --no-warnings --test --test-force-exit scripts/fix257.test.mjs scripts/fix244.test.ts",
     "test:fix261": "tsc && node --no-warnings --test --test-force-exit scripts/fix261.test.mjs && node --no-warnings scripts/lang-audit.mjs",
-    "test:paint": "tsc && node --no-warnings scripts/paint-test.mjs"
+    "test:paint": "tsc && node --no-warnings scripts/paint-test.mjs",
+    "test:fix267": "tsc && node --no-warnings --test --test-force-exit scripts/fix267.test.mjs"
   },
   "keywords": [
     "football",
