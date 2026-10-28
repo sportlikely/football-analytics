@@ -17,7 +17,9 @@ export const PROTECTED = new Set([
   'plan_events', 'credit_events', 'email_consent_log', 'push_consent_log', 'email_prefs', 'email_suppressed', 'push_subs',
   'push_prefs', 'favorites', 'staff_activity', 'security_log', 'contact_messages', 'support_replies', 'feature_model',
   'model_daily', 'season_forecast_history', 'season_forecast_accuracy', 'bb_live_samples', 'nfl_live_samples',
-  'tennis_live_samples', 'slugs', 'slug_ids', 'app_secrets', 'admin_email_actions'
+  'tennis_live_samples', 'slugs', 'slug_ids', 'app_secrets', 'admin_email_actions',
+  // fix258: staff console logins (and the session's "console unlocked" flag) are never touched
+  'staff_console', 'staff_console_keep', 'sessions', 'roles'
 ]);
 
 /** how a rule's column holds time */

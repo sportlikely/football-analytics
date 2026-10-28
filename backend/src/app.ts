@@ -108,7 +108,8 @@ import { forwardToWorker, fetchFromWorker } from './services/forward';
 import { linkAnswer, idOfSlug, slugOf, clientSlugs, slugStatus, internalPath, pubPath, isOldAddress, pastMatch, type LinkAnswer } from './services/slugs';
 import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from './utils/slugRules';
 import { archivedAsset } from './services/assetArchive';
-import { definePage, getPage, fallbackQuery, refreshPages, pageCacheStatus, pageMemStatus, pageHotStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
+import { definePage, getPage, fallbackQuery, refreshPages, rebuildPage, pageCacheStatus, pageMemStatus, pageHotStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
+import { appPageFor, copyLooksRight } from './utils/pageLang';
 import { trackVisit, visitorStats, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions, viewIdOf, makePass, readPass, PASS_COOKIE, PASS_MS } from './services/proxyGuard';
@@ -281,12 +282,15 @@ app.use((req, res, next) => {
  * (a page: the plain app page) while the work goes on and its answer is kept for the next request; every public GET
  * over 1 s is counted (data health "Slow requests"). Here, before the start-up wait, so that wait is cut too.
  */
-let appPageBuf: Buffer | null = null;
+let appPageText: string | null = null;
+// fix258: the plain app page with the address's own lang, canonical and hreflang set (utils/pageLang.ts)
+const appPageOf = (p: string) => { appPageText ??= fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8'); return appPageFor(appPageText, p); };
 app.use(deadlineStart({
   isApi: p => p.startsWith('/api/') && OPEN_API.test(p) && !/^\/api\/(health$|client-error$|webhooks\/|assistant\/)/.test(p),
   sendAppPage: SITE_PASSWORD ? null : res => {
-    try { appPageBuf ||= fs.readFileSync(path.join(STATIC_DIR, 'index.html')); } catch { return false; }
-    res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-SL-Pending': '1' }).end(appPageBuf);
+    let page: string;
+    try { page = appPageOf(res.req.path); } catch { return false; }
+    res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-SL-Pending': '1' }).end(page);
     return true;
   },
   label: req => routeLabel(req.method, req.path),
@@ -4630,6 +4634,8 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       // (the app renders it in the browser; the next request gets the stored copy)
       // fix243: the HTML is read in the reader thread (views); a basketball game is its own stored page per language
       const views = ['html'];
+      const rebuildSeo = () => (bbg ? rebuildPage('bb-game-seo', { id: bbg.id, lang: bbg.lang, slug: la && 'page' in la ? la.page.slug : '' })
+        : home ? rebuildPage('seo', { path: home }) : rebuildPage('seo-page', { path: seoPathOf(req.path).slice(0, 300) }));
       const s = bbg ? await getPage('bb-game-seo', { id: bbg.id, lang: bbg.lang, slug: la && 'page' in la ? la.page.slug : '' }, { waitMs: pageWait, views })
         : home ? await getPage('seo', { path: home }, { waitMs: pageWait, views }) : await getPage('seo-page', { path: seoPathOf(req.path).slice(0, 300) }, { waitMs: pageWait, views });
       const html = s?.view('html');
@@ -4637,7 +4643,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       // left on screen) — the plain app page until the worker has made the new copy
       const main = currentMainScript();
       const missKind = bbg ? 'bb-game-seo' : home ? 'seo' : 'seo-page';
-      if (html?.text && main && !html.text.includes(main)) { noteSeoMiss(missKind, 'old build', req.path, lang0); return res.sendFile(path.join(STATIC_DIR, 'index.html')); }
+      const plain = () => res.type('html').send(appPageOf(req.path));
+      if (html?.text && main && !html.text.includes(main)) { noteSeoMiss(missKind, 'old build', req.path, lang0); rebuildSeo(); return plain(); }
+      // fix258: a copy without this page's lang / hreflang set (made before fix256, or for another language) is never sent
+      if (html?.text && !copyLooksRight(html.text, lang0)) { noteSeoMiss(missKind, 'wrong lang', req.path, lang0); rebuildSeo(); return plain(); }
       if (html?.text) {
         res.set('ETag', html.etag).vary('Accept-Encoding').type('html');
         if (req.fresh) return res.status(304).end();
@@ -4646,10 +4655,10 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       // a copy without its HTML (stored before fix221, or nothing to show): the plain app page — fix243: never parsed or
       // rendered here
       noteSeoMiss(missKind, s ? 'no html' : 'not stored yet', req.path, lang0);
-      res.sendFile(path.join(STATIC_DIR, 'index.html'));
+      plain();
     } catch (e: any) {
       logger.warn(`seo page ${req.path}: ${e.message}`);
-      res.sendFile(path.join(STATIC_DIR, 'index.html'));
+      try { res.type('html').send(appPageOf(req.path)); } catch { res.sendFile(path.join(STATIC_DIR, 'index.html')); }
     }
   });
   logger.info(`Serving frontend from ${STATIC_DIR}`);

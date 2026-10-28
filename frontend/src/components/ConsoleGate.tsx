@@ -49,7 +49,16 @@ export default function ConsoleGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
-  const load = useCallback(() => axios.get(`${API_URL}/crm/console/status`).then(r => { setSt(r.data.data); setFail(null) }).catch(e => setFail(errorText(e))), [])
+  // fix258: only the server's own answer decides — a start-up { pending: true } (202), a restarting worker (5xx) or an
+  // answer without hasLogin is asked again, never read as "no console login yet"
+  const load = useCallback(function again(n = 0): Promise<void> {
+    const retry = (e?: unknown) => { if (n < 20) setTimeout(() => void again(n + 1), 1500); else setFail(e ? errorText(e) : 'The console did not answer. Reload the page.') }
+    return axios.get(`${API_URL}/crm/console/status`).then(r => {
+      const d = r.data?.data
+      if (r.status === 202 || typeof d?.hasLogin !== 'boolean') return retry()
+      setSt(d); setFail(null)
+    }).catch(e => ((e?.response?.status ?? 500) >= 500 ? retry(e) : setFail(errorText(e))))
+  }, [])
   useEffect(() => { if (user) load() }, [user?.id, load])
   // the server locked the console (sign-in elsewhere, password set by a manager): show the gate again
   useEffect(() => {

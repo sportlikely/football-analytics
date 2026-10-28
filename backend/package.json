@@ -65,6 +65,7 @@
     "test:fix252": "tsc && node --no-warnings --test --test-force-exit scripts/fix252.test.ts",
     "test:fix254": "tsc && node --no-warnings --test --test-force-exit scripts/fix254.test.ts",
     "test:fix256": "tsc && node --no-warnings --test --test-force-exit scripts/fix256.test.mjs",
+    "test:fix258": "tsc && node --no-warnings --test --test-force-exit scripts/fix258.test.mjs",
     "test:load": "tsc && node --no-warnings scripts/load-test.mjs",
     "test:paint": "tsc && node --no-warnings scripts/paint-test.mjs"
   },

@@ -366,6 +366,11 @@ function askWorker(key: string) {
   askedAt.set(key, Date.now());
   sendIpc({ t: 'page:build', key });
 }
+/** fix258: this stored copy is wrong (made for another build, or without its page's lang / hreflang): build it again */
+export function rebuildPage(name: string, q: Query = {}) {
+  const key = pageKey(name, q);
+  if (runsJobs) void buildQueued(key); else askWorker(key);
+}
 // fix254 (worker): the builds of the last 3 minutes, sent again every 30 s (a lost 'page' message is caught)
 const recentBuilds = new Map<string, { at: number; etags: Record<string, string> }>();
 function noteRecentBuild(key: string, at: number, etags: Record<string, string>) {
@@ -529,6 +534,40 @@ export function cleanPageCache(now = Date.now()) {
 export function fallbackQuery(name: string, q: Query = {}): Query | null {
   const fb = defs.get(name)?.fallback?.(q) || null;
   return fb && pageKey(name, fb) !== pageKey(name, q) ? fb : null;
+}
+
+/**
+ * fix258 (worker): stored HTML copies of these pages that `bad` rejects (made for an older build, or without their
+ * page's lang / hreflang set) — a kept-fresh page is built again now, an on-demand one dropped (built on its next
+ * request). Reads the first 16 KB of each copy's html view, 200 rows a slice with a yield between.
+ */
+export async function sweepCopies(names: string[], bad: (q: Record<string, string>, head: string) => boolean): Promise<{ checked: number; rebuilt: number; dropped: number }> {
+  const out = { checked: 0, rebuilt: 0, dropped: 0 };
+  if (!runsJobs) return out;
+  const warm = new Set([...defs.values()].flatMap(d => (d.warm || []).map(q => pageKey(d.name, q))));
+  const sel = db.prepare(`SELECT key, substr(json, 1, 16384) AS head FROM page_cache WHERE key > ? AND key < ? AND key LIKE '%#html' ORDER BY key LIMIT 200`);
+  const drop = db.prepare(`DELETE FROM page_cache WHERE key = ? OR (key > ? AND key < ?)`);
+  for (const name of names) {
+    let after = `${name}?`;
+    for (;;) {
+      const rows = sel.all(after, `${name}?\uffff`) as any[];
+      if (!rows.length) break;
+      for (const r of rows) {
+        after = r.key;
+        const key = String(r.key).slice(0, -'#html'.length);
+        out.checked++;
+        let wrong = false;
+        try { wrong = bad(parseKey(key).q, String(r.head || '')); } catch { /* keep it */ }
+        if (!wrong) continue;
+        if (warm.has(key)) { out.rebuilt++; void buildQueued(key); continue; }
+        drop.run(key, `${key}#`, `${key}#\uffff`);
+        memDel(key);
+        out.dropped++;
+      }
+      await new Promise<void>(r => setImmediate(r));
+    }
+  }
+  return out;
 }
 
 /** fix210b (worker): when this page was last stored (0 = never) — prebuild jobs skip what is fresh */

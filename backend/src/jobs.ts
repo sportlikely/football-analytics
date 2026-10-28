@@ -26,7 +26,8 @@ import { startDataAuditScheduler } from './services/dataAudit';
 import { startNewsScheduler } from './services/news';
 import { startBasketballScheduler } from './services/basketball';
 import { startBdlScheduler } from './services/bdl';
-import { startBackups } from './services/backup';
+import { startBackups, localList, localPath } from './services/backup';
+import { restoreFromKeep, restoreFromBackups } from './services/staffConsole';
 import { startAsn } from './services/asn';
 import { startCrawlerRanges } from './services/crawlerIps';
 import { startTennisScheduler } from './services/tennis';
@@ -46,7 +47,9 @@ import { resolveUnsettled, resolveUnsettledOnce, Providers as SettleProviders } 
 import { startApiFootballScheduler, rebuildAfFeaturesAsync, afGet, afRemaining } from './services/apiFootball';
 import { prepareModelV3Async } from './services/gridModel';
 import { writeLive, clearLive } from './services/liveState';
-import { startPageWarmer, refreshPages, storePage, storedAt } from './services/pageCache';
+import { startPageWarmer, refreshPages, storePage, storedAt, sweepCopies } from './services/pageCache';
+import { currentMainScript } from './services/earlyStatic';
+import { copyLooksRight, langOfPath, type PageLang } from './utils/pageLang';
 import { startBundleKeeper } from './services/gameBundle';
 import { db } from './db';
 import { yieldEvery } from './services/perf';
@@ -145,6 +148,23 @@ export function startJobs() {
   // fix241: official photos only — the Wikidata / Commons matcher (fix211 / fix221) is off (photosOn() false: Wikimedia
   // is not on utils/photoSources.ts), its stored files and rows are deleted here; the jobs stay for a licensed source
   after('photo sources', () => { purgeUnofficialPhotos(); }, 60 * 1000).unref();
+  // fix258: stored crawler copies without their page's lang / hreflang set (or made for an older build) are built again
+  after('page copies lang', async () => {
+    const main = currentMainScript();
+    const r = await sweepCopies(['seo', 'seo-page', 'bb-game-seo'], (q, head) => {
+      const lang = (q.lang as PageLang) || langOfPath(q.path || '/').lang;
+      if (!head.includes('</head>')) return !head.includes(`<html lang="${lang}"`);
+      // the app file's name is checked only when the whole copy was read (an old build's copy is also caught on request)
+      return !copyLooksRight(head, lang) || (!!main && head.includes('</html>') && !head.includes(main));
+    });
+    if (r.rebuilt || r.dropped) logger.info(`page copies lang: ${r.checked} checked, ${r.rebuilt} rebuilt, ${r.dropped} dropped`);
+  }, 3 * 60 * 1000).unref();
+  // fix258: a console login staff_console lost comes back (its protected copy, else the newest local backup that has it)
+  after('console logins', async () => {
+    const fromKeep = restoreFromKeep();
+    const b = await restoreFromBackups(localList().map(f => localPath(f.name)).filter((f): f is string => !!f));
+    if (fromKeep.length || b.lost.length) logger.warn(`console logins: ${fromKeep.length} restored from the protected copy; lost by the security log ${b.lost.length}, restored ${b.restored.length} from ${b.from || 'no backup'}${b.error ? ` (${b.error})` : ''}`);
+  }, 20 * 1000).unref();
   if (photosOn()) {
     after('player photos', () => photosTick(), 4 * 60 * 1000).unref();
     every('player photos', () => photosTick(), 20 * 60 * 1000).unref();

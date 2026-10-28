@@ -8,6 +8,7 @@
  * fix252: an /assets file of an older build comes from services/assetArchive.ts (kept 48 h after its deploy).
  */
 import fs from 'fs';
+import { appPageFor } from '../utils/pageLang';
 import path from 'path';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { archivedAsset } from './assetArchive';
@@ -73,7 +74,8 @@ export function serveEarly(req: IncomingMessage, res: ServerResponse): boolean {
     }
     // a file-like address that is not in the build (an old sitemap, robots …): not the page
     if (/\.[a-z0-9]{2,5}$/i.test(p) && !p.endsWith('.html')) { send(res, 404, 'text/plain; charset=utf-8', 'no-store', 'Not found', head); return true; }
-    send(res, 200, 'text/html; charset=utf-8', 'no-cache', indexHtml(), head);
+    // fix258: the plain app page carries the address's own lang, canonical and hreflang set (never lang="en" on /es/…)
+    send(res, 200, 'text/html; charset=utf-8', 'no-cache', appPageFor(indexHtml().toString('utf8'), p), head);
     return true;
   } catch {
     return false;
