@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
+import CopyForClaude from './admin/CopyForClaude'
+import type { ForClaudeReq } from '../lib/forClaude'
 
 type P3 = [number, number, number]
 type Block = { from: string; n: number; diff: number; hitBase: number; hitCand: number }
@@ -56,6 +58,22 @@ function Verdicts({ v }: { v: Verdict[] }) {
  * 30-day block predicted with settings fitted on the other 60 days (+ the 2 past seasons of the backtest), before → after
  * per group and per league (hit rate, log loss, draw picks), what is applied live. Market numbers stay admin-only.
  */
+/** fix259: one league for Claude (every number of its row and its test verdicts) */
+const leagueReq = (l: League): ForClaudeReq => ({
+  place: `Admin → Predictions & models → Leagues under 52% → ${l.name}`, scope: 'item',
+  checks: [{ id: 'league-fix' }],
+  shown: [{
+    title: `League ${l.name} (${l.comp}, group ${l.group})`,
+    text: [
+      `Games ${l.n} · hit rate ${l.hit}% · log loss ${l.logLoss}${l.marketLogLoss != null ? ` · market ${l.marketLogLoss} vs ours ${l.oursOnMarket} on ${l.marketN} games` : ''}`,
+      `Results H/D/A ${l.outcomes.join(' / ')} · our picks H/D/A ${l.picks.join(' / ')} · home bias ${l.homeBias ?? '—'} · draw gap ${Math.round(l.drawGap * 100)} pts`,
+      `Likely causes: ${l.causes.join(', ') || 'none named'} · own settings: ${l.own ? 'yes' : 'no (group)'}`,
+      `Action: ${l.action}${l.applied ? ` · applied ${l.applied} (${l.appliedVia})` : ' · nothing applied'}`,
+      ...[...l.verdicts, ...l.pickRules].map(v => `Test ${v.cand}: ${v.n} games, Δ ${v.dAll} (halves ${v.d1} / ${v.d2}), hit ${v.hitBase}% → ${v.hitCand}%${v.boot ? `, better in ${Math.round(v.boot.pBetter * 100)}% of resamples` : ''} → ${v.pass ? 'passed' : `kept out: ${v.why}`}`)
+    ].join('\n')
+  }]
+})
+
 export default function LeagueFixCard() {
   const [d, setD] = useState<Report | null>(null)
   const [msg, setMsg] = useState('')
@@ -133,7 +151,10 @@ export default function LeagueFixCard() {
             {leagues.map(l => (
               <Fragment key={l.comp}>
                 <tr className="border-t border-line/50 cursor-pointer" onClick={() => setOpen(open === l.comp ? null : l.comp)}>
-                  <td className="py-1.5 pr-3 text-ink whitespace-nowrap">{l.name}<span className="block text-xs text-faint">{l.causes.join(', ') || '—'}</span></td>
+                  <td className="py-1.5 pr-3 text-ink whitespace-nowrap">{l.name}<span className="block text-xs text-faint">{l.causes.join(', ') || '—'}</span>
+                    {/* fix259: a league under 50% */}
+                    {l.hit < 50 && <span className="block mt-1" onClick={e => e.stopPropagation()}><CopyForClaude size="sm" req={() => leagueReq(l)} /></span>}
+                  </td>
                   <td className="py-1.5 pr-3 num">{l.n}</td>
                   <td className={`py-1.5 pr-3 ${l.hit < 50 ? 'text-loss' : ''}`}>{arrow(`${l.hit}%`, `${l.after.hit}%`, l.applied ? l.after.hit >= l.hit : null)}</td>
                   <td className="py-1.5 pr-3 whitespace-nowrap">{arrow(l.logLoss, l.after.logLoss, l.applied ? l.after.logLoss <= l.logLoss : null)}{l.marketLogLoss != null && <span className="text-faint"> ({l.marketLogLoss} vs {l.oursOnMarket}, {l.marketN})</span>}</td>

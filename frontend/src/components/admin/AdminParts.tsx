@@ -8,6 +8,8 @@ import {
   adminPath, byLevel, cardChecks, cardDef, cardLevel, healthRule, healthTab, worst,
   type AdminSummary, type AdminTab, type HealthCheck, type Level
 } from '../../lib/adminTabs'
+import { cardReq, checkOnlyReq } from '../../lib/forClaude'
+import CopyForClaude from './CopyForClaude'
 
 /**
  * fix237: the parts of the tabbed admin page — the status dot, the "What this is / What to do" frame around every card,
@@ -31,10 +33,12 @@ export function Explained({ id, ctx, children }: { id: string; ctx: Ctx; childre
     <div className="mb-8" data-admin-card={id}>
       <div className="flex items-start gap-2 mb-2 px-1">
         <Dot level={level} className="mt-1" />
-        <p className="text-xs text-muted min-w-0">
+        <p className="text-xs text-muted min-w-0 flex-1">
           <b className="text-ink">{c.title}</b> — {c.what}
           {level !== 'ok' && <span className={`block mt-0.5 ${level === 'fail' ? 'text-loss' : 'text-draw'}`}><b>What to do:</b> {c.todo}</span>}
         </p>
+        {/* fix259: every card header */}
+        <CopyForClaude size="sm" req={() => cardReq(id, ctx.checks)} />
       </div>
       <div className="[&>section]:mb-0">{children}</div>
     </div>
@@ -58,6 +62,8 @@ function CheckRow({ c }: { c: HealthCheck }) {
             <ul className="mt-2 space-y-1 text-xs text-muted list-disc pl-4 break-words">{c.items.map((it, i) => <li key={i}>{it}</li>)}</ul>
           )}
         </div>
+        {/* fix259: next to every red / yellow check */}
+        {c.level !== 'ok' && <CopyForClaude size="sm" req={() => checkOnlyReq(c)} />}
         {!!c.items?.length && (
           <button type="button" onClick={() => setOpen(o => !o)} className="text-[11px] text-accent font-bold whitespace-nowrap">
             {open ? 'Hide' : `${c.items.length} item${c.items.length === 1 ? '' : 's'}`}
@@ -278,29 +284,22 @@ export function NeedsYouCard({ ctx, reload }: { ctx: Ctx; reload: () => void }) 
 export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
   const f = ctx.summary?.forClaude
   const dc = ctx.summary?.dataCheck
-  const [copied, setCopied] = useState(false)
   if (!f) return <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Loading…</section>
-  const text = [`SportLikely site errors, ${f.day}: ${f.open} open group(s). Top ${f.top.length}:`,
-    ...f.top.map((x, i) => `${i + 1}. ${x.count}× “${x.message}” on ${x.page}${x.where ? ` at ${x.where}` : ''} (last ${x.lastAt.slice(0, 16).replace('T', ' ')} UTC; builds ${x.builds.join(', ') || '?'})`),
-    // fix254: the top-scorer check's differences
-    ...(dc && dc.differences.length ? [``, `Top-scorer check ${dc.at.slice(0, 16).replace('T', ' ')} UTC: ${dc.matched} of ${dc.checked} match. Differences:`,
-      ...dc.differences.map(x => `- ${x.league}${x.player ? ` · ${x.player}` : ''}: ${x.detail}${x.reason ? ` (why: ${x.reason})` : ''}`),
-      ...(dc.more ? [`… and ${dc.more} more`] : []),
-      ...(dc.under.length ? [`Under 90% for 7+ days: ${dc.under.map(u => `${u.name} ${u.share}%`).join(', ')}`] : [])] : [])].join('\n')
-  const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }).catch(() => undefined)
+  // fix259: the shared button (the server writes the text: every open site error with its stack, the top-scorer differences)
+  const copyBtn = <CopyForClaude req={() => cardReq('for-claude', ctx.checks)} />
   return (
     <section className="card p-5 sm:p-6 mb-8">
       {!f.open && dc?.differences.length ? (
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
           <p className="text-sm text-win">No open site errors ✓</p>
-          <button type="button" onClick={copy} className="h-8 px-3 rounded-lg text-xs font-semibold bg-surface2 border border-line text-ink">{copied ? 'Copied ✓' : 'Copy for Claude'}</button>
+          {copyBtn}
         </div>
       ) : null}
       {!f.open ? (dc?.differences.length ? null : <p className="text-sm text-win">No open site errors ✓</p>) : (
         <>
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
             <p className="text-sm text-muted"><b className="num text-ink">{f.open}</b> open group(s); the 10 with most reports:</p>
-            <button type="button" onClick={copy} className="h-8 px-3 rounded-lg text-xs font-semibold bg-surface2 border border-line text-ink">{copied ? 'Copied ✓' : 'Copy for Claude'}</button>
+            {copyBtn}
           </div>
           <ol className="divide-y divide-line/50 text-sm">
             {f.top.map((x, i) => (

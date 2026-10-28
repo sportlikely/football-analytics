@@ -4,6 +4,7 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
 import { useConsole } from '../components/ConsoleGate'
+import CopyForClaude from '../components/admin/CopyForClaude'
 
 /*
  * CRM (staff only, English): support inbox (admin + support staff), email campaigns and revenue (admin only).
@@ -188,6 +189,8 @@ function ThreadView({ id, onChange, staff }: { id: number; onChange: () => void;
           <div className="text-[11px] text-faint">#{m.id} · {TOPIC[m.topic] || m.topic} · {fmt(m.at)}{m.page ? ` · from ${m.page}` : ''}</div>
           <h2 className="font-display text-xl font-bold text-ink truncate">{m.name || m.email}</h2>
           <a href={`mailto:${m.email}`} className="text-sm text-accent">{m.email}</a>
+          {/* fix259: the thread for Claude (customer id, no email) */}
+          <div className="mt-2"><CopyForClaude api="crm" size="sm" req={() => ({ place: `CRM → Support inbox → message #${m.id}`, scope: 'crm-message', id: m.id })} /></div>
         </div>
         <div className="flex flex-col items-end gap-2">
         <div className="flex gap-1">
@@ -571,6 +574,8 @@ function CustomerView({ id }: { id: number }) {
         <div className="text-[11px] text-faint">Account #{c.id}{staffAcct ? ` · staff (${c.role})` : ''}</div>
         <h2 className="font-display text-xl font-bold text-ink truncate">{c.name || c.email}</h2>
         <div className="text-sm text-muted truncate">{c.email}</div>
+        {/* fix259: the profile for Claude (account id, no email) */}
+        <div className="mt-2"><CopyForClaude api="crm" size="sm" req={() => ({ place: `CRM → Customers → account #${c.id}`, scope: 'crm-customer', id: c.id })} /></div>
       </div>
       <div>
         {row('Plan', <span className={PLAN_TONE[c.plan]}>{c.plan}{c.premiumUntil ? ` · until ${fmtDay(c.premiumUntil)}` : ''}{c.cancelAt ? ' · cancelled' : ''}</span>)}

@@ -15,6 +15,8 @@ import BbGridCard from '../components/BbGridCard'
 import DiffViewCard from '../components/DiffViewCard'
 import LeagueFixCard from '../components/LeagueFixCard'
 import { ChecksCard, DoneForYouCard, Explained, ForClaudeCard, NeedsYouCard, ResultsToCheck, SpeedCard, TabChecks, Tiles, type Ctx, type TileDef } from '../components/admin/AdminParts'
+import CopyForClaude from '../components/admin/CopyForClaude'
+import { tabReq, type ForClaudeReq } from '../lib/forClaude'
 import { ADMIN_TABS, adminPath, adminTabOf, healthTab, waitingCount, type AdminSummary, type AdminTab, type HealthCheck } from '../lib/adminTabs'
 import { PARITY_REPORT } from '../lib/sportParity.report'
 import { slAdmin } from '../lib/modelNames'
@@ -125,6 +127,10 @@ export default function Admin() {
         </div>
       </nav>
 
+      {/* fix259: the whole tab for Claude */}
+      <div className="flex justify-end -mt-1 mb-3">
+        <CopyForClaude label="Copy everything red/yellow on this page for Claude" req={() => tabReq(tab, summary, checks)} />
+      </div>
       <Tiles tiles={TILES[tab]} />
 
       {tab === 'needs-you' && (
@@ -703,7 +709,9 @@ function SiteErrorsCard() {
                 <span className="font-semibold text-ink">{r.pageKind}</span>
                 <span className="text-[11px] num text-loss font-bold">{r.count}×</span>
                 <span className="text-[11px] text-faint">last {when(r.lastAt)} · first {when(r.firstAt)}{r.browsers.length ? ` · ${r.browsers.join(', ')}` : ''}</span>
-                <button type="button" onClick={() => mark(r.sig, !r.resolvedAt)} className="ml-auto text-xs font-semibold text-accent hover:underline">
+                {/* fix259: one site error, with the newest others */}
+                {!r.resolvedAt && <CopyForClaude size="sm" className="ml-auto" req={() => ({ place: 'Admin → Site health → Site errors', scope: 'site-error', sig: r.sig })} />}
+                <button type="button" onClick={() => mark(r.sig, !r.resolvedAt)} className={`${r.resolvedAt ? 'ml-auto ' : ''}text-xs font-semibold text-accent hover:underline`}>
                   {r.resolvedAt ? 'Reopen' : 'Mark fixed'}
                 </button>
               </div>
@@ -935,6 +943,16 @@ function BbResultsCard() {
   )
 }
 
+/** fix259: one security-log row for Claude (the person by account id, never the email) */
+const secReq = (r: SecRow): ForClaudeReq => ({
+  place: 'Admin → Security → Security log', scope: 'item',
+  shown: [{
+    title: `Security log: ${EVENT_LABEL[r.event] || r.event}`,
+    text: [`${fmt(r.at)} (${r.at}) · event ${r.event}${r.userId ? ` · account #${r.userId}` : ''}${r.detail ? ` · ${r.detail}` : ''}${r.ip ? ` · from ${r.ip}` : ''}${r.ua ? ` · ${browserOf(r.ua)}` : ''}`,
+      ...(r.addresses || []).slice(0, 20).map(a => `address ${a.ip}: ${a.requests} requests${a.refused ? `, ${a.refused} refused` : ''}, ${a.firstAt} → ${a.lastAt}${a.ua ? `, ${browserOf(a.ua)}` : ''}`)].join('\n')
+  }]
+})
+
 function SecurityCard() {
   const [d, setD] = useState<{ failed24h: number; rows: SecRow[] } | null>(null)
   const [all, setAll] = useState(false)
@@ -957,6 +975,7 @@ function SecurityCard() {
                     <span className="w-32 shrink-0 text-[11px] text-faint num">{fmt(r.at)}</span>
                     <span className="font-semibold text-loss">▸ {EVENT_LABEL[r.event] || r.event}</span>
                     <span className="text-muted min-w-0 break-words">{r.detail}</span>
+                    <span className="ml-auto" onClick={e => e.preventDefault()}><CopyForClaude size="sm" req={() => secReq(r)} /></span>
                   </summary>
                   <ul className="mt-2 ml-2 sm:ml-36 space-y-0.5 text-[11px] text-faint num">
                     {(r.addresses || []).length === 0 && <li>No address written yet (written every 30 s per address).</li>}
@@ -977,6 +996,7 @@ function SecurityCard() {
                 <span className={`font-semibold ${BAD.has(r.event) ? 'text-loss' : 'text-ink'}`}>{EVENT_LABEL[r.event] || r.event}</span>
                 <span className="text-muted truncate">{r.email || (r.event === 'scraper' && r.detail) || '—'}</span>
                 <span className="ml-auto text-[11px] text-faint num">{r.ip || ''}{r.ua ? ` · ${browserOf(r.ua)}` : ''}</span>
+                {BAD.has(r.event) && <CopyForClaude size="sm" req={() => secReq(r)} />}
               </li>
             ))}
           </ul>

@@ -505,6 +505,8 @@ let lastEmailAt = 0;
 export const lastDataHealth = () => store.read();
 /** fix200: what /api/data-health returns: the stored report with its "at" time, never computed on the request */
 export const storedDataHealth = () => store.read() || NOT_YET;
+/** fix259: a check's last 3 values (newest first), for "Copy for Claude" */
+export const dataHealthHistory = (id: string) => store.history(id);
 
 /** Alert email: what has been failing for 30+ minutes, then what still works. */
 /** Alert email (fix239: the admin template): what has been failing for 30+ minutes, then what still works. */

@@ -145,6 +145,7 @@ import { askAssistant, assistantConfigured, messagesToday, assistantStats } from
 import { normalizeName } from './services/history';
 import { markFresh, markFailed } from './services/freshness';
 import { storedDataHealth } from './services/dataHealth';
+import { forClaudeText } from './services/forClaude';
 import { gameExtras as gameExtrasB, teamExtras as teamExtrasB, gameExtrasAdmin, extrasTick } from './services/gameExtras';
 import { pushSettings, savePushPrefs, addPushSub, removePushSub, PushError, pushAdminStats, sendTestPush } from './services/pushAlerts';
 import { emailSettings, saveEmailPrefs, initEmailPrefs, EmailPrefsError, checkUnsub, unsubscribePicks, verifyWebhook, handleWebhookEvent, emailAdminStats, sendTestEmail, previewEmail, crestPath } from './services/pickEmails';
@@ -1114,6 +1115,16 @@ app.post('/api/crm/inbox/:id(\\d+)/assign', need('inbox.reply'), jsonOnly, (req,
     res.json({ data: { ok: true } });
   } catch (e) { crmFail(res, e); }
 });
+// fix259: "Copy for Claude to fix" on a support message (inbox.read) or a customer profile (customers.view) — by customer id, no emails
+app.post('/api/crm/for-claude', jsonOnly, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const scope = String(req.body?.scope || '');
+    const perm: Perm | null = scope === 'crm-message' ? 'inbox.read' : scope === 'crm-customer' ? 'customers.view' : null;
+    if (!perm || !(req.staff === 'admin' || req.perms?.has(perm))) return res.status(403).json({ error: 'Not allowed' });
+    res.json({ data: { text: forClaudeText({ ...req.body, checks: [], cards: [] }, { viewer: viewer(req), security: !!req.perms?.has('security') }) } });
+  } catch (e) { crmFail(res, e); }
+});
 // Customers
 app.get('/api/crm/customers', need('customers.view'), (req, res) => {
   try { res.set('Cache-Control', 'no-store'); res.json({ data: searchCustomers(req.query.q, req.query.trust) }); } catch (e) { crmFail(res, e); }
@@ -1437,6 +1448,11 @@ const feedbackCount = new Map<number, number[]>();
 // Site crash reports from visitors' browsers (no IP, no user stored) — see services/clientErrors.ts
 app.post('/api/client-error', rateLimit('client-error', 20, 10 * 60000), jsonOnly, (req, res) => {
   try { res.json({ data: reportClientError(req.body) }); } catch { res.json({ data: { ok: false } }); }
+});
+// fix259: "Copy for Claude to fix" — the text for a card, a check, a row or a whole tab (services/forClaude.ts)
+app.post('/api/admin/for-claude', jsonOnly, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: { text: forClaudeText(req.body || {}, { viewer: { id: req.user?.id ?? 0, manage: true }, security: true }) } }); } catch (e) { sendError(res, e, 'Copy for Claude failed'); }
 });
 app.get('/api/admin/client-errors', (req, res) => {
   res.set('Cache-Control', 'no-store');

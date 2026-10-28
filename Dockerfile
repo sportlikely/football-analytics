@@ -37,6 +37,8 @@ COPY frontend/src/content/guides /app/frontend/src/content/guides
 # fix206: the how-it-works pages' search-engine copy uses the app's translations; the changelog is a file in the repo
 COPY frontend/src/locales /app/frontend/src/locales
 COPY docs/changelog.json /app/docs/changelog.json
+# fix259: "Copy for Claude" names the related fixes from the notes (services/forClaude.ts)
+COPY docs/notes /app/docs/notes
 RUN mkdir -p /data
 EXPOSE 3001
 # fix202: two processes share the container — the web process (this one, WEB_HEAP_MB) and the worker it starts

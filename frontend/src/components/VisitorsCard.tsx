@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
+import CopyForClaude from './admin/CopyForClaude'
+import { elText } from '../lib/forClaude'
 
 interface Visitors {
   onlineNow: number; onlineSignedIn: number; onlineWindowMin: number; onlineAll?: number
@@ -121,8 +123,12 @@ function CrawlersCard({ c }: { c: Crawlers }) {
     </div>
   )
   return (
-    <div className="mt-6 pt-5 border-t border-line/60">
-      <h3 className="font-display font-bold text-ink mb-3">Search engines</h3>
+    <div className="mt-6 pt-5 border-t border-line/60" data-copy-block="search-engines">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h3 className="font-display font-bold text-ink">Search engines</h3>
+        {/* fix259 */}
+        <CopyForClaude size="sm" req={() => ({ place: 'Admin → Visitors & users → Visitors → Search engines', scope: 'item', checks: [{ id: 'crawlers-verified' }], shown: [{ title: 'Search engines', text: elText(document.querySelector<HTMLElement>('[data-copy-block="search-engines"]')) }] })} />
+      </div>
       {day(c.today, 'Today (UTC)')}
       {day(c.yesterday, 'Yesterday')}
       <p className="text-[10px] text-faint">Verified = the address is in the engine’s published list, or reverse + forward DNS points back to it. A verified search engine is never limited or refused. Lists: {c.lists.status}</p>
@@ -151,6 +157,11 @@ function WhoCard({ w }: { w: Who }) {
                 <span className="min-w-0 flex-1 truncate text-ink">{n.name} <span className="text-faint text-[11px]">AS{n.asn}{n.cc ? `, ${n.cc}` : ''}</span></span>
                 {mark(n.mark)}
                 <span className="text-right num text-[11px] text-faint">{n0(n.addresses)} addr · {n0(n.requests)} req{n.refused ? ` · ${n0(n.refused)} refused` : ''}{n.passed ? ` · ${n0(n.passed)} passed the check` : ''}{n.passRefused ? ` · ${n0(n.passRefused)} refused after it` : ''}{n.logged ? ' · in the security log' : ''}</span>
+                {/* fix259: a network that was refused or looks like a script */}
+                {(n.refused > 0 || n.mark === 'script' || n.mark === 'data-centre') && <CopyForClaude size="sm" req={() => ({
+                  place: 'Admin → Visitors & users → Visitors → Who is calling today', scope: 'item',
+                  shown: [{ title: `Network ${n.name} (AS${n.asn})`, text: `${n.name} · AS${n.asn}${n.cc ? ` · ${n.cc}` : ''} · marked ${n.mark} · ${n.addresses} addresses · ${n.requests} requests today · ${n.refused} refused${n.passed ? ` · ${n.passed} passed the check (${n.passedRequests ?? 0} requests)` : ''}${n.passRefused ? ` · ${n.passRefused} refused after it` : ''} · in the security log: ${n.logged ? 'yes' : 'no'}\nLimits: ${w.limits.addressHour} page views an hour and ${w.limits.addressDay} a day per address, ${w.limits.networkHour} API reads an hour per network` }]
+                })} />}
               </li>
             ))}
           </ul>

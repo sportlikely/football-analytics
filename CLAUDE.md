@@ -208,6 +208,8 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   happened, what to do, buttons); action buttons are signed one-time links (`actionLink` + `onEmailAction`, page `/admin/act/<token>`);
   anything that fixed itself is `noteAutoFix` (07:00 summary), never its own email. Swapped results: `utils/resultSwap.ts`,
   `bbResults.ts` (basketball), `resultChecks.ts` (American football, tennis).
+- Copy for Claude (fix259): `services/forClaude.ts` + `utils/forClaude.ts` (text, secret filter, 12 KB), frontend `components/admin/CopyForClaude.tsx`
+  + `lib/forClaude.ts` — a new admin card gets the button through its Explained frame; a new red / yellow row passes its own `req`. Admin / CRM only.
 - `OPEN_API` in `app.ts` lists the public routes; everything else is admin/staff only (answered by the worker).
 
 Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colours `accent` (lime), `win`, `loss`, `draw`):
