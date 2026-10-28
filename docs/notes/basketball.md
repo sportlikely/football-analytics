@@ -370,3 +370,27 @@ Jokić ~+10. Bulls–Wizards: the on/off model had the Bulls by 6 (Trae Young �
   the published grid state; under 20 games: on). A rotation that doesn't fill the game → bb-v3. Live player ratings held in the
   established players' range (`LeagueSnap.cap`); the stored training rows are unchanged.
 - Not tried: a softer rule (shrink instead of switch, a per-row threshold) — would be fitted on the test season; needs its own gate.
+
+## fix270 — calibration layers that actually refit (28 Oct 2026)
+
+Data health 28 Oct: football 50–60% said 54, happened 59.4 (325 games); basketball 50–60 said 54.5 happened 44.2 (43),
+60–70 64.9 → 58.9 (56), 70–80 75.3 → 65.7 (35); tennis 60–70 said 64.8 happened 76.7 (90). fix254's nightly refit never
+fitted ("fewer than 300 games … before the previous 60 days": it wanted 300 games older than 120 days). Now
+(utils/recentCalib.ts, services/recentCalib.ts):
+- Fit on every settled game except the last 30 days, 200 games at least; walk-forward test on the 30 days (100+ games);
+  the layer that passed goes live. Two kinds, each shrunk toward "no change": isotonic (blocks shrunk 30 games' worth)
+  and Platt on the pick's chance (prior at a = 1, b = 0 worth 100 games); the kind is chosen on the fit rows only.
+- A young sport (basketball and tennis saved the model's own chance only from 25 Oct, fix222: fewer than 200 games
+  before the 30 days, 200+ in all): every settled game tested out of fold (5 blocks of time, each scored by a Platt fit
+  on the other 4), then the Platt fit on all of them goes live.
+- Promotion by fix251's bootstrap rule on the test games (gain ≥ 0.0005, better in ≥ 90% of 2,000 resamples, hit rate
+  not down > 0.5 pp, one promotion in 7 days); rollback as the champion rule (worse than none by > 0.005 on 100+ games).
+- Basketball joins: rows = bb_predictions.p_raw (the model's own chance) of settled games, no pre-season; the "before"
+  it must beat = what was shown (fix222's season layer). Live, it replaces the season layer and the in-season switch
+  (sportCalibration.bbCalibrated), and the next 7 days' predictions are saved again at once.
+- The first tick after the deploy runs the new rule (a fix254 run of the same day doesn't count). The before → after
+  table per band is in the log line, /api/admin/recent-calibration (?run=football|basketball|tennis) and data health.
+- Data health keeps 5 points; the detail names the layer in use and its fit date ("Layer in use: recent Platt layer,
+  fitted 2026-10-29 on … games" / "season layer (fix222), fitted …" / "none").
+- Smoke run on the 10 Oct copy: football 410 games, cross-fit, kept (better in 69% of resamples, 90% needed);
+  basketball / tennis had no p_raw then. The 28 Oct numbers are the server's first run after the deploy. test:fix270.

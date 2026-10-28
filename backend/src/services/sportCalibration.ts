@@ -19,6 +19,7 @@ import logger from '../utils/logger';
 import { onState, publishState } from './shared';
 import { yieldLoop } from './perf';
 import { buildLayer, applyLayer, inSeasonLayer, applyInSeason, type LeagueLayer, type LRow, type InSeasonFit } from '../utils/sportCalib';
+import { calibrateBasketball, recentState } from './recentCalibState';
 import { gridEval, groupOf, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, type GridParams } from '../utils/bbGridMath';
 
 export const BB_CALIB_VERSION = 'fix222-1';
@@ -43,7 +44,7 @@ function cur(): CalibState | null {
   }
   return bb;
 }
-export const bbCalibVer = () => ver;
+export const bbCalibVer = () => `${ver}.${recentState('basketball')?.at || 0}`;
 export const bbCalibState = () => cur();
 /** fix222b: the in-season switch (stored by the admin; BB_INSEASON=on|off overrides it), off by default */
 export function inSeasonMode(): 'on' | 'off' {
@@ -54,8 +55,14 @@ export function inSeasonMode(): 'on' | 'off' {
 export function setInSeasonMode(mode: 'on' | 'off') {
   db.prepare(`INSERT OR REPLACE INTO sport_calib (sport, at, version, state, report) VALUES ('basketball-inseason', ?, ?, ?, NULL)`).run(new Date().toISOString(), BB_CALIB_VERSION, JSON.stringify({ mode }));
 }
-/** the calibrated home win chance of a basketball game of `code` (season layer, then the in-season one when on and kept) */
+/**
+ * the calibrated home win chance of a basketball game of `code` (season layer, then the in-season one when on and kept).
+ * fix270: with the recent layer live (services/recentCalib.ts: fitted on the saved p_raw of settled games), that layer
+ * on the model's own chance in place of both.
+ */
 export function bbCalibrated(code: string, p: number) {
+  const r = calibrateBasketball(p);
+  if (r != null) return r;
   const s = cur();
   const q = applyLayer(s?.layer, code, p);
   const env = String(process.env.BB_INSEASON || '').toLowerCase();

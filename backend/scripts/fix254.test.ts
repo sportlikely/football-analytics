@@ -97,14 +97,14 @@ function synth(days: number, perDay: number, bias: number, now: number, seed = 1
   return rows;
 }
 
-test('(4) an under-confident model (54% said, ~60% happened) gets a new layer: better in both windows, walk-forward', () => {
+test('(4) an under-confident model (54% said, ~60% happened) gets a new layer: better on the last 30 days, walk-forward', () => {
   const now = Date.parse('2026-10-28T05:00:00Z');
   const rows = synth(300, 15, 0.06, now);
   const d = decideRecent(rows, null, null, null, now);
   assert.equal(d.decision, 'promote', d.reason);
-  assert.ok(d.windows.W.diff <= -DAILY_RULES.minGain && d.windows.Wp.diff < 0);
-  assert.ok(d.windows.W.n >= DAILY_RULES.minGames && d.windows.Wp.n >= DAILY_RULES.minGames);
-  assert.ok(d.live && d.live.to === '2026-10-28' && d.live.n >= MIN_FIT);
+  // fix270: one test window (the last 30 days), the layer fitted on everything before it (more in fix270.test.ts)
+  assert.ok(d.test.diff <= -DAILY_RULES.minGain && d.test.n >= 100);
+  assert.ok(d.live && d.live.to === '2026-09-28' && d.live.n >= MIN_FIT);
   const b = d.bands.find((x: any) => x.lo === 50);
   assert.ok(b.happened - b.said > 3, `band 50–60: said ${b.said}, happened ${b.happened}`);
   assert.ok(b.cal > b.said, 'the walk-forward layer says more');

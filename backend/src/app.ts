@@ -134,7 +134,7 @@ import { calendarToken, resetCalendarToken, calendarIcs, asCalLang, tokenHint, T
 import { tuneV3Full, tuneStatus, isTuning } from './services/v3Tuner';
 import { cleanName, mayHaveSponsor, NAME_KEYS } from './services/sponsorNames';
 import { hiddenModels, v3MixBacktest, featureModelStatus, setConfig as setModelConfig, setMixLive } from './services/featureModel';
-import { runRecentCalibration, recentCalibStatus } from './services/recentCalib';
+import { runRecentCalibration, recentCalibStatus, bandsText } from './services/recentCalib';
 import { runModelDaily, sendMorningReport, modelDailyLog, buildReport, dailyRunning } from './services/modelDaily';
 import { nflProbe, nflCurrentSeason, asLeague, asLeagues, LEAGUES } from './services/nfl';
 import { winnerUpsetReport } from './services/winnerUpsets';
@@ -4108,11 +4108,12 @@ app.get('/api/bb/wf', (req, res) => res.json({ data: bbWalkForward(String(req.qu
 app.get('/api/admin/live-book', (_req, res) => res.json({ data: liveBookStatus(), timestamp: new Date().toISOString() }));
 // Football: daily self-learning log (last 30 days); ?run=1 runs today's job now, ?report=1 (re)sends the morning report,
 // ?preview=1 builds the report text without sending
-// fix254: the recent calibration layers (football, tennis): live layer + last runs; ?run=football|tennis runs one now
+// fix254: the recent calibration layers (football, tennis; fix270: basketball): live layer + last runs;
+// ?run=football|basketball|tennis runs one now (fit, test on the last 30 days, before → after per band)
 app.get('/api/admin/recent-calibration', async (req, res) => {
   try {
     const run = String(req.query.run || '');
-    if (run === 'football' || run === 'tennis') { const d = await runRecentCalibration(run); res.json({ data: { decision: d.decision, reason: d.reason, windows: d.windows, bands: d.bands } }); return; }
+    if (run === 'football' || run === 'tennis' || run === 'basketball') { const d = await runRecentCalibration(run); res.json({ data: { decision: d.decision, reason: d.reason, mode: d.mode, fit: d.fit, test: d.test, bands: d.bands, table: bandsText(d), candidate: d.candidate } }); return; }
     res.json({ data: recentCalibStatus() });
   } catch (e: any) { sendError(res, e, 'Recent calibration failed'); }
 });

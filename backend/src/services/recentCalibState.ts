@@ -1,6 +1,7 @@
 /**
  * fix254 — the live recent calibration layer of each sport (utils/recentCalib.ts), read everywhere it is applied:
- * football's shown 1X2 (tracking.freezePredictions), tennis's shown chance (tennisModel.predictRow). Kept in
+ * football's shown 1X2 (tracking.freezePredictions), tennis's shown chance (tennisModel.predictRow), basketball's shown
+ * home chance (fix270: sportCalibration.bbCalibrated, on the model's own p_raw in place of the fix222 season layer). Kept in
  * recent_calib (one row per sport), published as 'calib-recent:<sport>' by the nightly job (services/recentCalib.ts).
  * The web takes the published copy; the worker and the job threads (tennis model: read-only connection) read the row,
  * at most once a minute. No import of the model code (tracking.ts imports this file).
@@ -10,7 +11,7 @@ import { isWeb } from './role';
 import { onState } from './shared';
 import { calibrateP, calibrate2, type IsoLayer } from '../utils/recentCalib';
 
-export type RecentSport = 'football' | 'tennis';
+export type RecentSport = 'football' | 'tennis' | 'basketball';
 export interface RecentState { at: string; layer: IsoLayer | null; since: string | null; prev: { layer: IsoLayer | null; since: string | null } | null }
 
 try {
@@ -53,3 +54,5 @@ export function calibrateFootball<T extends { model: string; home: number; draw:
 }
 /** tennis: the first player's chance (0–1) through the layer */
 export const calibrateTennis = (p1: number) => calibrate2(recentLayer('tennis'), p1);
+/** fix270: basketball — the home side's chance (0–1, the model's own) through the layer; null = no layer live */
+export const calibrateBasketball = (pRaw: number): number | null => { const L = recentLayer('basketball'); return L ? calibrate2(L, pRaw) : null; };
