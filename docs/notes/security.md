@@ -84,3 +84,26 @@ be counted twice). The limiter is per server (fine for one Railway service).
 ## Search engines verified by their address lists (fix245, 26 Oct 2026)
 
 Search Console (7–21 Oct): 15 % 4XX, 5 % 5XX, 22 % failed on 210k Google requests; Admin → Visitors: 369 Googlebot requests, verified 0. Google (AS15169) is on the data-centre list, so an unverified Googlebot got the proxy rules (60 page views an hour, 429, locked predictions) and the bot gate's 503. Now (services/crawlerIps.ts, utils/crawlerRanges.ts): a Google / Bing / Apple user-agent from an address in that engine's published list (downloaded daily by the worker; Google's googlebot, special-crawlers, user-triggered-fetchers(-google), Bing's bingbot, Apple's applebot; seed ranges until the first download) is verified at once, DNS or not; otherwise fix173's DNS check (system resolver, then 8.8.8.8 / 1.1.1.1). A verified search engine: no proxy limit, no rate limit, waits for a bot-gate slot (CRAWLER_WAIT_MS 15 s, then goes on), the worker builds a page instead of the 503 "Loading", 120 s startup wait. A crawler user-agent from any other address (Datacamp…) is refused as before. Data health "Search engines verified" fails on any 429 / 503 to Google's ranges.
+
+## Scraper swarms (fix277, 29 Oct 2026)
+
+29 Oct: one user-agent ("Chrome/155 … X11; Linux x86_64") made 222,665 requests from thousands of addresses, mostly US
+home networks; only ~38k were on the data-centre list, so the proxy rules above never applied to the rest. Each address
+opened a few pages, sent no seen beacon, and the next one took over.
+
+| Rule | Value |
+|---|---|
+| Group | hash(user-agent) + country + network (AS number when on the data-centre list, else the /16; IPv6 /32) |
+| Swarm (hour) | 40+ distinct addresses of a group in an hour, under 5% with human signs |
+| Swarm (day) | 300+ distinct addresses of one user-agent in a day, any country, under 5% human (a group with 5%+ people today is spared) |
+| Human signs | seen beacon visible 5+ s and used, not headless, 4+ s after the address's first page; a Quick-check pass; an email-verified account |
+| Judged | only addresses first seen a minute ago or more (a person's beacon comes after 5 s) |
+| Held | 6 h after it last qualified (kept across restarts by hashed group / user-agent keys, never addresses) |
+| Never | admins, verified search engines, signed-in email-verified accounts, pass holders, account / sign-in / billing / beacon routes, documentation ranges (2001:db8::/32 …: the site gate) |
+| Signed out in a swarm | 429 + the Quick check (Turnstile) on every page / API read, no crawler HTML, stored data only, no prediction, not a visit (visits.bot = 'swarm') |
+| Pass holder | only its own 300 page views an hour |
+| Admin | Visitors → Swarms: Rules / Always challenge / Trust per user-agent (`swarm_overrides`, applied at once) |
+| Data health | "Scraper swarms": yellow while one is challenged, red if a trusted user-agent or a listed search engine got the challenge (7 days) |
+
+Code: `utils/swarmRules.ts` (rules, unit-tested by `npm run test:fix277`), `services/swarmGuard.ts` (server side).
+

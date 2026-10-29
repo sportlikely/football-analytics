@@ -54,6 +54,7 @@ import { deployErrorsHealth } from './deployErrors';
 import { slowRequestsHealth, slowAdminRequestsHealth } from './deadline';
 import { upsetTextHealth } from './upsetHealth';
 import { crawlerHealth } from './crawlerIps';
+import { swarmHealth } from './swarmGuard';
 import { edgeStatus } from './edgeHops';
 import { modelDailyHealth } from './modelDailyHealth';
 import { leagueFixHealth } from './leagueFixHealth';
@@ -491,6 +492,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(...gameExtrasHealth(now)); } catch (e: any) { logger.warn(`game extras health: ${e?.message || e}`); }
   // fix242: upset watch — the favourite named in the text is the side with the higher win %, a reason on every game, max 10 a week
   try { checks.push(...upsetTextHealth(now)); } catch (e: any) { logger.warn(`upset watch health: ${e?.message || e}`); }
+  // fix277: scraper swarms — yellow while one is challenged, red if a trusted user-agent or a verified engine got the challenge
+  try { checks.push(swarmHealth()); } catch (e: any) { logger.warn(`swarm health: ${e?.message || e}`); }
   // fix245: search engines verified (list / DNS); fail when a request from Google's ranges got a 429 / 503 today
   try { checks.push(...crawlerHealth(edgeStatus())); } catch (e: any) { logger.warn(`crawler health: ${e?.message || e}`); }
   // fix251: the football daily learning — warn after 30 days without a promotion while the best candidate is better in both windows

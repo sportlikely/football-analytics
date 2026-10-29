@@ -10,11 +10,12 @@ export const QC_LANGS = ['en', 'de', 'es', 'fr', 'it', 'pt', 'tr', 'id', 'hi', '
 const QC_RTL: readonly QcLang[] = ['ar', 'he'];
 export type QcLang = (typeof QC_LANGS)[number];
 
-type Words = { title: string; vpn: string; why: string; checking: string; done: string; failed: string; signin: string; signinWhy: string; later: string; footer: string };
+type Words = { title: string; vpn: string; why: string; swarm: string; swarmWhy: string; checking: string; done: string; failed: string; signin: string; signinWhy: string; later: string; footer: string };
 
 export const QC_WORDS: Record<QcLang, Words> = {
   en: {
     title: 'Quick check', vpn: "You're on a VPN or proxy network.",
+    swarm: 'Many visits that look like yours come from scripts right now.', swarmWhy: 'So we check that you are a person. It takes a second.',
     why: 'Many pages are opened from this network, so we check that you are a person. It takes a second.',
     checking: 'Checking…', done: 'Done. Opening the page…', failed: "That didn't work. Please try again.",
     signin: 'Sign in', signinWhy: 'Signed in with a confirmed email, you are never asked.',
@@ -23,6 +24,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   de: {
     title: 'Kurze Prüfung', vpn: 'Du bist in einem VPN- oder Proxy-Netzwerk.',
+    swarm: 'Gerade kommen viele Besuche, die wie deiner aussehen, von Skripten.', swarmWhy: 'Daher prüfen wir, ob du ein Mensch bist. Das dauert eine Sekunde.',
     why: 'Aus diesem Netzwerk werden viele Seiten geöffnet, daher prüfen wir, ob du ein Mensch bist. Das dauert eine Sekunde.',
     checking: 'Wird geprüft…', done: 'Fertig. Die Seite wird geöffnet…', failed: 'Das hat nicht geklappt. Bitte versuche es noch einmal.',
     signin: 'Anmelden', signinWhy: 'Angemeldet mit bestätigter E-Mail wirst du nie gefragt.',
@@ -31,6 +33,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   es: {
     title: 'Comprobación rápida', vpn: 'Estás en una red VPN o proxy.',
+    swarm: 'Ahora mismo muchas visitas que parecen la tuya vienen de scripts.', swarmWhy: 'Por eso comprobamos que eres una persona. Tarda un segundo.',
     why: 'Desde esta red se abren muchas páginas, así que comprobamos que eres una persona. Tarda un segundo.',
     checking: 'Comprobando…', done: 'Listo. Abriendo la página…', failed: 'No ha funcionado. Inténtalo de nuevo.',
     signin: 'Iniciar sesión', signinWhy: 'Con la sesión iniciada y el correo confirmado, nunca se te pregunta.',
@@ -39,6 +42,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   fr: {
     title: 'Vérification rapide', vpn: 'Vous êtes sur un réseau VPN ou proxy.',
+    swarm: 'En ce moment, beaucoup de visites qui ressemblent à la vôtre viennent de scripts.', swarmWhy: 'Nous vérifions donc que vous êtes une personne. Cela prend une seconde.',
     why: 'Beaucoup de pages sont ouvertes depuis ce réseau, nous vérifions donc que vous êtes une personne. Cela prend une seconde.',
     checking: 'Vérification…', done: 'C’est fait. Ouverture de la page…', failed: 'Cela n’a pas marché. Veuillez réessayer.',
     signin: 'Se connecter', signinWhy: 'Connecté avec un e-mail confirmé, vous n’êtes jamais vérifié.',
@@ -47,6 +51,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   it: {
     title: 'Controllo rapido', vpn: 'Sei su una rete VPN o proxy.',
+    swarm: 'In questo momento molte visite simili alla tua arrivano da script.', swarmWhy: 'Quindi controlliamo che tu sia una persona. Ci vuole un secondo.',
     why: 'Da questa rete vengono aperte molte pagine, quindi controlliamo che tu sia una persona. Ci vuole un secondo.',
     checking: 'Controllo in corso…', done: 'Fatto. Apertura della pagina…', failed: 'Non ha funzionato. Riprova.',
     signin: 'Accedi', signinWhy: 'Se hai effettuato l’accesso con un’email confermata, non ti viene mai chiesto.',
@@ -55,6 +60,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   pt: {
     title: 'Verificação rápida', vpn: 'Você está em uma rede VPN ou proxy.',
+    swarm: 'Agora mesmo muitas visitas parecidas com a sua vêm de scripts.', swarmWhy: 'Por isso verificamos se você é uma pessoa. Leva um segundo.',
     why: 'Muitas páginas são abertas a partir desta rede, então verificamos se você é uma pessoa. Leva um segundo.',
     checking: 'Verificando…', done: 'Pronto. Abrindo a página…', failed: 'Não funcionou. Tente novamente.',
     signin: 'Entrar', signinWhy: 'Com sessão iniciada e e-mail confirmado, você nunca é verificado.',
@@ -63,6 +69,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   tr: {
     title: 'Hızlı kontrol', vpn: 'Bir VPN veya proxy ağındasınız.',
+    swarm: 'Şu anda sizinkine benzeyen birçok ziyaret betiklerden geliyor.', swarmWhy: 'Bu yüzden bir insan olduğunuzu kontrol ediyoruz. Bir saniye sürer.',
     why: 'Bu ağdan çok sayıda sayfa açılıyor, bu yüzden bir insan olduğunuzu kontrol ediyoruz. Bir saniye sürer.',
     checking: 'Kontrol ediliyor…', done: 'Tamam. Sayfa açılıyor…', failed: 'Olmadı. Lütfen tekrar deneyin.',
     signin: 'Giriş yap', signinWhy: 'Onaylı e-postayla giriş yaptığınızda size hiç sorulmaz.',
@@ -71,6 +78,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   id: {
     title: 'Pemeriksaan singkat', vpn: 'Anda menggunakan jaringan VPN atau proxy.',
+    swarm: 'Saat ini banyak kunjungan yang mirip dengan Anda berasal dari skrip.', swarmWhy: 'Jadi kami memeriksa bahwa Anda manusia. Hanya butuh sedetik.',
     why: 'Banyak halaman dibuka dari jaringan ini, jadi kami memeriksa bahwa Anda manusia. Hanya butuh sedetik.',
     checking: 'Memeriksa…', done: 'Selesai. Membuka halaman…', failed: 'Tidak berhasil. Silakan coba lagi.',
     signin: 'Masuk', signinWhy: 'Jika masuk dengan email yang sudah dikonfirmasi, Anda tidak pernah ditanya.',
@@ -79,6 +87,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   hi: {
     title: 'त्वरित जाँच', vpn: 'आप VPN या प्रॉक्सी नेटवर्क पर हैं।',
+    swarm: 'अभी आपकी जैसी दिखने वाली कई विज़िट स्क्रिप्ट से आ रही हैं।', swarmWhy: 'इसलिए हम जाँचते हैं कि आप इंसान हैं। इसमें एक सेकंड लगता है।',
     why: 'इस नेटवर्क से कई पेज खोले जाते हैं, इसलिए हम जाँचते हैं कि आप इंसान हैं। इसमें एक सेकंड लगता है।',
     checking: 'जाँच हो रही है…', done: 'हो गया। पेज खुल रहा है…', failed: 'यह काम नहीं किया। कृपया फिर से कोशिश करें।',
     signin: 'साइन इन करें', signinWhy: 'पुष्टि किए गए ईमेल से साइन इन होने पर आपसे कभी नहीं पूछा जाता।',
@@ -87,6 +96,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   pl: {
     title: 'Szybkie sprawdzenie', vpn: 'Korzystasz z sieci VPN lub proxy.',
+    swarm: 'Teraz wiele wizyt podobnych do Twojej pochodzi od skryptów.', swarmWhy: 'Dlatego sprawdzamy, czy jesteś człowiekiem. To potrwa sekundę.',
     why: 'Z tej sieci otwiera się wiele stron, więc sprawdzamy, czy jesteś człowiekiem. To potrwa sekundę.',
     checking: 'Sprawdzanie…', done: 'Gotowe. Otwieramy stronę…', failed: 'Nie udało się. Spróbuj ponownie.',
     signin: 'Zaloguj się', signinWhy: 'Po zalogowaniu z potwierdzonym e-mailem nigdy nie pytamy.',
@@ -95,6 +105,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   el: {
     title: 'Γρήγορος έλεγχος', vpn: 'Είσαι σε δίκτυο VPN ή proxy.',
+    swarm: 'Αυτή τη στιγμή πολλές επισκέψεις που μοιάζουν με τη δική σου έρχονται από σενάρια (scripts).', swarmWhy: 'Γι’ αυτό ελέγχουμε ότι είσαι άνθρωπος. Παίρνει ένα δευτερόλεπτο.',
     why: 'Από αυτό το δίκτυο ανοίγουν πολλές σελίδες, οπότε ελέγχουμε ότι είσαι άνθρωπος. Παίρνει ένα δευτερόλεπτο.',
     checking: 'Έλεγχος…', done: 'Έτοιμο. Ανοίγει η σελίδα…', failed: 'Δεν πέτυχε. Δοκίμασε ξανά.',
     signin: 'Σύνδεση', signinWhy: 'Αν συνδεθείς με επιβεβαιωμένο email, δεν σε ρωτάμε ποτέ.',
@@ -103,6 +114,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   ru: {
     title: 'Быстрая проверка', vpn: 'Вы в сети VPN или прокси.',
+    swarm: 'Сейчас много посещений, похожих на ваше, идут от скриптов.', swarmWhy: 'Поэтому мы проверяем, что вы человек. Это займёт секунду.',
     why: 'Из этой сети открывают много страниц, поэтому мы проверяем, что вы человек. Это займёт секунду.',
     checking: 'Проверяем…', done: 'Готово. Открываем страницу…', failed: 'Не получилось. Попробуйте ещё раз.',
     signin: 'Войти', signinWhy: 'Если вы вошли с подтверждённым email, мы никогда не спрашиваем.',
@@ -111,6 +123,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   ar: {
     title: 'تحقق سريع', vpn: 'أنت متصل عبر شبكة VPN أو بروكسي.',
+    swarm: 'الكثير من الزيارات التي تشبه زيارتك تأتي الآن من برامج آلية.', swarmWhy: 'لذلك نتحقق من أنك شخص حقيقي. الأمر يستغرق ثانية.',
     why: 'تُفتح صفحات كثيرة من هذه الشبكة، لذلك نتحقق من أنك شخص حقيقي. الأمر يستغرق ثانية.',
     checking: 'جارٍ التحقق…', done: 'تم. جارٍ فتح الصفحة…', failed: 'لم ينجح ذلك. حاول مرة أخرى.',
     signin: 'تسجيل الدخول', signinWhy: 'عند تسجيل الدخول ببريد إلكتروني مؤكد، لن يُطلب منك ذلك أبدًا.',
@@ -119,6 +132,7 @@ export const QC_WORDS: Record<QcLang, Words> = {
   },
   he: {
     title: 'בדיקה מהירה', vpn: 'נראה שאתם מחוברים דרך VPN או פרוקסי.',
+    swarm: 'כרגע הרבה כניסות שנראות כמו שלכם מגיעות מתוכנות אוטומטיות.', swarmWhy: 'אז אנחנו בודקים שמדובר באדם. זה לוקח שנייה.',
     why: 'מהרשת הזו נפתחים הרבה עמודים, אז אנחנו בודקים שמדובר באדם. זה לוקח שנייה.',
     checking: 'בודקים…', done: 'זהו. פותחים את העמוד…', failed: 'זה לא הצליח. נסו שוב.',
     signin: 'התחברות', signinWhy: 'מי שמחובר עם אימייל מאומת לא נשאל אף פעם.',
@@ -134,8 +148,11 @@ export const qcLangOf = (path: string): QcLang => ((QC_PREFIX.exec(path)?.[1] as
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const js = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
 
-/** The page. siteKey null = Turnstile is off: the plain line with Sign in. */
-export function quickCheckPage(lang: QcLang, siteKey: string | null): string {
+/**
+ * The page. siteKey null = Turnstile is off: the plain line with Sign in. fix277: kind 'swarm' = a scraper swarm's
+ * challenge (services/swarmGuard.ts): the same check, its own reason line.
+ */
+export function quickCheckPage(lang: QcLang, siteKey: string | null, kind: 'proxy' | 'swarm' = 'proxy'): string {
   const w = QC_WORDS[lang] || QC_WORDS.en;
   const pre = lang === 'en' ? '' : `/${lang}`;
   const check = siteKey
@@ -183,7 +200,7 @@ h1{font-size:22px;margin:0 0 6px}.vpn{font-weight:600;margin:0 0 6px}.why{color:
 .foot{margin-top:18px;font-size:12px;color:var(--muted)}
 </style></head>
 <body><a class="brand" href="${pre || '/'}"><img src="/logo-mark.png" alt="">SportLikely</a>
-<main class="card"><h1>${esc(w.title)}</h1><p class="vpn">${esc(w.vpn)}</p><p class="why">${esc(w.why)}</p>${check}
+<main class="card"><h1>${esc(w.title)}</h1><p class="vpn">${esc(kind === 'swarm' ? w.swarm : w.vpn)}</p><p class="why">${esc(kind === 'swarm' ? w.swarmWhy : w.why)}</p>${check}
 <div class="or">${esc(w.signinWhy)}<br><a class="btn" href="${pre}/login">${esc(w.signin)}</a></div></main>
 <p class="foot">${esc(w.footer)}</p>${script}</body></html>`;
 }

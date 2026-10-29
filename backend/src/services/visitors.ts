@@ -107,7 +107,8 @@ export function trackVisit(req: express.Request, _res: express.Response, next: e
       // fix262b: a search-engine user-agent from a data-centre network, not verified = a fake crawler (not Google)
       const sl = (req as any).slCrawler;
       const fake = isFakeCrawler(ua, ip, sl?.ok ? sl.how : null);
-      upsert.run(day, vid, signedIn ? 1 : 0, iso, iso, countryOf(ip), signedIn ? 1 : 0, fake ? 'fake-crawler' : uaBot ? 'ua' : dc ? 'datacentre' : null, uaBot ? 1 : 0);
+      // fix277: a verified search engine is 'crawler' (Visitors splits the bots: crawlers / swarms / other)
+      upsert.run(day, vid, signedIn ? 1 : 0, iso, iso, countryOf(ip), signedIn ? 1 : 0, fake ? 'fake-crawler' : sl?.ok ? 'crawler' : uaBot ? 'ua' : dc ? 'datacentre' : null, uaBot ? 1 : 0);
     }
     const lp = uaBot ? null : leaguePageOf(req.path);
     if (lp) {
@@ -122,7 +123,7 @@ export function trackVisit(req: express.Request, _res: express.Response, next: e
  * fix183: the browser's "seen" beacon — counted as a person only when nothing says otherwise. `crawler`: the request's
  * crawler verdict from index.ts (fix173: true = verified search engine, false = fake crawler, null = not a crawler UA).
  */
-export function visitSeen(req: express.Request, crawler: boolean | null): { counted: boolean; reason?: string } {
+export function visitSeen(req: express.Request, crawler: boolean | null, swarm = false): { counted: boolean; reason?: string } {
   const ip = req.ip || '';
   const ua = req.get('user-agent') || '';
   if (!ip || req.access === 'admin') return { counted: false, reason: 'not counted' };
@@ -133,6 +134,7 @@ export function visitSeen(req: express.Request, crawler: boolean | null): { coun
   const reason = !ua || BOT.test(ua) ? 'ua'
     : crawler === true ? 'crawler'
     : crawler === false ? 'fake-crawler'
+    : swarm ? 'swarm'
     : dataCentreOf(ip) ? 'datacentre'
     : b.webdriver || !Number(b.languages) ? 'headless'
     : !(Number(b.visibleMs) >= 5000) || !b.interacted ? 'no-signs'
@@ -152,11 +154,31 @@ export function visitSeen(req: express.Request, crawler: boolean | null): { coun
   return { counted: true };
 }
 
+/**
+ * fix277: a request of a scraper swarm (services/swarmGuard.ts) — its caller is not a person today (visits.bot =
+ * 'swarm'; a beacon with human signs can still make it one). Written once per caller and day.
+ */
+const swarmMarked = new Map<string, number>();
+export function markSwarmVisit(req: express.Request) {
+  try {
+    const ip = req.ip || '';
+    if (!ip) return;
+    const vid = hash(ip), day = visitDay(), k = `${vid}|${day}`;
+    if (swarmMarked.has(k)) return;
+    if (swarmMarked.size > 200000) swarmMarked.clear();
+    swarmMarked.set(k, Date.now());
+    markBot.run('swarm', day, vid);
+    const o = online.get(vid);
+    if (o && !o.signedIn) o.human = false;
+  } catch { /* counting never breaks a request */ }
+}
+
 every('visitors flush', () => {
   const now = Date.now();
   for (const [k, v] of online) if (v.at < now - ONLINE_MS) online.delete(k);
   for (const [k, t] of written) if (t < now - 2 * 86400000) written.delete(k);
   for (const [k, t] of leagueSeen) if (t < now - 2 * 86400000) leagueSeen.delete(k);
+  for (const [k, t] of swarmMarked) if (t < now - 2 * 86400000) swarmMarked.delete(k);
 }, 60000).unref();
 if (!isWeb) every('visitors cleanup', () => {
   try { db.prepare("DELETE FROM visits WHERE day < date('now', '-90 days')").run(); } catch { /* ignore */ }
@@ -189,11 +211,11 @@ export async function refreshVisitorSummary(): Promise<Summary> {
   return summary;
 }
 /** web: GET /api/admin/visitors — the stored string + the live part (online now, the lists loaded here); no query here */
-export function visitorsAnswer(): string {
+export function visitorsAnswer(extra: Record<string, unknown> = {}): string {
   const now = Date.now();
   let onlineNow = 0, onlineSignedIn = 0, onlineAll = 0;
   for (const v of online.values()) if (v.at >= now - ONLINE_MS) { onlineAll++; if (v.human) onlineNow++; if (v.signedIn) onlineSignedIn++; }
-  const live = JSON.stringify({ onlineNow, onlineSignedIn, onlineAll, onlineWindowMin: ONLINE_MS / 60000, datacentre: asnStatus(), geo: geoStatus() });
+  const live = JSON.stringify({ onlineNow, onlineSignedIn, onlineAll, onlineWindowMin: ONLINE_MS / 60000, datacentre: asnStatus(), geo: geoStatus(), ...extra });
   if (!summary?.text?.startsWith('{')) return `{"data":${live.slice(0, -1)},"pending":true}}`;
   return `{"data":${live.slice(0, -1)},${summary.text.slice(1)}}`;
 }

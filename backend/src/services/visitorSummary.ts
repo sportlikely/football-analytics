@@ -52,13 +52,16 @@ export function visitorDbSummary(now = Date.now()) {
   const returning = (db.prepare(`SELECT COUNT(*) AS n FROM (SELECT vid FROM visits WHERE day >= ? AND ${PEOPLE} GROUP BY vid HAVING COUNT(*) > 1)`).get(since(30, now)) as any).n as number;
   const first = (db.prepare('SELECT MIN(day) AS d FROM visits').get() as any)?.d || null;
   const botReasons = db.prepare(`SELECT COALESCE(bot, 'no-signs') AS reason, COUNT(*) AS n FROM visits WHERE day = ? AND NOT ${PEOPLE} GROUP BY COALESCE(bot, 'no-signs') ORDER BY n DESC`).all(since(1, now)) as { reason: string; n: number }[];
+  // fix277: the day's bots split: verified crawlers / scraper swarms / everything else
+  const botSplit = { crawlers: 0, swarms: 0, other: 0 };
+  for (const r of botReasons) { if (r.reason === 'crawler') botSplit.crawlers += r.n; else if (r.reason === 'swarm') botSplit.swarms += r.n; else botSplit.other += r.n; }
   const byCountry = (days: number) => db.prepare(BY_COUNTRY_SQL).all(since(days, now)) as { country: string; visitors: number; signedIn: number; bots: number }[];
   const countriesSince = (db.prepare('SELECT MIN(day) AS d FROM visits WHERE country IS NOT NULL').get() as any)?.d || null;
   const peopleSince = ((db.prepare(`SELECT v FROM visit_meta WHERE k = 'people_since'`).get() as any)?.v as string) || '';
   return {
     today: w1.people, last7: w7.people, last30: w30.people, returning30: returning,
     // fix274: all = people + bots (every caller, bot user-agents included), each window
-    todayBots: w1.bots, todayAll: w1.all, last7Bots: w7.bots, last7All: w7.all, last30Bots: w30.bots, last30All: w30.all, botReasons,
+    todayBots: w1.bots, todayAll: w1.all, last7Bots: w7.bots, last7All: w7.all, last30Bots: w30.bots, last30All: w30.all, botReasons, botSplit,
     peopleSince, daily, countingSince: first, dayZone: 'Asia/Jerusalem',
     windowFrom: { today: since(1, now), last7: since(7, now), last30: since(30, now) },
     countries: { last7: byCountry(7), last30: byCountry(30), since: countriesSince }

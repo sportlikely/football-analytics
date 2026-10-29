@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import CopyForClaude from './admin/CopyForClaude'
@@ -19,7 +19,17 @@ interface Visitors {
   builtAt?: string; geo?: Geo; pending?: boolean
   who?: Who
   crawlers?: Crawlers
+  // fix277: scraper swarms (live, from the web process) and the admin's switches; the day's bots split
+  swarms?: SwarmRow[]; swarmOverrides?: SwarmOverride[]
+  botSplit?: { crawlers: number; swarms: number; other: number }
 }
+interface SwarmRow {
+  ua: string; text: string; state: 'challenged' | 'watching'; why: 'hour' | 'day' | 'always' | null; override: 'trust' | 'challenge' | null
+  countries: { cc: string; addresses: number }[]; networks: { name: string; addresses: number }[]; otherNetworks: number
+  addressesHour: number; addresses: number; requests: number; views: number; human: number; humanShare: number; headless: number
+  refused: number; refused24h: number; wrong: number; groupsHeld: number; since: string | null; until: string | null
+}
+interface SwarmOverride { ua: string; mode: 'trust' | 'challenge'; text: string | null; by: string | null; at: string }
 // fix245: search engines today — verified by their published address lists or DNS, refused (429 / 503), the day's DNS sample
 type EngineDay = { requests: number; verified: number; byList: number; byDns: number; refused: number; s429: number; s503: number; api: number }
 interface CrawlerDay {
@@ -41,7 +51,7 @@ interface Who {
   networks: { name: string; asn: number; cc: string | null; requests: number; addresses: number; refused: number; logged: boolean; mark: Mark; passed?: number; passedRequests?: number; passRefused?: number }[]
 }
 interface CountryRow { country: string; visitors: number; signedIn: number; bots?: number }
-const REASON: Record<string, string> = { 'no-signs': 'no signs of a person', ua: 'bot user-agent', crawler: 'search-engine crawlers', 'fake-crawler': 'fake crawlers', datacentre: 'data-centre networks', headless: 'headless browsers' }
+const REASON: Record<string, string> = { 'no-signs': 'no signs of a person', ua: 'bot user-agent', crawler: 'search-engine crawlers', 'fake-crawler': 'fake crawlers', datacentre: 'data-centre networks', headless: 'headless browsers', swarm: 'scraper swarms' }
 // the old "all API callers" number is shown for a week after the switch to people only, then goes
 const showOld = (since?: string) => !!since && Date.now() - Date.parse(since) < 8 * 86400000
 // fix274: the server's days are Israel-time days ('YYYY-MM-DD'); i days before today
@@ -198,14 +208,86 @@ function WhoCard({ w }: { w: Who }) {
   )
 }
 
+const WHY: Record<string, string> = { hour: '40+ addresses in an hour, under 5% people', day: '300+ addresses today, under 5% people', always: 'always challenged (your switch)' }
+const hm = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '–')
+const swarmText = (r: SwarmRow) => `${r.text}\nState: ${r.override === 'trust' ? 'trusted (your switch)' : r.state}${r.why ? ` — ${WHY[r.why]}` : ''}${r.since ? ` · since ${r.since}` : ''}${r.until ? ` · until ${r.until}` : ''}\nCountries: ${r.countries.map(c => `${c.cc} ${c.addresses}`).join(', ') || '–'} · networks: ${r.networks.map(n => `${n.name} ${n.addresses}`).join(', ') || 'none listed'}${r.otherNetworks ? ` + ${r.otherNetworks} home / mobile networks` : ''}\nAddresses: ${r.addressesHour} this hour, ${r.addresses} today · ${r.requests} requests, ${r.views} page loads · people ${r.human} (${r.humanShare}%) · headless ${r.headless} · challenged ${r.refused} today, ${r.refused24h} in 24 h${r.wrong ? ` · WRONG challenges: ${r.wrong}` : ''}`
+
+/** fix277: groups of many addresses that act like one script — challenged with the Quick check; a switch per user-agent */
+function SwarmsCard({ rows, overrides, reload }: { rows: SwarmRow[]; overrides: SwarmOverride[]; reload: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const set = (ua: string, mode: 'trust' | 'challenge' | null) => {
+    setBusy(ua)
+    axios.post(`${API_URL}/admin/swarms/${ua}`, { mode }).then(reload).catch(() => {}).finally(() => setBusy(null))
+  }
+  const modeOf = (ua: string) => overrides.find(o => o.ua === ua)?.mode || null
+  const idle = overrides.filter(o => !rows.some(r => r.ua === o.ua))
+  const sw = (ua: string) => {
+    const m = modeOf(ua)
+    const b = (mode: 'trust' | 'challenge' | null, label: string) => (
+      <button type="button" disabled={busy === ua} onClick={() => set(ua, mode)} className={`seg-btn ${m === mode ? 'seg-btn-active' : ''}`}>{label}</button>
+    )
+    return <div className="seg text-[11px]">{b(null, 'Rules')}{b('challenge', 'Always challenge')}{b('trust', 'Trust')}</div>
+  }
+  return (
+    <div className="mt-6 pt-5 border-t border-line/60" data-copy-block="swarms">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h3 className="font-display font-bold text-ink">Swarms</h3>
+        <CopyForClaude size="sm" req={() => ({ place: 'Admin → Visitors & users → Visitors → Swarms', scope: 'item', checks: [{ id: 'scraper-swarms' }], shown: [{ title: 'Swarms', text: rows.map(swarmText).join('\n\n') || 'No swarm today' }] })} />
+      </div>
+      {rows.length === 0 ? <p className="text-sm text-faint">No group of addresses acting like one script today.</p> : (
+        <ul className="space-y-3 text-sm">
+          {rows.map(r => {
+            const trusted = r.override === 'trust'
+            return (
+              <li key={r.ua} className="rounded-xl border border-line/60 px-3 py-2.5">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="min-w-0 flex-1 truncate text-xs text-ink" title={r.text}>{r.text}</span>
+                  <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${trusted ? 'text-win' : r.state === 'challenged' ? 'text-loss' : 'text-faint'}`}>{trusted ? 'trusted' : r.state}</span>
+                </div>
+                <p className="mt-1 text-[11px] text-faint num">
+                  {r.countries.map(c => `${flagOf(c.cc)} ${c.cc} ${n0(c.addresses)}`).join(' · ') || '–'}
+                  {' · '}{r.networks.map(n => `${n.name} ${n0(n.addresses)}`).join(', ') || 'no listed network'}{r.otherNetworks ? ` + ${n0(r.otherNetworks)} home / mobile networks` : ''}
+                </p>
+                <p className="text-[11px] text-faint num">
+                  {n0(r.addressesHour)} addresses this hour · {n0(r.addresses)} today · {n0(r.requests)} requests · {r.humanShare}% people · {n0(r.refused)} challenged
+                  {r.state === 'challenged' && !trusted ? ` · since ${hm(r.since)}${r.why ? ` (${WHY[r.why]})` : ''}` : ''}{r.wrong ? ` · ${n0(r.wrong)} wrong challenges` : ''}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {sw(r.ua)}
+                  <CopyForClaude size="sm" req={() => ({ place: 'Admin → Visitors & users → Visitors → Swarms', scope: 'item', checks: [{ id: 'scraper-swarms' }], shown: [{ title: 'Swarm', text: swarmText(r) }] })} />
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {idle.length > 0 && (
+        <ul className="mt-3 space-y-1.5 text-[11px] text-faint">
+          {idle.map(o => (
+            <li key={o.ua} className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 flex-1 truncate" title={o.text || o.ua}>{o.mode === 'trust' ? 'Trusted' : 'Always challenged'}: {o.text || o.ua} (no traffic today)</span>
+              {sw(o.ua)}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-[10px] text-faint">
+        A group = one browser name + country + network. It is challenged when 40+ of its addresses in an hour (or 300+ of one browser name in a day) show almost no person (under 5% scrolled or clicked), and stays so for 6 hours. Admins, real search engines, signed-in accounts with a confirmed email and browsers that passed the Quick check are never challenged; its other visitors get the Quick check instead of pages and are not counted as visitors. Trust stops it at once.
+      </p>
+    </div>
+  )
+}
+
 /** Admin: people on the site now, and unique visitors (one per IP) today / 7 / 30 days, with a 30-day bar chart. */
 export default function VisitorsCard() {
   const [v, setV] = useState<Visitors | null>(null)
   const [err, setErr] = useState(false)
+  const reloadRef = useRef<() => void>(() => {})
   useEffect(() => {
     let off = false
     const load = () => axios.get(`${API_URL}/admin/visitors`).then(r => { if (!off) { setV(r.data.data); setErr(false) } }).catch(() => !off && setErr(true))
     load()
+    reloadRef.current = load
     const stop = poll(load) // fix273: every 5 min, paused while the tab is hidden (the summary is rebuilt every 5 min)
     return () => { off = true; stop() }
   }, [])
@@ -250,7 +332,7 @@ export default function VisitorsCard() {
         {tile('Last 30 days', v?.last30, v?.returning30 != null ? `${v.returning30} came back on another day${old && v.last30All != null ? ` · old count ${v.last30All}` : ''}` : undefined)}
       </div>
       {v?.botReasons && v.botReasons.length > 0 && (
-        <p className="mt-2 text-[11px] text-faint">Filtered today: {v.botReasons.map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}{v.datacentre && !v.datacentre.loaded ? ` · data-centre list: ${v.datacentre.status}` : ''}{old && v.onlineAll != null ? ` · online now, all callers: ${v.onlineAll}` : ''}</p>
+        <p className="mt-2 text-[11px] text-faint">{v.botSplit ? `Bots today: ${n0(v.botSplit.crawlers)} crawlers (verified) · ${n0(v.botSplit.swarms)} swarms · ${n0(v.botSplit.other)} other — ` : ''}Filtered today: {v.botReasons.map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}{v.datacentre && !v.datacentre.loaded ? ` · data-centre list: ${v.datacentre.status}` : ''}{old && v.onlineAll != null ? ` · online now, all callers: ${v.onlineAll}` : ''}</p>
       )}
       <div className="mt-5">
         <div className="flex items-end gap-[3px] h-28">
@@ -273,6 +355,7 @@ export default function VisitorsCard() {
       </div>
       {v?.countries && <Countries c={v.countries} geo={v.geo ?? v.countries.geo} />}
       {v?.crawlers && <CrawlersCard c={v.crawlers} />}
+      {v?.swarms && <SwarmsCard rows={v.swarms} overrides={v.swarmOverrides || []} reload={() => reloadRef.current()} />}
       {v?.who && <WhoCard w={v.who} />}
     </section>
   )

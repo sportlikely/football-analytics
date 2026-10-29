@@ -269,6 +269,14 @@ export function buildSummary(items: { at: string; area: string; title: string; d
   };
 }
 
+/**
+ * fix277: lines the summary always carries when they have something to say (e.g. "Swarms challenged today: …"), added
+ * by the service that knows them; not stored as fixes (no Undo).
+ */
+type SummaryLine = { area: string; title: string; href?: string | null };
+const summaryLines: (() => SummaryLine | null)[] = [];
+export const addSummaryLine = (fn: () => SummaryLine | null) => { summaryLines.push(fn); };
+
 /** 07:00 Israel time (checked every 5 minutes): one email with everything that fixed itself since the last one. */
 export async function dailySummaryTick(now = Date.now()): Promise<{ sent: boolean; items: number } | null> {
   const p = israelParts(now);
@@ -276,10 +284,12 @@ export async function dailySummaryTick(now = Date.now()): Promise<{ sent: boolea
   if (db.prepare(`SELECT 1 FROM admin_summary_log WHERE day = ?`).get(p.day)) return null;
   const items = db.prepare(`SELECT id, at, area, title, detail, href FROM admin_auto_fixes WHERE summary_day IS NULL ORDER BY at`).all() as any[];
   db.prepare(`INSERT OR IGNORE INTO admin_summary_log (day, sent_at, items) VALUES (?, ?, ?)`).run(p.day, new Date(now).toISOString(), items.length);
-  if (!items.length) return { sent: false, items: 0 };
-  const { subject, mail } = buildSummary(items);
+  const extra = summaryLines.map(f => { try { return f(); } catch { return null; } }).filter((x): x is SummaryLine => !!x)
+    .map(x => ({ at: new Date(now).toISOString(), area: x.area, title: x.title, detail: null, href: x.href || null }));
+  if (!items.length && !extra.length) return { sent: false, items: 0 };
+  const { subject, mail } = buildSummary([...items, ...extra]);
   const sent = await sendAdminMail(subject, mail);
-  db.prepare(`UPDATE admin_auto_fixes SET summary_day = ? WHERE summary_day IS NULL AND id <= ?`).run(p.day, items[items.length - 1].id);
+  if (items.length) db.prepare(`UPDATE admin_auto_fixes SET summary_day = ? WHERE summary_day IS NULL AND id <= ?`).run(p.day, items[items.length - 1].id);
   db.prepare(`DELETE FROM admin_auto_fixes WHERE at < ?`).run(new Date(now - 90 * 86400000).toISOString());
   logger.info(`admin daily summary: ${items.length} automatic fix(es)${sent ? ' emailed' : ''}`);
   return { sent, items: items.length };

@@ -112,7 +112,8 @@ import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from '
 import { archivedAsset } from './services/assetArchive';
 import { definePage, getPage, fallbackQuery, refreshPages, rebuildPage, pageCacheStatus, pageMemStatus, pageHotStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { appPageFor, copyLooksRight } from './utils/pageLang';
-import { trackVisit, visitorsAnswer, visitSeen } from './services/visitors';
+import { trackVisit, visitorsAnswer, visitSeen, markSwarmVisit } from './services/visitors';
+import { swarmHitOf, swarmCheck, swarmRefused, swarmTrusted, swarmSeen, swarmPassed, swarmRows, setSwarmOverride, swarmOverrides, swarmVerdictOf } from './services/swarmGuard';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions, viewIdOf, makePass, readPass, PASS_COOKIE, PASS_MS } from './services/proxyGuard';
 import { noteNetworkRequest, noteWho, notePassed } from './services/proxyScrapers';
@@ -183,7 +184,7 @@ import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Pr
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, crawlerCheck, costCapped } from './services/afUsage';
 import { clientIpMiddleware } from './services/edgeHops';
-import { noteCrawlerResponse, inGoogleRanges, noteGooglebotSample, noteEdgeAsnVerified } from './services/crawlerIps';
+import { noteCrawlerResponse, inGoogleRanges, noteGooglebotSample, noteEdgeAsnVerified, crawlerByList } from './services/crawlerIps';
 import { makeTrustProxy } from './utils/clientIp';
 import { engineOfUa } from './utils/crawlerRanges';
 import { botGate, isBotUa } from './services/botGate';
@@ -543,16 +544,36 @@ app.use('/api', (req, _res, next) => {
   if (cap && !nw) logScraperOnce(`cap:${cap.key}:${cap.key === 'ip' ? ipH : cap.key === 'ua' ? keys.ua : keys.user}`, req,
     `provider-cost cap: ${cap.calls} provider calls today by this ${cap.key === 'ip' ? 'address' : cap.key === 'ua' ? 'user-agent' : 'account'} (cap ${cap.cap}): stored data only until midnight UTC`);
   // fix244: page views per address (X-SL-View), a browser that passed the Quick check only its own pass limit
-  const pass = proxy && !isWorker ? passOf(req, ua) : null;
-  const refused = !isWorker && proxy && countedRead(req.method, req.originalUrl.split('?')[0])
+  const pass = !isWorker ? passOf(req, ua) : null;
+  const counted = countedRead(req.method, req.originalUrl.split('?')[0]);
+  const refused = !isWorker && proxy && counted
     ? proxyLimiter.hit(ipH, nw!.asn, { view: viewIdOf(req.get('x-sl-view')), pass: pass?.ok ? pass.id : null }) : null;
-  if (nw && !isWorker) noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, capped: !!cap, fakeCrawler: fake, verified: crawler, exempt: !proxy && !crawler, passed: !!pass?.ok, passRefused: refused && pass ? pass.id : null });
+  if (nw && !isWorker) noteNetworkRequest(nw, ipH, req.ip || '', ua, { refused: refused?.scope, capped: !!cap, fakeCrawler: fake, verified: crawler, exempt: !proxy && !crawler, passed: proxy && !!pass?.ok, passRefused: refused && pass ? pass.id : null });
   if (refused) {
     _res.set('Retry-After', String(refused.retryAfter));
     // check: the app opens the Quick check (a pass that reached its own limit: the plain message)
     return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.', proxy: true, check: !!passKey() && refused.scope !== 'pass-hour' });
   }
-  afSource.run({ kind: 'page', ua, crawler, keys, ...(cap || (claims && !crawler) || proxy ? { offline: true } : {}) }, next);
+  // fix277: a scraper swarm (many addresses, one script: services/swarmGuard.ts) — signed out, every read gets the Quick check
+  const swHit = !isWorker ? swarmHitOf(req.ip, ua) : null;
+  const sw = swarmCheck(swHit, { admin: false, verifiedCrawler: crawler, verifiedAccount: !!req.user?.emailVerified, signedIn: !!req.user, pass: !!pass?.ok, counted });
+  if (sw.act) {
+    (req as any).slSwarm = true;
+    if (sw.act !== 'pass') markSwarmVisit(req);
+    if (sw.act === 'challenge') {
+      swarmRefused(swHit!, swarmTrusted(ua) || !!crawlerByList(ua, req.ip));
+      _res.set('Retry-After', '3600');
+      return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.', proxy: true, swarm: true, check: !!passKey() });
+    }
+    // a pass holder: its own hourly limit only (already counted above on a data-centre network)
+    const passRefused = sw.act === 'pass' && counted && !proxy ? proxyLimiter.hit(ipH, 0, { view: viewIdOf(req.get('x-sl-view')), pass: pass!.id }) : null;
+    if (passRefused) {
+      _res.set('Retry-After', String(passRefused.retryAfter));
+      return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.', proxy: true, check: false });
+    }
+    if (sw.act === 'member' && !req.user) (req as any).proxyAnon = true;
+  }
+  afSource.run({ kind: 'page', ua, crawler, keys, ...(cap || (claims && !crawler) || proxy || sw.act === 'member' ? { offline: true } : {}) }, next);
 });
 every('proxy limits cleanup', () => proxyLimiter.prune(), 5 * 60000).unref();
 /** fix166: team / player pages of every sport make no provider call for a crawler (stored or database data only). */
@@ -887,6 +908,7 @@ app.post('/api/auth/quick-check', jsonOnly, async (req, res) => {
   res.cookie(PASS_COOKIE, makePass(key, ua, Date.now(), randomBytes(12).toString('base64url')), { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: PASS_MS, path: '/' });
   const nw = req.ip ? networkOf(req.ip) : null;
   if (nw) notePassed(nw, ipKey(req), req.ip || '', ua);
+  swarmPassed(swarmHitOf(req.ip, ua)); // fix277: a person in this group
   res.json({ ok: true });
 });
 app.get('/api/auth/signup-token', (_req, res) => {
@@ -1513,6 +1535,12 @@ app.get('/api/admin/client-errors', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ data: clientErrorList(Math.min(30, parseInt(String(req.query.days || '30'), 10) || 30)) });
 });
+// fix277: Admin → Visitors → Swarms: "Always challenge" / "Trust" one user-agent (mode null = the rules again); the web process applies it at once
+app.post('/api/admin/swarms/:ua([a-f0-9]{16})', jsonOnly, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const mode = req.body?.mode === 'trust' || req.body?.mode === 'challenge' ? req.body.mode : null;
+  try { res.json({ data: setSwarmOverride(req.params.ua, mode, req.user?.email || null) }); } catch (e) { sendError(res, e, 'Could not save'); }
+});
 app.post('/api/admin/client-errors/:sig([a-f0-9]{16})', jsonOnly, (req, res) => {
   resolveClientError(req.params.sig, !!req.body?.resolved);
   res.json({ data: { ok: true } });
@@ -1815,7 +1843,7 @@ app.post('/api/admin/db-space/vacuum', async (req, res) => {
 });
 app.get('/api/admin/waitlist', (_req, res) => res.json({ data: waitlistStats() }));
 // fix273: a stored string the worker builds every 5 min (services/visitors.ts) + the web's live numbers — no query here
-app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store').type('application/json').send(visitorsAnswer()); });
+app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store').type('application/json').send(visitorsAnswer({ swarms: swarmRows(), swarmOverrides: swarmOverrides() })); });
 app.get('/api/admin/news', (_req, res) => res.json({ data: newsStatus() }));
 
 app.post('/api/auth/login', jsonOnly, async (req, res) => {
@@ -2116,7 +2144,12 @@ function sendError(res: express.Response, error: any, fallback: string) {
 // fix183: the browser's "seen" beacon (a person: page visible 5+ s and a scroll / click / key / touch). Nothing stored
 // but the salted visitor hash, as for every visit; always 204 so the answer tells a script nothing.
 app.post('/api/visit/seen', (req, res) => {
-  try { visitSeen(req, (req as any).crawlerClaim ?? null); } catch { /* never fails the page */ }
+  try {
+    // fix277: the beacon's signs count for the swarm rules (a group without people is a swarm); a swarm's beacon is no visit
+    const ua = uaKey(req.get('user-agent'));
+    const v = swarmSeen(swarmHitOf(req.ip, ua), req.body || {}, req.access === 'admin' || isVerifiedCrawler(req));
+    visitSeen(req, (req as any).crawlerClaim ?? null, !!v?.swarm);
+  } catch { /* never fails the page */ }
   res.status(204).end();
 });
 
@@ -4757,7 +4790,9 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     res.status(404).set({ 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-store' }).type('html').send(hiddenLangHtml);
   });
   app.get(/^(\/(de|es|fr|it|pt|tr|id|hi|pl|el|ru|ar|he))?\/quick-check\/?$/, (req, res) => {
-    res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html').send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey()));
+    const ua = uaKey(req.get('user-agent')), hit = swarmHitOf(req.ip, ua);
+    const kind = hit && !isVerifiedCrawler(req) && swarmVerdictOf(hit) ? 'swarm' : 'proxy';
+    res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html').send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey(), kind));
   });
   app.get(/^(?!\/api\/|\/socket\.io\/).*/, async (req, res) => {
     // fix243: a bot's page takes a slot (services/botGate.ts): over the limit 503 + Retry-After; browsers never wait here
@@ -4798,6 +4833,23 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     // fix199: a page read from a data-centre / proxy address counts towards its limits (sign-in / sign-up pages never)
     const nw = req.access !== 'admin' && !req.user?.emailVerified && req.ip ? networkOf(req.ip) : null;
     const authPage = /^(\/[a-z]{2})?\/(login|signup|join|forgot|verify|account|reset|privacy|terms|contact)(\/|$)/.test(req.path);
+    // fix277: a scraper swarm signed out gets the Quick check instead of the page (no crawler HTML); a pass its own limit
+    if (req.access !== 'admin' && !authPage) {
+      const ua = uaKey(req.get('user-agent'));
+      const verified = isVerifiedCrawler(req) || (claimsCrawler(ua) && crawlerVerdict(req.ip, ua) === true);
+      const pass = verified ? null : passOf(req, ua);
+      const hit = swarmHitOf(req.ip, ua);
+      const sw = swarmCheck(hit, { admin: false, verifiedCrawler: verified, verifiedAccount: !!req.user?.emailVerified, signedIn: !!req.user, pass: !!pass?.ok, counted: true, page: true });
+      if (sw.act === 'challenge') {
+        swarmRefused(hit!, swarmTrusted(ua) || !!crawlerByList(ua, req.ip));
+        noteHtml(req, false, true);
+        return res.status(429).set({ 'Retry-After': '3600', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html')
+          .send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey(), 'swarm'));
+      }
+      const passRefused = sw.act === 'pass' && !nw ? proxyLimiter.hit(ipKey(req), 0, { page: true, pass: pass!.id }) : null;
+      if (passRefused) return res.status(429).set({ 'Retry-After': String(passRefused.retryAfter), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html')
+        .send(quickCheckPage(qcLangOf(req.path), null, 'swarm'));
+    }
     if (nw && !authPage) {
       const ua = uaKey(req.get('user-agent')), ipH = ipKey(req);
       const verified = isVerifiedCrawler(req) || (claimsCrawler(ua) && crawlerVerdict(req.ip, ua) === true);
