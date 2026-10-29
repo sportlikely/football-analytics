@@ -13,7 +13,9 @@
  *       (played = W+D+L, goal difference = GF−GA) · stored results whose outcome doesn't match the score
  *       · model history (results feed) missing games that were played
  *
- * A problem that stays for 6 runs in a row (30 minutes) is emailed to ADMIN_EMAILS, at most once every 6 hours.
+ * fix279: only what a person can act on is emailed (a feed stopped for 2 h+, a failed deploy, the disk filling within 3
+ * days: utils/alertRules.ts), once per problem, at most one data alert every 6 hours — all stored in the database
+ * (adminMail.ts), so a deploy never sends again. The rest goes to the For Claude list and the 07:00 summary.
  */
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -22,7 +24,8 @@ import { afUpcoming, afWithPredictions, afOverdue, fallbackReason } from './afMa
 import { afConfigured } from './apiFootball';
 import { feedState, bootedAt } from './freshness';
 import { emailEnabled, sendEmail } from './email';
-import { renderAdminMail, adminUrl, israelTime as ilTime, type AdminMail } from './adminMail';
+import { renderAdminMail, adminUrl, type AdminMail, trackAlerts, markEmailed, limitOk } from './adminMail';
+import { DATA_ALERT_GAP_MS } from '../utils/alertRules';
 import { lastDataAudit, leagueShare, AUDIT_TARGET } from './dataAudit';
 import { everyHeavy, afterHeavy, heavySlicer, inBatches } from './perf';
 import { missingPredictions } from './missingPredictions';
@@ -531,8 +534,6 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
 /* ---------------- scheduler + email ---------------- */
 
 const store = createHealthStore(db);
-const failStreak = new Map<string, number>();
-let lastEmailAt = 0;
 
 /** fix200: the last stored report (null before the first run on a fresh database) */
 export const lastDataHealth = () => store.read();
@@ -545,17 +546,17 @@ export const dataHealthHistory = (id: string) => store.history(id);
 /** Alert email (fix239: the admin template): what has been failing for 30+ minutes, then what still works. */
 export function healthEmail(failing: Check[], all: Check[]) {
   const okCount = all.filter(c => c.level === 'ok').length;
-  const title = failing.length === 1 ? `${failing[0].label}: failing for 30+ minutes` : `${failing.length} data checks failing for 30+ minutes`;
+  const title = failing.length === 1 ? `${failing[0].label}: failing` : `${failing.length} data checks failing`;
   const mail: AdminMail = {
     label: 'Data health', tone: 'fail', title,
-    what: `${failing.length === 1 ? `“${failing[0].label}” has` : `${failing.length} checks have`} been red since ${ilTime(Date.now() - 30 * 60000, false)} or earlier; ${okCount} of ${all.length} checks are still fine.`,
+    what: `${failing.length === 1 ? `“${failing[0].label}” has` : `${failing.length} checks have`} been red for a while (a feed 2 hours, anything else 30 minutes); ${okCount} of ${all.length} checks are still fine.`,
     todo: 'Open the check in Admin and do what its card says; most feeds recover by themselves, so tell Claude only if it is still red in a few hours.',
     rows: [
       ...failing.map(c => ({ title: c.label, detail: [c.detail, ...(c.items || []).slice(0, 6)].join(' · ') + ((c.items?.length || 0) > 6 ? ` · +${c.items!.length - 6} more` : ''), tone: 'fail' as const })),
       ...all.filter(c => !failing.includes(c) && c.level !== 'ok').slice(0, 8).map(c => ({ title: c.label, detail: c.detail, tone: c.level === 'warn' ? 'warn' as const : 'fail' as const }))
     ],
     buttons: [{ text: 'Open in Admin', href: adminUrl('needs-you') }],
-    footer: 'At most one data alert every 6 hours; it stops by itself once the feed recovers.'
+    footer: 'One email per problem: while it stays red it is listed once a day in the 07:00 summary, not emailed again. At most one data alert every 6 hours.'
   };
   const subject = `Site problem: ${failing.map(c => c.label).slice(0, 2).join(', ')}${failing.length > 2 ? ` +${failing.length - 2}` : ''}`;
   return { subject, ...renderAdminMail(mail) };
@@ -566,18 +567,32 @@ async function run() {
     const last = await dataHealth();
     store.save(last);
     const failing = last.checks.filter(c => c.level === 'fail');
-    for (const c of last.checks) failStreak.set(c.id, c.level === 'fail' ? (failStreak.get(c.id) || 0) + 1 : 0);
-    const persistent = failing.filter(c => (failStreak.get(c.id) || 0) >= 6); // 30 minutes at 5-minute runs
     if (failing.length) logger.warn(`Data health: ${failing.map(c => c.label).join(', ')}`);
-    const to = (process.env.ADMIN_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
-    if (persistent.length && emailEnabled && to.length && Date.now() - lastEmailAt > 6 * 3600 * 1000) {
-      lastEmailAt = Date.now();
-      const { subject, html, text } = healthEmail(persistent, last.checks);
-      for (const addr of to) await sendEmail(addr, subject, html, text).catch(() => undefined);
-    }
+    await alertFrom(last.checks);
   } catch (e: any) {
     logger.warn(`Data health run failed: ${e.message}`);
   }
+}
+
+/**
+ * fix279: the email part, every state in the database (a deploy never sends again): only checks a person can act on
+ * (utils/alertRules.ts), each problem once while it stays red, at most one data alert every 6 hours.
+ */
+export async function alertFrom(checks: Check[], now = Date.now()): Promise<{ sent: string[] }> {
+  const to = (process.env.ADMIN_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
+  const due = pickDataAlert(checks, now, emailEnabled && to.length > 0);
+  if (!due.length) return { sent: [] };
+  const { subject, html, text } = healthEmail(due, checks);
+  for (const addr of to) await sendEmail(addr, subject, html, text).catch(() => undefined);
+  return { sent: due.map(c => c.id) };
+}
+/** the checks this run emails (state moved on, the 6-hour clock and "emailed" stored); `canSend` false = none */
+export function pickDataAlert(checks: Check[], now = Date.now(), canSend = true): Check[] {
+  const due = trackAlerts(checks, now);
+  if (!due.length || !canSend) return [];
+  if (!limitOk('data-alert', DATA_ALERT_GAP_MS, now)) return [];
+  markEmailed(due.map(c => c.id), now);
+  return due;
 }
 
 export function startDataHealthScheduler() {

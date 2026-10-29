@@ -82,6 +82,7 @@
     "test:fix277": "tsc && node --no-warnings --test --test-force-exit scripts/fix277.test.ts",
     "test:fix199": "node --no-warnings --test scripts/proxy-guard.test.ts",
     "test:fix278": "tsc && node --no-warnings --test --test-force-exit scripts/fix278.test.mjs",
+    "test:fix279": "tsc && node --no-warnings --test --test-force-exit scripts/fix279.test.mjs",
     "test:fix260": "tsc && node --no-warnings --test --test-force-exit scripts/fix260.test.mjs",
     "test:site": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings scripts/site-test.mjs",
     "test:links": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings scripts/links-test.mjs",

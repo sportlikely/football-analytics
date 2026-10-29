@@ -98,7 +98,7 @@ const server = app.listen(0, '127.0.0.1', async () => {
   for (const s of samples) {
     const first = await open(s.url);
     const second = await open(s.url);
-    out.push({ ...s, onWorker: !!workerRouteOf(s.url.split('?')[0]), first, second });
+    out.push({ ...s, onWorker: !!workerRouteOf(s.url.split('?')[0]), instant: !!workerRouteOf(s.url.split('?')[0])?.instant, first, second });
   }
   console.log(JSON.stringify({ isWeb: role.isWeb, builds: webBuilds(), out }));
   process.exit(0);
@@ -117,7 +117,8 @@ test('the web process builds nothing: every public route and crawler page', () =
   for (const x of res.out) {
     if (x.first.built || x.second.built) bad.push(`${x.url}: a page builder ran in the web process`);
     if (x.second.ms > LIMIT_MS) bad.push(`${x.url}: ${x.second.ms} ms (database ${x.second.dbMs} ms) — over ${LIMIT_MS} ms`);
-    if (x.by === 'worker' && x.second.status !== 503) bad.push(`${x.url}: answered ${x.second.status} by the web process (a worker route: it must be passed on)`);
+    // fix279: an 'instant' worker route (game bundle, a team's news) answers 202 pending at once and passes it on in the background
+    if (x.by === 'worker' && x.second.status !== 503 && !(x.instant && x.second.status === 202)) bad.push(`${x.url}: answered ${x.second.status} by the web process (a worker route: it must be passed on)`);
     if (x.by !== 'worker' && x.onWorker) bad.push(`${x.url}: listed as ${x.by} but matched by WORKER_ROUTES`);
   }
   const slowest = [...res.out].sort((a, b) => b.second.ms - a.second.ms).slice(0, 5).map(x => `${x.url} ${x.second.ms} ms`);

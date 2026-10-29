@@ -34,7 +34,9 @@
   delete -wal/-shm. Admin card "Database backups" with "Back up now" and download (needs a fresh two-step code).
 - Data health (`dataHealth.ts`, `/api/data-health`): feeds, settling, duplicates, probabilities, tables, player pages
   (`dataAudit.ts` daily; target ~97% matched). Site errors from visitors' browsers (`clientErrors.ts`, Admin → Site errors,
-  email on a new problem).
+  on the For Claude list — fix279: no email). fix279: a data check emails only when a person can act (a feed red 2 h+, a
+  failed deploy, the disk full within 3 days: `utils/alertRules.ts`), once per problem, at most one data alert every 6 h,
+  all stored in the database (`admin_mail_limit`, `admin_alert_state`); the rest = For Claude list + 07:00 summary.
 - Email: Google Workspace (yarin@sportlikely.com; contact@, privacy@, billing@ aliases; support@ group), Resend for
   transactional mail, SPF/DKIM/DMARC pass (`p=quarantine` → `p=reject` early Nov).
 - SEO (`seo.ts`): per-page titles/descriptions/canonical/hreflang/JSON-LD, crawler HTML, `/sitemap.xml` (~1,077 URLs),

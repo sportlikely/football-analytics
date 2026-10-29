@@ -21,8 +21,7 @@ import footballDataAPI from './footballDataAPI';
 import { findPlayer, playerPage, FD_TO_AF } from './playerPage';
 import { afRemaining } from './apiFootball';
 import { getAfScorers } from './afMatches';
-import { emailEnabled, sendEmail } from './email';
-import { renderAdminMail, adminUrl, israelTime, type AdminMail } from './adminMail';
+import { renderAdminMail, adminUrl, israelTime, noteForClaude, type AdminMail } from './adminMail';
 import { every, after } from './perf';
 import { leaguesUnderFor, dueForEmail, isKnownGap, goalGap, STREAK_DAYS, STREAK_SHARE, KNOWN_CHECKS, type AuditRun, type PastIssue } from '../utils/auditStreak';
 
@@ -314,15 +313,14 @@ export function auditEmail(report: any, under: { league: string; since: string; 
   return { subject, ...renderAdminMail(mail) };
 }
 
-// fix254: an email only when a league stays under 90% for 7 days (at most once a week per league)
+// fix254: a league under 90% for 7 days (at most once a week per league) — fix279: no email any more (nothing for
+// Yarin to do): one line in the 07:00 summary ("For Claude"), the differences on the For Claude list
 async function emailReport(report: any) {
-  const to = (process.env.ADMIN_EMAILS || '').split(',').map(x => x.trim()).filter(Boolean);
-  if (!emailEnabled || !to.length) return;
   const sent = Object.fromEntries((db.prepare(`SELECT league, sent_at FROM data_audit_mail`).all() as any[]).map(r => [r.league, r.sent_at]));
   const due = dueForEmail(leaguesUnderFor(recentAuditRuns()), sent);
   if (!due.length) return;
-  const { subject, html, text } = auditEmail(report, due);
-  for (const addr of to) await sendEmail(addr, subject, html, text);
+  const { subject } = auditEmail(report, due);
+  noteForClaude(subject);
   const at = new Date().toISOString();
   for (const u of due) db.prepare(`INSERT OR REPLACE INTO data_audit_mail (league, sent_at) VALUES (?, ?)`).run(u.league, at);
 }

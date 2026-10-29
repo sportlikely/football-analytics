@@ -17,6 +17,7 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { emailEnabled, sendMail, esc, SITE } from './email';
 import { pubPath } from './slugs';
+import { stepAlert, wantsEmail, alertClass, RED_MS, type AlertRow } from '../utils/alertRules';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS admin_email_actions (
@@ -29,6 +30,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_admin_auto_fixes_day ON admin_auto_fixes(summary_day);
   CREATE TABLE IF NOT EXISTS admin_summary_log (day TEXT PRIMARY KEY, sent_at TEXT NOT NULL, items INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS admin_alert_once (key TEXT NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (key, day));
+  CREATE TABLE IF NOT EXISTS admin_mail_limit (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS admin_alert_state (id TEXT PRIMARY KEY, label TEXT NOT NULL, red_since INTEGER NOT NULL, emailed_at INTEGER, green_since INTEGER);
 `);
 
 const LIME = '#c6f432', INK = '#0b0e13', TEXT = '#111419', MUTED = '#5d6573', LINE = '#e3e6eb', SOFT = '#f3f5f7';
@@ -228,6 +231,67 @@ export async function alertOncePerDay(key: string, subject: string, m: AdminMail
   return sendAdminMail(subject, m);
 }
 
+/* ---------- fix279: limits that survive a restart ---------- */
+
+/**
+ * true (and the clock restarts) when nothing under `key` was sent in the last `gapMs`; false otherwise. Stored in the
+ * database, so a deploy never resets it (the 6-hour data-alert clock lived in memory: every deploy could send again).
+ */
+export function limitOk(key: string, gapMs: number, now = Date.now()): boolean {
+  try {
+    const r = db.prepare(`INSERT INTO admin_mail_limit (key, at) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET at = excluded.at WHERE admin_mail_limit.at <= ?`)
+      .run(key, now, now - gapMs);
+    return r.changes > 0;
+  } catch { return false; }
+}
+/** when `key` was last sent (null = never) */
+export function limitAt(key: string): number | null {
+  try { return (db.prepare(`SELECT at FROM admin_mail_limit WHERE key = ?`).get(key) as any)?.at ?? null; } catch { return null; }
+}
+
+/* ---------- fix279: one email per problem (data health) ---------- */
+
+const rowOf = (r: any): AlertRow => ({ id: r.id, label: r.label, redSince: r.red_since, emailedAt: r.emailed_at ?? null, greenSince: r.green_since ?? null });
+export function alertRows(): AlertRow[] {
+  try { return (db.prepare(`SELECT * FROM admin_alert_state`).all() as any[]).map(rowOf); } catch { return []; }
+}
+
+/**
+ * Every run of the checks: each check's stored state moves on (red since / emailed / green since) and the checks this
+ * run may email come back (a feed red for 2 h+, a failed deploy or a disk filling within 3 days, red for 30 min+, not
+ * emailed yet for this problem). The caller sends them and calls markEmailed.
+ */
+export function trackAlerts<C extends { id: string; label: string; level: string; detail?: string; items?: string[] }>(checks: C[], now = Date.now()): C[] {
+  const prev = new Map(alertRows().map(r => [r.id, r]));
+  const due: C[] = [];
+  const put = db.prepare(`INSERT OR REPLACE INTO admin_alert_state (id, label, red_since, emailed_at, green_since) VALUES (?, ?, ?, ?, ?)`);
+  const del = db.prepare(`DELETE FROM admin_alert_state WHERE id = ?`);
+  const seen = new Set<string>();
+  for (const c of checks) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    const p = prev.get(c.id) || null;
+    const next = stepAlert(p, c, now);
+    if (!next) { if (p) del.run(c.id); continue; }
+    if (!p || p.label !== next.label || p.redSince !== next.redSince || p.emailedAt !== next.emailedAt || p.greenSince !== next.greenSince)
+      put.run(next.id, next.label, next.redSince, next.emailedAt, next.greenSince);
+    if (wantsEmail(next, c, now)) due.push(c);
+  }
+  return due;
+}
+export function markEmailed(ids: string[], now = Date.now()) {
+  const up = db.prepare(`UPDATE admin_alert_state SET emailed_at = ? WHERE id = ?`);
+  for (const id of ids) up.run(now, id);
+}
+/** red right now: emailed ones ("still red since") and the quiet ones (For Claude), red for 30 min+ */
+export function redNow(now = Date.now()) {
+  const rows = alertRows().filter(r => r.greenSince == null && now - r.redSince >= RED_MS).sort((a, b) => a.redSince - b.redSince);
+  return {
+    stillRed: rows.filter(r => r.emailedAt != null).map(r => ({ id: r.id, label: r.label, since: new Date(r.redSince).toISOString(), emailedAt: new Date(r.emailedAt!).toISOString() })),
+    forClaude: rows.filter(r => r.emailedAt == null).map(r => ({ id: r.id, label: r.label, since: new Date(r.redSince).toISOString(), quiet: alertClass(r.id) === 'quiet' }))
+  };
+}
+
 /* ---------- the daily summary of what fixed itself ---------- */
 
 /** Something fixed itself: it goes into tomorrow morning's summary instead of its own email. */
@@ -238,6 +302,9 @@ export function noteAutoFix(area: string, title: string, detail?: string | null,
   } catch (e: any) { logger.warn(`auto-fix note: ${e?.message || e}`); }
 }
 
+/** fix279: a check with nothing for a person to do: one line in the next 07:00 summary ("For Claude"), never an email */
+export const noteForClaude = (title: string, detail?: string | null) => noteAutoFix('For Claude', title, detail, adminUrl('needs-you'));
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** fix253: three lines per kind (in the order the kinds first happened), then "+N more" for that kind */
 export function summaryRows(items: { at: string; area: string; title: string; detail: string | null; href: string | null }[], per = 3): MailRow[] {
@@ -245,24 +312,30 @@ export function summaryRows(items: { at: string; area: string; title: string; de
   for (const i of items) { const l = by.get(i.area) || []; l.push(i); by.set(i.area, l); }
   const rows: MailRow[] = [];
   for (const [area, l] of by) {
-    for (const i of l.slice(0, per)) rows.push({ when: `${israelTime(i.at)} · ${area}`, title: i.title, titleHref: i.href, detail: i.detail || undefined, tone: 'ok' as Tone });
-    if (l.length > per) rows.push({ when: area, title: `+${l.length - per} more ${area.toLowerCase()}`, titleHref: adminUrl('needs-you'), tone: 'ok' as Tone });
+    const tone: Tone = area === 'Still red' ? 'fail' : area === 'For Claude' ? 'info' : 'ok'; // fix279
+    for (const i of l.slice(0, per)) rows.push({ when: `${israelTime(i.at)} · ${area}`, title: i.title, titleHref: i.href, detail: i.detail || undefined, tone });
+    if (l.length > per) rows.push({ when: area, title: `+${l.length - per} more ${area.toLowerCase()}`, titleHref: adminUrl('needs-you'), tone });
   }
   return rows;
 }
 
 /** what the summary says (also used by the test and the admin preview) */
-export function buildSummary(items: { at: string; area: string; title: string; detail: string | null; href: string | null }[]): { subject: string; mail: AdminMail } {
+/** fix279: summary lines that are not fixes (red checks listed once a day), not counted as fixes */
+export const NOT_FIX_AREAS = new Set(['Still red', 'For Claude']);
+export function buildSummary(all: { at: string; area: string; title: string; detail: string | null; href: string | null }[]): { subject: string; mail: AdminMail } {
+  const items = all.filter(i => !NOT_FIX_AREAS.has(i.area));
+  const other = all.length - items.length;
   const results = items.filter(i => /result/.test(i.area)).length;
-  const what = results === items.length ? plural(results, 'result') : results ? `${plural(results, 'result')} and ${plural(items.length - results, 'other fix', 'other fixes')}` : plural(items.length, 'fix', 'fixes');
+  const what = !items.length ? `${plural(other, 'check')} to know about` : results === items.length ? plural(results, 'result') : results ? `${plural(results, 'result')} and ${plural(items.length - results, 'other fix', 'other fixes')}` : plural(items.length, 'fix', 'fixes');
+  const head = items.length ? 'Fixed automatically' : 'Daily summary';
   return {
-    subject: `Fixed automatically: ${what} (daily summary)`,
+    subject: items.length ? `${head}: ${what} (daily summary)` : `${head}: ${what}`,
     mail: {
       label: 'Daily summary', tone: 'ok',
-      title: `Fixed automatically: ${what}`,
-      what: `Since the last summary the site found and fixed ${plural(items.length, 'problem')} by itself; each one is listed below.`,
+      title: `${head}: ${what}`,
+      what: `${items.length ? `Since the last summary the site found and fixed ${plural(items.length, 'problem')} by itself` : 'Nothing needed fixing since the last summary'}${other ? `; ${plural(other, 'check')} ${other === 1 ? 'is' : 'are'} red with nothing for you to do (listed once here, never their own email)` : ''}; each one is listed below.`,
       todo: null,
-      rows: summaryRows(items),
+      rows: summaryRows(all),
       buttons: [{ text: 'Open Done for you in Admin', href: adminUrl('needs-you') }],
       footer: 'One summary a day at 07:00: three lines per kind, the rest (with Undo) in Admin → Needs you → Done for you.'
     }
@@ -274,8 +347,16 @@ export function buildSummary(items: { at: string; area: string; title: string; d
  * by the service that knows them; not stored as fixes (no Undo).
  */
 type SummaryLine = { area: string; title: string; href?: string | null };
-const summaryLines: (() => SummaryLine | null)[] = [];
-export const addSummaryLine = (fn: () => SummaryLine | null) => { summaryLines.push(fn); };
+const summaryLines: (() => SummaryLine | SummaryLine[] | null)[] = [];
+export const addSummaryLine = (fn: () => SummaryLine | SummaryLine[] | null) => { summaryLines.push(fn); };
+// fix279: what was emailed and is still red, and the red checks with nothing to do (For Claude) — listed once a day
+addSummaryLine(() => {
+  const r = redNow();
+  return [
+    ...r.stillRed.map(x => ({ area: 'Still red', title: `${x.label}: still red since ${israelTime(x.since)} (emailed ${israelTime(x.emailedAt)})`, href: adminUrl('needs-you') })),
+    ...r.forClaude.map(x => ({ area: 'For Claude', title: `${x.label}: red since ${israelTime(x.since)}`, href: adminUrl('needs-you') }))
+  ];
+});
 
 /** 07:00 Israel time (checked every 5 minutes): one email with everything that fixed itself since the last one. */
 export async function dailySummaryTick(now = Date.now()): Promise<{ sent: boolean; items: number } | null> {
@@ -284,7 +365,7 @@ export async function dailySummaryTick(now = Date.now()): Promise<{ sent: boolea
   if (db.prepare(`SELECT 1 FROM admin_summary_log WHERE day = ?`).get(p.day)) return null;
   const items = db.prepare(`SELECT id, at, area, title, detail, href FROM admin_auto_fixes WHERE summary_day IS NULL ORDER BY at`).all() as any[];
   db.prepare(`INSERT OR IGNORE INTO admin_summary_log (day, sent_at, items) VALUES (?, ?, ?)`).run(p.day, new Date(now).toISOString(), items.length);
-  const extra = summaryLines.map(f => { try { return f(); } catch { return null; } }).filter((x): x is SummaryLine => !!x)
+  const extra = summaryLines.flatMap(f => { try { return f() ?? []; } catch { return []; } })
     .map(x => ({ at: new Date(now).toISOString(), area: x.area, title: x.title, detail: null, href: x.href || null }));
   if (!items.length && !extra.length) return { sent: false, items: 0 };
   const { subject, mail } = buildSummary([...items, ...extra]);

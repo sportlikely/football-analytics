@@ -26,7 +26,13 @@ import { partsOf } from './gameBundle';
 
 /** shared: the same answer for everyone (fix250: a signed-in visitor gets the signed-out copy too) */
 /** fix263: `stored` = this request is answered by the web from a stored page (pageCache.ts), not by the worker */
-type RouteDef = { re: RegExp; freshMs: number; shared?: boolean; stored?: (req: express.Request) => boolean };
+/**
+ * fix279: `members` = the same answer for every signed-in member as for a signed-out visitor (only an admin's differs):
+ * members get the signed-out copy. `instant` = no copy → 202 pending at once (the copy is fetched in the background).
+ * `ownPending` = a signed-in request that would need its own build is 202 too — never a wait on the worker (the game
+ * bundle: the page's sections then ask their own routes; 29 Oct: /api/game-bundle 5.3 s, 8.8 s for an admin).
+ */
+type RouteDef = { re: RegExp; freshMs: number; shared?: boolean; stored?: (req: express.Request) => boolean; members?: boolean; instant?: boolean; ownPending?: boolean };
 /** fix263: /api/news without a team (a sport's or a league's news) is a stored page; a team's news stays here */
 export const newsIsStored = (req: express.Request) => req.path === '/api/news' && !['team', 'short', 'teamId', 'playerId'].some(k => req.query[k] != null && req.query[k] !== '');
 const S = 1000, MIN = 60 * S;
@@ -42,7 +48,8 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/leagues\/[^/]+\/(standings|results|scorers)$/, freshMs: 2 * MIN },
   { re: /^\/api\/(teams|team-page)\/\d+$/, freshMs: 10 * MIN },
   { re: /^\/api\/player-page\/(\d+|find)$/, freshMs: 30 * MIN },
-  { re: /^\/api\/(today|news|search)$/, freshMs: 2 * MIN, stored: newsIsStored },
+  { re: /^\/api\/(today|search)$/, freshMs: 2 * MIN },
+  { re: /^\/api\/news$/, freshMs: 2 * MIN, stored: newsIsStored, members: true, instant: true }, // fix279: a team's news (29 Oct: 5.1 s)
   { re: /^\/api\/how-it-works\/[a-z-]+$/, freshMs: 10 * MIN },
   { re: /^\/api\/upset-watch$/, freshMs: 5 * MIN }, // fix242: football's upset watch (Pro) is built by the worker like the other sports'
   { re: /^\/api\/more\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 1 * MIN },
@@ -59,7 +66,7 @@ export const WORKER_ROUTES: RouteDef[] = [
   { re: /^\/api\/favorites\/calendar$/, freshMs: 5 * MIN },
   { re: /^\/api\/slug-route$/, freshMs: 1 * MIN }, // fix229: an address outside the web process's slug state
   { re: /^\/api\/extras\/(football|basketball|nfl|tennis)\/(game\/-?\d+|team\/\d+)$/, freshMs: 5 * MIN, shared: true }, // fix231 (the same for everyone)
-  { re: /^\/api\/game-bundle\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 20 * S }, // fix250: a game page's parts in one answer
+  { re: /^\/api\/game-bundle\/(football|basketball|nfl|tennis)\/-?\d+$/, freshMs: 20 * S, instant: true, ownPending: true }, // fix250: a game page's parts in one answer
   { re: /^\/api\/names\/(he|ar)$/, freshMs: 10 * MIN, shared: true } // fix261: names in the local script (the same for everyone)
 ];
 
@@ -292,7 +299,9 @@ export async function workerRoutes(req: express.Request, res: express.Response, 
   // signed in: the plan and the unlocks change the page — the worker's fresh answer, streamed (fix250: cut at 900 ms by
   // services/deadline.ts, the answer kept for the person's next request); a route that is the same for everyone: the copy
   const signedIn = !!(req.user || req.access === 'admin');
-  if (signedIn && !route.shared) { stats.forwarded++; return forwardToWorker(req, res); }
+  const own = signedIn && !route.shared && !(route.members && req.access !== 'admin');
+  if (own && route.ownPending) { stats.pending++; return pending(res); }
+  if (own) { stats.forwarded++; return forwardToWorker(req, res); }
   const k = copyKey(req);
   const have = await readCopy(k);
   if (have) {
@@ -301,7 +310,14 @@ export async function workerRoutes(req: express.Request, res: express.Response, 
     if (stale) { stats.stale++; fetchCopy(k, req, true).then(() => { stats.refreshed++; }, () => { stats.failed++; }); } else stats.served++;
     return;
   }
-  if (signedIn) { stats.forwarded++; return forwardToWorker(req, res); }
+  if (signedIn && !route.members) { stats.forwarded++; return forwardToWorker(req, res); }
+  // fix279: no copy yet → 202 at once; the worker builds it in the background and the copy is kept for the next one
+  if (route.instant && !(req as any).verifiedCrawler) {
+    stats.pending++;
+    pending(res);
+    fetchCopy(k, req, true).catch(() => { stats.failed++; });
+    return;
+  }
   stats.forwarded++;
   waiting(res);
   keepsOwnCopies(res);

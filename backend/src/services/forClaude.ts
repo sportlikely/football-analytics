@@ -16,6 +16,7 @@ import { storedDataHealth, dataHealthHistory } from './dataHealth';
 import { clientErrorList, currentBuild } from './clientErrors';
 import { modelDailyLog } from './modelDaily';
 import { auditForClaude } from './dataAudit';
+import { redNow } from './adminMail';
 import { inboxThread, customerProfile, type Viewer } from './crm';
 
 export interface ForClaudeBody {
@@ -99,6 +100,9 @@ export function forClaudeText(b: ForClaudeBody, who: { viewer?: Viewer; security
     if (c.id === 'site-errors' || c.id === 'for-claude') {
       const rows = clientErrorList(30).rows.filter(r => !r.resolvedAt).sort((x, y) => (x.lastAt < y.lastAt ? 1 : -1)).slice(0, 10);
       sections.push(rows.length ? siteErrorSection(rows) : { title: 'Site errors', lines: ['No open site errors.'] });
+      // fix279: the red checks with nothing for a person to do (never emailed)
+      const red = c.id === 'for-claude' ? redNow(now).forClaude : [];
+      if (red.length) sections.push({ title: 'Red checks (no email, nothing for Yarin to do)', lines: red.map(r => `- ${r.label} (${r.id}): red since ${r.since}`) });
       let dc: ReturnType<typeof auditForClaude> | null = null;
       try { dc = c.id === 'for-claude' ? auditForClaude() : null; } catch { /* no check yet */ }
       if (dc?.differences.length) sections.push({ // fix275: known provider / league differences marked, left out of the %

@@ -669,6 +669,20 @@ const byWorker = (req: express.Request, res: express.Response, here: () => unkno
  */
 const STORED_OR_WORKER = new Set(['guides', 'guide', 'news', 'bb-config']);
 const STORED_WAIT_MS = Number(process.env.STORED_WAIT_MS) || Math.min(600, Number(process.env.PAGE_WAIT_MS) || 600);
+/**
+ * fix279: stored pages the web answers within FAST_STORED_MS (29 Oct 19:00–20:00: /api/public/results 8.9 s, /api/news
+ * 5.1 s — a query with no copy waited for the worker, news went to the worker): a copy at once, else the nearest copy,
+ * else 202 pending (the worker builds it meanwhile). Never a wait for a build, never the worker on the request.
+ */
+const FAST_STORED = new Set(['results', 'record', 'news']);
+const FAST_STORED_MS = Number(process.env.FAST_STORED_MS) || 80;
+async function withinFast<T>(fast: boolean, p: Promise<T>): Promise<T | null> {
+  if (!fast) return p;
+  let t: NodeJS.Timeout | undefined;
+  const late = new Promise<null>(resolve => { t = setTimeout(() => resolve(null), FAST_STORED_MS); });
+  p.catch(() => undefined); // (finished in the background: the copy is kept in memory for the next request)
+  try { return await Promise.race([p, late]); } finally { clearTimeout(t); }
+}
 async function sendStored(req: express.Request, res: express.Response, name: string, q: Query, view: string | null, keep?: Set<number>) {
   // fix222: each phase is its own perf entry ("stored bb-games: read / pick / send"), so a stall names the phase
   const read = track(`stored ${name}: read`);
@@ -677,20 +691,23 @@ async function sendStored(req: express.Request, res: express.Response, name: str
   const views = (req as any).proxyAnon ? ['rows', ...(view ? [view] : [])] : keep?.size ? ['rows'] : view ? [view] : [];
   // fix248: the 'full' ETag (304 check of a member's copy) is read there too
   // fix250: a visitor waits at most 600 ms for a first build (then { pending: true }; the worker stores it meanwhile)
-  try { s = await getPage(name, q, { views, etags: !(req as any).proxyAnon && keep?.size ? ['full'] : undefined, waitMs: isVerifiedCrawler(req) ? undefined : STORED_WAIT_MS }); } finally { read(); }
+  // fix279: the pages answered under 100 ms (FAST_STORED): no wait for a first build, and a read that has not come
+  // back within FAST_STORED_MS (the reader pool busy) is a 202 pending — the copy lands in memory for the next request
+  const fast = FAST_STORED.has(name) && !isVerifiedCrawler(req);
+  try { s = await withinFast(fast, getPage(name, q, { views, etags: !(req as any).proxyAnon && keep?.size ? ['full'] : undefined, waitMs: fast ? 0 : isVerifiedCrawler(req) ? undefined : STORED_WAIT_MS })); } finally { read(); }
   // fix232: counted in data health "Errors during the last deploy" (target 0 after the first 60 s)
   // fix245: a verified search engine never gets this 503: the worker builds the page now and answers
   if (!s && isWeb && isVerifiedCrawler(req)) return forwardToWorker(req, res);
   // fix263: the pages fix263 made stored (guides, news, basketball config) had a worker / web answer before: until their
   // first copy is stored (the first deploy) the worker builds it now — never "Loading"
-  if (!s && isWeb && STORED_OR_WORKER.has(name)) return forwardToWorker(req, res);
+  if (!s && isWeb && STORED_OR_WORKER.has(name) && !fast) return forwardToWorker(req, res);
   // fix252: a query with no copy yet (2 × /api/public/results after the 12:21 deploy on 27 Oct): the page's stand-in copy
   // (PageDef.fallback: a warm query, always stored) while the worker builds this one — never "Loading" when one exists
   if (!s) {
     const fb = fallbackQuery(name, q);
     if (fb) {
       const t = track(`stored ${name}: fallback`);
-      try { s = await getPage(name, fb, { views, waitMs: 0 }); } finally { t(); }
+      try { s = await withinFast(fast, getPage(name, fb, { views, waitMs: 0 })); } finally { t(); }
       if (s) res.set('X-SL-Copy', 'nearest');
     }
   }
@@ -2871,8 +2888,10 @@ app.get('/api/slug/:sport/:kind/:slug', (req, res) => {
   if (hit && kind === 'match' && req.access !== 'admin' && pastMatch(sport, hit.id)) return pastGone(res);
   if (hit) return res.set('Cache-Control', req.access === 'admin' && kind === 'match' ? 'private, no-store' : 'public, max-age=300').json({ data: { id: hit.id, slug: hit.canonical } });
   // fix263: the web holds every slug once its state + id index are in: an unknown one is answered here (the search)
-  if (isWeb && kind !== 'match' && webKnowsSlug(sport, kind)) {
+  // fix279: a match slug we never gave too (an old one: the day's games by their names, from the web's id index)
+  if (isWeb && webKnowsSlug(sport, kind)) {
     const a = linkAnswer(`/${sport}/${kind}/${slug}`);
+    if (a && 'to' in a) return res.set('Cache-Control', 'public, max-age=300').json({ data: { slug: a.to.split('?')[0].split('/').pop() } });
     return res.status(404).set('Cache-Control', 'public, max-age=60').json({ error: 'Not found', search: a && 'search' in a ? a.search : null });
   }
   if (isWeb) return forwardToWorker(req, res);
@@ -3084,8 +3103,12 @@ definePage({
   name: 'news', freshMs: 2 * 60 * 1000, variants: VIEWS_JSON,
   warm: [{ sport: 'football', limit: 10 }, { sport: 'basketball', limit: 10 }, { sport: 'tennis', limit: 10 }, { sport: 'american-football', limit: 10 },
     { sport: 'american-football', league: 'NFL', limit: 10 }, { sport: 'american-football', league: 'NCAA', limit: 10 }],
-  // a league's own news, first time asked: the sport's news while it is built
-  fallback: q => (q.league && q.sport !== 'american-football' ? { sport: q.sport, limit: 10 } : null),
+  // a league's own news, first time asked: the sport's news while it is built; fix279: any other length too (the
+  // warm 10 of that sport / NFL / NCAA list) — never the worker on the request
+  fallback: q => {
+    const near = q.sport === 'american-football' && (q.league === 'NFL' || q.league === 'NCAA') ? { sport: q.sport, league: q.league, limit: 10 } : { sport: q.sport, limit: 10 };
+    return q.league === near.league && Number(q.limit) === 10 ? null : near;
+  },
   build: async q => ({ data: await newsFor({ sport: q.sport as NewsSport, league: q.league || undefined, limit: Number(q.limit) || 12 }), timestamp: new Date().toISOString() })
 });
 app.get('/api/news', async (req, res) => {

@@ -9,7 +9,7 @@
  *  - the trust grade the CRM shows (Real / Unsure / Bot) and an email to the admin when 5+ unverified sign-ups arrive
  *    within an hour.
  */
-import { sendAdminMail, adminUrl } from './adminMail';
+import { sendAdminMail, adminUrl, limitOk, limitAt } from './adminMail';
 import crypto from 'crypto';
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -115,13 +115,14 @@ export function trustOf(u: { id: number; email: string; created_at: string; last
 
 /* ---------- alert: 5+ unverified sign-ups in an hour ---------- */
 
-let alertedAt = 0;
+// fix279: the 6-hour clock is stored (adminMail.limitOk): a deploy never sends it again
 export async function checkSignupSurge() {
-  if (Date.now() - alertedAt < 6 * 3600 * 1000) return;
+  const at = limitAt('signup-surge');
+  if (at && Date.now() - at < 6 * 3600 * 1000) return;
   const since = new Date(Date.now() - 3600 * 1000).toISOString();
   const n = (db.prepare(`SELECT COUNT(*) AS n FROM users WHERE created_at >= ? AND COALESCE(email_verified, 0) = 0`).get(since) as any)?.n || 0;
   if (n < 5) return;
-  alertedAt = Date.now();
+  if (!limitOk('signup-surge', 6 * 3600 * 1000)) return;
   logger.warn(`sign-up alert: ${n} unverified sign-ups in the last hour`);
   // fix239: needs a decision → its own email in the admin template
   await sendAdminMail(`Needs you: ${n} unverified sign-ups in an hour`, {

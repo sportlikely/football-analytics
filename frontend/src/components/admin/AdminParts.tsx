@@ -332,6 +332,16 @@ export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
           </ol>
         </>
       )}
+      {!!ctx.summary?.redChecks?.length && (
+        <div className="mt-4 pt-3 border-t border-line/60">
+          <p className="text-sm text-muted mb-1">Red checks with nothing for you to do (no email; listed in the 07:00 summary):</p>
+          <ul className="divide-y divide-line/50 text-[12px]">
+            {ctx.summary.redChecks.map(r => (
+              <li key={r.id} className="py-1.5 break-words"><span className="text-ink">{r.label}</span> <span className="text-faint">red since {day(r.since)}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
       {dc && dc.differences.length > 0 && (
         <div className="mt-4 pt-3 border-t border-line/60">
           <p className="text-sm text-muted mb-1">Top-scorer check ({day(dc.at)}): <b className="num text-ink">{dc.matched}</b> of {dc.checked - (dc.known || 0)} match · {dc.differences.length + dc.more - (dc.known || 0)} difference(s){dc.known ? ` · ${dc.known} known, not counted` : ''}{dc.under.length ? <> · <span className="text-loss">under 90% for 7+ days: {dc.under.map(u => `${u.name} ${u.share}%`).join(', ')}</span></> : null}</p>

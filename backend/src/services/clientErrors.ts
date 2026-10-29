@@ -22,7 +22,7 @@ import path from 'path';
 import { db } from '../db';
 import { isWeb as isWebProc } from './role';
 import logger from '../utils/logger';
-import { sendAdminMail, adminUrl, siteUrl, israelTime } from './adminMail';
+import { adminUrl, addSummaryLine, israelTime } from './adminMail';
 import { every, after } from './perf';
 import { onUndo, recordDone } from './doneForYou';
 
@@ -67,7 +67,6 @@ export function pageKind(path: string) {
 /** Messages that are not our bug: browser extensions, network drops, a deploy in progress. */
 const NOISE = /ResizeObserver loop|Script error\.?$|chrome-extension:|moz-extension:|safari-extension:|Network Error|Load failed|Failed to fetch|NetworkError|AbortError|cancel(l)?ed|timeout of \d+ms/i;
 
-let emailsToday = { day: '', n: 0 };
 
 export function reportClientError(body: any) {
   const message = clean(body?.message, 300);
@@ -104,33 +103,19 @@ export function reportClientError(body: any) {
         resolved_at = ${stale ? 'resolved_at' : 'NULL'}, fixed_by = ${stale ? 'fixed_by' : 'NULL'}, kept_open = NULL WHERE sig = ?`)
       .run(now, JSON.stringify(pages.slice(0, 20)), JSON.stringify(browsers.slice(0, 10)), version, JSON.stringify(builds.slice(-10)), where, sig);
   }
-  maybeEmail(sig).catch(() => undefined);
   return { ok: true };
 }
 
-async function maybeEmail(sig: string) {
-  const to = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
-  if (!to) return;
-  const r = db.prepare('SELECT * FROM client_errors WHERE sig = ?').get(sig) as any;
-  if (!r || r.resolved_at) return; // fix275: a group fixed by a newer build sends no email
-  if (r.emailed_at && Date.now() - new Date(r.emailed_at).getTime() < 86400000) return;
-  const day = new Date().toISOString().slice(0, 10);
-  if (emailsToday.day !== day) emailsToday = { day, n: 0 };
-  if (emailsToday.n >= 10) return;
-  emailsToday.n++;
-  db.prepare('UPDATE client_errors SET emailed_at = ? WHERE sig = ?').run(new Date().toISOString(), sig);
-  const pages: string[] = JSON.parse(r.pages || '[]');
-  // fix239: the admin template, the page as a clean link, times in Israel time
-  const link = siteUrl(pages[0] || '/');
-  await sendAdminMail(`Site problem: a page broke (${r.page_kind})`, {
-    label: 'Site errors', tone: 'fail',
-    title: `A page broke for visitors (${r.page_kind})`,
-    what: `The ${r.page_kind} page showed an error in a visitor’s browser ${r.count === 1 ? 'once' : `${r.count} times`} so far: “${String(r.message).slice(0, 160)}”.`,
-    todo: 'Nothing to press: it is on the daily “for Claude” list, and it closes itself once a new build stops it.',
-    rows: [{ title: link, titleHref: link, when: `First seen ${israelTime(r.first_at || r.last_at)} · last ${israelTime(r.last_at)}`, detail: [r.where_ ? `Where: ${r.where_}` : '', pages.length > 1 ? `Also on: ${pages.slice(1, 4).join(', ')}` : ''].filter(Boolean).join(' · ') || undefined }],
-    buttons: [{ text: 'Open site errors in Admin', href: adminUrl('site') }, { text: 'Open the page', href: link, kind: 'secondary' }]
-  });
-}
+/*
+ * fix279: no email for a broken page (Yarin, 29 Oct: "Site problem: a page broke" had nothing for him to do) — the open
+ * groups are on the For Claude list (Admin → Needs you) and counted once in the 07:00 summary.
+ */
+addSummaryLine(() => {
+  try {
+    const n = (db.prepare('SELECT COUNT(*) AS n FROM client_errors WHERE resolved_at IS NULL').get() as any)?.n || 0;
+    return n ? { area: 'For Claude', title: `${n} site error group${n === 1 ? '' : 's'} open (pages that broke for visitors)`, href: adminUrl('needs-you') } : null;
+  } catch { return null; }
+});
 
 export function clientErrorList(days = 30) {
   const since = new Date(Date.now() - days * 86400000).toISOString();

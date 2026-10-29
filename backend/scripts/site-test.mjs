@@ -76,6 +76,39 @@ function typeSample(sample) {
     b.matchNext && `/basketball/match/${b.matchNext}`, '/premium', '/search?q=arsenal', NOT_FOUND].filter(Boolean);
 }
 
+/* ---------- fix279: the speed list ---------- */
+const SPEED_MS = Number(process.env.SITE_SPEED_MS) || 300;
+export async function speedList(base, sample) {
+  const b = sample.basketball || {};
+  const slug = b.matchNext || b.matchDone || null;
+  let id = null;
+  if (slug) try { id = (await (await fetch(`${base}/api/slug/basketball/match/${slug}`)).json())?.data?.id ?? null; } catch { /* no id: the bundle is skipped */ }
+  const swapped = slug ? slug.replace(/^(.+?)-vs-(.+?)(-\d{4}-\d{2}-\d{2}(?:-\d)?)$/, '$2-vs-$1$3') : null; // a slug we never gave (sides swapped)
+  const urls = [
+    '/api/public/results?days=30&limit=50', '/api/public/results?days=120&limit=50&competition=PL', '/api/public/results?days=365&limit=1&competition=PL',
+    '/api/news?sport=football&limit=12', '/api/news?sport=basketball&limit=10', '/api/news?sport=football&limit=7',
+    ...(id != null ? [`/api/game-bundle/basketball/${id}`] : []),
+    ...(slug ? [`/api/slug/basketball/match/${slug}`] : []), ...(swapped && swapped !== slug ? [`/api/slug/basketball/match/${swapped}`] : [])
+  ];
+  const out = [];
+  for (const u of urls) {
+    const why = [];
+    let ms = 0, status = 0;
+    for (let i = 0; i < 2; i++) {
+      const t = performance.now();
+      try { const r = await fetch(base + u, { headers: { 'X-Forwarded-For': `2001:db8:279::${(++visitor).toString(16)}` }, signal: AbortSignal.timeout(15_000) }); status = r.status; await r.arrayBuffer(); }
+      catch (e) { status = 0; why.push(`no answer: ${e.message}`); }
+      ms = performance.now() - t;
+      if (i === 0) await sleep(1500); // the first may be a 202: the worker stores the copy meanwhile
+    }
+    if (ms > SPEED_MS) why.push(`answered in ${Math.round(ms)} ms (speed list: ${SPEED_MS} ms at most)`);
+    if (![200, 202, 404].includes(status)) why.push(`status ${status}`);
+    log(`speed ${u}: ${status} in ${Math.round(ms)} ms`);
+    out.push({ url: `speed:${u}`, role: 'out', width: 0, why });
+  }
+  return out;
+}
+
 /* ---------- one page ---------- */
 let visitor = 0;
 async function check(browser, base, job) {
@@ -256,6 +289,9 @@ function testedTree() {
     }
     const results = [];
     const slowFirst = [];
+    // fix279: the speed list — routes the web must answer from stored copies (never a build on the request): asked twice
+    // as a visitor, the second answer within SITE_SPEED_MS (the live target is 100 ms; CI runners are slower) and 200 / 202
+    if ((process.env.SITE_SHARD || '1/1').startsWith('1/') && !only) results.push(...await speedList(site.base, sample));
     let next = 0, done = 0;
     await Promise.all(Array.from({ length: CONC }, async () => {
       while (next < todo.length) {

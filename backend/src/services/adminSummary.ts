@@ -7,6 +7,7 @@ import { db } from '../db';
 import { errorsForClaude } from './clientErrors';
 import { auditForClaude } from './dataAudit';
 import { visitDay } from './visitorSummary';
+import { redNow } from './adminMail';
 
 const count = (sql: string, ...args: any[]): number => {
   try { return Number((db.prepare(sql).get(...args) as any)?.n) || 0; } catch { return 0; }
@@ -23,6 +24,8 @@ export interface AdminSummary {
   forClaude: ReturnType<typeof errorsForClaude> | null
   /** fix254: the top-scorer check's differences (no email for them) and the leagues under 90% for 7+ days */
   dataCheck: ReturnType<typeof auditForClaude> | null
+  /** fix279: red data-health checks with nothing for a person to do (never their own email; the 07:00 summary lists them) */
+  redChecks: { id: string; label: string; since: string; quiet: boolean }[]
   /** tiles */
   visitorsToday: number; signupsToday: number; accounts: number; paying: number
   siteErrorsOpen: number; siteErrors24h: number; failedSignIns24h: number
@@ -45,7 +48,7 @@ export function adminSummary(now = Date.now()): AdminSummary {
   let dataCheck: AdminSummary['dataCheck'] = null;
   try { dataCheck = auditForClaude(); } catch { /* no check yet */ }
   return {
-    needsYou: contactOpen + paymentIssues, contactOpen, paymentIssues, forClaude, dataCheck,
+    needsYou: contactOpen + paymentIssues, contactOpen, paymentIssues, forClaude, dataCheck, redChecks: redNow(now).forClaude,
     done24h: count(`SELECT COUNT(*) AS n FROM done_for_you WHERE at >= ?`, dayAgo),
     injuriesToReview: count(`SELECT COUNT(*) AS n FROM bb_news_injuries WHERE state = 'active' AND reviewed = 0`),
     // fix239: + the American football / tennis results waiting for a decision (services/resultChecks.ts)

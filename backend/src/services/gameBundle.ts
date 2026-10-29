@@ -10,8 +10,8 @@
  * bundle as its copy and each part as that route's own copy (workerRoutes.ts: byte ranges, nothing parsed), so the old
  * routes are answered from the bundle. The app asks for the bundle first and fills its sections from it.
  *
- * The worker keeps the bundles visitors opened in the last hour fresh (every 3 min, signed-out copies in route_cache),
- * so the next visitor gets a stored copy at once.
+ * The worker keeps the bundles visitors opened in the last 24 hours (fix279: was 1 h) and the next 12 hours' games
+ * (fix279) fresh (every 3 min, signed-out copies in route_cache), so a visitor gets a stored copy at once.
  */
 import http from 'node:http';
 import { db } from '../db';
@@ -90,19 +90,40 @@ const builtAt = new Map<string, number>();
 export function noteBundleAsked(sport: BundleSport, id: number) {
   const k = `${sport}/${id}`;
   asked.delete(k); asked.set(k, Date.now());
-  if (asked.size > 400) asked.delete(asked.keys().next().value as string);
+  if (asked.size > 600) asked.delete(asked.keys().next().value as string);
 }
 const KEEP_FRESH_MS = 3 * 60_000;
 const stats = { rounds: 0, built: 0, failed: 0, lastRoundMs: 0, keeping: 0 };
-export const bundleStatus = () => ({ ...stats, keeping: [...asked.values()].filter(t => Date.now() - t < 3600_000).length });
+export const bundleStatus = () => ({ ...stats, keeping: [...asked.values()].filter(t => Date.now() - t < KEEP_ASKED_MS).length });
 
+/**
+ * fix279: the games of the next 12 hours (and live) of basketball, American football and tennis are kept too, so the
+ * first visitor of a game finds its stored copy (29 Oct: /api/game-bundle/basketball/:id 5.3 s — a first build)
+ */
+const UPCOMING_MS = 12 * 3600_000, UPCOMING_PER_SPORT = 40;
+export function upcomingBundles(now = Date.now()): string[] {
+  const from = new Date(now - 3 * 3600_000).toISOString(), to = new Date(now + UPCOMING_MS).toISOString();
+  const q = (sport: BundleSport, sql: string) => { try { return (db.prepare(sql).all(from, to, UPCOMING_PER_SPORT) as any[]).map(r => `${sport}/${r.id}`); } catch { return []; } };
+  return [
+    ...q('basketball', `SELECT game_id AS id FROM bb_games WHERE kickoff BETWEEN ? AND ? AND (status IS NULL OR status NOT IN ('FT','AOT','POST','CANC','ABD','AWD')) ORDER BY kickoff LIMIT ?`),
+    ...q('nfl', `SELECT game_id AS id FROM nfl_games WHERE kickoff BETWEEN ? AND ? AND (status IS NULL OR status NOT IN ('FT','AOT','POST','CANC','PST')) ORDER BY kickoff LIMIT ?`),
+    ...q('tennis', `SELECT id FROM tennis_matches WHERE scheduled_at BETWEEN ? AND ? AND (status IS NULL OR status NOT IN ('finished','cancelled','retired','walkover')) ORDER BY scheduled_at LIMIT ?`)
+  ];
+}
+
+/** fix279: a bundle opened once is kept 24 h (was 1 h) */
+const KEEP_ASKED_MS = 24 * 3600_000;
 let ins: any = null;
 async function keepFresh() {
   const t0 = Date.now();
   ins ||= db.prepare(`INSERT OR REPLACE INTO route_cache (key, at, status, type, cache, body) VALUES (?, ?, ?, ?, ?, ?)`);
+  // (an upcoming game nobody opened yet counts as asked over an hour ago: rebuilt every 30 minutes, not every 3)
+  for (const k of upcomingBundles()) if (!asked.has(k)) asked.set(k, Date.now() - 3600_001);
   for (const [k, at] of [...asked]) {
-    if (Date.now() - at > 3600_000) { asked.delete(k); builtAt.delete(k); continue; }
-    if (Date.now() - (builtAt.get(k) || 0) < KEEP_FRESH_MS) continue;
+    if (Date.now() - at > KEEP_ASKED_MS) { asked.delete(k); builtAt.delete(k); continue; }
+    // fix279: opened in the last hour → every 3 minutes; older (or not opened yet) → every 30 (a visitor's request
+    // refreshes a stale copy anyway: workerRoutes.ts)
+    if (Date.now() - (builtAt.get(k) || 0) < (Date.now() - at < 3600_000 ? KEEP_FRESH_MS : 30 * 60_000)) continue;
     const [sport, idS] = k.split('/');
     try {
       const b = await buildBundle(sport as BundleSport, Number(idS));

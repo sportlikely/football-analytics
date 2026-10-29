@@ -307,9 +307,10 @@ export function linkAnswer(path: string, query = ''): LinkAnswer {
       return { page: { sport: nw.sport, kind: nw.kind, id: hit.id, slug: nw.slug, ...(nw.kind === 'match' && pastMatch(nw.sport, hit.id) ? { past: true as const } : {}) } };
     }
     // fix263: a team / league / player the web's state does not hold has no page: the search, no worker round trip
-    // (a match slug we never gave still asks: the worker matches the day's games by their names)
-    if (isWeb && (nw.kind === 'match' || !webKnowsSlug(nw.sport, nw.kind))) return { ask: true };
-    const m = nw.kind === 'match' && !isWeb ? matchBySlugParts(nw.sport, nw.slug) : null;
+    // (a match slug we never gave: the day's games matched by their names)
+    // fix279: … answered on the web from its id index once it holds the sport's matches (no worker round trip)
+    if (isWeb && !webKnowsSlug(nw.sport, nw.kind)) return { ask: true };
+    const m = nw.kind !== 'match' ? null : isWeb ? indexedMatchByParts(idIndexes.get(nw.sport), nw.slug) : matchBySlugParts(nw.sport, nw.slug);
     if (m) return { to: `${lang}/${nw.sport}/match/${m}${sub}${kept}` };
     return { search: `${lang}/search?q=${encodeURIComponent(nw.slug.replace(/-vs-/, ' ').replace(/-\d{4}-\d{2}-\d{2}(-\d)?$/, '').replace(/-/g, ' '))}` };
   }
@@ -374,11 +375,36 @@ function matchBySlugParts(sport: LinkSport, slug: string): string | null {
   if (!p?.day) return null;
   let rows: any[] = [];
   try { rows = db.prepare(`SELECT slug FROM slugs WHERE sport = ? AND kind = 'match' AND is_primary = 1 AND slug LIKE ?`).all(sport, `%-vs-%-${p.day}%`) as any[]; } catch { return null; }
+  const hits = rows.map(r => r.slug as string).filter(x => slugPartsFit(x, p));
+  return hits.length === 1 ? hits[0] : null;
+}
+/** a primary match slug fits the parts of a slug we never gave (same day and number, both sides' words, either order) */
+function slugPartsFit(cand: string, p: NonNullable<ReturnType<typeof parseMatchSlug>>): boolean {
+  const m = parseMatchSlug(cand);
+  if (!m || m.day !== p.day || m.n !== p.n) return false;
   const words = (x: string) => x.split('-').filter(w => w.length > 1 && w !== 'fc');
   const fits = (side: string, want: string) => { const w = words(want); return w.length > 0 && w.every(x => side.split('-').includes(x)); };
-  const hits = rows.map(r => ({ slug: r.slug as string, m: parseMatchSlug(r.slug) })).filter(x => x.m && x.m.day === p.day && x.m.n === p.n)
-    .filter(x => (fits(x.m!.home, p.home) && fits(x.m!.away, p.away)) || (fits(x.m!.home, p.away) && fits(x.m!.away, p.home)));
-  return hits.length === 1 ? hits[0].slug : null;
+  return (fits(m.home, p.home) && fits(m.away, p.away)) || (fits(m.home, p.away) && fits(m.away, p.home));
+}
+/**
+ * fix279: the same lookup on the web, from the id index it holds (29 Oct: /api/slug/basketball/match/<old slug> 1.4–2.0 s,
+ * a worker round trip): the day's slugs are found in each chunk's text (indexOf), no database, no worker
+ */
+export function indexedMatchByParts(ix: IdIndex | null | undefined, slug: string): string | null {
+  const p = parseMatchSlug(slug);
+  if (!ix || !p?.day) return null;
+  const needle = `-${p.day}`, hits = new Set<string>();
+  for (const c of ix.chunks) {
+    if (c.kind !== 'match' || !c.ids.length) continue;
+    for (let at = c.text.indexOf(needle); at >= 0;) {
+      let lo = 0, hi = c.ids.length - 1; // the slug holding position `at`
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (c.off[mid] <= at) lo = mid; else hi = mid - 1; }
+      const cand = c.text.slice(c.off[lo], c.off[lo + 1]);
+      if (slugPartsFit(cand, p)) { hits.add(cand); if (hits.size > 1) return null; }
+      at = c.text.indexOf(needle, c.off[lo + 1]);
+    }
+  }
+  return hits.size === 1 ? [...hits][0] : null;
 }
 
 /* ---------- building (worker) ---------- */
