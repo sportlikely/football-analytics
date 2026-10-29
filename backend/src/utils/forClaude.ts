@@ -199,6 +199,9 @@ export function perfSection(perf: any): Section {
     `Background (worker): ${w.stallsLastHour ?? '–'} freezes, worst ${w.worstLastHour ?? '–'} ms, heap ${w.heapMb ?? '–'} of ${w.heapLimitMb ?? '–'} MB, restarts 24 h ${w.restarts24h ?? w.restarts ?? '–'}${w.lastExit ? ` · last exit: ${short(w.lastExit.reason, 160)}` : ''}`
   ];
   const list = (title: string, xs: any[] | undefined, n: number, f: (x: any) => string) => { if (xs?.length) lines.push(`${title}:`, ...xs.slice(0, n).map(x => `- ${f(x)}`)); };
+  // fix274: every web stall since the process was ready (the last 50, newest first): time, length, what ran, the code
+  if (web.stallsSinceReady != null) lines.push(`Website since ready: ${web.stallsSinceReady} stall(s) over 500 ms, ${web.slowSinceReady ?? '–'} request(s) over 500 ms`);
+  list('Recent web stalls (since ready, newest first)', web.readyStalls, 50, s => `${s.at ? ilTime(s.at) : '?'} · ${s.ms} ms${s.admin ? ' (admin)' : s.counted ? '' : ' (under 500 ms)'} · ${short(s.running || 'nothing named', 160)}${s.code?.length ? ` · code: ${s.code.slice(0, 3).join('; ')}` : ''}`);
   list('Website worst freezes (last hour)', web.topStalls, 5, stallLine);
   list('Website freezes with the code that ran (diagStalls)', web.diagStalls, 5, stallLine);
   list('Website short blocks (shortBlocks)', web.shortBlocks, 5, stallLine);

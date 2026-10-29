@@ -808,3 +808,20 @@ the Visitors card polled it every 30 s.
   collect — on the slow volume, hours); the 30-min runs are scheduled at once; an unbuilt map answers 202 pending, no-store
   (an empty `{names:{}}` was kept by the web, cached 30 min by browsers and saved by the app as "the names"; the app
   now ignores an empty map). At the check the live map had 9,672 names each in he and ar (built 10:17 UTC).
+
+## fix274 — Visitors counts that add up; the web stalls since ready kept (29 Oct)
+
+- **Visitors**: /api/admin/visitors at 13:25 Israel time showed todayBots 17,467 > todayAll 16,392. todayBots was every
+  caller that was not a person (bot user-agents included), todayAll only callers without a bot user-agent (the 1,082
+  "ua" callers in one and not the other). Now `visitorSummary.ts` counts each window (today / 7 / 30 days) in one pass
+  over distinct callers (vid): a caller is a person when any of its rows in the window is one, else a bot; all = every
+  caller. people + bots = all (today, last7Bots / last7All, last30Bots / last30All), the chart's allCallers = people +
+  bots per day, the reasons add up to todayBots. "All" now includes the bot user-agents.
+- **Israel-time days**: the rows are written on the Israel-time day (`visitDay`, visitors.ts) and the windows start on
+  Israel-time calendar days (`since`, no 23 / 25-hour slip at a clock change); the Admin "Visitors today" tile and the
+  card's chart use the same day. The deploy day mixes rows keyed by the UTC day (until 00:00 Israel time).
+- **Web stalls since ready**: perf.ts keeps the last 50 stalls after the process was ready (over 300 ms; `counted` =
+  over 500 ms and not an admin diagnostic = what /health's stallsSinceReady counts) with time, length, what ran (the
+  routes / jobs in flight or just ended) and the top functions of the CPU profile when it has them. /api/perf summary
+  → web.stallsSinceReady / slowSinceReady / readyStalls; Admin → Site health → Speed "Recent web stalls"; its Copy for
+  Claude lists them. Record only, no behaviour change. Test: `npm run test:fix274`.

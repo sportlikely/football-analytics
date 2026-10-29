@@ -9,7 +9,7 @@ import { every } from './perf';
 import { isFakeCrawler } from './crawlerIps';
 import { onState, publishState } from './shared';
 import { inThread, threadJobsOn } from './threadJob';
-import { visitorDbSummary } from './visitorSummary';
+import { visitorDbSummary, visitDay, since } from './visitorSummary';
 
 /**
  * Visitor counts for the admin page (Oct 2026): who is on the site now, and unique visitors per day / 7 / 30 days.
@@ -98,7 +98,7 @@ export function trackVisit(req: express.Request, _res: express.Response, next: e
     const signedIn = !!req.user && !uaBot;
     const prev = online.get(vid);
     online.set(vid, { at: now, signedIn: signedIn || !!prev?.signedIn, human: signedIn || !!prev?.human });
-    const day = new Date(now).toISOString().slice(0, 10);
+    const day = visitDay(now); // fix274: Israel-time days
     const k = `${vid}|${day}`;
     if ((written.get(k) || 0) < now - 60000) {
       written.set(k, now);
@@ -129,7 +129,7 @@ export function visitSeen(req: express.Request, crawler: boolean | null): { coun
   const b = (req.body || {}) as { token?: string; visibleMs?: number; interacted?: boolean; webdriver?: boolean; languages?: number; plugins?: number };
   if (typeof b.token !== 'string' || !/^[a-z0-9]{12,40}$/i.test(b.token)) return { counted: false, reason: 'no token' };
   const vid = hash(ip);
-  const day = new Date().toISOString().slice(0, 10);
+  const day = visitDay();
   const reason = !ua || BOT.test(ua) ? 'ua'
     : crawler === true ? 'crawler'
     : crawler === false ? 'fake-crawler'
@@ -163,7 +163,6 @@ if (!isWeb) every('visitors cleanup', () => {
   try { db.prepare("DELETE FROM league_visits WHERE day < date('now', '-90 days')").run(); } catch { /* ignore */ }
 }, 6 * 3600000).unref();
 
-const since = (days: number) => new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
 
 /*
  * fix273: Admin → Visitors is a stored string. The worker builds the database part every 5 min in a job thread

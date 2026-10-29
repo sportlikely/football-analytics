@@ -10,7 +10,7 @@ interface Visitors {
   onlineNow: number; onlineSignedIn: number; onlineWindowMin: number; onlineAll?: number
   today: number; last7: number; last30: number; returning30: number
   // fix183: people only; what was filtered, and the old number (every API caller) kept for a week to compare
-  todayBots?: number; todayAll?: number; last7All?: number; last30All?: number; botReasons?: { reason: string; n: number }[]
+  todayBots?: number; todayAll?: number; last7All?: number; last30All?: number; last7Bots?: number; last30Bots?: number; dayZone?: string; botReasons?: { reason: string; n: number }[]
   peopleSince?: string; datacentre?: { loaded: boolean; status: string }
   daily: { day: string; visitors: number; signedIn: number; hits: number; bots?: number; allCallers?: number }[]
   countingSince: string | null
@@ -44,6 +44,13 @@ interface CountryRow { country: string; visitors: number; signedIn: number; bots
 const REASON: Record<string, string> = { 'no-signs': 'no signs of a person', ua: 'bot user-agent', crawler: 'search-engine crawlers', 'fake-crawler': 'fake crawlers', datacentre: 'data-centre networks', headless: 'headless browsers' }
 // the old "all API callers" number is shown for a week after the switch to people only, then goes
 const showOld = (since?: string) => !!since && Date.now() - Date.parse(since) < 8 * 86400000
+// fix274: the server's days are Israel-time days ('YYYY-MM-DD'); i days before today
+const ilDayAgo = (i: number) => {
+  let t: string
+  try { t = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()) } catch { t = new Date().toISOString().slice(0, 10) }
+  const [y, m, d] = t.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - i)).toISOString().slice(0, 10)
+}
 const flagOf = (cc: string) => (/^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map(c => 0x1f1e6 + c.charCodeAt(0) - 65)) : '🌐')
 let regionNames: Intl.DisplayNames | null = null
 try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }) } catch { /* old browser */ }
@@ -204,10 +211,10 @@ export default function VisitorsCard() {
   }, [])
   if (err && !v) return null
 
-  // the last 30 days, missing days as 0
+  // the last 30 days, missing days as 0 (fix274: Israel-time days, as the server counts them)
   const days: { day: string; visitors: number; signedIn: number; bots: number }[] = []
   for (let i = 29; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10)
+    const d = ilDayAgo(i)
     const r = v?.daily?.find(x => x.day === d)
     days.push({ day: d, visitors: r?.visitors || 0, signedIn: r?.signedIn || 0, bots: r?.bots || 0 })
   }
@@ -226,7 +233,7 @@ export default function VisitorsCard() {
     <section className="card p-5 sm:p-6 mb-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
         <h2 className="font-display text-lg font-bold text-ink">Visitors</h2>
-        <span className="text-xs text-faint">one visitor = one person (the page was open 5+ s and used, or signed in) · admins, bots, crawlers, data-centre networks and headless browsers not counted{v?.peopleSince ? ` · people only since ${new Date(v.peopleSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.countingSince ? ` · counting since ${new Date(v.countingSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.builtAt ? ` · numbers of ${new Date(v.builtAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} (every 5 min)` : v?.pending ? ' · first numbers within 5 min of a restart' : ''}</span>
+        <span className="text-xs text-faint">one visitor = one person (the page was open 5+ s and used, or signed in) · admins, bots, crawlers, data-centre networks and headless browsers not counted · days in Israel time{v?.peopleSince ? ` · people only since ${new Date(v.peopleSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.countingSince ? ` · counting since ${new Date(v.countingSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.builtAt ? ` · numbers of ${new Date(v.builtAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} (every 5 min)` : v?.pending ? ' · first numbers within 5 min of a restart' : ''}</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {tile('Online now', v?.onlineNow, v ? `people · ${v.onlineSignedIn} signed in · last ${v.onlineWindowMin} min` : undefined, true)}
@@ -235,9 +242,9 @@ export default function VisitorsCard() {
           <div className="flex items-baseline gap-2 mt-1.5 flex-wrap">
             <span className="num text-2xl font-extrabold leading-none text-ink">{v?.today ?? '–'}</span>
             <span className="text-xs text-ink font-semibold">people</span>
-            {v?.todayBots != null && <span className="text-[11px] text-faint num" title={(v.botReasons || []).map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}>{v.todayBots} bots / scripts filtered</span>}
+            {v?.todayBots != null && <span className="text-[11px] text-faint num" title={(v.botReasons || []).map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}>{v.todayBots} bots / scripts filtered{v.todayAll != null ? ` · ${v.todayAll} callers in all` : ''}</span>}
           </div>
-          {old && v?.todayAll != null && <div className="text-[10px] text-faint mt-1 num">old count: {v.todayAll} all API callers</div>}
+          {old && v?.todayAll != null && <div className="text-[10px] text-faint mt-1 num">old count: {v.todayAll} all API callers (people + bots)</div>}
         </div>
         {tile('Last 7 days', v?.last7, old && v?.last7All != null ? `people · old count ${v.last7All} callers` : 'people')}
         {tile('Last 30 days', v?.last30, v?.returning30 != null ? `${v.returning30} came back on another day${old && v.last30All != null ? ` · old count ${v.last30All}` : ''}` : undefined)}

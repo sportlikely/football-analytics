@@ -82,7 +82,7 @@ async function perfSlim(): Promise<unknown> {
     const d = (await axios.get(`${API_URL}/perf`)).data?.data || {}
     const pick = (o: any, ks: string[]) => Object.fromEntries(ks.filter(k => o && o[k] !== undefined).map(k => [k, o[k]]))
     return {
-      web: pick(d.web, ['stallsLastHour', 'worstLastHour', 'uptimeMin', 'memoryMb', 'topStalls', 'diagStalls', 'shortBlocks']),
+      web: pick(d.web, ['stallsLastHour', 'worstLastHour', 'uptimeMin', 'memoryMb', 'topStalls', 'diagStalls', 'shortBlocks', 'stallsSinceReady', 'slowSinceReady', 'readyStalls']),
       worker: pick(d.worker, ['stallsLastHour', 'worstLastHour', 'heapMb', 'heapLimitMb', 'restarts', 'restarts24h', 'lastExit', 'topStalls']),
       slowRequests: d.slowRequests, pageReader: d.pageReader
     }

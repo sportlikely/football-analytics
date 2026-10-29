@@ -56,6 +56,14 @@ type Stall = { at: string; ms: number; job: string | null; startup?: true; diag?
 const stalls: Stall[] = [];
 const shortBlocks: Stall[] = [];
 /*
+ * fix274: the web stalls since the process was ready (start-up ones left out), the last 50 — what /health's
+ * stallsSinceReady counts (over 500 ms, not an admin diagnostic) plus the 300–500 ms ones and the admin ones, marked.
+ * Only a record (Admin → Site health → "Recent web stalls" and its Copy for Claude): 29 Oct, 7 stalls and 21 slow
+ * requests in the 70 minutes after the 13:15 restart, with nothing saying what ran. The code that ran (`cpu`) is put
+ * on the same object a moment later by the CPU profile.
+ */
+const readyStalls: Stall[] = [];
+/*
  * fix232: a stall while only an admin diagnostic ran (/api/perf, /api/admin/* answered here) is not a stall a visitor
  * waited for: it is kept apart (diagStalls) and not counted in the hour (data health "Web stalls"). On 25 Oct the 5 MB
  * /api/perf froze the web 4.8–18.6 s each time it was opened: the top 4 web stalls of the hour were "http GET /api/perf".
@@ -115,6 +123,7 @@ if (isMainThread) setInterval(() => {
     // fix232: so are the stalls of an admin diagnostic (/api/perf)
     if (startupDone && !diag) noteHour(lag, job);
     if (stalls.length > 100) stalls.shift();
+    if (startupDone) { readyStalls.push(stall); if (readyStalls.length > 50) readyStalls.shift(); }
     // fix167: the target is no stall over 500 ms (boot included), so every one over 500 ms is logged
     // fix202: the worker's own loop is allowed to be busy (no visitor waits for it): its stalls are logged from 2 s
     if (lag > (isWorker ? 2000 : 500)) logger.warn(`${isWorker ? 'Worker: event' : 'Event'} loop blocked ${lag} ms${job ? ` (${job})` : ''}`);
@@ -560,6 +569,11 @@ export function markListening(loadMs: number) {
 }
 export const markStartupDone = () => { startupDone = true; };
 export const stallsSinceReady = () => stalls.filter(s => !s.startup && !s.diag && s.ms > 500).length;
+/** fix274: the last 50 web stalls since ready, newest first: time, length, what ran (route / job), the code when profiled */
+export const recentWebStalls = () => readyStalls.slice().reverse().map(s => ({
+  at: s.at, ms: s.ms, running: s.job ? s.job.slice(0, 300) : null, counted: s.ms > 500 && !s.diag, admin: !!s.diag || undefined,
+  code: s.cpu ? s.cpu.top.slice(0, 5).map(f => `${f.fn} ${f.at} ${f.ms} ms`) : null
+}));
 /** fix218: requests that took over 500 ms since the process was ready (http entries of the recent list) */
 export const slowSinceReady = () => recent.filter(r => r.label.startsWith('http ') && !isDiagLabel(r.label) && r.end - r.start > 500 && !(r as any).startup).length;
 export function perfStatus() {
@@ -605,6 +619,8 @@ export function perfSummary() {
   const p = perfStatus();
   return {
     uptimeMin: p.uptimeMin, maxLagMs: p.maxLagMs, stallsLastHour: p.stallsLastHour, worstLastHour: p.worstLastHour,
+    // fix274: /health's two counts and the last 50 web stalls since ready (Admin → Site health → Recent web stalls)
+    stallsSinceReady: stallsSinceReady(), slowSinceReady: slowSinceReady(), readyStalls: recentWebStalls(),
     loopByMinute: loopMinutes(),
     running: p.running, heavy: { ...p.heavy, waiting: p.heavy.waiting.slice(0, 20) }, memoryMb: p.memoryMb, heapMb: p.heapMb,
     topStalls: p.topStalls.map(s => ({ at: s.at, ms: s.ms, job: s.job ? s.job.slice(0, 300) : null, cpu: s.cpu?.top.slice(0, 3).map(f => `${f.fn} ${f.at} ${f.ms} ms`) })),

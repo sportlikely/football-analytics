@@ -4286,7 +4286,7 @@ function perfSummaryText(): string {
   const body: any = { process: ROLE, summary: true, web, worker, memory: memorySizing(), pageMemory: pageMemStatus(), pageHot: pageHotStatus(), pageReader: pageReaderStatus(), botPages: botGate.status(), workerRoutes: workerRoutesStatus(), webBuilds: webBuilds(), webWrites: deferredStatus(), slowRequests: slowRequests(), seoMisses: seoMissStatus(), htmlBy: htmlByStatus(), hours };
   let text = JSON.stringify({ data: body, timestamp: new Date().toISOString() });
   if (text.length > PERF_MAX) { body.hours = hours.slice(-6); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
-  if (text.length > PERF_MAX) { body.hours = []; body.web.jobs = body.web.jobs.slice(0, 10); if (body.worker?.jobs) body.worker.jobs = body.worker.jobs.slice(0, 10); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
+  if (text.length > PERF_MAX) { body.hours = []; body.web.jobs = body.web.jobs.slice(0, 10); body.web.readyStalls = body.web.readyStalls.slice(0, 20); if (body.worker?.jobs) body.worker.jobs = body.worker.jobs.slice(0, 10); text = JSON.stringify({ data: body, timestamp: new Date().toISOString() }); }
   return text;
 }
 app.get('/api/perf', async (req, res) => {

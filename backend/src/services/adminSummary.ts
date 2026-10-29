@@ -6,6 +6,7 @@
 import { db } from '../db';
 import { errorsForClaude } from './clientErrors';
 import { auditForClaude } from './dataAudit';
+import { visitDay } from './visitorSummary';
 
 const count = (sql: string, ...args: any[]): number => {
   try { return Number((db.prepare(sql).get(...args) as any)?.n) || 0; } catch { return 0; }
@@ -51,7 +52,7 @@ export function adminSummary(now = Date.now()): AdminSummary {
     bbResultsToCheck: count(`SELECT COUNT(*) AS n FROM bb_result_check WHERE resolved_at IS NULL`) + count(`SELECT COUNT(*) AS n FROM result_review WHERE resolved_at IS NULL`)
       + count(`SELECT COUNT(*) AS n FROM settle_review WHERE resolved_at IS NULL`), // fix240: football games with no final at 48 h
     // the same "people" rule as the Visitors card (services/visitors.ts)
-    visitorsToday: count(`SELECT COUNT(DISTINCT vid) AS n FROM visits WHERE day >= ? AND (human = 1 OR signed_in = 1)`, day),
+    visitorsToday: count(`SELECT COUNT(DISTINCT vid) AS n FROM visits WHERE day >= ? AND (human = 1 OR signed_in = 1)`, visitDay(now)), // fix274: Israel-time day
     signupsToday: count(`SELECT COUNT(*) AS n FROM users WHERE created_at >= ?`, day),
     accounts: count(`SELECT COUNT(*) AS n FROM users`),
     paying: count(`SELECT COUNT(*) AS n FROM users WHERE plan IN ('premium', 'pro')`),

@@ -384,6 +384,8 @@ export function DoneForYouCard({ reload }: { reload: () => void }) {
 
 /* ---------------- Speed (/api/perf summary) ---------------- */
 
+const ilClock = (at: string) => { try { return new Date(at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit' }) } catch { return at.slice(11, 19) } }
+
 export function SpeedCard() {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -403,7 +405,27 @@ export function SpeedCard() {
         {row('Background freezes', `${w.stallsLastHour ?? '–'} · worst ${w.worstLastHour ?? '–'} ms`, 'last hour; visitors never wait for these')}
         {row('Background memory', `${w.heapMb ?? '–'} of ${w.heapLimitMb ?? '–'} MB`, 'lower is better; a warning over 85%')}
         {row('Background restarts', `${w.restarts24h ?? w.restarts ?? 0}`, 'last 24 hours; 0 is normal')}
+        {web.stallsSinceReady != null && row('Since the start', `${web.stallsSinceReady} freezes · ${web.slowSinceReady ?? '–'} slow requests`, 'over 500 ms, since the website was ready')}
       </ul>
+      {/* fix274: the last 50 web stalls since ready — when, how long, what ran on the web thread, the code when profiled */}
+      {Array.isArray(web.readyStalls) && (
+        <div className="mt-4 pt-4 border-t border-line/60">
+          <h3 className="font-display font-bold text-ink mb-1">Recent web stalls</h3>
+          <p className="text-[11px] text-faint mb-2">The last 50 freezes of the website since it was ready, newest first: Israel time, length, the page or job that ran, the code when known. A record only.</p>
+          {web.readyStalls.length === 0 ? <p className="text-sm text-faint">None since the start.</p> : (
+            <ul className="space-y-1.5 text-[12px]">
+              {web.readyStalls.map((s: { at: string; ms: number; running: string | null; counted: boolean; admin?: boolean; code: string[] | null }, i: number) => (
+                <li key={`${s.at}-${i}`} className="break-words">
+                  <span className="num text-faint">{ilClock(s.at)}</span>{' '}
+                  <b className={`num ${s.counted ? 'text-loss' : 'text-ink'}`}>{s.ms} ms</b>{s.admin ? <span className="text-faint"> (admin)</span> : null}{' '}
+                  <span className="text-muted">{s.running || 'nothing named'}</span>
+                  {s.code?.length ? <span className="block text-[11px] text-faint">code: {s.code.slice(0, 3).join(' · ')}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </section>
   )
 }
