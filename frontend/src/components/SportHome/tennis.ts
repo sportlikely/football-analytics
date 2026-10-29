@@ -21,7 +21,7 @@ export function toGame(m: TMatch): HGame {
     id: m.id, href: tennisHref.match(m), reveal: { id: tennisRid(m), status: tennisRstatus(m) }, kickoff: m.start,
     competition: { name: compOf(m) }, home: side(m.home), away: side(m.away),
     live: m.state === 'live' ? { label: liveLabel(m), score: m.score ? m.score.won : [0, 0] } : null,
-    pred: winnerPred(m.prediction, surname(m.home), surname(m.away), m.prediction?.strongAt ?? TENNIS_STRONG)
+    pred: winnerPred(m.prediction, surname(m.home), surname(m.away))
   }
 }
 
@@ -33,7 +33,7 @@ export function toResult(m: TMatch): HResult {
     id: m.id, href: tennisHref.match(m), competition: compOf(m), date: m.start,
     home: { name: m.home.name, logo: m.home.logo || null, score: m.score ? m.score.won[0] : '', won: m.winner === 1 },
     away: { name: m.away.name, logo: m.away.logo || null, score: m.score ? m.score.won[1] : '', won: m.winner === 2 },
-    pick: pick ? { words: surname(pick === 'H' ? m.home : m.away), pct: null, strong: false } : null,
+    pick: pick ? { words: surname(pick === 'H' ? m.home : m.away), pct: null } : null,
     hit: p?.hit ?? null
   }
 }

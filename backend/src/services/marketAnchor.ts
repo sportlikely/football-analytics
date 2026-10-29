@@ -15,7 +15,7 @@ import { db } from '../db';
 import type { Consensus, AnchorFit, LevelTest, MarketSport } from '../utils/marketLines';
 import { anchorWeightOf, blendLine, blendChance, marketMargin, marketTotal, median, gapStats } from '../utils/marketLines';
 import { groupOf as bbGroupOf } from '../utils/bbGridMath';
-import type { Extras } from '../utils/moreMath';
+import type { Extras, PSet } from '../utils/moreMath';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS market_lines (
@@ -187,7 +187,9 @@ export function anchorFootballGoals(gameId: number, league: string | null, x: Ex
   const shown = blendChance(ours, mk, w);
   const g = x.sets.goals;
   const p = g.p.map((v, i) => (i >= 3 ? (v * shown) / ours : (v * (1 - shown)) / (1 - ours)));
-  return { ...x, sets: { ...x.sets, goals: { ...g, p } }, info: { ...x.info, anchor: { ou25: Math.round(ours * 10000) / 10000 }, ...(mk != null ? { anchored: true } : {}) } };
+  // fix281: the over 2.5 question follows the anchored goals
+  const o25: Record<string, PSet> = x.sets.over25 ? { over25: { ...x.sets.over25, p: [shown, 1 - shown] } } : {};
+  return { ...x, sets: { ...x.sets, goals: { ...g, p }, ...o25 }, info: { ...x.info, anchor: { ou25: Math.round(ours * 10000) / 10000 }, ...(mk != null ? { anchored: true } : {}) } };
 }
 
 /* ---------- the gate's measure: median |gap| to the closing line on settled games ---------- */
@@ -203,7 +205,7 @@ export function oursOfExtras(sport: MarketSport, market: string, x: Extras | nul
     if (market === 'spread') return e[0] - e[1];
   }
   if (sport === 'football') {
-    if (market === 'ou2.5') { const v = overOf(x, 2.5); return v == null ? null : v * 100; }
+    if (market === 'ou2.5' || market === 'ou1.5' || market === 'ou3.5') { const v = overOf(x, Number(market.slice(2))); return v == null ? null : v * 100; }
     if (market === 'btts') { const v = bttsOf(x); return v == null ? null : v * 100; }
   }
   if (sport === 'tennis' && market === 'total_games') return Number.isFinite(x.info?.expGames) ? x.info.expGames : null;

@@ -8,7 +8,7 @@ import { t, LOCALE } from '../../lib/i18n'
 import { ModelName } from './game/ModelName'
 import type { ModelSport } from '../../lib/modelNames'
 import MoreRecord from './accuracy/MoreRecord'
-import type { MoreSport } from './game/MorePredictions'
+import type { MoreSport } from './prediction/more'
 import { tg } from '../../lib/genText'
 
 /**

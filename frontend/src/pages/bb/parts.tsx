@@ -2,13 +2,13 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { t, LOCALE } from '../../lib/i18n'
 import { useReveal, justRevealed } from '../../lib/reveal'
-import CountUp from '../../components/CountUp'
 import { LeagueBar } from '../../components/LeagueSidebar'
 import { BB_STATUS, BB_COUNTRY, liveLabel, bbRank, timeOf, useBbFavorites, type BbGame, type BbSide } from '../../lib/bb'
 import { useStuck, stuckBg } from '../../lib/useStuck'
 import { LiveChancePanel } from '../../components/sport/game/LiveChance'
 import { ScorersToggle, RowScorersLine, useScorersOpen } from '../../components/sport/RowScorers'
 import { leagueHref, matchHref } from '../../lib/links'
+import RowBody, { type RowTeam } from '../../components/sport/prediction/RowBody'
 
 /** Shared pieces of the basketball pages — the same look as the football pages. */
 
@@ -90,6 +90,10 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
   const favWhy = useBbFavorites().reasons(g)
   // fix209: a live / finished row opens with its arrow to each team's top scorer
   const [scOpen, scToggle] = useScorersOpen()
+  const side = (k: 'H' | 'A'): RowTeam => {
+    const team = k === 'H' ? g.home : g.away
+    return { name: team.name, short: bbShort(team.name, g.league.code), logo: <TeamLogo team={team} size={15} />, score: g.score && g.state !== 'upcoming' ? (k === 'H' ? g.score.home : g.score.away) : null, live: isLive, dim: done && !won(k), bold: pick === k || won(k) }
+  }
 
   return (
     <div>
@@ -119,23 +123,15 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
         )}
       </div>
 
-      {/* teams */}
-      <div className="flex-1 min-w-0">
-        {showLeague && <div className="text-[10px] text-faint mb-0.5 truncate">{g.league.name}</div>}
-        {(['H', 'A'] as const).map(side => {
-          const team = side === 'H' ? g.home : g.away
-          const score = g.score && g.state !== 'upcoming' ? (side === 'H' ? g.score.home : g.score.away) : null
-          return (
-            <div key={side} className="flex items-center gap-2 min-w-0 h-5">
-              <TeamLogo team={team} size={15} />
-              <span className={`text-[13px] truncate ${pick === side || won(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>{team.name}</span>
-              {score !== null && <span className={`ms-auto ps-2 num text-[13px] font-extrabold tabular-nums ${isLive ? 'text-live' : done && !won(side) ? 'text-muted' : 'text-ink'}`}>{score}</span>}
-            </div>
-          )
-        })}
-      </div>
+      {/* fix281: names left / right, the split bar, one "Our pick" line (compact rows: the names only) */}
+      <RowBody
+        top={showLeague ? <div className="text-[10px] text-faint mb-0.5 truncate">{g.league.name}</div> : undefined}
+        home={side('H')} away={side('A')}
+        pred={compact ? { kind: 'none' } : covered ? { kind: 'covered', n: 2, onReveal: reveal } : p && p.locked ? { kind: 'locked', n: 2, pick: pickName }
+          : !(isLive && p?.live) && p && pick && pct !== null ? { kind: 'open', roll, cells: [{ key: 'H', pct: p.pHome!, on: pick === 'H' }, { key: 'A', pct: p.pAway!, on: pick === 'A' }], pick: { words: pick === 'H' ? bbShort(g.home.name, g.league.code) : bbShort(g.away.name, g.league.code), pct } }
+          : { kind: 'none' }}
+      />
 
-      {/* prediction */}
       {compact ? (
         <div className="flex-shrink-0 flex flex-col items-end gap-0.5 max-w-[96px]">
           {pickName && <span className={`text-[11px] font-semibold truncate max-w-full ${PICK_COLOR[pick!]}`}>{pickName}</span>}
@@ -144,49 +140,8 @@ export function GameRow({ g, showLeague = false, showDay = false, compact = fals
           )}
         </div>
       ) : (
-      <div className="flex-shrink-0 flex items-center justify-end min-w-[84px] sm:min-w-[150px] gap-1.5">
-        {covered ? (
-          <button
-            type="button"
-            onClick={e => { e.preventDefault(); e.stopPropagation(); reveal() }}
-            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11px] font-bold bg-accent/10 text-accent border border-accent/30 hover:bg-accent/15"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-            {t('Reveal')}
-          </button>
-        ) : p && p.locked ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-faint">
-            <LockIcon /> {pickName ? <span className={`font-semibold truncate max-w-[110px] ${PICK_COLOR[pick!]}`}>{pickName}</span> : t('Locked')}
-          </span>
-        ) : isLive && p?.live ? (
-          <LiveRowPct g={g} />
-        ) : p && pick && pct !== null ? (
-          <>
-            {/* fix132 (all screen sizes): the fix127 block — 1 · 2 cells (our pick lime, the other dimmed) and
-                "Our pick · team · %" under them; spread and total next to it on wide screens */}
-            <span className="flex items-center gap-1">
-              <BbPickBlock p={p} pick={pick} home={bbShort(g.home.name, g.league.code)} away={bbShort(g.away.name, g.league.code)} roll={roll} />
-              {typeof p.spread === 'number' && typeof p.total === 'number' && (
-                <>
-                  <span className="hidden lg:block w-px h-5 bg-line mx-1" aria-hidden />
-                  <span className={`hidden lg:grid w-[60px] h-7 rounded-md place-items-center leading-none border border-line/70 text-muted ${roll ? 'pop-in' : ''}`} title={t('Point spread')}>
-                    <span className="text-[8px] font-bold opacity-75">{t('Spread')}</span>
-                    <span className="num text-[11px] font-bold text-ink">{p.spread >= 0 ? '1' : '2'} −{Math.abs(p.spread).toFixed(1)}</span>
-                  </span>
-                  <span className={`hidden lg:grid w-[60px] h-7 rounded-md place-items-center leading-none border border-line/70 text-muted ${roll ? 'pop-in' : ''}`} title={t('Total points')}>
-                    <span className="text-[8px] font-bold opacity-75">{t('Total')}</span>
-                    <span className="num text-[11px] font-bold text-ink">{p.total.toFixed(1)}</span>
-                  </span>
-                </>
-              )}
-            </span>
-          </>
-        ) : (
-          <span className="text-xs text-faint">–</span>
-        )}
+      <div className="flex-shrink-0 flex items-center justify-end gap-1.5">
+        {isLive && p?.live && !covered ? <LiveRowPct g={g} /> : null}
         {done && p?.hit !== null && p?.hit !== undefined && (
           <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold ${p.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`} title={p.hit ? t('Hit') : t('Miss')}>{p.hit ? '✓' : '✗'}</span>
         )}
@@ -364,35 +319,3 @@ export function bbShort(raw: string | null | undefined, code: string) {
   return code === 'NBA' ? w[w.length - 1] : w[0]
 }
 
-/**
- * fix132 — basketball's version of football's fix127 row block (components/DcPick.tsx DcBlock): two 36 px cells
- * "1 · 2" with each team's win %, our pick outlined lime and the other dimmed, then "Our pick · Fenerbahce · 80%".
- * Also used by the NFL rows (fix139).
- */
-export function BbPickBlock({ p, pick, home, away, roll }: { p: { pHome?: number | null; pAway?: number | null }; pick: 'H' | 'A'; home: string; away: string; roll: boolean }) {
-  const pct = Math.round(pick === 'H' ? p.pHome! : p.pAway!)
-  return (
-    <span className="inline-flex flex-col items-end gap-1">
-      <span className="flex items-center gap-1">
-        {(['H', 'A'] as const).map((k, i) => {
-          const on = k === pick
-          return (
-            <span key={k} className={`w-9 h-7 rounded-md grid place-items-center leading-none border transition-colors ${on ? 'border-accent/70 bg-accent/15 text-ink' : 'border-transparent bg-surface2/40 text-faint'} ${roll ? 'pop-in' : ''}`}
-              style={roll ? { animationDelay: `${i * 90}ms` } : undefined}>
-              <span className={`text-[8px] font-bold ${on ? 'text-accent' : ''}`}>{k === 'H' ? '1' : '2'}</span>
-              <CountUp value={Math.round(k === 'H' ? p.pHome! : p.pAway!)} animate={roll} delay={i * 90} className="num text-[11px] font-bold" />
-            </span>
-          )
-        })}
-      </span>
-      <span className="flex items-center gap-1 text-[10px] leading-none whitespace-nowrap">
-        <span className="text-faint">{t('Our pick')}</span>
-        <span aria-hidden className="text-faint">·</span>
-        <span className="font-bold text-ink">{pick === 'H' ? home : away}</span>
-        <span aria-hidden className="text-faint">·</span>
-        <span className="num font-extrabold text-accent">{pct}%</span>
-      </span>
-      {pct >= 70 && <span className="rounded-full border border-accent/50 text-accent text-[9px] font-bold px-1.5 py-px leading-none whitespace-nowrap">{t('Strong')}</span>}
-    </span>
-  )
-}

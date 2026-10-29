@@ -81,7 +81,7 @@ export function toGame(m: Match): HGame {
         { key: 'D', head: 'X', label: tt('Draw'), pct: p.draw, on: on('D') },
         { key: 'A', head: '2', label: tn(m.awayTeam), pct: p.away, on: on('A') }
       ],
-      pick: dc ? { words: dcLabel(dc.code, shortTeam(m.homeTeam), shortTeam(m.awayTeam)), pct: dc.pct, strong: dc.strong, help: true } : null
+      pick: dc ? { words: dcLabel(dc.code, shortTeam(m.homeTeam), shortTeam(m.awayTeam)), pct: dc.pct, help: true } : null
     }
   } else if (p) pred = { kind: 'locked', heads: ['1', 'X', '2'] } // fix160: drawn blurred, like the open block
   return {
@@ -100,7 +100,7 @@ export function toResult(r: any): HResult {
     id: r.matchId, href: matchHref('football', r.matchId, { home: r.home, away: r.away, date: r.date })!, competition: r.competition || '', date: r.date,
     home: { name: r.home, logo: r.homeCrest || null, score: hg, won: r.outcome === 'H' },
     away: { name: r.away, logo: r.awayCrest || null, score: ag, won: r.outcome === 'A' },
-    pick: r.dc ? { words: dcLabel(r.dc.pick, r.home, r.away), tag: r.dc.pick, pct: r.dc.p ?? null, strong: false } : null,
+    pick: r.dc ? { words: dcLabel(r.dc.pick, r.home, r.away), tag: r.dc.pick, pct: r.dc.p ?? null } : null,
     hit: r.dc ? r.dc.hit : (r.hit ?? null)
   }
 }

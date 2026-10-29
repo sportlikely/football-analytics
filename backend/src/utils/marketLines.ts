@@ -387,17 +387,23 @@ export const MARKET_LIMITS: Record<MarketSport, Record<string, MarketLimit>> = {
   basketball: {
     total: { market: 'total', limit: 3, unit: 'points', label: 'totals' }, homePts: { market: 'total', limit: 3, unit: 'points', label: 'totals' },
     awayPts: { market: 'total', limit: 3, unit: 'points', label: 'totals' }, half: { market: 'total', limit: 3, unit: 'points', label: 'totals' },
+    totalLine: { market: 'total', limit: 3, unit: 'points', label: 'totals' }, half2: { market: 'total', limit: 3, unit: 'points', label: 'totals' },
     margin: { market: 'spread', limit: 2, unit: 'points', label: 'the spread' }
   },
   nfl: {
     total: { market: 'total', limit: 2.5, unit: 'points', label: 'totals' }, homePts: { market: 'total', limit: 2.5, unit: 'points', label: 'totals' },
     awayPts: { market: 'total', limit: 2.5, unit: 'points', label: 'totals' }, half: { market: 'total', limit: 2.5, unit: 'points', label: 'totals' },
+    totalLine: { market: 'total', limit: 2.5, unit: 'points', label: 'totals' }, half2: { market: 'total', limit: 2.5, unit: 'points', label: 'totals' },
     margin: { market: 'spread', limit: 1.5, unit: 'points', label: 'the spread' }
   },
   tennis: { games: { market: 'total_games', limit: 1.5, unit: 'points', label: 'total games' } },
   football: {
     goals: { market: 'ou2.5', limit: 5, unit: 'chance', label: 'over / under 2.5' },
-    cleanHome: { market: 'btts', limit: 5, unit: 'chance', label: 'both teams score' }, cleanAway: { market: 'btts', limit: 5, unit: 'chance', label: 'both teams score' }
+    cleanHome: { market: 'btts', limit: 5, unit: 'chance', label: 'both teams score' }, cleanAway: { market: 'btts', limit: 5, unit: 'chance', label: 'both teams score' },
+    // fix281: the yes / no questions follow their own market (each team scores: both teams score)
+    over15: { market: 'ou1.5', limit: 5, unit: 'chance', label: 'over / under 1.5' }, over25: { market: 'ou2.5', limit: 5, unit: 'chance', label: 'over / under 2.5' },
+    over35: { market: 'ou3.5', limit: 5, unit: 'chance', label: 'over / under 3.5' }, btts: { market: 'btts', limit: 5, unit: 'chance', label: 'both teams score' },
+    scoreHome: { market: 'btts', limit: 5, unit: 'chance', label: 'both teams score' }, scoreAway: { market: 'btts', limit: 5, unit: 'chance', label: 'both teams score' }
   }
 };
 /** the settled games with a closing line an output needs before its gap counts */

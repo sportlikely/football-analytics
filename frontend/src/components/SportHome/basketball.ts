@@ -26,7 +26,7 @@ export function toGame(g: BbGame): HGame {
     id: g.id, href: matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, reveal: { id: rid(g), status: rstatus(g) }, kickoff: g.kickoff,
     competition: { name: g.league.name, href: leagueHref('basketball', g.league.code, g.league.name)! }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: liveLabel(g, true), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
-    pred: winnerPred(g.prediction, bbShort(g.home.name, g.league.code), bbShort(g.away.name, g.league.code), g.prediction?.strongAt ?? STRONG)
+    pred: winnerPred(g.prediction, bbShort(g.home.name, g.league.code), bbShort(g.away.name, g.league.code))
   }
 }
 
@@ -38,7 +38,7 @@ export function toResult(g: BbGame): HResult {
     id: g.id, href: matchHref('basketball', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, competition: g.league.name, date: g.kickoff,
     home: { name: g.home.name, logo: g.home.logo, score: g.score?.home ?? '', won: won('H') },
     away: { name: g.away.name, logo: g.away.logo, score: g.score?.away ?? '', won: won('A') },
-    pick: pick ? { words: pick === 'H' ? g.home.name : g.away.name, pct: null, strong: false } : null,
+    pick: pick ? { words: pick === 'H' ? g.home.name : g.away.name, pct: null } : null,
     hit: g.prediction?.hit ?? null
   }
 }

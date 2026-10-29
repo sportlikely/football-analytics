@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import type { MoreSport } from '../game/MorePredictions'
+import type { MoreSport } from '../prediction/more'
 import { t, LOCALE } from '../../../lib/i18n'
 import { TeamLogo } from '../../../pages/bb/parts'
 import { Card, Tick, pct, type AccuracyAdapter, type AccData } from '../Accuracy'

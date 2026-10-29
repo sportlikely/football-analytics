@@ -8,12 +8,12 @@ import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
 import { useReveal } from '../../lib/reveal'
 import { slModelOf } from '../../lib/modelNames'
-import { tennisRid, tennisRstatus, tennisHref, tennisPlayerFav, tennisTournamentFav, surname, roundName, flagOf, tierLabel, surfaceName, setsText, TENNIS_STRONG, type TMatch, type TPred } from '../../lib/tennis'
+import { tennisRid, tennisRstatus, tennisHref, tennisPlayerFav, tennisTournamentFav, surname, roundName, flagOf, tierLabel, surfaceName, setsText, type TMatch, type TPred } from '../../lib/tennis'
 import { Skeleton } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
-import MorePredictions from '../../components/sport/game/MorePredictions'
+import { useGameTopics } from '../../components/sport/prediction/topicTabs'
 import GameExtras from '../../components/sport/game/GameExtras'
-import GamePage, { useGameTab, GameNews, Section, fmtGameDate, fmtGameTime, type GameTab } from '../../components/sport/game/GamePage'
+import GamePage, { GameNews, Section, fmtGameDate, fmtGameTime, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
 import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts'
@@ -51,7 +51,7 @@ export default function TennisMatch() {
   const navigate = useNavigate()
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
-  const [tab, pickTab] = useGameTab(TABS, { standings: 'draw', table: 'draw', players: 'stats' })
+  const { tab, pickTab, topic, pickTopic } = useGameTopics('tennis', TABS, { standings: 'draw', table: 'draw', players: 'stats' })
   primeGame('tennis', Number(id)) // fix250: the page's parts in one request
   useEffect(() => {
     setD(null); setMissing(false)
@@ -82,7 +82,6 @@ export default function TennisMatch() {
     title: t('{0}: player page', { 0: s.name }), linkLabel: t('Player page →'), star: s.id ? <FavStar fav={tennisPlayerFav(s)} size="sm" /> : undefined,
     sub: s.rank ? t('World No. {0}', { 0: s.rank }) : null
   })
-  const strongAt = p?.strongAt ?? TENNIS_STRONG
   const sets = p?.sets || []
   const g = p?.games
   const tabs: GameTab[] = [
@@ -92,7 +91,8 @@ export default function TennisMatch() {
         <>
           <WinnerPrediction
             rid={tennisRid(m)} status={tennisRstatus(m)} p={p} home={{ name: m.home.name, logo: null }} away={{ name: m.away.name, logo: null }} upcoming={m.state === 'upcoming'}
-            model={p?.model || 'tennis-v1'} sport="tennis" saved={t('Saved before the first serve')} updated={t('Updated until the first serve')} strongAt={strongAt}
+            model={p?.model || 'tennis-v1'} sport="tennis" saved={t('Saved before the first serve')} updated={t('Updated until the first serve')}
+            more={{ sport: 'tennis', id: m.id }} topic={topic} onTopic={pickTopic} names={{ home: surname(m.home), away: surname(m.away) }}
             middle={{ label: t('Total games'), value: g && typeof g.median === 'number' ? String(g.median) : '–' }}
             stats={[
               { label: t('Likely score'), value: sets[0] ? sets[0].score.replace('-', '–') : '–' },
@@ -105,8 +105,6 @@ export default function TennisMatch() {
             noPrediction={m.state === 'upcoming' ? t('Our prediction for this match is saved in the 48 hours before the first serve.') : t('No prediction for this match.')}
           />
           {p && !p.locked && sets.length > 0 && <SetsCard m={m} p={p} />}
-          {/* fix204: more predictions from the same chain (locked like the prediction) */}
-          <MorePredictions sport="tennis" id={m.id} rid={tennisRid(m)} status={tennisRstatus(m)} home={m.home.name} away={m.away.name} />
           {/* fix231: trends (all matches / this surface), next matches, weather (outdoors) */}
           <GameExtras sport="tennis" id={m.id} />
           {lang === 'en' && d.writeup && <GamePreview text={d.writeup} title="Match preview" />}

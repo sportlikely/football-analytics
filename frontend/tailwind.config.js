@@ -25,6 +25,7 @@ export default {
         live: 'rgb(var(--live) / <alpha-value>)',
         win: 'rgb(var(--win) / <alpha-value>)',
         loss: 'rgb(var(--loss) / <alpha-value>)',
+        likely: 'rgb(var(--likely) / <alpha-value>)',
       },
       boxShadow: {
         card: '0 1px 0 rgb(var(--line) / 0.6), 0 8px 24px -12px rgb(0 0 0 / 0.35)',

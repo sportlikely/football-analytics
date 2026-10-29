@@ -59,7 +59,7 @@ export const PARITY = [
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.whatItMeans', label: 'What this game means: season chances by result (fix215)', football: true, basketball: true, nfl: true, tennis: 'na: tennis has no league season table (tournaments and rankings), nothing to simulate' },
-  { key: 'game.morePredictions', label: 'More predictions block under the prediction (fix204)', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'game.morePredictions', label: 'More predictions inside the prediction tab: "Most sure first" + topic cards (fix204, fix281)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'record.morePredictions', label: 'More predictions section on the record page (fix204)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'seo.crawler.moreSentence', label: 'Crawler game page: one More predictions sentence (fix204)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.modelName', label: 'Public model name + version line under the prediction (ModelName, fix191)', football: true, basketball: true, nfl: true, tennis: true },

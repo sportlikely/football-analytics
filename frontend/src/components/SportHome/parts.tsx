@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { t as tt, LOCALE, isRtl } from '../../lib/i18n'
+import { bandOf, bandWord, BAND_TEXT } from '../../lib/confidence'
 import { isCovered, revealMatch, justRevealed } from '../../lib/reveal'
 import CountUp from '../CountUp'
 import { RevealChip } from '../Reveal'
@@ -169,7 +170,7 @@ function Field({ kind }: { kind: SportAdapter['field'] }) {
   )
 }
 
-/** The lime "Our pick" chip of the hero: "Our pick (?) Barça or draw · 82%" (+ "Strong pick"). */
+/** The lime "Our pick" chip of the hero: "Our pick (?) Barça or draw · 82%" (+ the band word, fix281). */
 function HeroPick({ pick }: { pick: HPick }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5 min-w-0">
@@ -179,7 +180,8 @@ function HeroPick({ pick }: { pick: HPick }) {
         <span className="truncate">{pick.words}</span>
         {pick.pct !== null && <><span aria-hidden>·</span><span className="num whitespace-nowrap">{pick.pct}%</span></>}
       </span>
-      {pick.strong && <span className="inline-block rounded-full border font-bold whitespace-nowrap text-[11px] px-2 py-0.5 border-[#C8FF3D]/60 text-[#C8FF3D]">{tt("Strong pick")}</span>}
+      {/* fix281: the band word replaces "Strong pick" (lib/confidence) */}
+      {pick.pct !== null && <span data-band={bandOf(pick.pct)} className="inline-block rounded-full border font-bold whitespace-nowrap text-[11px] px-2 py-0.5 border-white/40 text-white/90">{bandWord(bandOf(pick.pct))}</span>}
     </span>
   )
 }
@@ -414,9 +416,9 @@ function PickLine({ pick }: { pick: HPick }) {
         <span className="text-faint">{tt("Our pick")}</span>
         {pick.help && <DcHelp />}
         <span className="font-bold text-ink truncate">{pick.words}</span>
-        {pick.pct !== null && <><span aria-hidden className="text-faint">·</span><span className="num font-extrabold text-accent">{pick.pct}%</span></>}
+        {pick.pct !== null && <><span aria-hidden className="text-faint">·</span><span className={`num font-extrabold ${BAND_TEXT[bandOf(pick.pct)]}`}>{pick.pct}%</span></>}
       </span>
-      {pick.strong && <span className="rounded-full border border-accent/50 text-accent text-[10px] font-bold px-1.5 py-px">{tt("Strong")}</span>}
+      {pick.pct !== null && <span data-band={bandOf(pick.pct)} className={`text-[10px] font-bold whitespace-nowrap ${BAND_TEXT[bandOf(pick.pct)]}`}>{bandWord(bandOf(pick.pct))}</span>}
     </span>
   )
 }

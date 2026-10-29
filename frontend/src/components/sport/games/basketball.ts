@@ -6,21 +6,10 @@ import { t as tt } from '../../../lib/i18n'
 import { useAuth } from '../../../lib/auth'
 import { useBbConfig, useBbFavorites, bbLeagueFav, bbRank, BB_COUNTRY, type BbGame } from '../../../lib/bb'
 import { toGame, toResult } from '../../SportHome/basketball'
-import type { GamesAdapter, GamesData, SGame, SLeague, SChip } from '../types'
+import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 import { teamHref, leagueHref, useSlugVersion } from '../../../lib/links'
 
 /** Basketball's adapter for the shared Games page (fix152a): data + labels only. */
-
-/** Margin / Total pts chips (the model's expected margin and total). */
-export function winnerChips(p: { locked?: boolean; spread?: number | null; margin?: number | null; total?: number | null } | null | undefined): SChip[] {
-  if (!p || p.locked) return []
-  const m = typeof p.spread === 'number' ? p.spread : typeof p.margin === 'number' ? p.margin : null
-  if (m === null || typeof p.total !== 'number') return []
-  return [
-    { key: 'margin', label: tt("Margin"), value: `${m >= 0 ? '1' : '2'} +${Math.abs(m).toFixed(1)}`, title: tt("Expected margin") },
-    { key: 'total', label: tt("Total pts"), value: p.total.toFixed(1), title: tt("Total points") }
-  ]
-}
 
 function useData(): GamesData {
   const { access } = useAuth()
@@ -55,7 +44,7 @@ function useData(): GamesData {
       const weight = open ? Math.max(0, 20 - bbRank(g.league.code)) / 4 + (1 - Math.abs(p!.pHome! - 50) / 50) : 0
       let note: SGame['note'] = null
       if (g.state === 'live' && p?.live) { const k = p.live.pHome >= p.live.pAway ? 'H' : 'A'; note = { text: `${tt("Now")}: ${k === 'H' ? h.home.short : h.away.short} ${Math.round(k === 'H' ? p.live.pHome : p.live.pAway)}%`, tone: 'live' } }
-      return { ...h, state: g.state as SGame['state'], league, favWhy: favs.reasons(g).map(f => f.name), weight, chips: open ? winnerChips(p) : [], note }
+      return { ...h, state: g.state as SGame['state'], league, favWhy: favs.reasons(g).map(f => f.name), weight, note }
     })
     return {
       loading: games === null, error, games: list, leagues,

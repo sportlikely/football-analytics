@@ -74,7 +74,6 @@ export function pickOfPrediction(p: Prediction): 'H' | 'D' | 'A' {
  * The 1X2 percentages stay as they are; the single most likely result is still tracked as the "hard call".
  */
 export type DC = '1X' | 'X2' | '12'
-export const DC_STRONG = 85
 export const DC_SIDES: Record<DC, ('H' | 'D' | 'A')[]> = { '1X': ['H', 'D'], X2: ['D', 'A'], '12': ['H', 'A'] }
 
 export function dcOf(h: number, d: number, a: number): { code: DC; pct: number } {
@@ -83,12 +82,12 @@ export function dcOf(h: number, d: number, a: number): { code: DC; pct: number }
 }
 
 /** Our double-chance pick for a prediction: full ones carry the %, locked ones only the code (null when unknown). */
-export function doubleChance(p: Prediction | null | undefined): { code: DC; pct: number | null; sides: ('H' | 'D' | 'A')[]; strong: boolean } | null {
+export function doubleChance(p: Prediction | null | undefined): { code: DC; pct: number | null; sides: ('H' | 'D' | 'A')[] } | null {
   if (!p) return null
-  if (p.locked || typeof p.home !== 'number') return p.dc ? { code: p.dc, pct: null, sides: DC_SIDES[p.dc], strong: false } : null
+  if (p.locked || typeof p.home !== 'number') return p.dc ? { code: p.dc, pct: null, sides: DC_SIDES[p.dc] } : null
   const x = dcOf(p.home, p.draw, p.away)
   const pct = Math.round(x.pct)
-  return { code: x.code, pct, sides: DC_SIDES[x.code], strong: pct >= DC_STRONG }
+  return { code: x.code, pct, sides: DC_SIDES[x.code] }
 }
 
 /** Our double chance in words (fix127): "No draw" / "Barça or draw" — never the code alone. Pass short names. */

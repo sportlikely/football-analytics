@@ -8,19 +8,10 @@ import { useFavorites } from '../../../lib/favorites'
 import { useTennisFavorites, useTennisTour, tennisTournamentFav, tennisHref, tierLabel, surfaceName, isoOfCountry, surname, type TMatch } from '../../../lib/tennis'
 import { toGame, toResult } from '../../SportHome/tennis'
 import { TennisTourChips, TennisTournamentPanel } from '../../../pages/tennis/parts'
-import type { GamesAdapter, GamesData, SGame, SLeague, SChip } from '../types'
+import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 
 /** Tennis's adapter for the shared Matches page (fix193): data + labels only. The "leagues" are the tournaments. */
 
-/** the side chips of a row: the most likely set score and the median total games */
-export function tennisChips(p: TMatch['prediction']): SChip[] {
-  if (!p || p.locked) return []
-  const out: SChip[] = []
-  const top = p.sets && p.sets[0]
-  if (top) out.push({ key: 'sets', label: tt("Sets"), value: top.score.replace('-', '–'), title: tt("Most likely set score") })
-  if (p.games && typeof p.games.median === 'number') out.push({ key: 'games', label: tt("Games"), value: String(p.games.median), title: tt("Total games (median)") })
-  return out
-}
 /** a tournament as the sidebar / groups show it: biggest events first */
 export const tournamentOf = (m: TMatch, level: number): SLeague => ({
   // the bar reads "AUSTRIA: Erste Bank Open · ATP 500 · Hard" (football: "SPAIN: LaLiga")
@@ -37,7 +28,7 @@ export function tennisSGame(m: TMatch, lg: SLeague = tournamentOf(m, levelOf(m))
   // Spotlight: the bigger the event and the closer the match, the higher
   const weight = open ? (6 - Math.min(6, Math.floor(levelOf(m) / 10))) / 3 + (1 - Math.abs(p!.pHome! - 50) / 50) : 0
   return {
-    ...toGame(m), state: m.state as SGame['state'], league: lg, favWhy, weight, chips: tennisChips(p),
+    ...toGame(m), state: m.state as SGame['state'], league: lg, favWhy, weight,
     note: m.state === 'live' && open && p!.live ? { text: tt("Now: {0} {1}%", { 0: surname(p!.live.pHome >= p!.live.pAway ? m.home : m.away), 1: Math.round(Math.max(p!.live.pHome, p!.live.pAway)) }), tone: 'live' as const } : null,
     hit: m.state === 'done' ? p?.hit ?? null : undefined
   }

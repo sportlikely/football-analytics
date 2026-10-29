@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { API_URL } from '../../../lib/socket'
 import { t, LOCALE } from '../../../lib/i18n'
-import type { MoreSport } from '../game/MorePredictions'
+import type { MoreSport } from '../prediction/more'
 
 /**
  * "More predictions" on every sport's record page (fix204): per output, the games checked, how often our most likely
@@ -21,7 +21,10 @@ export default function MoreRecord({ sport }: { sport: MoreSport }) {
     cleanHome: t('Home clean sheet'), cleanAway: t('Away clean sheet'), win2Home: t('Home win by 2+ goals'), win2Away: t('Away win by 2+ goals'),
     ht: t('Half-time result'), htft: t('Half-time / full-time'), margin: t('Winning margin'), total: t('Total points'),
     homePts: t('Home team points'), awayPts: t('Away team points'), half: sport === 'nfl' ? t('Halftime leader') : t('First-half winner'), ot: t('Overtime'),
-    sets: t('Set score'), first: t('First set'), games: t('Total games'), tb: t('At least one tie-break')
+    sets: t('Set score'), first: t('First set'), games: t('Total games'), tb: t('At least one tie-break'),
+    // fix281
+    over15: t('Over 1.5 goals'), over25: t('Over 2.5 goals'), over35: t('Over 3.5 goals'), btts: t('Both teams score'), scoreHome: t('Home team scores'), scoreAway: t('Away team scores'),
+    totalLine: t('Total points over / under'), half2: t('Second-half winner'), set1: t('Player 1 wins a set'), set2: t('Player 2 wins a set')
   }
   const since = r.since ? new Date(r.since).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' }) : null
   return (

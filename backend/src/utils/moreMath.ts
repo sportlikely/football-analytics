@@ -169,6 +169,11 @@ function halves(lh: number, la: number, s: number, sizeH: number | null, sizeA: 
   return { ht, htft };
 }
 
+/** fix281: a yes / no set from P(yes) */
+const yesNo = (q: number): PSet => { const v = Math.min(1, Math.max(0, q)); return { labels: ['yes', 'no'], p: [v, 1 - v] }; };
+/** fix281: the over / under line of a basketball / NFL game: the league's typical total, on a half point */
+export const totalLineOf = (meanTotal: number) => Math.round(meanTotal) + 0.5;
+
 export function footballExtras(xgHome0: number, xgAway0: number, htShare = DEFAULT_HT_SHARE, shrink: GoalShrink | null = null, gm: GoalModel | null = null): Extras {
   const [xgHome, xgAway] = shrinkPair(xgHome0, xgAway0, shrink);
   // the full-time grid: independent Poisson (fix204) or the league's Dixon–Coles / negative-binomial grid (fix204c)
@@ -204,6 +209,10 @@ export function footballExtras(xgHome0: number, xgAway0: number, htShare = DEFAU
       cleanAway: { labels: ['yes', 'no'], p: [ph[0], 1 - ph[0]] },
       win2Home: { labels: ['yes', 'no'], p: [w2h, 1 - w2h] },
       win2Away: { labels: ['yes', 'no'], p: [w2a, 1 - w2a] },
+      // fix281: the yes / no questions of the prediction tab, each its own output (own calibration, own gate)
+      over15: yesNo(1 - goals[0] - goals[1]), over25: yesNo(goals[3] + goals[4]), over35: yesNo(goals[4]),
+      btts: yesNo(1 - ph[0] - pa[0] + grid[0][0]),
+      scoreHome: yesNo(1 - ph[0]), scoreAway: yesNo(1 - pa[0]),
       ht: { labels: ['H', 'D', 'A'], p: norm1(ht) },
       htft: { labels: HTFT, p: norm1(htft) }
     },
@@ -278,6 +287,10 @@ export function normalExtras(x: NormalIn): Extras {
   const sdTeam = teamSd(f.sigmaT, sd);
   const s = Math.min(0.65, Math.max(0.35, f.share));
   const half = threeWay(s * mu, sd * Math.sqrt(s), f.kHalf);
+  // fix281: the second half on its own (regulation only), the rest of the margin with the rest of the spread
+  const half2 = threeWay((1 - s) * mu, sd * Math.sqrt(1 - s), f.kHalf);
+  const line = totalLineOf(f.meanTotal);
+  const pOver = 1 - (x.shapeT ? shapeCdf(x.shapeT, (line - x.total) / (x.sdT || f.sigmaT)) : normCdf((line - x.total) / (x.sdT || f.sigmaT)));
   const pT0 = normCdf((0.5 - mu) / sd) - normCdf((-0.5 - mu) / sd);
   const ot = Math.min(0.35, Math.max(0, f.kOt * pT0));
   return {
@@ -288,9 +301,12 @@ export function normalExtras(x: NormalIn): Extras {
       homePts: { labels: teamLabels, p: norm1(binsOf(x.homePts, x.sdHome || sdTeam, intCuts(aEdges), x.shapeTeam)), cuts: aEdges },
       awayPts: { labels: teamLabels, p: norm1(binsOf(x.awayPts, x.sdAway || sdTeam, intCuts(aEdges), x.shapeTeam)), cuts: aEdges },
       half: { labels: ['H', 'D', 'A'], p: norm1(half) },
+      half2: { labels: ['H', 'D', 'A'], p: norm1(half2) },
+      // fix281: over / under the line (a numeric set: total < line → 'under')
+      totalLine: { labels: ['under', 'over'], p: [1 - pOver, pOver], cuts: [Math.ceil(line)] },
       ot: { labels: ['yes', 'no'], p: [ot, 1 - ot] }
     },
-    info: { expected: [Math.round(x.homePts), Math.round(x.awayPts)], side: side > 0 ? 'H' : 'A', sd: round2(sd), share: round3(s) }
+    info: { expected: [Math.round(x.homePts), Math.round(x.awayPts)], line, side: side > 0 ? 'H' : 'A', sd: round2(sd), share: round3(s) }
   };
 }
 
@@ -329,7 +345,10 @@ export function tennisExtras(d: { sets: Record<string, number>; first: number; g
       sets: { labels: order, p: norm1(order.map(k => d.sets[k] || 0)) },
       first: { labels: ['1', '2'], p: [d.first, 1 - d.first] },
       games: { labels: [`<${cuts[0]}`, ...cuts.slice(0, -1).map((c, k) => `${c}–${cuts[k + 1] - 1}`), `${cuts[cuts.length - 1]}+`], p: norm1(gp), cuts: [...cuts] },
-      tb: { labels: ['yes', 'no'], p: [tb, 1 - tb] }
+      tb: { labels: ['yes', 'no'], p: [tb, 1 - tb] },
+      // fix281: each player wins at least one set
+      set1: yesNo(order.reduce((a, k) => a + (Number(k.split('-')[0]) >= 1 ? d.sets[k] || 0 : 0), 0) / Math.max(1e-9, order.reduce((a, k) => a + (d.sets[k] || 0), 0))),
+      set2: yesNo(order.reduce((a, k) => a + (Number(k.split('-')[1]) >= 1 ? d.sets[k] || 0 : 0), 0) / Math.max(1e-9, order.reduce((a, k) => a + (d.sets[k] || 0), 0)))
     },
     // fix278: the expected total games (the gap to the market's total-games line)
     info: { bo: bo === 5 ? 5 : 3, expGames: expGamesOf(d.games) }

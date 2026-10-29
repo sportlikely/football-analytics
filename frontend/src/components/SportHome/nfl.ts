@@ -29,7 +29,7 @@ export function toGame(g: NflGame): HGame {
     id: g.id, href: matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, reveal: { id: nflRid(g), status: nflRstatus(g) }, kickoff: g.kickoff,
     competition: { name: compOf(g), href: leagueHref('american-football', lg === 2 ? '2' : '1')! }, home: team(g.home), away: team(g.away),
     live: g.state === 'live' ? { label: nflClock(g), score: [g.score?.home ?? 0, g.score?.away ?? 0] } : null,
-    pred: winnerPred(g.prediction, rowName(g.home.name, lg), rowName(g.away.name, lg), nflStrongAt(lg))
+    pred: winnerPred(g.prediction, rowName(g.home.name, lg), rowName(g.away.name, lg))
   }
 }
 
@@ -47,7 +47,7 @@ export function toResult(g: NflGame): HResult {
       id: g.id, href: matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff })!, competition: compOf(g), date: g.kickoff,
       home: { name: g.home.name, logo: g.home.logo, score: g.score?.home ?? '', won: won('H') },
       away: { name: g.away.name, logo: g.away.logo, score: g.score?.away ?? '', won: won('A') },
-      pick: pick ? { words: nick(pick === 'H' ? g.home.name : g.away.name, lg), pct: null, strong: false } : null,
+      pick: pick ? { words: nick(pick === 'H' ? g.home.name : g.away.name, lg), pct: null } : null,
       hit: p?.hit ?? null
     }
 }

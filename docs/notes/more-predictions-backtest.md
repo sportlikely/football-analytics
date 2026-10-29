@@ -562,3 +562,12 @@ POR −14.8 vs −7.5, total 228.8 vs 234 — totals 3–5 low every game, and n
   books write the away handicap either as its own ("Away +6.5") or as the home side's number ("Away -6.5"); both
   pairings are now built and the one that looks like real two-way prices is kept (+ a money-line guard). Stored line =
   home handicap; home margin = −line, read once (`marketNumber`). Old handicap rows were removed and re-read.
+
+## fix281 (29 Oct 2026): the yes / no questions of the prediction tab
+
+New outputs, each with its own calibration and gate: football `over15`, `over25`, `over35`, `btts`, `scoreHome`,
+`scoreAway` (from the same score grid as the goals; over 2.5 follows the market anchor of the goals set); basketball /
+NFL `totalLine` (over / under the league's typical total on a half point — a numeric set, cut at the line) and `half2`
+(second-half winner, regulation only: the margin's rest × (1 − first-half share), spread × √(1 − share)); tennis `set1`,
+`set2` (each player wins at least one set, from the chain's set scores). Market limits: ou1.5 / ou2.5 / ou3.5 / btts
+(each team scores follows btts), totals for the points ones. No backtest numbers yet: the next server run fills them.

@@ -10,16 +10,16 @@ import { t, LOCALE, lang } from '../../lib/i18n'
 import { FavStar } from '../../lib/favorites'
 import { useReveal } from '../../lib/reveal'
 import { slModelOf } from '../../lib/modelNames'
-import { NFL_STATUS, weekLabel, nick, nflTeamFav, nflRid, nflRstatus, setNflLeague, nflLeagueName, nflModelOf, nflStrongAt, type NflGame as Game, type NflSide, type NflPred, type StandRow } from '../../lib/nfl'
+import { NFL_STATUS, weekLabel, nick, nflTeamFav, nflRid, nflRstatus, setNflLeague, nflLeagueName, nflModelOf, type NflGame as Game, type NflSide, type NflPred, type StandRow } from '../../lib/nfl'
 import { Card, Skeleton, TeamLogo } from '../bb/parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
-import MorePredictions from '../../components/sport/game/MorePredictions'
+import { useGameTopics } from '../../components/sport/prediction/topicTabs'
 import GameMeaning from '../../components/sport/forecast/GameMeaning'
 import GameExtras from '../../components/sport/game/GameExtras'
 import YourPicks from '../../components/YourPicks'
 import { newerWinnerLive } from '../../lib/liveState'
 import { StatBars, LeagueSwitch, StandTable } from './parts'
-import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
+import GamePage, { GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
 import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts'
@@ -79,7 +79,7 @@ export default function NflGame() {
   const id = useEntityId()
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
-  const [tab, pickTab] = useGameTab(TABS, { overview: 'h2h', injuries: 'players', standings: 'table', video: 'highlights' })
+  const { tab, pickTab, topic, pickTopic } = useGameTopics('nfl', TABS, { overview: 'h2h', injuries: 'players', standings: 'table', video: 'highlights' })
   const reload = useRef<() => void>(() => undefined)
   primeGame('nfl', Number(id)) // fix250: the page's parts in one request
   useApiFresh(id ? `${API_URL}/nfl/game/${id}` : null, () => reload.current())
@@ -128,7 +128,8 @@ export default function NflGame() {
         <>
           <WinnerPrediction
             rid={nflRid(g)} status={nflRstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model={nflModelOf(lg)} sport="american-football"
-            saved={t('Saved before kick-off')} updated={t('Updated until kick-off')} strongAt={nflStrongAt(lg)}
+            saved={t('Saved before kick-off')} updated={t('Updated until kick-off')}
+            more={{ sport: 'nfl', id: g.id }} topic={topic} onTopic={pickTopic} names={{ home: nick(g.home.name, g.league), away: nick(g.away.name, g.league) }}
             stats={[
               { label: t('Expected margin'), value: typeof p?.margin === 'number' ? t('{0} by {1}', { 0: nick((p.margin >= 0 ? g.home : g.away).name, g.league), 1: Math.abs(p.margin).toFixed(1) }) : '–' },
               { label: t('Predicted score'), value: typeof p?.homePts === 'number' ? `${Math.round(p.homePts)}–${Math.round(p.awayPts!)}` : '–' },
@@ -139,8 +140,6 @@ export default function NflGame() {
             howCalc={p && p.why && !p.locked ? <NflModelParts g={g} p={p} injuries={d.injuries} /> : undefined}
             noPrediction={g.state === 'upcoming' ? t('Our prediction for this game is saved in the week of the game, before kick-off.') : t('No prediction for this game.')}
           />
-          {/* fix204: more predictions from the same model (locked like the prediction) */}
-          <MorePredictions sport="nfl" id={g.id} rid={nflRid(g)} status={nflRstatus(g)} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />
           <GameMeaning sport="nfl" id={g.id} />
           {/* fix231: trends, next games, weather (outdoor stadiums) */}
           <GameExtras sport="nfl" id={g.id} />

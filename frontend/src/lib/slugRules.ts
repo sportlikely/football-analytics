@@ -111,7 +111,9 @@ export const ALLOWED_QUERY = ['q', 'league', 'tour', 'tab', 'day', 'plan', 'ref'
 /* ---------- fix235: tabs are sub-paths, every sport page is /<sport>/<page> (docs/notes/links.md) ---------- */
 
 /** a match page's tabs, every sport: /<sport>/match/<slug>/<tab>; the prediction is the page itself (no sub-path) */
-export const MATCH_TABS = ['stats', 'lineups', 'h2h', 'table', 'highlights', 'rest', 'players', 'box', 'quarters', 'plays', 'form', 'draw'] as const
+export const MATCH_TABS = ['stats', 'lineups', 'h2h', 'table', 'highlights', 'rest', 'players', 'box', 'quarters', 'plays', 'form', 'draw',
+  // fix281: the prediction tab's topics (football Result · Goals · Score · Half-time; basketball / NFL Points · Halves; tennis Sets · Games)
+  'goals', 'score', 'half-time', 'points', 'halves', 'sets', 'games'] as const
 /** a league page's tabs: /<sport>/league/<slug>/<tab> (the overview is the page itself) */
 export const LEAGUE_TABS = ['forecast'] as const
 /**

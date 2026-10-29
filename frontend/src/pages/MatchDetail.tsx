@@ -9,7 +9,6 @@ import { useApiFresh } from '../lib/apiCache'
 import PageSkeleton from '../components/PageSkeleton'
 import { API_URL, socket } from '../lib/socket'
 import { modelInfo, isV3, score10, CONFIDENCE_LABEL, MATCH_TYPE_LABEL, pickOfPrediction, doubleChance, dcLabel, shortTeam, type DC, type Prediction } from '../lib/predict'
-import OurPick from '../components/DcPick'
 import WinProbability from '../components/WinProbability'
 import { useReveal, justRevealed, hideMatch, guessFirstOn } from '../lib/reveal'
 import CountUp from '../components/CountUp'
@@ -26,12 +25,12 @@ import RowLink from '../components/sport/RowLink'
 import { tNodes } from '../lib/tNodes'
 import { slModel } from '../lib/modelNames'
 import { ModelName } from '../components/sport/game/ModelName'
-import MorePredictions from '../components/sport/game/MorePredictions'
+import PredictionPanel from '../components/sport/prediction/PredictionPanel'
+import { useGameTopics } from '../components/sport/prediction/topicTabs'
 import GameMeaning from '../components/sport/forecast/GameMeaning'
 import GameExtras from '../components/sport/game/GameExtras'
 import { footballScorers } from '../lib/scorers'
 import { playerHref, leagueHref } from '../lib/links'
-import { useTabPath } from '../lib/tabPath'
 import { latinOf } from '../lib/names'
 import { tg } from '../lib/genText'
 
@@ -567,7 +566,8 @@ function MatchDetail() {
   // Page sections as tabs: Prediction first, then Statistics, Lineups and the league table.
   // The open tab lives in the address as a sub-path (fix235: …/match/<slug>/stats, /lineups, /table) so a link can
   // open it directly; the prediction is the page itself.
-  const [tab, pickTab] = useTabPath(TAB_IDS) as [TabId, (t: TabId) => void]
+  const { tab: tab0, pickTab, topic, pickTopic } = useGameTopics('football', TAB_IDS)
+  const tab = tab0 as TabId
 
   // League table (fetched once per competition; the tab is hidden when there is none)
   const compCode = details?.match.competition.code
@@ -675,7 +675,6 @@ function MatchDetail() {
   const pickVar = pick === 'H' ? '--home' : pick === 'A' ? '--away' : '--draw'
   // fix120: our recommended pick is the double chance (two results); the 1X2 pick stays as the "hard call"
   const dc = pick ? doubleChance(p) : null
-  const inDc = (k: 'H' | 'D' | 'A') => (dc ? dc.sides.includes(k) : pick === k)
 
   const tableTotals = (tables || []).filter(t => t.type === 'TOTAL')
   const tableInvolving = tableTotals.filter(t => t.table.some(r => r.team.id === home.id || r.team.id === away.id))
@@ -778,31 +777,34 @@ function MatchDetail() {
                         <span className="text-[11px] text-faint">{modelInfo(p.model).desc}</span>
                       </div>
                     )}
-                    {/* fix128: "Most likely result" (the highest of 1 · X · 2 highlighted), then our double chance in words;
-                        the two results inside it get a lime outline on the cards, the third is dimmed */}
+                    {/* fix281: the shared prediction tab — split bar, "Most sure first", topics as sub-paths, "Why we think so" behind a button */}
                     {(() => {
-                      const top = p.home >= p.draw && p.home >= p.away ? 'H' : p.away >= p.draw ? 'A' : 'D'
+                      const hn = shortTeam(home), an = shortTeam(away)
+                      const sides = dc ? dc.sides : []
+                      const win = (k: 'H' | 'D' | 'A') => (k === 'H' ? tt("{0} win", { 0: hn }) : k === 'A' ? tt("{0} win", { 0: an }) : tt("A draw"))
+                      const dcText = dc ? (dc.code === '1X' ? tt("{0} win or draw", { 0: hn }) : dc.code === 'X2' ? tt("{0} win or draw", { 0: an }) : tt("No draw: one team wins")) : ''
+                      const v = (k: 'H' | 'D' | 'A') => (k === 'H' ? p.home : k === 'D' ? p.draw : p.away)
+                      const top = (['H', 'D', 'A'] as const).reduce((a, b) => (v(b) > v(a) ? b : a), 'H' as 'H' | 'D' | 'A')
                       return (
-                        <>
-                          <div className="text-[11px] font-semibold uppercase tracking-wide text-faint mb-2">{tt("Most likely result")}</div>
-                          <div className="grid grid-cols-3 gap-3" dir="ltr">
-                            <OutcomeTile k="H" label={home.shortName || home.name} v={p.home} top={top === 'H'} inPick={inDc('H')} roll={justRevealed(matchId)} delay={0} />
-                            <OutcomeTile k="D" label={tt("Draw")} v={p.draw} top={top === 'D'} inPick={inDc('D')} roll={justRevealed(matchId)} delay={120} />
-                            <OutcomeTile k="A" label={away.shortName || away.name} v={p.away} top={top === 'A'} inPick={inDc('A')} roll={justRevealed(matchId)} delay={240} />
-                          </div>
-                          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-                            <OurPick p={p} home={shortTeam(home)} away={shortTeam(away)} showCode />
-                          </div>
-                        </>
-                      )
-                    })()}
-                    <div className="flex h-2.5 gap-[3px] mt-4">
-                      <div className={`rounded-full bg-home ${inDc('H') ? '' : 'opacity-35'}`} style={{ width: `calc(${p.home}% - 3px)` }} />
-                      <div className={`rounded-full bg-draw ${inDc('D') ? '' : 'opacity-35'}`} style={{ width: `calc(${p.draw}% - 3px)` }} />
-                      <div className={`rounded-full bg-away ${inDc('A') ? '' : 'opacity-35'}`} style={{ width: `calc(${p.away}% - 3px)` }} />
-                    </div>
-                    <ModelName sport="football" className="mt-3" />
-
+                        <div className={justRevealed(matchId) ? 'animate-pop' : ''}>
+                          <PredictionPanel
+                            sport="football" moreId={m.id} rid={m.id} status={m.status} names={{ home: hn, away: an }} topic={topic} onTopic={pickTopic}
+                            main={{
+                              cells: (['H', 'D', 'A'] as const).map(k => ({ key: k, pct: v(k), on: sides.includes(k) })),
+                              pick: { words: dc ? dcLabel(dc.code, hn, an) : win(top), pct: dc?.pct ?? Math.round(v(top)), help: !!dc },
+                              items: [
+                                ...(dc && dc.pct !== null ? [{ id: 'dc', text: dcText, pct: dc.pct }] : []),
+                                ...(['H', 'D', 'A'] as const).map(k => ({ id: `res-${k}`, text: win(k), pct: v(k) }))
+                              ],
+                              card: {
+                                kind: 'split', id: 'result', q: tt("Who wins?"),
+                                cells: (['H', 'D', 'A'] as const).map(k => ({ key: k, label: `${k === 'H' ? hn : k === 'A' ? an : tt("Draw")} ${Math.round(v(k))}%`, pct: v(k), on: sides.includes(k) })),
+                                call: { words: dc ? dcLabel(dc.code, hn, an) : win(top), pct: dc?.pct ?? v(top) }
+                              }
+                            }}
+                            under={(
+                              <>
+                                <ModelName sport="football" className="mt-3" />
                     {p.live && LIVE.has(m.status) && <LiveChance p={p} home={home} away={away} paused={m.status === 'PAUSED'} />}
 
                     {['SCHEDULED', 'TIMED'].includes(m.status) && (
@@ -817,7 +819,16 @@ function MatchDetail() {
                     )}
 
                     {p.beforeLineups && <LineupChange p={p} home={home} away={away} />}
+                    {guessFirstOn() && ['SCHEDULED', 'TIMED'].includes(m.status) && (
+                      <div className="mt-2 text-end">
+                        <button type="button" onClick={() => hideMatch(matchId)} className="text-xs text-faint hover:text-ink underline underline-offset-4">{tt("Hide prediction again")}</button>
+                      </div>
+                    )}
 
+                              </>
+                            )}
+                            why={(
+                              <>
                     <PredictionStory
                       p={p}
                       home={home.shortName || home.name}
@@ -825,14 +836,6 @@ function MatchDetail() {
                       upcoming={['SCHEDULED', 'TIMED'].includes(m.status)}
                       friendly={/friendl/i.test(latinOf(m.competition.name))}
                     />
-                    {guessFirstOn() && ['SCHEDULED', 'TIMED'].includes(m.status) && (
-                      <div className="mt-2 text-end">
-                        <button type="button" onClick={() => hideMatch(matchId)} className="text-xs text-faint hover:text-ink underline underline-offset-4">{tt("Hide prediction again")}</button>
-                      </div>
-                    )}
-
-                    <GoalsPanel p={p} home={home} away={away} roll={justRevealed(matchId)} />
-
                     {p.grid && (
                       <details className="mt-4 group">
                         <summary className="cursor-pointer text-xs text-muted hover:text-ink select-none">{tt("For experts: the full model table")}</summary>
@@ -874,6 +877,12 @@ function MatchDetail() {
                       <p className="mt-3 text-xs text-faint">
                         {tt("Strength = goals per game relative to the league average, adjusted for opponent quality and shrunk toward average early in the season (1.00 = average). Attack above 1 is good; defence below 1 is good.")}</p>
                     </details>
+                              </>
+                            )}
+                          />
+                        </div>
+                      )
+                    })()}
                   </>
                   )
                 ) : (
@@ -881,8 +890,6 @@ function MatchDetail() {
                 )}
               </Section>
 
-              {/* fix204: more predictions from the same score grid (locked like the prediction) */}
-              <MorePredictions sport="football" id={m.id} rid={m.id} status={m.status} home={home.shortName || home.name} away={away.shortName || away.name} />
               <GameMeaning sport="football" id={m.id} />
               {/* fix231: trends, next games, weather, referee */}
               <GameExtras sport="football" id={m.id} />
@@ -1349,102 +1356,6 @@ function OutcomeTile({ k, label, v, top = false, inPick = false, dimOut = true, 
         {label}
       </div>
       <div className={`num text-2xl sm:text-3xl font-extrabold ${top ? color : 'text-ink/80'}`}><CountUp value={v} decimals={1} suffix="%" animate={roll} delay={delay} /></div>
-    </div>
-  )
-}
-
-/**
- * Goals and scores: total-goals lines (over 1.5 / 2.5 / 3.5 / 4.5) and the most likely correct scores.
- * Worked out from the model's expected goals (a Poisson score grid, the same method the models use); where the model
- * sends its own figure (over 2.5, BTTS, its top scores) that figure is used, so the page never shows two numbers
- * for the same thing.
- */
-function scoreGrid(lh: number, la: number) {
-  const pois = (l: number, k: number) => { let f = 1; for (let i = 2; i <= k; i++) f *= i; return (Math.exp(-l) * Math.pow(l, k)) / f }
-  const cells: { home: number; away: number; prob: number }[] = []
-  for (let i = 0; i <= 10; i++) for (let j = 0; j <= 10; j++) cells.push({ home: i, away: j, prob: pois(lh, i) * pois(la, j) * 100 })
-  return cells
-}
-
-function GoalsPanel({ p, home, away, roll }: { p: Prediction; home: Team; away: Team; roll: boolean }) {
-  const cells = scoreGrid(p.expectedGoals.home, p.expectedGoals.away)
-  const over = (line: number) => cells.filter(c => c.home + c.away > line).reduce((a, c) => a + c.prob, 0)
-  // keep the model's own over 2.5, and keep the lines in order (1.5 ≥ 2.5 ≥ 3.5 ≥ 4.5)
-  const o25 = p.over25
-  const o15 = Math.max(over(1.5), o25), o35 = Math.min(over(3.5), o25), o45 = Math.min(over(4.5), o35)
-  const lines = [{ l: '1.5', v: o15 }, { l: '2.5', v: o25 }, { l: '3.5', v: o35 }, { l: '4.5', v: o45 }]
-  const own = new Map(p.topScores.map(t => [`${t.home}-${t.away}`, t.prob]))
-  const scores = cells.map(c => ({ ...c, prob: own.get(`${c.home}-${c.away}`) ?? c.prob })).sort((a, b) => b.prob - a.prob).slice(0, 8)
-  const hn = home.shortName || home.name, an = away.shortName || away.name
-  return (
-    <div className="mt-5 space-y-3">
-      <div className="grid grid-cols-3 gap-3">
-        <Stat label={tt("Expected goals")} value={`${p.expectedGoals.home} – ${p.expectedGoals.away}`} />
-        <Stat label={tt("Both teams score")} value={`${Math.round(p.btts)}%`} />
-        <Stat label={tt("Most likely score")} value={scores[0] ? `${scores[0].home}–${scores[0].away}` : '–'} sub={scores[0] ? `${Math.round(scores[0].prob)}%` : undefined} />
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-line/70 bg-surface2/40 p-4">
-          <div className="label mb-3">{tt("Total goals")}</div>
-          <div className="space-y-2.5">
-            {lines.map((x, i) => (
-              <div key={x.l} className="grid grid-cols-[74px_1fr_44px] items-center gap-3 text-sm">
-                <span className="text-muted">{tt("Over")}{' '}{x.l}</span>
-                <span className="h-2 rounded-full bg-surface2 overflow-hidden">
-                  <span className="block h-full rounded-full bg-accent transition-[width] duration-1000 ease-out" style={{ width: `${Math.round(x.v)}%`, transitionDelay: `${i * 90}ms` }} />
-                </span>
-                <span className="num font-bold text-ink text-end"><CountUp value={x.v} suffix="%" animate={roll} delay={300 + i * 90} /></span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 text-[11px] text-faint">{tt("Under = 100% minus over. Under 2.5:")}{' '}<span className="num text-muted">{Math.round(100 - o25)}%</span></div>
-        </div>
-        <div className="rounded-xl border border-line/70 bg-surface2/40 p-4">
-          <div className="label mb-3">{tt("Correct score")}</div>
-          <div className="grid grid-cols-4 gap-2">
-            {scores.map((c, i) => (
-              <div key={`${c.home}-${c.away}`} className={`rounded-lg px-2 py-2 text-center ${i === 0 ? 'bg-accent/15 border border-accent/40' : 'bg-surface2/70'}`}>
-                <div className={`num font-bold ${i === 0 ? 'text-accent' : 'text-ink'}`}>{c.home}–{c.away}</div>
-                <div className="num text-[11px] text-muted"><CountUp value={c.prob} decimals={1} suffix="%" animate={roll} delay={400 + i * 60} /></div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 text-[11px] text-faint">{tt("{0} first · {1} second", { 0: hn, 1: an })}</div>
-        </div>
-      </div>
-      {(() => {
-        // who scores first: the first goal goes to each side in proportion to its expected goals
-        const lh = Math.max(0.01, p.expectedGoals.home), la = Math.max(0.01, p.expectedGoals.away), lam = lh + la
-        const none = Math.exp(-lam) * 100
-        const fh = (lh / lam) * (100 - none), fa = (la / lam) * (100 - none)
-        return (
-          <div className="rounded-xl border border-line/70 bg-surface2/40 p-4">
-            <div className="label mb-3">{tt("Who scores first")}</div>
-            <div className="flex h-2.5 gap-[3px] rounded-full overflow-hidden" aria-hidden>
-              <div className="bg-home" style={{ width: `${fh}%` }} />
-              <div className="bg-faint/50" style={{ width: `${none}%` }} />
-              <div className="bg-away" style={{ width: `${fa}%` }} />
-            </div>
-            <div className="mt-2 grid grid-cols-3 text-sm">
-              <span><span className="text-muted">{hn}</span> <b className="num text-ink">{Math.round(fh)}%</b></span>
-              <span className="text-center"><span className="text-muted">{tt("No goal")}</span> <b className="num text-ink">{Math.round(none)}%</b></span>
-              <span className="text-end"><span className="text-muted">{an}</span> <b className="num text-ink">{Math.round(fa)}%</b></span>
-            </div>
-          </div>
-        )
-      })()}
-    </div>
-  )
-}
-
-function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return (
-    <div className="rounded-xl bg-surface2/60 border border-line/50 px-3 py-2.5 text-center">
-      <div className="num text-lg font-bold text-ink">
-        {value}
-        {sub && <span className="text-xs text-faint font-medium ms-1">{sub}</span>}
-      </div>
-      <div className="text-[11px] text-faint">{label}</div>
     </div>
   )
 }

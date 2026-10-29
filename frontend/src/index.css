@@ -18,6 +18,7 @@
   --live: 225 29 72;
   --win: 22 163 74;
   --loss: 220 38 38;
+  --likely: 180 120 0; /* fix281: "Likely" (60–79%) */
   color-scheme: light;
 }
 
@@ -36,6 +37,7 @@
   --live: 255 59 78;
   --win: 61 220 132;
   --loss: 255 92 92;
+  --likely: 250 204 21;
   color-scheme: dark;
 }
 
@@ -209,7 +211,7 @@ html.a11y-text-2 { font-size: 125%; }
 html.a11y-text-3 { font-size: 150%; }
 html.a11y-contrast {
   --bg: 0 0 0; --surface: 0 0 0; --surface-2: 20 20 20; --line: 255 255 255; --ink: 255 255 255; --muted: 255 255 255; --faint: 230 230 230;
-  --accent: 255 255 0; --home: 120 190 255; --draw: 255 220 90; --away: 255 150 170; --live: 255 110 110; --win: 110 255 170; --loss: 255 120 120;
+  --accent: 255 255 0; --home: 120 190 255; --draw: 255 220 90; --away: 255 150 170; --live: 255 110 110; --win: 110 255 170; --loss: 255 120 120; --likely: 255 210 80;
 }
 html.a11y-contrast .stage { display: none; }
 html.a11y-contrast .card, html.a11y-contrast .glass { border-color: rgb(255 255 255) !important; }

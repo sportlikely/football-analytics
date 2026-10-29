@@ -5,7 +5,8 @@ import { API_URL } from '../../lib/socket'
 import { useNflLeague, useNflFilter, nflBase, type NflLeague, type NflFilter } from '../../lib/nfl'
 import { t, LOCALE } from '../../lib/i18n'
 import { NFL_STATUS, timeOf, nick, record, useNflFavorites, nflRid, nflRstatus, type NflGame, type StandRow, type Standings } from '../../lib/nfl'
-import { SectionTitle, TeamLogo, dayTitle, BbPickBlock, LockIcon } from '../bb/parts'
+import { SectionTitle, TeamLogo, dayTitle } from '../bb/parts'
+import RowBody, { type RowTeam } from '../../components/sport/prediction/RowBody'
 import { useReveal, justRevealed } from '../../lib/reveal'
 import { ScorersToggle, RowScorersLine, useScorersOpen } from '../../components/sport/RowScorers'
 import { teamHref, leagueHref, matchHref } from '../../lib/links'
@@ -68,6 +69,10 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
   const favWhy = useNflFavorites().reasons(g)
   // fix209: a live / finished row opens with its arrow to the scoring plays
   const [scOpen, scToggle] = useScorersOpen()
+  const side = (k: 'H' | 'A'): RowTeam => {
+    const team = k === 'H' ? g.home : g.away
+    return { name: team.name, short: nick(team.name, g.league), logo: <TeamLogo team={team} size={15} />, score: g.score ? (k === 'H' ? g.score.home : g.score.away) : null, live: isLive, dim: done && !won(k), bold: pick === k || won(k) }
+  }
   return (
     <div>
     <Link to={matchHref('american-football', g.id, { home: g.home.name, away: g.away.name, homeId: g.home.id, awayId: g.away.id, date: g.kickoff }) ?? ''} className={`group relative flex items-center gap-2.5 px-3 sm:px-4 py-1.5 hover:bg-surface2/50 transition-colors ${isLive ? 'bg-live/[0.06]' : ''}`}>
@@ -94,54 +99,15 @@ export function NflGameRow({ g, showDay = false }: { g: NflGame; showDay?: boole
           </>
         )}
       </div>
-      <div className="flex-1 min-w-0">
-        {(['H', 'A'] as const).map(side => {
-          const team = side === 'H' ? g.home : g.away
-          const score = g.score ? (side === 'H' ? g.score.home : g.score.away) : null
-          return (
-            <div key={side} className="flex items-center gap-2 min-w-0 h-5">
-              <TeamLogo team={team} size={15} />
-              <span className={`text-[13px] truncate ${pick === side || won(side) ? 'font-bold text-ink' : 'text-ink/85'}`}>
-                <span className="sm:hidden">{nick(team.name, g.league)}</span><span className="hidden sm:inline">{team.name}</span>
-              </span>
-              {score !== null && <span className={`ms-auto ps-2 num text-[13px] font-extrabold tabular-nums ${isLive ? 'text-live' : done && !won(side) ? 'text-muted' : 'text-ink'}`}>{score}</span>}
-            </div>
-          )
-        })}
-      </div>
-      <div className="flex-shrink-0 flex items-center justify-end min-w-[84px] sm:min-w-[150px] gap-1.5">
-        {covered ? (
-          <button
-            type="button"
-            onClick={e => { e.preventDefault(); e.stopPropagation(); reveal() }}
-            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11px] font-bold bg-accent/10 text-accent border border-accent/30 hover:bg-accent/15"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-            {t('Reveal')}
-          </button>
-        ) : p && p.locked ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-faint"><LockIcon /> {t('Locked')}</span>
-        ) : pick ? (
-          <span className="flex items-center gap-1">
-            <BbPickBlock p={p!} pick={pick} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} roll={roll} />
-            {typeof p!.margin === 'number' && typeof p!.total === 'number' && (
-              <>
-                <span className="hidden lg:block w-px h-5 bg-line mx-1" aria-hidden />
-                <span className={`hidden lg:grid w-[60px] h-7 rounded-md place-items-center leading-none border border-line/70 text-muted ${roll ? 'pop-in' : ''}`} title={t('Expected margin')}>
-                  <span className="text-[8px] font-bold opacity-75">{t('Margin')}</span>
-                  <span className="num text-[11px] font-bold text-ink">{p!.margin! >= 0 ? '1' : '2'} +{Math.abs(p!.margin!).toFixed(1)}</span>
-                </span>
-                <span className={`hidden lg:grid w-[60px] h-7 rounded-md place-items-center leading-none border border-line/70 text-muted ${roll ? 'pop-in' : ''}`} title={t('Total points')}>
-                  <span className="text-[8px] font-bold opacity-75">{t('Total')}</span>
-                  <span className="num text-[11px] font-bold text-ink">{p!.total!.toFixed(1)}</span>
-                </span>
-              </>
-            )}
-          </span>
-        ) : g.state === 'upcoming' ? <SoonChip /> : <span className="text-xs text-faint">{done ? '' : '–'}</span>}
+      {/* fix281: names left / right, the split bar, one "Our pick" line */}
+      <RowBody
+        home={side('H')} away={side('A')}
+        pred={covered ? { kind: 'covered', n: 2, onReveal: reveal } : p && p.locked ? { kind: 'locked', n: 2 }
+          : pick ? { kind: 'open', roll, cells: [{ key: 'H', pct: p!.pHome!, on: pick === 'H' }, { key: 'A', pct: p!.pAway ?? 100 - p!.pHome!, on: pick === 'A' }], pick: { words: nick(pick === 'H' ? g.home.name : g.away.name, g.league), pct: Math.round(pick === 'H' ? p!.pHome! : p!.pAway ?? 100 - p!.pHome!) } }
+          : { kind: 'none' }}
+      />
+      <div className="flex-shrink-0 flex items-center justify-end gap-1.5">
+        {!covered && !(p && p.locked) && !pick && g.state === 'upcoming' && <SoonChip />}
         {done && p && typeof p.hit === 'boolean' && (
           <span className={`w-5 h-5 rounded grid place-items-center text-[10px] font-extrabold ${p.hit ? 'bg-win/15 text-win' : 'bg-loss/15 text-loss'}`} title={p.hit ? t('Hit') : t('Miss')}>{p.hit ? '✓' : '✗'}</span>
         )}

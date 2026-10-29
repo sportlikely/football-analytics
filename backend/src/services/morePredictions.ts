@@ -61,15 +61,15 @@ db.exec(`
   if (!cols.has('public_ll')) db.exec(`ALTER TABLE more_pred_gate ADD COLUMN public_ll REAL`);
 }
 /** bump when the maths behind saved rows changes: upcoming games are saved again on the next tick */
-export const MORE_CALC = '278'; // fix278: market anchor, tennis expected games
+export const MORE_CALC = '281'; // fix281: over / under, both score, each team scores, total line, second half, wins a set
 
 export const MORE_SPORTS: MoreSport[] = ['football', 'basketball', 'nfl', 'tennis'];
 /** the outputs of each sport, in page order */
 export const MORE_KEYS: Record<MoreSport, string[]> = {
-  football: ['score', 'goals', 'homeGoals', 'awayGoals', 'cleanHome', 'cleanAway', 'win2Home', 'win2Away', 'ht', 'htft'],
-  basketball: ['margin', 'total', 'homePts', 'awayPts', 'half', 'ot'],
-  nfl: ['margin', 'total', 'homePts', 'awayPts', 'half', 'ot'],
-  tennis: ['sets', 'first', 'games', 'tb']
+  football: ['score', 'goals', 'homeGoals', 'awayGoals', 'cleanHome', 'cleanAway', 'win2Home', 'win2Away', 'over15', 'over25', 'over35', 'btts', 'scoreHome', 'scoreAway', 'ht', 'htft'],
+  basketball: ['margin', 'total', 'totalLine', 'homePts', 'awayPts', 'half', 'half2', 'ot'],
+  nfl: ['margin', 'total', 'totalLine', 'homePts', 'awayPts', 'half', 'half2', 'ot'],
+  tennis: ['sets', 'first', 'set1', 'set2', 'games', 'tb']
 };
 const DAY = 86400000;
 const MIN_FIT_GAMES = 200;
@@ -619,6 +619,7 @@ export function footballActual(hg: number, ag: number, ht: [number, number] | nu
   return {
     score: hg <= 5 && ag <= 5 ? `${hg}-${ag}` : 'other', goals: hg + ag, homeGoals: hg, awayGoals: ag,
     cleanHome: yn(ag === 0), cleanAway: yn(hg === 0), win2Home: yn(hg - ag >= 2), win2Away: yn(ag - hg >= 2),
+    over15: yn(hg + ag >= 2), over25: yn(hg + ag >= 3), over35: yn(hg + ag >= 4), btts: yn(hg > 0 && ag > 0), scoreHome: yn(hg > 0), scoreAway: yn(ag > 0),
     ht: ht ? hda(ht[0], ht[1]) : null, htft: ht ? `${hda(ht[0], ht[1])}/${hda(hg, ag)}` : null
   };
 }
@@ -626,7 +627,13 @@ export function pointsActual(x: Extras, hs: number, as: number, q: { h: (number 
   const side = x.info?.side === 'A' ? -1 : 1;
   const halfOk = q && q.h[0] != null && q.h[1] != null && q.a[0] != null && q.a[1] != null;
   const h2 = halfOk ? (q!.h[0] || 0) + (q!.h[1] || 0) : 0, a2 = halfOk ? (q!.a[0] || 0) + (q!.a[1] || 0) : 0;
-  return { margin: side * (hs - as), total: hs + as, homePts: hs, awayPts: as, half: halfOk ? hda(h2, a2) : null, ot: overtime === null ? null : yn(overtime) };
+  // fix281: the second half = quarters 3 + 4 (overtime not counted)
+  const half2Ok = q && q.h[2] != null && q.h[3] != null && q.a[2] != null && q.a[3] != null;
+  const h3 = half2Ok ? (q!.h[2] || 0) + (q!.h[3] || 0) : 0, a3 = half2Ok ? (q!.a[2] || 0) + (q!.a[3] || 0) : 0;
+  return {
+    margin: side * (hs - as), total: hs + as, totalLine: hs + as, homePts: hs, awayPts: as, half: halfOk ? hda(h2, a2) : null,
+    half2: half2Ok ? hda(h3, a3) : null, ot: overtime === null ? null : yn(overtime)
+  };
 }
 export function tennisActual(games: [number[], number[]], rule: number): Actual | null {
   const [a, b] = games;
@@ -639,7 +646,7 @@ export function tennisActual(games: [number[], number[]], rule: number): Actual 
     tot += matchTb ? 1 : x + y;
     if (matchTb || (Math.max(x, y) === 7 && Math.min(x, y) === 6)) tb = true;
   });
-  return { sets: `${w1}-${w2}`, first: a[0] > b[0] ? '1' : '2', games: tot, tb: yn(tb) };
+  return { sets: `${w1}-${w2}`, first: a[0] > b[0] ? '1' : '2', set1: yn(w1 >= 1), set2: yn(w2 >= 1), games: tot, tb: yn(tb) };
 }
 export function checkExtras(x: Extras, actual: Actual): { actual: Actual; checks: Record<string, SetCheck> } {
   const checks: Record<string, SetCheck> = {};
@@ -1211,6 +1218,8 @@ export function backtestReports() {
 const OUT_NAME: Record<string, string> = {
   score: 'Likely scores (exact)', goals: 'Total goals 0/1/2/3/4+', homeGoals: 'Home goals 0/1/2/3+', awayGoals: 'Away goals 0/1/2/3+',
   cleanHome: 'Home clean sheet', cleanAway: 'Away clean sheet', win2Home: 'Home win by 2+', win2Away: 'Away win by 2+', ht: 'Half-time result', htft: 'HT/FT (9)',
+  over15: 'Over 1.5 goals', over25: 'Over 2.5 goals', over35: 'Over 3.5 goals', btts: 'Both teams score', scoreHome: 'Home scores', scoreAway: 'Away scores',
+  totalLine: 'Total over / under the line', half2: 'Second-half winner', set1: 'Player 1 wins a set', set2: 'Player 2 wins a set',
   margin: 'Winning margin bands', total: 'Total points bands', homePts: 'Home points bands', awayPts: 'Away points bands', half: 'First-half winner', ot: 'Overtime',
   sets: 'Set score', first: 'First set', games: 'Total games bands', tb: 'At least one tie-break'
 };

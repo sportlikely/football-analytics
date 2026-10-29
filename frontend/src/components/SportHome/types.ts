@@ -14,7 +14,7 @@ export interface HTeam {
 export interface HCell { key: string; head: string; label: string; pct: number; on: boolean }
 
 /** "Our pick · {words} · %" — help = the "?" that opens the double-chance guide (football). */
-export interface HPick { words: string; tag?: string | null; pct: number | null; strong: boolean; help?: boolean }
+export interface HPick { words: string; tag?: string | null; pct: number | null; help?: boolean }
 
 export type HPred =
   | { kind: 'full'; cells: HCell[]; pick: HPick | null }

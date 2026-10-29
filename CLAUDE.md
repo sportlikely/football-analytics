@@ -64,7 +64,13 @@ is model work, the matching note, in the same commit.
   don't change the number. General branding says "the SL engine" (no sports listed).
 - **`BILLING_TEST_MODE`** must be removed before real payments go live. Don't wire real payment webhooks without Yarin.
 - **Team analysis for every sport:** Every sport has team analysis on the team page (strengths & weaknesses by fixed rules, model rating tiles, 1–10 league scores, rank over time, our record on the team) — build it with the sport, not later.
-- **List rows:** List rows in every sport use the fix127 block (commit 9b3f610): result cells with % (our pick highlighted) + 'Our pick · {words} · %' underneath. Phones too.
+- **List rows:** List rows in every sport use the fix281 split bar (Yarin, 29 Oct 2026; replaces the fix127 cells): the two
+  names left / right, one bar split home / draw / away (no draw segment without draws) with our side in accent and
+  "58% win · Draw 18% · 24% win" under it, then one line "Our pick <words> <%>" coloured by band — 80%+ accent "Very
+  likely", 60–79% yellow "Likely", under 60% grey "Close call" (one helper `frontend/src/lib/confidence.ts`; no "Strong"
+  badge, no 85% rule). Locked / covered picks: the grey bar with today's lock / Reveal. Shared parts:
+  `components/sport/prediction/RowBody.tsx` + `SplitBar.tsx`. Phones too. The prediction tab of every sport is
+  `components/sport/prediction/PredictionPanel.tsx` (bar, "Most sure first", topics as sub-paths, "Why" behind a button).
 - **Football is the template for every page.** Every sport renders the shared components in components/sport/* (and
   components/SportHome for the home) with an adapter; never build a sport-specific page layout. Anything added to football is
   added to all sports. Menus come from one per-sport config (`frontend/src/lib/sportNav.ts`). No season / week picker on
@@ -269,7 +275,8 @@ Frontend (`frontend/src`, React + Vite + Tailwind, tokens in `index.css`, colour
 ## Model facts you should know (details in docs/notes)
 
 - **Our recommended football pick is the double chance** (fix120): the two most likely results (1X / X2 / 12), % = their
-  sum, right when the result is inside it; "Strong pick" = 85%+. 1X2 stays tracked as "the hard calls". Basketball: winner.
+  sum, right when the result is inside it; on screen every pick carries its fix281 band (80%+ Very likely, 60–79% Likely,
+  under 60% Close call — lib/confidence.ts). 1X2 stays tracked as "the hard calls". Basketball: winner.
 - Football v3 top leagues: hit rate ≈ bookmakers' favourite (≈50%), log loss within 0.002 of the closing odds; second
   divisions trail the market by 2–6 points (that's the leagues, not a bug). Strong picks (60%+) ≈ 75% right.
 - Every competition counts in the public record in every sport (fix203); "in testing" is only an admin label on leagues added from Admin.

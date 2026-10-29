@@ -411,7 +411,7 @@ test('fix204c: the NFL backtest produces gates from the stored walk-forward game
   assert.ok(out.nfl && out.nfl.games > 300, JSON.stringify(out));
   const gates = db.prepare(`SELECT output, public, games FROM more_pred_gate WHERE sport = 'nfl'`).all();
   assert.deepEqual(gates.map(g => g.output).sort(), [...mp.MORE_KEYS.nfl].sort());
-  assert.ok(gates.filter(g => g.output !== 'half').every(g => g.games > 300), 'every output but the first half (no quarter scores here)');
+  assert.ok(gates.filter(g => g.output !== 'half' && g.output !== 'half2').every(g => g.games > 300), 'every output but the halves (no quarter scores here)');
   const rep = mp.backtestReports().find(x => x.sport === 'nfl');
   assert.ok(rep.before && rep.before.total && rep.diag && rep.diag.leagues['1'], 'before → after and the cause stored');
   close(rep.diag.leagues['1'].bT, 3, 1, 'the cause: 3 points too many');

@@ -6,11 +6,11 @@ import type { HCell, HPick, HPred, HRecordRow, HSpecialItem } from './types'
  * the "Our record" bars by confidence band and the "Upset watch" items. Used by those sports' adapters (fix141).
  */
 
-/** Two cells (1 · 2) with the picked side highlighted, and "Our pick · {team} · %". `strongAt` = the sport's strong %. */
-export function winnerPred(p: { locked?: boolean; pHome?: number | null; pAway?: number | null; pick?: 'H' | 'A' | null } | null | undefined, home: string, away: string, strongAt: number): HPred {
+/** Two cells (1 · 2) with the picked side highlighted, and "Our pick · {team} · %" (fix281: its band from lib/confidence). */
+export function winnerPred(p: { locked?: boolean; pHome?: number | null; pAway?: number | null; pick?: 'H' | 'A' | null } | null | undefined, home: string, away: string): HPred {
   if (!p) return { kind: 'none' }
   // fix160: a locked row still draws the 1 · 2 block (blurred); the pick in words when the server gives it (basketball)
-  if (p.locked || typeof p.pHome !== 'number') return { kind: 'locked', heads: ['1', '2'], pick: p.pick ? { words: p.pick === 'H' ? home : away, pct: null, strong: false } : null }
+  if (p.locked || typeof p.pHome !== 'number') return { kind: 'locked', heads: ['1', '2'], pick: p.pick ? { words: p.pick === 'H' ? home : away, pct: null } : null }
   const pAway = typeof p.pAway === 'number' ? p.pAway : 100 - p.pHome
   const pick = p.pick || (p.pHome >= pAway ? 'H' : 'A')
   const pct = Math.round(pick === 'H' ? p.pHome : pAway)
@@ -18,7 +18,7 @@ export function winnerPred(p: { locked?: boolean; pHome?: number | null; pAway?:
     { key: 'H', head: '1', label: home, pct: p.pHome, on: pick === 'H' },
     { key: 'A', head: '2', label: away, pct: pAway, on: pick === 'A' }
   ]
-  const words: HPick = { words: pick === 'H' ? home : away, pct, strong: pct >= strongAt }
+  const words: HPick = { words: pick === 'H' ? home : away, pct }
   return { kind: 'full', cells, pick: words }
 }
 

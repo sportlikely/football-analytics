@@ -27,9 +27,6 @@ export interface SLeague {
   param?: string
 }
 
-/** A side chip after the result cells (football: Over 2.5 / Both score; basketball + NFL: Margin / Total pts). */
-export interface SChip { key: string; label: string; value: string; strong?: boolean; title?: string }
-
 export interface SGame extends HGame {
   state: 'upcoming' | 'live' | 'done' | 'off'
   league: SLeague
@@ -37,7 +34,6 @@ export interface SGame extends HGame {
   favWhy: string[]
   /** Spotlight weight: how big the game is (bigger = first) */
   weight: number
-  chips: SChip[]
   /** a small line under the teams: "Upset watch · 34%" (loss) or "Now: Real 71%" (live) */
   note?: { text: string; tone: 'loss' | 'live' | 'muted' } | null
   /** finished games: our pick right / wrong */

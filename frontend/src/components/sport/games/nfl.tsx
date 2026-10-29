@@ -7,7 +7,6 @@ import { useFavorites, type Favorite } from '../../../lib/favorites'
 import { useNflFavorites, useNflFilter, nflLeagueName, type NflGame, type NflLeague } from '../../../lib/nfl'
 import { toGame, toResult } from '../../SportHome/nfl'
 import { NflLeagueChips, NflLeaguePanel } from '../../../pages/nfl/parts'
-import { winnerChips } from './basketball'
 import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 import { teamHref, leagueHref, useSlugVersion } from '../../../lib/links'
 
@@ -61,7 +60,7 @@ function useData(): GamesData {
       // fix213: the live win chance in the Live box (basketball's "Now: Chiefs 71%")
       let note: SGame['note'] = null
       if (g.state === 'live' && p?.live) { const k = p.live.pHome >= p.live.pAway ? 'H' : 'A'; note = { text: `${tt("Now")}: ${k === 'H' ? h.home.short : h.away.short} ${Math.round(k === 'H' ? p.live.pHome : p.live.pAway)}%`, tone: 'live' } }
-      return { ...h, state: g.state as SGame['state'], league: lg, favWhy: favs.reasons(g).map(f => f.name), weight, chips: open ? winnerChips(p) : [], note }
+      return { ...h, state: g.state as SGame['state'], league: lg, favWhy: favs.reasons(g).map(f => f.name), weight, note }
     })
     return {
       loading: games === null, error, games: listOut, leagues: [...lgs.values()],

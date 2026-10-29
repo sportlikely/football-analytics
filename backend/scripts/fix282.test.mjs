@@ -172,7 +172,7 @@ test('every sport renders the panel; admins keep Factor by factor / How it adds 
   assert.match(story, /\{admin && <Block title=\{tt\("How it adds up"\)\}>/, 'How it adds up: admins only');
   assert.ok(!/ex\.forPick\.map/.test(story), 'the single "+ reason" lines are gone');
   const wp = FRONT('components/sport/game/WinnerPrediction.tsx');
-  assert.match(wp, /<WhyPanel className="mt-5" factors=\{x\.factors\}/);
+  assert.match(wp, /<WhyPanel factors=\{x\.factors\}/, 'fix281: the panel opens from the "Why we think so" button');
   assert.match(wp, /\(!x\.factors\?\.length \|\| admin\)/, 'the old why lines: admins only once the panel is there');
   for (const f of ['pages/bb/BbGame.tsx', 'pages/nfl/NflGame.tsx', 'pages/tennis/TennisMatch.tsx']) assert.match(FRONT(f), /factors=\{/, f);
   assert.match(SRC('src/services/bbSite.ts'), /factors: \(full \|\| game\.state === 'done'\) \? bbFactorsOf\(g, pr, why\) : null/);

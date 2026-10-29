@@ -69,10 +69,6 @@ function useData(): GamesData {
       const h = toGame(m), p = mainPred(m)
       const open = !!p && !p.locked && typeof p.home === 'number'
       const live = LIVE.has(m.status)
-      const chips = open && typeof p!.over25 === 'number' && typeof p!.btts === 'number' ? [
-        { key: 'o25', label: p!.over25 >= 50 ? tt("Over 2.5") : tt("Under 2.5"), v: p!.over25 >= 50 ? p!.over25 : 100 - p!.over25, title: tt("Over 2.5 goals: {0}% · Under: {1}%", { 0: Math.round(p!.over25), 1: Math.round(100 - p!.over25) }) },
-        { key: 'btts', label: p!.btts >= 50 ? tt("Both score") : tt("Not both"), v: p!.btts >= 50 ? p!.btts : 100 - p!.btts, title: tt("Both teams score: {0}% · Not both: {1}%", { 0: Math.round(p!.btts), 1: Math.round(100 - p!.btts) }) }
-      ].map(x => ({ key: x.key, label: x.label, value: `${Math.round(x.v)}%`, strong: x.v >= 60, title: x.title })) : []
       // a small line under the teams: the upset (Pro) before the game, the live win chance during it
       let note: SGame['note'] = null
       if (open && full && !live) { const up = Math.min(p!.home, p!.away), fav = Math.max(p!.home, p!.away); if (up >= 30 && fav - up >= 10) note = { text: `${tt("Upset watch")} · ${Math.round(up)}%`, tone: 'loss' } }
@@ -87,7 +83,7 @@ function useData(): GamesData {
       const fh = fame(m.homeTeam), fa = fame(m.awayTeam)
       const att = p?.factors ? Number((p.factors as any).homeAttack) + Number((p.factors as any).awayAttack) : 0
       const weight = Math.max(fh, fa) + 0.4 * Math.min(fh, fa) + (Number.isFinite(att) ? att / 20 : 0)
-      return { ...h, state: live ? 'live' : 'upcoming', league: leagues.get(m.competition.code)!, favWhy: reasons(m as any).map(f => f.name), weight, chips, note }
+      return { ...h, state: live ? 'live' : 'upcoming', league: leagues.get(m.competition.code)!, favWhy: reasons(m as any).map(f => f.name), weight, note }
     })
     return {
       loading, error, games, leagues: [...leagues.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),

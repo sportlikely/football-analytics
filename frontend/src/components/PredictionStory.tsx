@@ -105,23 +105,6 @@ const fmt = (x: number) => (Math.round(x * 10) / 10).toFixed(1)
 /** fix282: two scores that round to the same tenth but differ get a second decimal (the edge side shows the higher one) */
 const fmtPair = (h: number, a: number): [string, string] => (fmt(h) === fmt(a) && h !== a ? [h.toFixed(2), a.toFixed(2)] : [fmt(h), fmt(a)])
 
-/** The most likely of: the result, double chance, over/under 1.5 and 2.5, both teams to score (same as the record page). */
-function safestBet(p: Prediction, home: string, away: string): { label: string; p: number } | null {
-  if (p.locked || typeof p.home !== 'number') return null
-  const c: { label: string; p: number }[] = []
-  const top = [{ l: tt("{0} to win", { 0: home }), v: p.home }, { l: tt("Draw"), v: p.draw }, { l: tt("{0} to win", { 0: away }), v: p.away }].sort((a, b) => b.v - a.v)[0]
-  c.push({ label: top.l, p: top.v })
-  const dc = [{ l: tt("{0} or draw", { 0: home }), v: p.home + p.draw }, { l: tt("{0} or draw", { 0: away }), v: p.away + p.draw }, { l: tt("{0} or {1} (no draw)", { 0: home, 1: away }), v: p.home + p.away }].sort((a, b) => b.v - a.v)[0]
-  c.push({ label: dc.l, p: dc.v })
-  const lam = p.expectedGoals.home + p.expectedGoals.away
-  const o15 = Math.max((1 - Math.exp(-lam) * (1 + lam)) * 100, p.over25)
-  c.push(o15 >= 50 ? { label: tt("Over 1.5 goals"), p: o15 } : { label: tt("Under 1.5 goals"), p: 100 - o15 })
-  c.push(p.over25 >= 50 ? { label: tt("Over 2.5 goals"), p: p.over25 } : { label: tt("Under 2.5 goals"), p: 100 - p.over25 })
-  c.push(p.btts >= 50 ? { label: tt("Both teams score"), p: p.btts } : { label: tt("Not both teams score"), p: 100 - p.btts })
-  const best = c.sort((a, b) => b.p - a.p)[0]
-  return { label: best.label, p: Math.round(best.p) }
-}
-
 export default function PredictionStory({ p, home, away, upcoming, friendly }: {
   p: Prediction; home: string; away: string; upcoming: boolean; friendly?: boolean
 }) {
@@ -170,17 +153,6 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
         <div className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{tt("Our pick")}</div>
         <p className="mt-1.5 text-lg font-display font-bold text-ink leading-snug">{ex.dcHeadline}</p>
         <p className="mt-1 text-sm text-muted leading-snug">{ex.headline}</p>
-        {(() => {
-          const b = safestBet(p, home, away)
-          return b ? (
-            <div className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-xl border border-win/30 bg-win/10 px-3 py-2 text-sm">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-win">{tt("Most sure")}</span>
-              <span className="font-semibold text-ink">{b.label}</span>
-              <span className="num font-bold text-win">{b.p}%</span>
-              <span className="text-[11px] text-faint">{tt("the pick we are most sure about in this match")}</span>
-            </div>
-          ) : null
-        })()}
         {p.mix?.disagrees && (() => {
           const k = p.mix.favourite === 'H' ? 'home' : p.mix.favourite === 'A' ? 'away' : 'draw'
           const who = k === 'home' ? home : k === 'away' ? away : tt("a draw")

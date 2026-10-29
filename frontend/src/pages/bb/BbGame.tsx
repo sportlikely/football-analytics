@@ -14,13 +14,13 @@ import YourPicks from '../../components/YourPicks'
 import { newerWinnerLive } from '../../lib/liveState'
 import { BB_STATUS, liveLabel, spreadText, bbTeamFav, bbLeagueFav, useBbConfig, type BbGame as Game } from '../../lib/bb'
 import { FavStar } from '../../lib/favorites'
-import { Card, TeamLogo, LiveChanceBox, rid, rstatus } from './parts'
+import { Card, TeamLogo, LiveChanceBox, rid, rstatus, bbShort } from './parts'
 import { GAME_RELOAD } from '../../components/UnlockPrompt'
 import type { Standings } from './BbLeague'
 import { teamPlace } from '../../lib/bbTable'
 import { StatsTab, RestTab, H2HTab, StandingsTab } from './GameTabs'
 import { MarketsCard, CompareCard, PlayersCard, ModelTable, type Markets, type ModelInfo, type GamePlayer } from './GameExtras'
-import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
+import GamePage, { GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import type { Factor } from '../../lib/whyFactors'
 import GamePreview from '../../components/sport/game/GamePreview'
@@ -30,7 +30,7 @@ import GridSplit, { type GridView } from '../../components/sport/game/GridSplit'
 import { SwingChart } from '../../components/sport/game/LiveChance'
 import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
-import MorePredictions from '../../components/sport/game/MorePredictions'
+import { useGameTopics } from '../../components/sport/prediction/topicTabs'
 import GameMeaning from '../../components/sport/forecast/GameMeaning'
 import GameExtras from '../../components/sport/game/GameExtras'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
@@ -114,7 +114,7 @@ export default function BbGame() {
   const cfg = useBbConfig()
   const [d, setD] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, pickTab] = useGameTab(TABS, { injuries: 'players' })
+  const { tab, pickTab, topic, pickTopic } = useGameTopics('basketball', TABS, { injuries: 'players' })
   const reload = useRef<() => void>(() => undefined)
   primeGame('basketball', Number(id)) // fix250: the page's parts in one request
   useApiFresh(id ? `${API_URL}/basketball/game/${id}` : null, () => reload.current())
@@ -160,7 +160,8 @@ export default function BbGame() {
         <>
           <WinnerPrediction
             rid={rid(g)} status={rstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model={g.prediction?.model || 'bb-v3'} sport="basketball"
-            saved={t('Saved before tip-off')} updated={t('Updated until tip-off')} strongAt={g.prediction?.strongAt ?? 70} showLockedPick
+            saved={t('Saved before tip-off')} updated={t('Updated until tip-off')} showLockedPick
+            more={{ sport: 'basketball', id: g.id }} topic={topic} onTopic={pickTopic} names={{ home: bbShort(g.home.name, g.league.code), away: bbShort(g.away.name, g.league.code) }}
             stats={[
               { label: t('Point spread'), value: spreadText(g) || '–' },
               { label: t('Predicted score'), value: p?.score ? `${p.score.home}–${p.score.away}` : '–' },
@@ -172,8 +173,6 @@ export default function BbGame() {
             badges={g.resultCheck ? <span title={t('The final score from our data provider looks wrong. This game doesn’t count in our record until it is checked.')} className="ms-auto rounded-full px-3 py-1 text-xs font-bold bg-draw/15 text-draw">{t('Result being checked')}</span> : undefined}
             noPrediction={t('No prediction for this game.')}
           />
-          {/* fix204: more predictions from the same model (locked like the prediction) */}
-          <MorePredictions sport="basketball" id={g.id} rid={rid(g)} status={rstatus(g)} home={g.home.name} away={g.away.name} />
           <GameMeaning sport="basketball" id={g.id} />
           {/* fix231: trends, next games (indoors: no weather; the provider names no referees) */}
           <GameExtras sport="basketball" id={g.id} />

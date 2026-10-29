@@ -38,11 +38,12 @@ const list = (v, all) => (v ? v.split(',').map(s => s.trim()) : all);
 
 /* ---------- the routes ---------- */
 const SPORT_TABS = {
-  football: ['stats', 'lineups', 'h2h', 'table', 'highlights'],
-  basketball: ['stats', 'lineups', 'h2h', 'table', 'highlights', 'box', 'players', 'quarters'],
-  'american-football': ['stats', 'lineups', 'h2h', 'table', 'players', 'plays'],
-  tennis: ['stats', 'h2h', 'form', 'draw']
+  football: ['stats', 'lineups', 'h2h', 'table', 'highlights', 'goals', 'score', 'half-time'],
+  basketball: ['stats', 'lineups', 'h2h', 'table', 'highlights', 'box', 'players', 'quarters', 'points', 'halves'],
+  'american-football': ['stats', 'lineups', 'h2h', 'table', 'players', 'plays', 'points', 'halves'],
+  tennis: ['stats', 'h2h', 'form', 'draw', 'sets', 'games']
 };
+// fix281: the prediction tab's topics (sub-paths) — every sport above, and one per sport in every language below
 const SPORT_PAGES = {
   football: ['', '/matches', '/today', '/predictions/premier-league', '/upset-watch', '/draw-alerts', '/favorites', '/my-picks', '/accuracy'],
   basketball: ['', '/matches', '/today', '/predictions/nba', '/upset-watch', '/favorites', '/my-picks', '/accuracy', '/how-it-works'],
@@ -73,7 +74,8 @@ function typeSample(sample) {
   const f = sample.football || {}, b = sample.basketball || {};
   return ['/', '/football', '/football/matches', '/football/today', f.matchDone && `/football/match/${f.matchDone}`, f.matchDone && `/football/match/${f.matchDone}/stats`,
     f.team && `/football/team/${f.team}`, f.player && `/football/player/${f.player}`, f.league && `/football/league/${f.league}`,
-    b.matchNext && `/basketball/match/${b.matchNext}`, '/premium', '/search?q=arsenal', NOT_FOUND].filter(Boolean);
+    b.matchNext && `/basketball/match/${b.matchNext}`, f.matchDone && `/football/match/${f.matchDone}/goals`, (b.matchNext || b.matchDone) && `/basketball/match/${b.matchNext || b.matchDone}/points`,
+    sample['american-football']?.matchDone && `/american-football/match/${sample['american-football'].matchDone}/halves`, sample.tennis?.matchDone && `/tennis/match/${sample.tennis.matchDone}/sets`, '/premium', '/search?q=arsenal', NOT_FOUND].filter(Boolean);
 }
 
 /* ---------- fix279: the speed list ---------- */

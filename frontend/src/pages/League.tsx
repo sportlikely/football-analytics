@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import axios from 'axios'
 import { API_URL } from '../lib/socket'
-import { doubleChance, shortTeam, type Prediction } from '../lib/predict'
-import { DcBlock, DcLine } from '../components/DcPick'
+import { doubleChance, dcLabel, shortTeam, type Prediction } from '../lib/predict'
+import RowBody, { type RowPred, type RowTeam } from '../components/sport/prediction/RowBody'
 import { isCovered, revealMatch, useRevealState } from '../lib/reveal'
 import RecentResults from '../components/RecentResults'
 import { t as tt, LOCALE } from '../lib/i18n'
@@ -14,7 +14,7 @@ import { footballTeamHref } from '../lib/teamLink'
 import NameLink, { href } from '../components/sport/NameLink'
 import SeasonForecast from '../components/sport/forecast/SeasonForecast'
 import { NewsPic } from '../components/NewsList'
-import { playerHref, leagueHref, matchHref } from '../lib/links'
+import { playerHref, leagueHref, matchHref, useSlugVersion } from '../lib/links'
 
 /**
  * League page: /league/<code> (football-data codes like PL, API-Football codes like AF140).
@@ -443,52 +443,26 @@ function League() {
 }
 
 function FixtureRow({ m }: { m: Match }) {
+  // fix280: the link is drawn again once the match exceptions of /api/slugs arrive (as the Games lists do)
+  useSlugVersion()
   const p = mainPred(m)
   const pct = hasPct(p)
   const covered = pct && isCovered(m.id, m.status, true)
-  const k = p ? p.pick || (pct ? (p.home >= p.draw && p.home >= p.away ? 'H' : p.away >= p.draw ? 'A' : 'D') : null) : null
-  const name = k === 'H' ? tn(m.homeTeam) : k === 'A' ? tn(m.awayTeam) : k === 'D' ? 'Draw' : null
-  const color = k === 'H' ? 'text-home' : k === 'A' ? 'text-away' : 'text-draw'
-  const val = pct && k ? (k === 'H' ? p.home : k === 'A' ? p.away : p.draw) : null
-  // fix120: our pick is the double chance
+  // fix120: our pick is the double chance; fix281: the shared row body (split bar + "Our pick" line)
   const dc = doubleChance(p)
+  const hn = shortTeam(m.homeTeam), an = shortTeam(m.awayTeam)
+  const pred: RowPred = covered ? { kind: 'covered', n: 3, onReveal: () => revealMatch(m.id) }
+    : pct && dc ? { kind: 'open', cells: (['H', 'D', 'A'] as const).map(k => ({ key: k, pct: k === 'H' ? p.home : k === 'D' ? p.draw : p.away, on: dc.sides.includes(k) })), pick: { words: dcLabel(dc.code, hn, an), pct: dc.pct, help: true } }
+    : dc ? { kind: 'locked', n: 3, pick: dcLabel(dc.code, hn, an) }
+    : p ? { kind: 'locked', n: 3 } : { kind: 'none' }
+  const team = (t: Match['homeTeam'], k: 'H' | 'A'): RowTeam => ({ name: tn(t), logo: <Crest team={t} size={16} />, bold: !!dc && pct && !covered && dc.sides.includes(k) && !dc.sides.includes(k === 'H' ? 'A' : 'H') })
   return (
     <Link to={matchHref('football', m.id, { home: m.homeTeam.name || m.homeTeam.shortName, away: m.awayTeam.name || m.awayTeam.shortName, homeId: m.homeTeam.id, awayId: m.awayTeam.id, date: m.utcDate }) ?? ''} state={{ match: m }} className="flex items-center gap-2 sm:gap-3 px-1 sm:px-2 py-2 rounded-xl hover:bg-surface2/60 transition-colors">
       <span className="w-10 sm:w-12 flex-shrink-0 text-center">
         <span className="block text-[10px] text-faint">{new Date(m.utcDate).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric' })}</span>
         <span className="block text-xs font-bold text-ink num">{new Date(m.utcDate).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}</span>
       </span>
-      <span className="min-w-0 flex-1 space-y-1">
-        <span className="flex items-center gap-1.5 text-[13px] sm:text-sm"><Crest team={m.homeTeam} size={16} /><span className="truncate text-ink">{tn(m.homeTeam)}</span></span>
-        <span className="flex items-center gap-1.5 text-[13px] sm:text-sm"><Crest team={m.awayTeam} size={16} /><span className="truncate text-ink">{tn(m.awayTeam)}</span></span>
-      </span>
-      <span className="flex-shrink-0 text-end flex flex-col items-end">
-        {covered ? (
-          <button
-            onClick={e => {
-              e.preventDefault()
-              revealMatch(m.id)
-            }}
-            className="text-[11px] font-bold text-bg bg-accent px-2.5 py-1 rounded-full"
-          >
-            {tt("Reveal")}</button>
-        ) : dc ? (
-          <>
-            {/* fix127: 1 · X · 2 + our double chance in words; locked: the words only */}
-            {pct && dc.pct !== null ? <DcBlock p={p} home={shortTeam(m.homeTeam)} away={shortTeam(m.awayTeam)} /> : <DcLine code={dc.code} pct={null} home={shortTeam(m.homeTeam)} away={shortTeam(m.awayTeam)} />}
-          </>
-        ) : name ? (
-          <>
-            <span className="block text-[10px] text-faint">{tt("Pick")}</span>
-            <span className={`block text-xs font-bold truncate ${color}`}>
-              {name}
-              {val !== null && <span className="num"> {Math.round(val)}%</span>}
-            </span>
-          </>
-        ) : (
-          <span className="text-[11px] text-faint">–</span>
-        )}
-      </span>
+      <RowBody home={team(m.homeTeam, 'H')} away={team(m.awayTeam, 'A')} pred={pred} />
     </Link>
   )
 }
