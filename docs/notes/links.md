@@ -76,6 +76,7 @@ The crawler pages are still built from the old addresses inside (`internalPage`)
   exception whenever any of those names / days (with or without the side ids) would make another slug. One primary slug per
   match. A list's memo re-draws its links when the exceptions arrive (`useSlugVersion()` in its deps). test:site / test:links
   check every match link of the next 7 days on every sport's matches list against /api/slug.
+- fix282b — every other slug a list could print for a match (a side's full or short name: "barcelona-vs-deportivo-alaves-…" next to "barcelona-vs-alaves-…") is stored as an alias of the match by the slugs job, so a link printed before the list knew the slug 301s in one hop (was: the search).
 
 ## After a deploy
 

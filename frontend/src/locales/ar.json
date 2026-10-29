@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "الموسم الماضي أُعيد لعبه أسبوعًا بأسبوع: مقياس Brier {0}، مقابل {1} لقراءة الترتيب كما كان. الأقل أفضل.",
  "Product news": "أخبار المنتج",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "ميزات جديدة وأخبار Premium، بضع مرات في السنة. متوقفة ما لم تفعّلها.",
- "Our 13 factors: 1,000 points split": "عواملنا الـ13: توزيع 1,000 نقطة",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "الفريقان يسددان الكثير من الثلاثيات: يصعب توقع هذه المباراة، لذا تقترب الفرص من 50%.",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "يُقاس كل عامل للفريقين قبل انطلاق المباراة ويُوزن بحسب مدى نجاحه في توقع النتائج على مدى ثلاثة مواسم (2022-23 إلى 2024-25)، ثم يُختبر على 2025-26. الأفضلية = عدد النقاط (من 1000) التي يميل بها هذا العامل نحو أحد الطرفين.",
  "Player impact of the expected rotation": "تأثير لاعبي المداورة المتوقعة",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "توقف طبي",
  "Motivation": "الحافز",
  "No effect in this game": "لا تأثير في هذه المباراة",
- "No single one decides it.": "لا يحسمها عامل واحد.",
  "Nothing in the numbers points the other way.": "لا شيء في الأرقام يشير إلى الجهة الأخرى.",
  "Player impact": "تأثير اللاعبين",
  "Player talent": "موهبة اللاعبين",
@@ -2962,9 +2960,6 @@
  "Serve and return": "الإرسال والاستقبال",
  "Surface switch": "تغيير الأرضية",
  "Team rating": "تقييم الفريق",
- "We checked one thing for this game. It makes {0} the favourite.": "فحصنا عاملاً واحداً لهذه المباراة. يجعل {0} المرشح الأوفر حظاً.",
- "We checked {0} things for this game. They come out level.": "فحصنا {0} عوامل لهذه المباراة. النتيجة متعادلة.",
- "We checked {0} things for this game. Together they make {1} the favourite.": "فحصنا {0} عوامل لهذه المباراة. معاً تجعل {1} المرشح الأوفر حظاً.",
  "Where the market stands — used inside the model only": "موقف السوق — يُستخدم داخل النموذج فقط",
  "counted in the confirmed line-ups": "محسوب ضمن التشكيلات المؤكدة",
  "every usual starter is in the line-up": "كل الأساسيين المعتادين في التشكيلة",
@@ -2977,7 +2972,9 @@
  "not enough meetings": "مواجهات غير كافية",
  "same rest for both sides": "راحة متساوية للطرفين",
  "share": "الحصة",
- "{0} counts for more than half.": "{0} يشكل أكثر من النصف.",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: الأفضلية لـ{1}، ما يُبقي فوز {1} ممكناً ({2}%).",
- "{0}: the edge goes to {1}.": "{0}: الأفضلية لـ{1}."
+ "{0}: the edge goes to {1}.": "{0}: الأفضلية لـ{1}.",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "{0} هو المرشح الأوفر حظاً. إليك ما يرجّح الكفة، من الدفعة الأكبر إلى الأصغر.",
+ "Too close to call. Here is what pushes each way.": "متقاربة جداً بحيث يصعب الحسم. إليك ما يدفع في كل اتجاه.",
+ "Our factors: 1,000 points split": "عواملنا: توزيع 1,000 نقطة"
 }

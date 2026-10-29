@@ -85,6 +85,7 @@
     "test:fix279": "tsc && node --no-warnings --test --test-force-exit scripts/fix279.test.mjs",
     "test:fix280": "tsc && node --no-warnings --test --test-force-exit scripts/fix280.test.mjs",
     "test:fix282": "tsc && node --no-warnings --test --test-force-exit scripts/fix282.test.mjs",
+    "test:fix282b": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings --test --test-force-exit scripts/fix282b.test.mjs",
     "test:fix260": "tsc && node --no-warnings --test --test-force-exit scripts/fix260.test.mjs",
     "test:fix283": "tsc && node --no-warnings --test --test-force-exit scripts/fix283.test.mjs",
     "test:site": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings scripts/site-test.mjs",

@@ -193,7 +193,7 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
       </div>
 
       {/* 2. fix282: every factor, ranked by its share of the edge (the model's own points) */}
-      <WhyPanel factors={footballFactors(g)} fav={p.home > p.away ? 'H' : p.away > p.home ? 'A' : null} home={home} away={away} otherPct={p.home > p.away ? p.away : p.away > p.home ? p.home : null} />
+      <WhyPanel factors={footballFactors(g)} fav={p.home > p.away ? 'H' : p.away > p.home ? 'A' : null} home={home} away={away} favPct={Math.max(p.home, p.away)} otherPct={p.home > p.away ? p.away : p.away > p.home ? p.home : null} />
 
       {/* 3. admins: factor by factor (scores out of 10) */}
       {admin && moving.length > 0 && (

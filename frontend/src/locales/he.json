@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "העונה שעברה שוחזרה שבוע אחר שבוע: ציון Brier {0}, לעומת {1} לקריאת הטבלה כמו שהייתה. נמוך יותר = טוב יותר.",
  "Product news": "חדשות מוצר",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "פיצ'רים חדשים וחדשות Premium, כמה פעמים בשנה. כבוי אלא אם מפעילים.",
- "Our 13 factors: 1,000 points split": "13 הגורמים שלנו: חלוקה של 1,000 נקודות",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "שתי הקבוצות זורקות הרבה לשלוש: קשה יותר לחזות את המשחק הזה, אז הסיכויים קרובים יותר ל-50%.",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "כל גורם נמדד לשתי הקבוצות לפני הג'אמפ בול ומקבל משקל לפי כמה טוב הוא חזה תוצאות לאורך שלוש עונות (2022-23 עד 2024-25), ואז נבדק על 2025-26. יתרון = כמה נקודות (מתוך 1000) הגורם מזיז לטובת אחד הצדדים.",
  "Player impact of the expected rotation": "השפעת השחקנים ברוטציה הצפויה",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "הפסקה רפואית",
  "Motivation": "מוטיבציה",
  "No effect in this game": "ללא השפעה במשחק הזה",
- "No single one decides it.": "אף אחד מהם לא מכריע לבד.",
  "Nothing in the numbers points the other way.": "שום דבר במספרים לא מצביע לצד השני.",
  "Player impact": "השפעת השחקנים",
  "Player talent": "כישרון השחקנים",
@@ -2962,9 +2960,6 @@
  "Serve and return": "הגשה והחזרה",
  "Surface switch": "החלפת משטח",
  "Team rating": "דירוג הקבוצה",
- "We checked one thing for this game. It makes {0} the favourite.": "בדקנו דבר אחד למשחק הזה. הוא הופך את {0} לפייבוריטית.",
- "We checked {0} things for this game. They come out level.": "בדקנו {0} דברים למשחק הזה. הם יוצאים שקולים.",
- "We checked {0} things for this game. Together they make {1} the favourite.": "בדקנו {0} דברים למשחק הזה. יחד הם הופכים את {1} לפייבוריטית.",
  "Where the market stands — used inside the model only": "איפה השוק עומד — בשימוש רק בתוך המודל",
  "counted in the confirmed line-ups": "נספר בהרכבים המאושרים",
  "every usual starter is in the line-up": "כל השחקנים הקבועים בהרכב",
@@ -2977,7 +2972,9 @@
  "not enough meetings": "אין מספיק מפגשים",
  "same rest for both sides": "אותה מנוחה לשני הצדדים",
  "share": "חלק",
- "{0} counts for more than half.": "{0} מהווה יותר ממחצית.",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: היתרון ל{1}, ולכן ניצחון של {1} נשאר אפשרי ({2}%).",
- "{0}: the edge goes to {1}.": "{0}: היתרון ל{1}."
+ "{0}: the edge goes to {1}.": "{0}: היתרון ל{1}.",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "{0} היא הפייבוריטית. הנה מה שמטה את הכף, מהדחיפה הגדולה ביותר לקטנה ביותר.",
+ "Too close to call. Here is what pushes each way.": "צמוד מדי להכרעה. הנה מה שדוחף לכל צד.",
+ "Our factors: 1,000 points split": "הגורמים שלנו: חלוקה של 1,000 נקודות"
 }

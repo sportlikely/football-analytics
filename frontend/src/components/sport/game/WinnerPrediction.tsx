@@ -148,7 +148,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
             </div>
             {x.factors && x.factors.length > 0 && (() => {
               const ph = p.pHome || 0, pa = p.pAway ?? 100 - ph
-              return <WhyPanel className="mt-5" factors={x.factors} fav={ph > pa ? 'H' : pa > ph ? 'A' : null} home={x.home.name} away={x.away.name} otherPct={ph > pa ? pa : pa > ph ? ph : null} />
+              return <WhyPanel className="mt-5" factors={x.factors} fav={ph > pa ? 'H' : pa > ph ? 'A' : null} home={x.home.name} away={x.away.name} favPct={Math.max(ph, pa)} otherPct={ph > pa ? pa : pa > ph ? ph : null} />
             })()}
             {x.why.length > 0 && (!x.factors?.length || admin) && (
               <div className="mt-5 rounded-2xl border border-line/60 bg-surface2/30 p-4">

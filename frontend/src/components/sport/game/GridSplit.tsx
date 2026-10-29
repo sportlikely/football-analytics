@@ -38,7 +38,7 @@ export default function GridSplit({ grid, home, away }: { grid: GridView; home: 
   return (
     <div className="mt-5 rounded-xl border border-line/70 bg-surface/60 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div className="text-xs font-semibold text-ink">{t('Our 13 factors: 1,000 points split')}</div>
+        <div className="text-xs font-semibold text-ink">{t('Our factors: 1,000 points split')}</div>
         <div className="num text-xs text-muted">
           <span className="text-home font-semibold">{grid.points.home}</span> · <span className="text-away font-semibold">{grid.points.away}</span> <span className="text-faint">/ 1000</span>
         </div>

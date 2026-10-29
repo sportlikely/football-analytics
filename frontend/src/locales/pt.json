@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Temporada passada repetida semana a semana: pontuação Brier {0}, contra {1} lendo a tabela de cada momento. Mais baixo é melhor.",
  "Product news": "Novidades do produto",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "Novas funções e novidades do Premium, algumas vezes por ano. Desligado até você ativar.",
- "Our 13 factors: 1,000 points split": "Os nossos 13 fatores: divisão de 1000 pontos",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "As duas equipas lançam muitos triplos: este jogo é mais difícil de prever, por isso as probabilidades ficam mais perto de 50%.",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "Cada fator é medido para as duas equipas antes do salto inicial e pesado conforme previu os resultados em três temporadas (2022-23 a 2024-25), verificado em 2025-26. Vantagem = quantos pontos (de 1000) esse fator move para um dos lados.",
  "Player impact of the expected rotation": "Impacto dos jogadores da rotação prevista",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "Interrupção médica",
  "Motivation": "Motivação",
  "No effect in this game": "Sem efeito neste jogo",
- "No single one decides it.": "Nenhum decide sozinho.",
  "Nothing in the numbers points the other way.": "Nada nos números aponta para o outro lado.",
  "Player impact": "Impacto dos jogadores",
  "Player talent": "Talento dos jogadores",
@@ -2962,9 +2960,6 @@
  "Serve and return": "Saque e devolução",
  "Surface switch": "Mudança de superfície",
  "Team rating": "Rating da equipe",
- "We checked one thing for this game. It makes {0} the favourite.": "Verificamos uma coisa para este jogo. Ela torna {0} o favorito.",
- "We checked {0} things for this game. They come out level.": "Verificamos {0} coisas para este jogo. Elas ficam empatadas.",
- "We checked {0} things for this game. Together they make {1} the favourite.": "Verificamos {0} coisas para este jogo. Juntas, tornam {1} o favorito.",
  "Where the market stands — used inside the model only": "Onde está o mercado — usado só dentro do modelo",
  "counted in the confirmed line-ups": "contado nas escalações confirmadas",
  "every usual starter is in the line-up": "todos os titulares habituais estão na escalação",
@@ -2977,7 +2972,9 @@
  "not enough meetings": "confrontos insuficientes",
  "same rest for both sides": "o mesmo descanso para os dois",
  "share": "peso",
- "{0} counts for more than half.": "{0} conta mais da metade.",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: a vantagem é de {1}, o que mantém possível uma vitória de {1} ({2}%).",
- "{0}: the edge goes to {1}.": "{0}: a vantagem é de {1}."
+ "{0}: the edge goes to {1}.": "{0}: a vantagem é de {1}.",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "{0} é o favorito. Veja o que pesa a favor, do maior empurrão ao menor.",
+ "Too close to call. Here is what pushes each way.": "Equilibrado demais para cravar. Veja o que pesa para cada lado.",
+ "Our factors: 1,000 points split": "Nossos fatores: divisão de 1.000 pontos"
 }
