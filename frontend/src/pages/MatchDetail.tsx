@@ -28,6 +28,8 @@ import { ModelName } from '../components/sport/game/ModelName'
 import PredictionPanel from '../components/sport/prediction/PredictionPanel'
 import { useGameTopics } from '../components/sport/prediction/topicTabs'
 import GameMeaning from '../components/sport/forecast/GameMeaning'
+import GamePreview from '../components/sport/game/GamePreview'
+import { GamePicksSlot } from '../components/sport/game/GameLayout'
 import GameExtras from '../components/sport/game/GameExtras'
 import { footballScorers } from '../lib/scorers'
 import { playerHref, leagueHref } from '../lib/links'
@@ -889,12 +891,13 @@ function MatchDetail() {
                   <p className="text-sm text-faint">{(m as any).unpredicted === 'few-games' ? tt("Not predicted (team without enough games)") : tt("No prediction available for this match yet.")}</p>
                 )}
               </Section>
+              {/* fix284: phones — "Your picks" right after the prediction (PC: GameLayout's right column) */}
+              <GamePicksSlot />
 
               <GameMeaning sport="football" id={m.id} />
               {/* fix231: trends, next games, weather, referee */}
               <GameExtras sport="football" id={m.id} />
 
-              <YourPicks sport="fb" gameId={m.id} home={home.shortName || home.name} away={away.shortName || away.name} />
               <GameNews home={{ team: home.name, short: home.shortName }} away={{ team: away.name, short: away.shortName }} />
 
               {(live || done) && p && !p.locked && !hidden && !unlockAnim && (
@@ -1073,6 +1076,8 @@ function MatchDetail() {
     <CompCode.Provider value={m.competition?.code}>
     <GamePage
       back={{ to: '/football/matches', label: tt("All matches") }}
+      preview={lang === 'en' && details?.preview?.text ? <GamePreview text={details.preview.text} title="Match preview" /> : null}
+      picks={<YourPicks sport="fb" gameId={m.id} home={home.shortName || home.name} away={away.shortName || away.name} />}
       srTitle={tabTitle ? `${tabTitle}${m.competition?.name ? ` · ${m.competition.name}` : ''} ${tt("prediction")}` : undefined}
       league={{
         name: m.competition.name, href: leagueHref('football', m.competition.code, m.competition.name) || '/football', logo: m.competition.emblem || null, bits: roundBits,
@@ -1106,7 +1111,6 @@ function MatchDetail() {
         </div>
       ) : undefined}
       afterHero={<>
-        {lang === 'en' && details?.preview?.text && <MatchPreview text={details.preview.text} />}
         <p className="mt-3 text-xs text-muted">
           <Link to="/guides/win-percentages" className="hover:text-ink">{tt("New here? How to read our numbers")} <span aria-hidden className="text-accent rtl-flip">→</span></Link>
         </p>
@@ -1288,23 +1292,6 @@ function Section({ title, note, id, children }: { title: string; note?: ReactNod
 }
 
 /** Free / signed-out view: the pick and confidence; percentages, value and the breakdown are Premium. */
-
-/**
- * "Match preview" (fix121): the same English text search engines get (no pick, no %). Open on wider screens,
- * folded on phones (tap to open). English pages only for now.
- */
-function MatchPreview({ text }: { text: string }) {
-  const [open, setOpen] = useState(() => typeof window === 'undefined' || window.matchMedia('(min-width: 640px)').matches)
-  return (
-    <details open={open} onToggle={e => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="group mt-4 card px-4 sm:px-5 py-3">
-      <summary className="flex items-center justify-between gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-        <h2 className="font-display text-base font-bold text-ink">Match preview</h2>
-        <svg viewBox="0 0 24 24" className="w-4 h-4 text-muted transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 9l6 6 6-6" /></svg>
-      </summary>
-      <p className="mt-2 text-sm text-muted leading-relaxed">{text}</p>
-    </details>
-  )
-}
 
 function LockedPrediction({ pick, dc, home, away, matchId, status, autoUnlock = false, onUnlocked }: {
   pick: 'H' | 'D' | 'A' | null; dc: DC | null; home: Team; away: Team; matchId: number; status: string; autoUnlock?: boolean; onUnlocked: () => void

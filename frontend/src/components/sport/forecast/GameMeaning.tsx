@@ -1,22 +1,27 @@
 import { t } from '../../../lib/i18n'
 import { useGameMeaning, zoneLabel, pct, BAD_ZONE, type FcSport, type FcMeaning } from '../../../lib/seasonForecast'
 import { Section } from '../game/GamePage'
+import { useAuth } from '../../../lib/auth'
 
 /**
  * fix215: "What this game means" on every sport's game page — how each side's title / top-4 / play-off / relegation
  * chance changes with a win, a draw or a loss, from the season forecast's runs where that result happened. Shown only
  * when a result moves a chance by 2 points or more; locked like the game's prediction.
+ * fix284: admins only (Yarin, 29 Oct: off the game page for visitors in every sport; the season forecast pages stay),
+ * under an "Admin" label. The server answers null to everyone else.
  */
 export default function GameMeaning({ sport, id }: { sport: FcSport; id: number }) {
-  const { data } = useGameMeaning(sport, id)
-  if (!data) return null
+  const { access } = useAuth()
+  const admin = access === 'admin'
+  const { data } = useGameMeaning(sport, admin ? id : null)
+  if (!admin || !data) return null
   if (data.locked) return (
-    <Section title={t('What this game means')}>
+    <Section title={t('What this game means')} note={t('Admin preview · not public yet')} id="game-meaning">
       <p className="text-sm text-muted">{t('How a win, a draw or a loss changes {0} and {1}’s season chances comes with this game’s prediction.', { 0: data.home.name, 1: data.away.name })}</p>
     </Section>
   )
   return (
-    <Section title={t('What this game means')} note={data.league}>
+    <Section title={t('What this game means')} note={`${t('Admin preview · not public yet')} · ${data.league}`} id="game-meaning">
       <div className="space-y-4">
         <Side d={data} side="home" sport={sport} />
         <Side d={data} side="away" sport={sport} />

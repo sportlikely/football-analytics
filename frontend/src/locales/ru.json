@@ -3062,5 +3062,8 @@
  "No draw: one team wins": "Без ничьей: кто-то победит",
  "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "Фаворит — {0}. Вот что склоняет чашу весов, от самого сильного толчка к самому слабому.",
  "Too close to call. Here is what pushes each way.": "Слишком равно, чтобы назвать фаворита. Вот что тянет в каждую сторону.",
- "Our factors: 1,000 points split": "Наши факторы: раздел 1000 очков"
+ "Our factors: 1,000 points split": "Наши факторы: раздел 1000 очков",
+ "Locked at the first serve": "Закрыто с первой подачи",
+ "Change them until the first serve": "Можно менять до первой подачи",
+ "Tap to pick before the first serve.": "Нажмите, чтобы выбрать до первой подачи."
 }

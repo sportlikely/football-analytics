@@ -24,6 +24,7 @@ import GamePage, { GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab 
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
 import type { Factor } from '../../lib/whyFactors'
 import GamePreview from '../../components/sport/game/GamePreview'
+import { GamePicksSlot } from '../../components/sport/game/GameLayout'
 import Court, { type CourtPlayer } from '../../components/sport/game/Court'
 import NewsChange from '../../components/sport/game/NewsChange'
 import GridSplit, { type GridView } from '../../components/sport/game/GridSplit'
@@ -173,6 +174,8 @@ export default function BbGame() {
             badges={g.resultCheck ? <span title={t('The final score from our data provider looks wrong. This game doesn’t count in our record until it is checked.')} className="ms-auto rounded-full px-3 py-1 text-xs font-bold bg-draw/15 text-draw">{t('Result being checked')}</span> : undefined}
             noPrediction={t('No prediction for this game.')}
           />
+          {/* fix284: phones — "Your picks" right after the prediction (PC: GameLayout's right column) */}
+          <GamePicksSlot />
           <GameMeaning sport="basketball" id={g.id} />
           {/* fix231: trends, next games (indoors: no weather; the provider names no referees) */}
           <GameExtras sport="basketball" id={g.id} />
@@ -181,8 +184,6 @@ export default function BbGame() {
             <NewsChange home={g.home.name} away={g.away.name} before={d.beforeAfter.before} after={d.beforeAfter.after}
               players={d.beforeAfter.players.map(p => ({ id: p.id, name: p.name, side: p.side, href: href.bbPlayer(p.id, p.name), detail: `${p.status} · −${p.points.toFixed(1)} ${t('pts')}` }))} />
           )}
-          {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
-          <YourPicks sport="bb" gameId={g.id} home={g.home.name} away={g.away.name} />
           <MarketsGate d={d} />
           {d.preview && <CompareCard g={g} home={d.preview.home} away={d.preview.away} table={sameTable(d.standings, g.home.id, g.away.id)} form={d.stats.home && d.stats.away ? { home: d.stats.home.form, away: d.stats.away.form } : null} />}
           {d.players && <PlayersCard g={g} home={d.players.home} away={d.players.away} limit={4} title={t('Players to watch')} />}
@@ -226,6 +227,8 @@ export default function BbGame() {
   return (
     <GamePage
       back={{ to: '/basketball/matches', label: t('All games') }}
+      preview={lang === 'en' && d.writeup ? <GamePreview text={d.writeup} /> : null}
+      picks={<YourPicks sport="bb" gameId={g.id} home={g.home.name} away={g.away.name} />}
       srTitle={`${g.home.name} vs ${g.away.name} · ${g.league.name} ${t('prediction')}`}
       league={{
         name: g.league.name, href: leagueHref('basketball', g.league.code, g.league.name)!, logo: cfg?.leagues.find(l => l.code === g.league.code)?.logo || null,

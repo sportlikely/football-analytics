@@ -4,6 +4,7 @@
  *
  * Football: winner (home / draw / away), over / under 2.5 goals, both teams to score (yes / no).
  * Basketball: winner (home / away), over / under total points. NFL + college football (fix144): winner only (no spread).
+ * Tennis (fix284): who wins (H = player 1, A = player 2); a walkover or a cancelled match is void, a retirement counts.
  * Basketball: over / under total points. The total line is not our model's number (that one
  * is for paying members): it is the average total of both teams' last 10 games, rounded to .5, and each pick keeps the
  * line it was made at.
@@ -16,6 +17,7 @@
 import { db } from '../db';
 import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
+import { tennisPublic } from './tennisSite';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS user_picks (
@@ -28,12 +30,15 @@ db.exec(`
 
 export class PickError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
-export type Sport = 'fb' | 'bb' | 'nfl';
+export type Sport = 'fb' | 'bb' | 'nfl' | 'tn';
 const MARKETS: Record<Sport, Record<string, string[]>> = {
   fb: { result: ['H', 'D', 'A'], ou25: ['O', 'U'], btts: ['Y', 'N'] },
   bb: { win: ['H', 'A'], total: ['O', 'U'] },
-  nfl: { win: ['H', 'A'] }
+  nfl: { win: ['H', 'A'] },
+  tn: { win: ['H', 'A'] }
 };
+const TN_DONE = ['completed', 'finished'];
+const tnVoid = (status: string | null, outcome: string | null) => status === 'void' || status === 'cancelled' || /walkover/i.test(outcome || '');
 const NFL_VOID = ['CANC', 'PST'];
 const BB_DONE = ['FT', 'AOT'];
 const BB_VOID = ['CANC', 'POST', 'ABD', 'AWD'];
@@ -69,7 +74,13 @@ function nflGame(id: number): GameInfo | null {
   return { kickoff: g.kickoff, home: g.home_name || 'TBD', away: g.away_name || 'TBD', league: g.league === 2 ? 'College football' : 'NFL', finished: BB_DONE.includes(g.status) };
 }
 
-const gameInfo = (sport: Sport, id: number) => (sport === 'fb' ? fbGame(id) : sport === 'nfl' ? nflGame(id) : bbGame(id));
+function tnGame(id: number): GameInfo | null {
+  const m = db.prepare(`SELECT scheduled_at, status, p1_name, p2_name, tournament FROM tennis_matches WHERE id = ? AND COALESCE(draw, 'singles') = 'singles'`).get(id) as any;
+  if (!m?.scheduled_at || !m.p1_name || !m.p2_name) return null;
+  return { kickoff: m.scheduled_at, home: m.p1_name, away: m.p2_name, league: m.tournament || 'Tennis', finished: TN_DONE.includes(m.status) };
+}
+
+const gameInfo = (sport: Sport, id: number) => (sport === 'fb' ? fbGame(id) : sport === 'nfl' ? nflGame(id) : sport === 'tn' ? tnGame(id) : bbGame(id));
 const started = (kickoff: string) => new Date(kickoff).getTime() <= Date.now();
 
 /** 'hit' | 'miss' | 'void' | 'pending' for one pick. */
@@ -90,6 +101,12 @@ function outcomeOf(sport: Sport, gameId: number, market: string, pick: string, l
     if (n.hs === n.as_) return 'void'; // a tie: nobody won
     return (n.hs > n.as_ ? 'H' : 'A') === pick ? 'hit' : 'miss';
   }
+  if (sport === 'tn') {
+    const m = db.prepare('SELECT status, outcome, winner FROM tennis_matches WHERE id = ?').get(gameId) as any;
+    if (!m || tnVoid(m.status, m.outcome)) return 'void';
+    if (!TN_DONE.includes(m.status) || (m.winner !== 1 && m.winner !== 2)) return 'pending';
+    return (m.winner === 1 ? 'H' : 'A') === pick ? 'hit' : 'miss';
+  }
   const g = db.prepare('SELECT status, hs, as_ FROM bb_games WHERE game_id = ?').get(gameId) as any;
   if (!g) return 'void';
   if (BB_VOID.includes(g.status)) return 'void';
@@ -105,9 +122,10 @@ function outcomeOf(sport: Sport, gameId: number, market: string, pick: string, l
 }
 
 function checkSport(sport: string, access: string): Sport {
-  if (sport !== 'fb' && sport !== 'bb' && sport !== 'nfl') throw new PickError(400, 'Unknown sport.');
+  if (sport !== 'fb' && sport !== 'bb' && sport !== 'nfl' && sport !== 'tn') throw new PickError(400, 'Unknown sport.');
   if (sport === 'bb' && !bbPublic() && access !== 'admin') throw new PickError(404, 'Not found.');
   if (sport === 'nfl' && !nflPublic() && access !== 'admin') throw new PickError(404, 'Not found.');
+  if (sport === 'tn' && !tennisPublic() && access !== 'admin') throw new PickError(404, 'Not found.');
   return sport;
 }
 
@@ -150,6 +168,7 @@ export function setPick(userId: number, sportIn: string, gameId: number, market:
 export function personalRecord(userId: number, access: string) {
   const showBb = bbPublic() || access === 'admin';
   const showNfl = nflPublic() || access === 'admin';
+  const showTn = tennisPublic() || access === 'admin';
   const rows = db.prepare(`SELECT sport, game_id, market, pick, line, kickoff, updated_at FROM user_picks WHERE user_id = ? ORDER BY kickoff DESC LIMIT 2000`).all(userId) as any[];
   const games = new Map<string, GameInfo | null>();
   const stats: Record<string, { picks: number; settled: number; hits: number; pending: number; void: number }> = {};
@@ -158,6 +177,7 @@ export function personalRecord(userId: number, access: string) {
   for (const r of rows) {
     if (r.sport === 'bb' && !showBb) continue;
     if (r.sport === 'nfl' && !showNfl) continue;
+    if (r.sport === 'tn' && !showTn) continue;
     const key = `${r.sport}:${r.game_id}`;
     if (!games.has(key)) games.set(key, gameInfo(r.sport, r.game_id));
     const g = games.get(key);
@@ -177,5 +197,5 @@ export function personalRecord(userId: number, access: string) {
   // fix144: the record per sport too (My picks has a sport filter)
   const bySport: Record<string, { picks: number; settled: number; hits: number; pending: number }> = {};
   for (const [k, s] of Object.entries(stats)) { const sp = k.split(':')[0]; const b = (bySport[sp] ||= { picks: 0, settled: 0, hits: 0, pending: 0 }); b.picks += s.picks; b.settled += s.settled; b.hits += s.hits; b.pending += s.pending; }
-  return { total, streak, stats, bySport, list, basketball: showBb, nfl: showNfl };
+  return { total, streak, stats, bySport, list, basketball: showBb, nfl: showNfl, tennis: showTn };
 }

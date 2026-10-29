@@ -3062,5 +3062,8 @@
  "No draw: one team wins": "Όχι ισοπαλία: νικά μια ομάδα",
  "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "Φαβορί είναι το {0}. Δείτε τι γέρνει την πλάστιγγα, από τη μεγαλύτερη ώθηση στη μικρότερη.",
  "Too close to call. Here is what pushes each way.": "Πολύ κοντά για πρόβλεψη. Δείτε τι σπρώχνει προς κάθε πλευρά.",
- "Our factors: 1,000 points split": "Οι παράγοντές μας: μοιρασιά 1.000 πόντων"
+ "Our factors: 1,000 points split": "Οι παράγοντές μας: μοιρασιά 1.000 πόντων",
+ "Locked at the first serve": "Κλειδώνει στο πρώτο σερβίς",
+ "Change them until the first serve": "Αλλάζουν μέχρι το πρώτο σερβίς",
+ "Tap to pick before the first serve.": "Πάτησε για να επιλέξεις πριν από το πρώτο σερβίς."
 }

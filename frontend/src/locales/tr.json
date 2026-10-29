@@ -3062,5 +3062,8 @@
  "No draw: one team wins": "Beraberlik yok: bir takım kazanır",
  "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "Favori {0}. Dengeyi değiştirenler, en büyük etkiden en küçüğe:",
  "Too close to call. Here is what pushes each way.": "Tahmin edilemeyecek kadar yakın. Her iki yöne itenler şunlar:",
- "Our factors: 1,000 points split": "Faktörlerimiz: 1000 puanlık dağılım"
+ "Our factors: 1,000 points split": "Faktörlerimiz: 1000 puanlık dağılım",
+ "Locked at the first serve": "İlk serviste kilitlenir",
+ "Change them until the first serve": "İlk servise kadar değiştirebilirsin",
+ "Tap to pick before the first serve.": "İlk servisten önce seçmek için dokun."
 }

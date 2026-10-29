@@ -27,6 +27,7 @@ import NewsChange from '../../components/sport/game/NewsChange'
 import QuarterStrip from '../../components/sport/game/QuarterStrip'
 import Highlights from '../../components/sport/game/Highlights'
 import GamePreview from '../../components/sport/game/GamePreview'
+import { GamePicksSlot } from '../../components/sport/game/GameLayout'
 import { useLiveBox, LiveBoxLabel } from '../../components/sport/game/LiveBox'
 import { RestTab } from '../bb/GameTabs'
 import KeyPlayers from '../../components/sport/game/KeyPlayers'
@@ -140,14 +141,14 @@ export default function NflGame() {
             howCalc={p && p.why && !p.locked ? <NflModelParts g={g} p={p} injuries={d.injuries} /> : undefined}
             noPrediction={g.state === 'upcoming' ? t('Our prediction for this game is saved in the week of the game, before kick-off.') : t('No prediction for this game.')}
           />
+          {/* fix284: phones — "Your picks" right after the prediction (PC: GameLayout's right column) */}
+          <GamePicksSlot />
           <GameMeaning sport="nfl" id={g.id} />
           {/* fix231: trends, next games, weather (outdoor stadiums) */}
           <GameExtras sport="nfl" id={g.id} />
           {d.keyPlayers && <NflKeyPlayers g={g} data={d.keyPlayers} />}
           {d.beforeAfter && <ChangeCard g={g} x={d.beforeAfter} />}
-          {lang === 'en' && d.writeup && <GamePreview text={d.writeup} />}
           {d.starters && (d.starters.home.length > 0 || d.starters.away.length > 0) && <Starters g={g} data={d.starters} />}
-          <YourPicks sport="nfl" gameId={g.id} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />
           <GameNews home={{ sport: 'american-football', teamId: g.home.id }} away={{ sport: 'american-football', teamId: g.away.id }} />
         </>
       )
@@ -175,6 +176,8 @@ export default function NflGame() {
   return (
     <GamePage
       back={{ to: '/american-football/matches', label: t('All games') }}
+      preview={lang === 'en' && d.writeup ? <GamePreview text={d.writeup} /> : null}
+      picks={<YourPicks sport="nfl" gameId={g.id} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />}
       top={<LeagueSwitch />}
       srTitle={`${g.home.name} vs ${g.away.name} · ${nflLeagueName(lg)} ${weekLabel(g.weekKey, g.league)}`}
       league={{ name: nflLeagueName(lg), href: leagueHref('american-football', String(lg))!, bits: [weekLabel(g.weekKey, g.league)] }}

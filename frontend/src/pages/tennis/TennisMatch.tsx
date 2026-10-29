@@ -18,6 +18,8 @@ import WinnerPrediction, { type WhyRow } from '../../components/sport/game/Winne
 import { LiveChancePanel, SwingChart } from '../../components/sport/game/LiveChance'
 import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts'
 import GamePreview from '../../components/sport/game/GamePreview'
+import { GamePicksSlot } from '../../components/sport/game/GameLayout'
+import YourPicks from '../../components/YourPicks'
 import Highlights from '../../components/sport/game/Highlights'
 import PlayerPhoto from '../../components/sport/PlayerPhoto'
 import { PlayerName, SurfaceTag, FormList, DrawTab, type Played, type DrawRound } from './parts'
@@ -104,10 +106,11 @@ export default function TennisMatch() {
             howCalc={p && !p.locked && p.numbers ? <TennisParts m={m} p={p} /> : undefined}
             noPrediction={m.state === 'upcoming' ? t('Our prediction for this match is saved in the 48 hours before the first serve.') : t('No prediction for this match.')}
           />
+          {/* fix284: phones — "Your picks" right after the prediction (PC: GameLayout's right column) */}
+          <GamePicksSlot />
           {p && !p.locked && sets.length > 0 && <SetsCard m={m} p={p} />}
           {/* fix231: trends (all matches / this surface), next matches, weather (outdoors) */}
           <GameExtras sport="tennis" id={m.id} />
-          {lang === 'en' && d.writeup && <GamePreview text={d.writeup} title="Match preview" />}
           <GameNews home={{ sport: 'tennis', playerId: m.home.id ?? undefined }} away={{ sport: 'tennis', playerId: m.away.id ?? undefined }} title={t('News about both players')} />
         </>
       )
@@ -125,6 +128,8 @@ export default function TennisMatch() {
   return (
     <GamePage
       back={{ to: '/tennis/matches', label: t('All matches') }}
+      preview={lang === 'en' && d.writeup ? <GamePreview text={d.writeup} title="Match preview" /> : null}
+      picks={<YourPicks sport="tn" gameId={m.id} home={m.home.name} away={m.away.name} />}
       srTitle={`${m.home.name} vs ${m.away.name} · ${m.tournament.name} ${t('prediction')}`}
       league={{ name: m.tournament.name, href: tennisHref.tournament(m.tournament.key), star: <FavStar size="sm" fav={tennisTournamentFav(m.tournament)} />,
         bits: [tierLabel(m), surfaceName(m.tournament.surface, m.tournament.indoor), roundName(m), m.bestOf === 5 ? t('Best of 5') : ''].filter(Boolean) }}

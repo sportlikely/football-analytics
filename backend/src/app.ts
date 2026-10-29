@@ -130,7 +130,7 @@ import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, todayGroups as 
 import { listGuides, getGuide, guideSlugs } from './services/guides';
 import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
 import { hubBySlug, hubByOld, hubOpen, buildHub, HUBS } from './services/hubs';
-import { refreshFromDetails } from './services/matchPreview';
+import { refreshFromDetails, getPreview } from './services/matchPreview';
 import { fontRoute, warmFonts } from './services/fonts';
 import { listFavorites, addFavorites, removeFavorite, MAX_FAVORITES } from './services/favorites';
 import { calendarToken, resetCalendarToken, calendarIcs, asCalLang, tokenHint, TOKEN_RE } from './services/calendar';
@@ -1039,7 +1039,7 @@ app.get('/api/admin/assistant', (_req, res) => res.json({ data: assistantStats()
 // Favorites (signed-in users; visitors keep them in the browser and they are merged here on sign-in)
 // Your picks + personal record (every signed-in account) — services/userPicks.ts
 const pickErr = (res: express.Response, e: any) => e instanceof PickError ? res.status(e.status).json({ error: e.message }) : sendError(res, e, 'Picks failed');
-app.get('/api/picks/game/:sport(fb|bb|nfl)/:id(\\d+)', (req, res) => {
+app.get('/api/picks/game/:sport(fb|bb|nfl|tn)/:id(\\d+)', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: { signedIn: !!req.user, ...gamePicks(req.user?.id ?? null, req.params.sport, parseInt(req.params.id, 10), req.access || 'anon') } }); }
   catch (e: any) { pickErr(res, e); }
@@ -2406,7 +2406,9 @@ function offlineDetails(id: number): any | null {
   };
   let prediction: any = null, predictions: any[] = [];
   try { predictions = footballDataAPI.allPredictionsFor(match); prediction = footballDataAPI.predictionFor(match); } catch { /* none saved */ }
-  return { match, prediction, predictions, head2head: null, standings: { home: null, away: null }, form: { home: [], away: [] }, probableLineups: null, partial: true, message: 'More details soon' };
+  // fix284: the preview from our own tables (the page's left column on PC), as when the provider answers
+  const pv = getPreview(id);
+  return { match, prediction, predictions, preview: pv ? { text: pv.text, builtAt: pv.builtAt, title: pv.title } : null, head2head: null, standings: { home: null, away: null }, form: { home: [], away: [] }, probableLineups: null, partial: true, message: 'More details soon' };
 }
 const detailsInflight = new Map<number, Promise<any>>();
 function buildOnce(id: number): Promise<any> {
@@ -2976,6 +2978,8 @@ app.get('/api/season-forecast/:sport/team/:id(\\d+)', (req, res) => {
 app.get('/api/season-forecast/:sport/game/:id(\\d+)', (req, res) => {
   const sport = String(req.params.sport);
   if (!fcOpen(req, sport)) return res.status(404).json({ error: 'Not found' });
+  // fix284: "What this game means" is off the game page for visitors (Yarin, 29 Oct); admins keep it under an Admin label
+  if (req.access !== 'admin') return res.set('Cache-Control', 'private, no-store').json({ data: null });
   try {
     const id = Number(req.params.id), m = gameMeaning(sport, String(id));
     if (!m) return res.set('Cache-Control', 'private, no-store').json({ data: null });

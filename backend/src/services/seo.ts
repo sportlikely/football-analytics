@@ -4,11 +4,12 @@ import { slModel } from '../utils/modelNames';
 import { BB_LEAGUES } from './basketball';
 import { bbPublic } from './bbSite';
 import { FONT_HEAD } from './fonts';
-import { getPreview, firstSentence, matchTitle, previewDates, previewFacts as previewFactsRaw } from './matchPreview';
-import { bbPreview } from './bbPreview';
+import { getPreview as getPreviewMarked, firstSentence, matchTitle, previewDates, previewFacts as previewFactsRaw } from './matchPreview';
+import { bbPreview as bbPreviewMarked } from './bbPreview';
 import { nflCurrentSeason, schoolName, HIDE_OTHER } from './nfl';
 import { nflPublic, nflWeeks, nflWeekGames, nflGamesBetween, nflGame as nflGameRaw, nflStandings, nflTeam as nflTeamRaw, nflPlayer as nflPlayerRaw, leagueOfTeamId, type NflGame } from './nflSite';
-import { nflPreview } from './nflGameExtras';
+import { nflPreview as nflPreviewMarked } from './nflGameExtras';
+import { plainPreview } from '../utils/previewWhen';
 import { moreSentence } from './morePredictions';
 // fix204: one sentence from More predictions on the crawler game page (all languages), only for public outputs
 const moreP = (sport: 'football' | 'basketball' | 'nfl', id: number, lang: string) => { try { const t = moreSentence(sport, id, lang); return t ? `<p>${esc(t)}</p>` : ''; } catch { return ''; } };
@@ -48,6 +49,10 @@ function memo<A extends unknown[], R>(name: string, fn: (...a: A) => R): (...a: 
 const fbLast = memo('fbLast', fbLastRaw), fbNext = memo('fbNext', fbNextRaw), fbH2h = memo('fbH2h', fbH2hRaw);
 const bbGameById = memo('bbGameById', bbGameByIdRaw), bbLast = memo('bbLast', bbLastRaw), bbNext = memo('bbNext', bbNextRaw), bbH2h = memo('bbH2h', bbH2hRaw), bbTeamName = memo('bbTeamName', bbTeamNameRaw);
 const previewFacts = memo('previewFacts', previewFactsRaw);
+// fix284: crawler copies are plain text (day in UTC, no clock time, never "UTC"); the game page fills in the visitor's time
+const getPreview = (id: number) => { const p = getPreviewMarked(id); return p && { ...p, text: plainPreview(p.text) }; };
+const bbPreview = (id: number) => plainPreview(bbPreviewMarked(id));
+const nflPreview = (id: number) => plainPreview(nflPreviewMarked(id));
 const nflGame = memo('nflGame', nflGameRaw), nflTeam = memo('nflTeam', nflTeamRaw), nflPlayer = memo('nflPlayer', nflPlayerRaw);
 
 /**

@@ -12,6 +12,7 @@
 import { db } from '../db';
 import { shapeGame, GAME_COLS, nflStandings, playerGroups, weekKey, type NflGame } from './nflSite';
 import type { LeagueId } from './nfl';
+import { dayMark, timeMark } from '../utils/previewWhen';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS nfl_pred_first (game_id INTEGER PRIMARY KEY, p_home REAL NOT NULL, margin REAL, outs TEXT, qb TEXT, made_at TEXT NOT NULL);
@@ -238,12 +239,12 @@ export function nflPreviewText(id: number, qbNames?: [string | null, string | nu
   const H = g.home.name, A = g.away.name, past = g.state === 'done';
   const lg = g.league === 2 ? 'college football' : 'NFL';
   const wk = g.weekKey === 'post' ? (g.league === 2 ? 'bowl season' : 'the playoffs') : g.weekKey === 'pre' ? 'the pre-season' : `Week ${g.weekKey}`;
-  const when = new Date(g.kickoff).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const when = dayMark(g.kickoff); // fix284: the visitor's own day (utils/previewWhen.ts)
   const parts: { prio: number; text: string }[] = [];
   const add = (prio: number, text: string | null) => { if (text) parts.push({ prio, text }); };
   add(0, past
-    ? pick(id, 'intro', [`${H} hosted ${A} in ${wk} of the ${lg} season on ${when}.`, `On ${when}, ${A} visited ${H} (${lg}, ${wk}).`])
-    : pick(id, 'intro', [`${H} host ${A} in ${wk} of the ${lg} season on ${when}.`, `On ${when}, ${A} visit ${H} (${lg}, ${wk}).`, `${wk} of the ${lg} season brings ${A} to ${H} on ${when}.`]));
+    ? pick(id, 'intro', [`${H} hosted ${A} on ${when} (${lg}, ${wk}).`, `On ${when}, ${A} visited ${H} (${lg}, ${wk}).`])
+    : pick(id, 'intro', [`${H} host ${A} on ${when} (${lg}, ${wk}).`, `On ${when}, ${A} visit ${H} (${lg}, ${wk}).`]));
   if (g.venue) add(3, `The game is played at ${g.venue}.`);
   if (past && g.score) add(0, `Final score: ${H} ${g.score.home}–${g.score.away} ${A}.`);
   const rh = seasonRecord(g.home.id, g.season, g.kickoff), ra = seasonRecord(g.away.id, g.season, g.kickoff);
@@ -277,7 +278,7 @@ export function nflPreviewText(id: number, qbNames?: [string | null, string | nu
     if (oh.length || oa.length) add(2, [oh.length ? `${H} have ruled out ${oh.join(', ')}` : '', oa.length ? `${A} are without ${oa.join(', ')}` : ''].filter(Boolean).join(', while ') + '.');
   }
   const fillers = [
-    `Kick-off ${past ? 'was' : 'is'} at ${new Date(g.kickoff).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC.`,
+    `Kick-off ${past ? 'was' : 'is'} at ${timeMark(g.kickoff)}.`,
     'The game page also covers the expected margin, total points, the predicted score, rest and the injury report.',
     'Every SportLikely prediction is saved before kick-off and checked against the result afterwards.',
     'The numbers in this preview come from our own records of the games we cover.'

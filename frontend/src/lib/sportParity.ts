@@ -58,7 +58,7 @@ export const PARITY = [
   { key: 'game.scorers', label: 'Scorers under the score, live and final, and in a list row opened with its arrow (fix209: football goals / own goals / penalties / red cards, basketball top scorer, NFL scoring plays, tennis set scores + the game score while live)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.highlights', label: 'Video highlights', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.savedBadge', label: 'Saved before kick-off', football: true, basketball: true, nfl: true, tennis: true },
-  { key: 'game.whatItMeans', label: 'What this game means: season chances by result (fix215)', football: true, basketball: true, nfl: true, tennis: 'na: tennis has no league season table (tournaments and rankings), nothing to simulate' },
+  { key: 'game.whatItMeans', label: 'What this game means: season chances by result (fix215; admins only since fix284)', football: true, basketball: true, nfl: true, tennis: 'na: tennis has no league season table (tournaments and rankings), nothing to simulate' },
   { key: 'game.morePredictions', label: 'More predictions inside the prediction tab: "Most sure first" + topic cards (fix204, fix281)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'record.morePredictions', label: 'More predictions section on the record page (fix204)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'seo.crawler.moreSentence', label: 'Crawler game page: one More predictions sentence (fix204)', football: true, basketball: true, nfl: true, tennis: true },

@@ -6,12 +6,15 @@ import StickyBar from '../../StickyBar'
 import { useNews, NewsRows, type NewsItem } from '../../NewsList'
 import { hasScorerLine, type ScorerLines } from '../../../lib/scorers'
 import { HeaderScorers } from './ScoreLines'
+import GameLayout, { useGameCols } from './GameLayout'
 
 /**
  * The game page (football's match page, shared by every sport since fix152c): back link, the hero (competition ·
  * round · date, both teams, score or start time, status), the sport's lines under it, sticky tabs and the open tab.
  * The prediction tab (always the first) ends with a card per other tab. Each sport's page gives the data and the
- * tabs' content; the layout lives here.
+ * tabs' content; the layout lives here. fix284: inside GameLayout — on PC the preview (left) and "Your picks" (right)
+ * sit beside the game on every tab; on phones the preview is above the tabs and the page puts <GamePicksSlot /> after
+ * its prediction block.
  */
 export interface GameTab { id: string; label: string; short?: string; hint: string; live?: boolean; render: () => ReactNode }
 export interface HeroSide { name: string; logo: ReactNode; href: string; title?: string; linkLabel: string; star?: ReactNode; sub?: string | null }
@@ -39,6 +42,9 @@ export interface GamePageProps {
   footer?: ReactNode
   /** between the hero and the tabs */
   afterHero?: ReactNode
+  /** fix284: "Game preview" (GamePreview, English pages) and "Your picks" (YourPicks): GameLayout places them */
+  preview?: ReactNode
+  picks: ReactNode
   tabs: GameTab[]
   tab: string
   onTab: (id: string) => void
@@ -70,7 +76,7 @@ function TeamHero({ s, align }: { s: HeroSide; align: 'left' | 'right' }) {
       className={`flex flex-col items-center text-center gap-2 sm:gap-4 min-w-0 hover:opacity-90 ${align === 'right' ? 'sm:flex-row-reverse sm:text-end' : 'sm:flex-row sm:text-start'}`}>
       {s.logo}
       <div className="min-w-0 w-full sm:w-auto">
-        <div className="font-sans font-extrabold text-[15px] sm:font-display sm:text-2xl text-ink leading-tight break-words sm:truncate">{s.name}</div>
+        <div className="font-sans font-extrabold text-[15px] sm:font-display sm:text-2xl text-ink leading-tight break-words sm:truncate lg:text-xl lg:whitespace-normal lg:overflow-visible lg:text-clip">{s.name}</div>
         {s.sub && <div className="hidden sm:block text-xs text-faint mt-0.5 truncate">{s.sub}</div>}
         <div className={`flex items-center justify-center gap-1 mt-1 sm:mt-0.5 ${align === 'right' ? 'sm:justify-end' : 'sm:justify-start'}`}>
           {/* fix256: long words (ru "Страница команды →") wrap on phones instead of running out of the hero */}
@@ -105,9 +111,12 @@ export default function GamePage(p: GamePageProps) {
   const { status: st } = p
   const live = st.kind === 'live'
   const current = p.tabs.find(x => x.id === p.tab) || p.tabs[0]
+  const cols = useGameCols()
+  const wide = cols === 3 && !!p.preview ? 'max-w-[1672px]' : cols > 1 ? 'max-w-[1348px]' : 'max-w-5xl'
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 pb-28 xl:pb-10">
+    <div className={`${wide} mx-auto px-4 sm:px-6 py-6 pb-28 xl:pb-10`}>
       {p.srTitle && <h1 className="sr-only">{p.srTitle}</h1>}
+      <GameLayout preview={p.preview} picks={p.picks}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link to={p.back.to} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink transition-colors">
           <span aria-hidden className="rtl-flip">←</span> {p.back.label}</Link>
@@ -166,6 +175,7 @@ export default function GamePage(p: GamePageProps) {
       </div>
 
       {p.afterHero}
+      {cols === 1 && p.preview && <div className="mt-4">{p.preview}</div>}
 
       {/* ---------- Tabs ---------- */}
       <StickyBar className="top-16 sm:top-[72px] -mx-4 sm:mx-0 mt-6 px-4 sm:px-0 py-2">
@@ -193,6 +203,7 @@ export default function GamePage(p: GamePageProps) {
           </div>
         )}
       </div>
+      </GameLayout>
     </div>
   )
 }

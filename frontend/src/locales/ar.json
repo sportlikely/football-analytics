@@ -3062,5 +3062,8 @@
  "No draw: one team wins": "لا تعادل: يفوز أحد الفريقين",
  "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "{0} هو المرشح الأوفر حظاً. إليك ما يرجّح الكفة، من الدفعة الأكبر إلى الأصغر.",
  "Too close to call. Here is what pushes each way.": "متقاربة جداً بحيث يصعب الحسم. إليك ما يدفع في كل اتجاه.",
- "Our factors: 1,000 points split": "عواملنا: توزيع 1,000 نقطة"
+ "Our factors: 1,000 points split": "عواملنا: توزيع 1,000 نقطة",
+ "Locked at the first serve": "مقفل عند أول إرسال",
+ "Change them until the first serve": "يمكن تغييرها حتى أول إرسال",
+ "Tap to pick before the first serve.": "اضغط للاختيار قبل أول إرسال."
 }

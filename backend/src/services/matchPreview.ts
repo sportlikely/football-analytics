@@ -11,6 +11,7 @@
  */
 import { db } from '../db';
 import logger from '../utils/logger';
+import { dayMark, timeMark } from '../utils/previewWhen';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS match_previews (
@@ -58,8 +59,6 @@ function hash(s: string) {
 const pick = <T>(id: number, slot: string, list: T[]): T => list[hash(`${id}:${slot}`) % list.length];
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const ord = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
-const longDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 const list = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const num = (n: number) => (n >= 0 && n <= 10 ? ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'][n] : String(n));
 
@@ -89,21 +88,19 @@ export function previewText(x: PreviewInput): string {
   const past = !!x.score;
   const comp = x.comp || 'the league';
   const md = x.matchday ? ` matchday ${x.matchday}` : '';
-  const when = longDate(x.date);
+  const when = dayMark(x.date); // fix284: the visitor's own day / time (utils/previewWhen.ts)
   const parts: { key: string; prio: number; text: string }[] = [];
   const add = (key: string, prio: number, text: string | null) => { if (text) parts.push({ key, prio, text }); };
 
   // 1. who, where, when
   add('intro', 0, past
     ? pick(id, 'intro', [
-        `${H} hosted ${A} in ${comp}${md} on ${when}${x.venue ? ` at ${x.venue}` : ''}.`,
-        `On ${when}, ${H} faced ${A}${x.venue ? ` at ${x.venue}` : ''} in ${comp}${x.matchday ? ` (matchday ${x.matchday})` : ''}.`,
-        `${comp}${md} brought ${A} to ${x.venue || `face ${H}`} on ${when}.`
+        `${H} hosted ${A} on ${when} in ${comp}${md}${x.venue ? ` at ${x.venue}` : ''}.`,
+        `On ${when}, ${H} faced ${A}${x.venue ? ` at ${x.venue}` : ''} in ${comp}${x.matchday ? ` (matchday ${x.matchday})` : ''}.`
       ])
     : pick(id, 'intro', [
-        `${H} host ${A} in ${comp}${md} on ${when}${x.venue ? ` at ${x.venue}` : ''}.`,
-        `On ${when}, ${H} welcome ${A}${x.venue ? ` to ${x.venue}` : ''} in ${comp}${x.matchday ? ` (matchday ${x.matchday})` : ''}.`,
-        `${comp}${md} brings ${A} to ${x.venue || `face ${H}`} on ${when}.`
+        `${H} host ${A} on ${when} in ${comp}${md}${x.venue ? ` at ${x.venue}` : ''}.`,
+        `On ${when}, ${H} welcome ${A}${x.venue ? ` to ${x.venue}` : ''} in ${comp}${x.matchday ? ` (matchday ${x.matchday})` : ''}.`
       ]));
   if (x.score) add('result', 0, pick(id, 'result', [
     `Full time: ${H} ${x.score.home}–${x.score.away} ${A}.`,
@@ -171,7 +168,7 @@ export function previewText(x: PreviewInput): string {
 
   // fill up to ~120 words with plain context, trim to ≤ 200 by dropping the least important lines
   const fillers = [
-    `Kick-off ${past ? 'was' : 'is'} at ${hhmm(x.date)} UTC.`,
+    `Kick-off ${past ? 'was' : 'is'} at ${timeMark(x.date)}.`,
     ...(parts.some(p => /^(form|table|h2h)/.test(p.key)) ? [`This preview is written from both teams' recent results, the ${x.comp ? `${x.comp} ` : ''}table and their past meetings.`] : []),
     `Our prediction page also covers expected goals, both teams to score, over and under 2.5 goals and the likely line-ups.`,
     `Every SportLikely prediction is saved before kick-off and checked against the result afterwards.`,
@@ -330,7 +327,8 @@ function save(x: PreviewInput, state: string): StoredPreview {
 }
 function fromRow(r: any): StoredPreview {
   const x = JSON.parse(r.input) as PreviewInput;
-  return { text: r.text, builtAt: r.built_at, title: matchTitle(x.home, x.away, x.comp, x.date), state: r.state };
+  // fix284: written again from the stored facts (same templates by id), so a text stored with "UTC" never comes back
+  return { text: previewText(x), builtAt: r.built_at, title: matchTitle(x.home, x.away, x.comp, x.date), state: r.state };
 }
 
 /** Match page details were just loaded: store / rebuild the preview when it moved on (line-ups, full time, a day old). */

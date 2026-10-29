@@ -11,11 +11,11 @@ import { matchHref } from '../lib/links'
  * fix144: every sport (football, basketball, NFL + college); each sport's menu opens it filtered on that sport. */
 
 type Result = 'hit' | 'miss' | 'void' | 'pending'
-type SportKey = 'fb' | 'bb' | 'nfl'
+type SportKey = 'fb' | 'bb' | 'nfl' | 'tn'
 interface Row { sport: SportKey; gameId: number; market: string; pick: string; line: number | null; kickoff: string; result: Result; home: string | null; away: string | null; league: string | null }
 interface Stat { picks: number; settled: number; hits: number; pending: number; void: number }
 interface Tot { picks: number; settled: number; hits: number; pending: number }
-interface Rec { total: Tot; bySport?: Record<string, Tot>; streak: number; stats: Record<string, Stat>; list: Row[]; basketball: boolean; nfl?: boolean }
+interface Rec { total: Tot; bySport?: Record<string, Tot>; streak: number; stats: Record<string, Stat>; list: Row[]; basketball: boolean; nfl?: boolean; tennis?: boolean }
 
 const TYPES: { key: string; sport: SportKey; market: string }[] = [
   { key: 'fb:result', sport: 'fb', market: 'result' },
@@ -23,12 +23,13 @@ const TYPES: { key: string; sport: SportKey; market: string }[] = [
   { key: 'fb:btts', sport: 'fb', market: 'btts' },
   { key: 'bb:win', sport: 'bb', market: 'win' },
   { key: 'bb:total', sport: 'bb', market: 'total' },
-  { key: 'nfl:win', sport: 'nfl', market: 'win' }
+  { key: 'nfl:win', sport: 'nfl', market: 'win' },
+  { key: 'tn:win', sport: 'tn', market: 'win' }
 ]
-const SPORT_LABEL = (s: SportKey) => (s === 'fb' ? tt('Football') : s === 'bb' ? tt('Basketball') : tt('American football'))
+const SPORT_LABEL = (s: SportKey) => (s === 'fb' ? tt('Football') : s === 'bb' ? tt('Basketball') : s === 'tn' ? tt('Tennis') : tt('American football'))
 const GAME_HREF = (r: Row) => matchHref(s2l(r.sport), r.gameId, { home: r.home, away: r.away, date: r.kickoff })!
-const s2l = (s: SportKey) => (s === 'fb' ? 'football' : s === 'bb' ? 'basketball' : 'american-football')
-const GAMES_HREF: Record<SportKey, string> = { fb: '/football/matches', bb: '/basketball/matches', nfl: '/american-football/matches' }
+const s2l = (s: SportKey) => (s === 'fb' ? 'football' : s === 'bb' ? 'basketball' : s === 'tn' ? 'tennis' : 'american-football')
+const GAMES_HREF: Record<SportKey, string> = { fb: '/football/matches', bb: '/basketball/matches', nfl: '/american-football/matches', tn: '/tennis/matches' }
 const pct = (s: { settled: number; hits: number }) => (s.settled ? Math.round((s.hits / s.settled) * 1000) / 10 : null)
 
 export default function MyPicks({ initial = 'all' }: { initial?: 'all' | SportKey }) {
@@ -59,8 +60,8 @@ export default function MyPicks({ initial = 'all' }: { initial?: 'all' | SportKe
   // fix144: the record of the sport chosen (all sports together on "All")
   const total = d ? (sport === 'all' ? d.total : d.bySport?.[sport] || { picks: 0, settled: 0, hits: 0, pending: 0 }) : undefined
   const overall = total ? pct(total) : null
-  const shown = (x: SportKey) => x === 'fb' || (x === 'bb' ? !!d?.basketball : !!d?.nfl)
-  const sports = (['fb', 'bb', 'nfl'] as SportKey[]).filter(shown)
+  const shown = (x: SportKey) => x === 'fb' || (x === 'bb' ? !!d?.basketball : x === 'tn' ? !!d?.tennis : !!d?.nfl)
+  const sports = (['fb', 'bb', 'nfl', 'tn'] as SportKey[]).filter(shown)
   const types = TYPES.filter(x => shown(x.sport)).filter(x => sport === 'all' || x.sport === sport)
 
   return (

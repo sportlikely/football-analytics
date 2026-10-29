@@ -6,14 +6,20 @@
  */
 import { db } from '../db';
 import { pubPath } from './slugs';
-import { getPreview } from './matchPreview';
-import { bbPreview } from './bbPreview';
+import { getPreview as getPreviewMarked } from './matchPreview';
+import { bbPreview as bbPreviewMarked } from './bbPreview';
 import { bbPublic } from './bbSite';
 import { nflPublic } from './nflSite';
-import { nflPreview } from './nflGameExtras';
+import { nflPreview as nflPreviewMarked } from './nflGameExtras';
+import { plainPreview } from '../utils/previewWhen';
 import { slicer, yieldLoop } from './perf';
 import { runsJobs } from './role';
 import { onState, publishState } from './shared';
+
+// fix284: hub copies are plain text (day in UTC, no clock time); only the game page fills in the visitor's own time
+const getPreview = (id: number) => { const p = getPreviewMarked(id); return p && { ...p, text: plainPreview(p.text) }; };
+const bbPreview = (id: number) => plainPreview(bbPreviewMarked(id));
+const nflPreview = (id: number) => plainPreview(nflPreviewMarked(id));
 
 /** slug = the URL (/predictions/<slug>); old = the fix125 URL, answered with a 301 to the slug (fix134) */
 export type HubSport = 'football' | 'basketball' | 'american-football';

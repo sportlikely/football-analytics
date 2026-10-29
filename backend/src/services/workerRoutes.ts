@@ -88,7 +88,7 @@ export const PUBLIC_ROUTES: { path: string; sport: RouteSport; by: 'worker' | 's
   { path: '/api/auth/2fa', sport: 'all', by: 'web', sample: '/api/auth/2fa' },
   { path: '/api/auth/export', sport: 'all', by: 'web', sample: '/api/auth/export' },
   { path: '/api/assistant/status', sport: 'all', by: 'web', sample: '/api/assistant/status' },
-  { path: '/api/picks/game/:sport(fb|bb|nfl)/:id(\\d+)', sport: 'all', by: 'web', sample: '/api/picks/game/fb/1' },
+  { path: '/api/picks/game/:sport(fb|bb|nfl|tn)/:id(\\d+)', sport: 'all', by: 'web', sample: '/api/picks/game/fb/1' },
   { path: '/api/picks/record', sport: 'all', by: 'web', sample: '/api/picks/record' },
   { path: '/api/favorites', sport: 'all', by: 'web', sample: '/api/favorites' },
   { path: '/api/favorites/calendar', sport: 'all', by: 'worker', sample: '/api/favorites/calendar' },

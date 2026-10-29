@@ -5,6 +5,7 @@
  * Kept in memory for 30 minutes per game.
  */
 import { BB_LEAGUES } from './basketball';
+import { dayMark, timeMark } from '../utils/previewWhen';
 import { nbaInjuries } from './bbInjuries';
 import { bbGameById, bbLast, bbH2h, bbRecord, bbWl, BbGameRow } from './seoFacts';
 
@@ -15,7 +16,6 @@ function hash(s: string) {
 }
 const pick = <T>(id: number, slot: string, list: T[]): T => list[hash(`bb:${id}:${slot}`) % list.length];
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
-const longDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const num = (n: number) => (n >= 0 && n <= 10 ? ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'][n] : String(n));
 const leagueName = (code: string) => BB_LEAGUES.find(l => l.code === code)?.name || code;
 const FINAL = "See SportLikely's prediction for this game.";
@@ -27,14 +27,14 @@ function formOf(games: BbGameRow[], teamId: number) {
 }
 
 export function bbPreviewText(g: BbGameRow): string {
-  const id = g.id, H = g.home, A = g.away, lg = leagueName(g.code), when = longDate(g.date);
+  const id = g.id, H = g.home, A = g.away, lg = leagueName(g.code), when = dayMark(g.date); // fix284: the visitor's own day (utils/previewWhen.ts)
   const past = g.status === 'FT' || g.status === 'AOT';
   const parts: { prio: number; text: string }[] = [];
   const add = (prio: number, text: string | null) => { if (text) parts.push({ prio, text }); };
 
   add(0, past
-    ? pick(id, 'intro', [`${H} hosted ${A} in the ${lg} on ${when}.`, `On ${when}, ${A} visited ${H} in the ${lg}.`])
-    : pick(id, 'intro', [`${H} host ${A} in the ${lg} on ${when}.`, `On ${when}, ${A} visit ${H} in the ${lg}.`, `The ${lg} brings ${A} to ${H} on ${when}.`]));
+    ? pick(id, 'intro', [`${H} hosted ${A} on ${when} in the ${lg}.`, `On ${when}, ${A} visited ${H} in the ${lg}.`])
+    : pick(id, 'intro', [`${H} host ${A} on ${when} in the ${lg}.`, `On ${when}, ${A} visit ${H} in the ${lg}.`]));
   if (past && g.hs != null && g.as_ != null) add(0, `Final score: ${H} ${g.hs}–${g.as_} ${A}.`);
 
   // season records
@@ -82,7 +82,7 @@ export function bbPreviewText(g: BbGameRow): string {
   }
 
   const fillers = [
-    `Tip-off ${past ? 'was' : 'is'} at ${new Date(g.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC.`,
+    `Tip-off ${past ? 'was' : 'is'} at ${timeMark(g.date)}.`,
     `The game page also covers the point spread, total points, the predicted score, rest days and key players.`,
     `Every SportLikely prediction is saved before tip-off and checked against the result afterwards.`,
     `The numbers in this preview come from our own records of the games we cover.`

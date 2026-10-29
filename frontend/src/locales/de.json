@@ -3062,5 +3062,8 @@
  "No draw: one team wins": "Kein Unentschieden: ein Team gewinnt",
  "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "{0} ist Favorit. Das gibt den Ausschlag, vom stärksten bis zum schwächsten Schub.",
  "Too close to call. Here is what pushes each way.": "Zu knapp für eine Prognose. Das spricht für die eine und die andere Seite.",
- "Our factors: 1,000 points split": "Unsere Faktoren: Aufteilung von 1000 Punkten"
+ "Our factors: 1,000 points split": "Unsere Faktoren: Aufteilung von 1000 Punkten",
+ "Locked at the first serve": "Gesperrt beim ersten Aufschlag",
+ "Change them until the first serve": "Änderbar bis zum ersten Aufschlag",
+ "Tap to pick before the first serve.": "Tippe vor dem ersten Aufschlag, um zu wählen."
 }

@@ -8,7 +8,8 @@ import { t as tt } from '../lib/i18n'
 /*
  * "Your picks" card (Oct 2026): every signed-in account picks the winner, over / under and both-teams-score
  * (basketball: winner and over / under the points line) before kick-off. Changeable until kick-off, then locked and
- * counted in the personal record (/my-picks). It never reveals or unlocks our own prediction.
+ * counted in the personal record (/my-picks). It never reveals or unlocks our own prediction. fix284: tennis too (who wins),
+ * and on PC the card sits in the game page's right column (GameLayout).
  */
 
 type Result = 'hit' | 'miss' | 'void' | 'pending'
@@ -43,7 +44,7 @@ export function ResultBadge({ r }: { r: Result }) {
   return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-surface2 text-muted">{tt('Waiting for the result')}</span>
 }
 
-export default function YourPicks({ sport, gameId, home, away }: { sport: 'fb' | 'bb' | 'nfl'; gameId: number; home: string; away: string }) {
+export default function YourPicks({ sport, gameId, home, away }: { sport: 'fb' | 'bb' | 'nfl' | 'tn'; gameId: number; home: string; away: string }) {
   const loc = useLocation()
   const [d, setD] = useState<PickState | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -74,11 +75,11 @@ export default function YourPicks({ sport, gameId, home, away }: { sport: 'fb' |
   }
 
   return (
-    <section className="card p-5 sm:p-6" aria-labelledby={`yp-${gameId}`}>
+    <section className="card p-5 sm:p-6" aria-labelledby={`yp-${gameId}`} data-your-picks>
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
         <h2 id={`yp-${gameId}`} className="font-display text-base font-bold text-ink">{tt('Your picks')}</h2>
         <span className="text-xs text-faint">
-          {locked ? (sport === 'bb' ? tt('Locked at tip-off') : tt('Locked at kick-off')) : d.signedIn ? (sport === 'bb' ? tt('Change them until tip-off') : tt('Change them until kick-off')) : tt('Free for every account')}
+          {locked ? (sport === 'bb' ? tt('Locked at tip-off') : sport === 'tn' ? tt('Locked at the first serve') : tt('Locked at kick-off')) : d.signedIn ? (sport === 'bb' ? tt('Change them until tip-off') : sport === 'tn' ? tt('Change them until the first serve') : tt('Change them until kick-off')) : tt('Free for every account')}
         </span>
       </div>
 
@@ -120,7 +121,7 @@ export default function YourPicks({ sport, gameId, home, away }: { sport: 'fb' |
           })}
           {err && <p className="text-xs text-loss" role="alert">{err}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <span className="text-[11px] text-faint">{locked ? tt('Your picks are saved in your personal record.') : made ? tt('Saved. Tap again to remove a pick.') : (sport === 'bb' ? tt('Tap to pick before tip-off.') : tt('Tap to pick before kick-off.'))}</span>
+            <span className="text-[11px] text-faint">{locked ? tt('Your picks are saved in your personal record.') : made ? tt('Saved. Tap again to remove a pick.') : (sport === 'bb' ? tt('Tap to pick before tip-off.') : sport === 'tn' ? tt('Tap to pick before the first serve.') : tt('Tap to pick before kick-off.'))}</span>
             <Link to="/football/my-picks" className="text-xs font-semibold text-accent hover:underline">{tt('My record')} <span aria-hidden className="rtl-flip">→</span></Link>
           </div>
         </div>
