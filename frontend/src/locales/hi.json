@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "पिछला सीज़न सप्ताह दर सप्ताह दोबारा चलाया गया: Brier स्कोर {0}, जबकि उस समय की तालिका पढ़ने पर {1}। कम बेहतर है।",
  "Product news": "प्रोडक्ट ख़बरें",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "नए फ़ीचर और Premium ख़बरें, साल में कुछ बार। जब तक आप चालू न करें, बंद।",
- "Our 13 factors: 1,000 points split": "हमारे 13 फ़ैक्टर: 1,000 अंकों का बँटवारा",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "दोनों टीमें बहुत 3-पॉइंटर लेती हैं: इस मैच का अनुमान मुश्किल है, इसलिए संभावनाएँ 50% के क़रीब रहती हैं।",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "हर फ़ैक्टर को टिप-ऑफ़ से पहले दोनों टीमों के लिए मापा जाता है और तीन सीज़न (2022-23 से 2024-25) में उसने नतीजों का कितना सही अनुमान लगाया, उसके हिसाब से वज़न दिया जाता है, फिर 2025-26 पर जाँचा जाता है। बढ़त = वह फ़ैक्टर किसी एक पक्ष की ओर कितने अंक (1000 में से) खिसकाता है।",
  "Player impact of the expected rotation": "अपेक्षित रोटेशन के खिलाड़ियों का असर",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "मेडिकल ब्रेक",
  "Motivation": "प्रेरणा",
  "No effect in this game": "इस मैच में कोई असर नहीं",
- "No single one decides it.": "कोई एक अकेले फ़ैसला नहीं करता।",
  "Nothing in the numbers points the other way.": "आंकड़ों में कुछ भी दूसरी तरफ़ इशारा नहीं करता।",
  "Player impact": "खिलाड़ियों का असर",
  "Player talent": "खिलाड़ियों की प्रतिभा",
@@ -2962,9 +2960,6 @@
  "Serve and return": "सर्व और रिटर्न",
  "Surface switch": "सतह बदलना",
  "Team rating": "टीम रेटिंग",
- "We checked one thing for this game. It makes {0} the favourite.": "हमने इस मैच के लिए एक चीज़ देखी। वह {0} को पसंदीदा बनाती है।",
- "We checked {0} things for this game. They come out level.": "हमने इस मैच के लिए {0} चीज़ें देखीं। वे बराबर रहती हैं।",
- "We checked {0} things for this game. Together they make {1} the favourite.": "हमने इस मैच के लिए {0} चीज़ें देखीं। मिलकर वे {1} को पसंदीदा बनाती हैं।",
  "Where the market stands — used inside the model only": "बाज़ार कहाँ खड़ा है — सिर्फ़ मॉडल के अंदर इस्तेमाल होता है",
  "counted in the confirmed line-ups": "पुष्ट लाइन-अप में गिना गया",
  "every usual starter is in the line-up": "सभी नियमित स्टार्टर लाइन-अप में हैं",
@@ -2977,7 +2972,6 @@
  "not enough meetings": "पर्याप्त मुकाबले नहीं",
  "same rest for both sides": "दोनों के लिए बराबर आराम",
  "share": "हिस्सा",
- "{0} counts for more than half.": "{0} आधे से ज़्यादा है।",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: बढ़त {1} की है, जिससे {1} की जीत संभव बनी रहती है ({2}%).",
  "{0}: the edge goes to {1}.": "{0}: बढ़त {1} की है।",
  "Over 3.5 goals": "3.5 से ज़्यादा गोल",
@@ -3065,5 +3059,8 @@
  "Possible": "मुमकिन",
  "A draw": "ड्रॉ",
  "{0} win or draw": "{0} जीते या ड्रॉ",
- "No draw: one team wins": "ड्रॉ नहीं: कोई एक टीम जीते"
+ "No draw: one team wins": "ड्रॉ नहीं: कोई एक टीम जीते",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "{0} पसंदीदा है। पलड़ा किस वजह से झुकता है, सबसे बड़े असर से सबसे छोटे तक:",
+ "Too close to call. Here is what pushes each way.": "कहना मुश्किल, मुकाबला बहुत करीबी है। हर तरफ़ क्या धकेलता है, यह रहा:",
+ "Our factors: 1,000 points split": "हमारे फ़ैक्टर: 1,000 अंकों का बँटवारा"
 }

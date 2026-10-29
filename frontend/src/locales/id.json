@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Musim lalu diputar ulang pekan demi pekan: skor Brier {0}, dibandingkan {1} dengan membaca klasemen saat itu. Makin rendah makin baik.",
  "Product news": "Berita produk",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "Fitur baru dan berita Premium, beberapa kali setahun. Nonaktif kecuali Anda menyalakannya.",
- "Our 13 factors: 1,000 points split": "13 faktor kami: pembagian 1.000 poin",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "Kedua tim sering mengambil tembakan 3 angka: pertandingan ini lebih sulit ditebak, jadi peluangnya lebih dekat ke 50%.",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "Setiap faktor diukur untuk kedua tim sebelum tip-off dan diberi bobot sesuai seberapa baik faktor itu memprediksi hasil selama tiga musim (2022-23 hingga 2024-25), lalu diperiksa pada 2025-26. Keunggulan = berapa poin (dari 1000) yang digeser faktor itu ke satu sisi.",
  "Player impact of the expected rotation": "Dampak pemain dari rotasi yang diperkirakan",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "Jeda medis",
  "Motivation": "Motivasi",
  "No effect in this game": "Tidak berpengaruh di laga ini",
- "No single one decides it.": "Tidak ada satu pun yang menentukan sendiri.",
  "Nothing in the numbers points the other way.": "Tidak ada angka yang mengarah ke sisi lain.",
  "Player impact": "Dampak pemain",
  "Player talent": "Bakat pemain",
@@ -2962,9 +2960,6 @@
  "Serve and return": "Servis dan pengembalian",
  "Surface switch": "Pergantian permukaan",
  "Team rating": "Rating tim",
- "We checked one thing for this game. It makes {0} the favourite.": "Kami memeriksa satu hal untuk laga ini. Itu membuat {0} menjadi unggulan.",
- "We checked {0} things for this game. They come out level.": "Kami memeriksa {0} hal untuk laga ini. Hasilnya seimbang.",
- "We checked {0} things for this game. Together they make {1} the favourite.": "Kami memeriksa {0} hal untuk laga ini. Bersama-sama, semuanya membuat {1} menjadi unggulan.",
  "Where the market stands — used inside the model only": "Posisi pasar — hanya dipakai di dalam model",
  "counted in the confirmed line-ups": "dihitung dalam susunan pemain resmi",
  "every usual starter is in the line-up": "semua starter reguler ada di susunan pemain",
@@ -2977,7 +2972,6 @@
  "not enough meetings": "pertemuan belum cukup",
  "same rest for both sides": "istirahat sama untuk keduanya",
  "share": "porsi",
- "{0} counts for more than half.": "{0} mencakup lebih dari separuh.",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: keunggulan untuk {1}, sehingga kemenangan {1} tetap mungkin ({2}%).",
  "{0}: the edge goes to {1}.": "{0}: keunggulan untuk {1}.",
  "Over 3.5 goals": "Lebih dari 3,5 gol",
@@ -3065,5 +3059,8 @@
  "Possible": "Bisa terjadi",
  "A draw": "Seri",
  "{0} win or draw": "{0} menang atau seri",
- "No draw: one team wins": "Tidak seri: salah satu tim menang"
+ "No draw: one team wins": "Tidak seri: salah satu tim menang",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "{0} adalah unggulan. Inilah yang memiringkannya, dari dorongan terbesar ke terkecil.",
+ "Too close to call. Here is what pushes each way.": "Terlalu ketat untuk ditebak. Inilah yang mendorong ke masing-masing sisi.",
+ "Our factors: 1,000 points split": "Faktor kami: pembagian 1.000 poin"
 }

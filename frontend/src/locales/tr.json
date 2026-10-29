@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Geçen sezon hafta hafta yeniden oynatıldı: Brier skoru {0}, o anki tabloya göre {1}. Düşük olan daha iyidir.",
  "Product news": "Ürün haberleri",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "Yeni özellikler ve Premium haberleri, yılda birkaç kez. Siz açmadıkça kapalı.",
- "Our 13 factors: 1,000 points split": "13 faktörümüz: 1000 puanlık dağılım",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "İki takım da çok üçlük deniyor: bu maçı tahmin etmek daha zor, bu yüzden olasılıklar %50'ye daha yakın.",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "Her faktör hava atışından önce iki takım için ölçülür ve üç sezonda (2022-23 – 2024-25) sonuçları ne kadar iyi tahmin ettiğine göre ağırlıklandırılır, 2025-26 ile kontrol edilir. Avantaj = o faktörün bir tarafa kaydırdığı puan (1000 üzerinden).",
  "Player impact of the expected rotation": "Beklenen rotasyonun oyuncu etkisi",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "Sağlık nedeniyle ara",
  "Motivation": "Motivasyon",
  "No effect in this game": "Bu maçta etkisi yok",
- "No single one decides it.": "Tek başına hiçbiri belirlemiyor.",
  "Nothing in the numbers points the other way.": "Rakamlarda diğer tarafı gösteren bir şey yok.",
  "Player impact": "Oyuncu etkisi",
  "Player talent": "Oyuncu yeteneği",
@@ -2962,9 +2960,6 @@
  "Serve and return": "Servis ve karşılama",
  "Surface switch": "Zemin değişikliği",
  "Team rating": "Takım puanı",
- "We checked one thing for this game. It makes {0} the favourite.": "Bu maç için bir şeye baktık. {0} takımını favori yapıyor.",
- "We checked {0} things for this game. They come out level.": "Bu maç için {0} şeye baktık. Başa baş çıkıyorlar.",
- "We checked {0} things for this game. Together they make {1} the favourite.": "Bu maç için {0} şeye baktık. Birlikte {1} takımını favori yapıyorlar.",
  "Where the market stands — used inside the model only": "Piyasanın durumu — yalnızca modelin içinde kullanılır",
  "counted in the confirmed line-ups": "onaylanan kadrolarda hesaba katıldı",
  "every usual starter is in the line-up": "tüm düzenli ilk 11 oyuncuları kadroda",
@@ -2977,7 +2972,6 @@
  "not enough meetings": "yeterli karşılaşma yok",
  "same rest for both sides": "iki taraf için aynı dinlenme",
  "share": "pay",
- "{0} counts for more than half.": "{0} yarıdan fazlasını oluşturuyor.",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: avantaj {1} tarafında, bu da {1} galibiyetini mümkün tutuyor (%{2}).",
  "{0}: the edge goes to {1}.": "{0}: avantaj {1} tarafında.",
  "Over 3.5 goals": "3,5 gol üstü",
@@ -3065,5 +3059,8 @@
  "Possible": "Mümkün",
  "A draw": "Beraberlik",
  "{0} win or draw": "{0} kazanır veya berabere",
- "No draw: one team wins": "Beraberlik yok: bir takım kazanır"
+ "No draw: one team wins": "Beraberlik yok: bir takım kazanır",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "Favori {0}. Dengeyi değiştirenler, en büyük etkiden en küçüğe:",
+ "Too close to call. Here is what pushes each way.": "Tahmin edilemeyecek kadar yakın. Her iki yöne itenler şunlar:",
+ "Our factors: 1,000 points split": "Faktörlerimiz: 1000 puanlık dağılım"
 }

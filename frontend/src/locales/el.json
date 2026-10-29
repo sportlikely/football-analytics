@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Η προηγούμενη σεζόν ξαναπαίχτηκε εβδομάδα-εβδομάδα: Brier score {0}, έναντι {1} για την ανάγνωση της βαθμολογίας όπως ήταν. Όσο χαμηλότερο τόσο καλύτερα.",
  "Product news": "Νέα του προϊόντος",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "Νέες λειτουργίες και νέα του Premium, λίγες φορές τον χρόνο. Απενεργοποιημένο, εκτός αν το ενεργοποιήσεις.",
- "Our 13 factors: 1,000 points split": "Οι 13 παράγοντές μας: μοιρασιά 1.000 πόντων",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "Και οι δύο ομάδες παίρνουν πολλά τρίποντα: αυτός ο αγώνας είναι πιο δύσκολο να προβλεφθεί, οπότε οι πιθανότητες είναι πιο κοντά στο 50%.",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "Κάθε παράγοντας μετριέται και για τις δύο ομάδες πριν από το τζάμπολ και σταθμίζεται ανάλογα με το πόσο καλά προέβλεψε αποτελέσματα σε τρεις σεζόν (2022-23 έως 2024-25), και μετά ελέγχεται στη 2025-26. Πλεονέκτημα = πόσους πόντους (από 1000) μετακινεί αυτός ο παράγοντας προς τη μία πλευρά.",
  "Player impact of the expected rotation": "Επίδραση παικτών της αναμενόμενης rotation",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "Ιατρική διακοπή",
  "Motivation": "Κίνητρο",
  "No effect in this game": "Καμία επίδραση σε αυτό το παιχνίδι",
- "No single one decides it.": "Κανένας δεν κρίνει μόνος του.",
  "Nothing in the numbers points the other way.": "Τίποτα στους αριθμούς δεν δείχνει την άλλη πλευρά.",
  "Player impact": "Επίδραση παικτών",
  "Player talent": "Ταλέντο παικτών",
@@ -2962,9 +2960,6 @@
  "Serve and return": "Σερβίς και επιστροφή",
  "Surface switch": "Αλλαγή επιφάνειας",
  "Team rating": "Βαθμολογία ομάδας",
- "We checked one thing for this game. It makes {0} the favourite.": "Ελέγξαμε ένα πράγμα για αυτό το παιχνίδι. Κάνει φαβορί το {0}.",
- "We checked {0} things for this game. They come out level.": "Ελέγξαμε {0} πράγματα για αυτό το παιχνίδι. Βγαίνουν ισόπαλα.",
- "We checked {0} things for this game. Together they make {1} the favourite.": "Ελέγξαμε {0} πράγματα για αυτό το παιχνίδι. Μαζί κάνουν φαβορί το {1}.",
  "Where the market stands — used inside the model only": "Πού βρίσκεται η αγορά — χρησιμοποιείται μόνο μέσα στο μοντέλο",
  "counted in the confirmed line-ups": "υπολογίζεται στις επίσημες ενδεκάδες",
  "every usual starter is in the line-up": "όλοι οι βασικοί είναι στην ενδεκάδα",
@@ -2977,7 +2972,6 @@
  "not enough meetings": "δεν υπάρχουν αρκετές αναμετρήσεις",
  "same rest for both sides": "ίδια ξεκούραση και για τους δύο",
  "share": "μερίδιο",
- "{0} counts for more than half.": "Το {0} μετρά πάνω από τα μισά.",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: το πλεονέκτημα πάει στο {1}, άρα μια νίκη του {1} μένει πιθανή ({2}%).",
  "{0}: the edge goes to {1}.": "{0}: το πλεονέκτημα πάει στο {1}.",
  "Over 3.5 goals": "Πάνω από 3,5 γκολ",
@@ -3065,5 +3059,8 @@
  "Possible": "Ενδεχόμενο",
  "A draw": "Ισοπαλία",
  "{0} win or draw": "{0}: νίκη ή ισοπαλία",
- "No draw: one team wins": "Όχι ισοπαλία: νικά μια ομάδα"
+ "No draw: one team wins": "Όχι ισοπαλία: νικά μια ομάδα",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "Φαβορί είναι το {0}. Δείτε τι γέρνει την πλάστιγγα, από τη μεγαλύτερη ώθηση στη μικρότερη.",
+ "Too close to call. Here is what pushes each way.": "Πολύ κοντά για πρόβλεψη. Δείτε τι σπρώχνει προς κάθε πλευρά.",
+ "Our factors: 1,000 points split": "Οι παράγοντές μας: μοιρασιά 1.000 πόντων"
 }

@@ -832,14 +832,23 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   const side = (id: string | null, n: string) => (id && client.t[id]) || (sport === 'tennis' ? (id && clientP[id]) || playerSlug(n) : teamSlug(n));
   // fix280: a game is an exception when ANY name / day a list may print for it (full or short name, with the side's id
   // or without: several lists pass names only) makes another slug — the app then takes the slug from this list
+  // fix282b: … and each of those other slugs is kept as an alias of the match (a link printed before the list knew the
+  // match's slug — /football/match/barcelona-vs-deportivo-alaves-2026-10-31 — 301s in one hop instead of the search)
+  const variants: SlugRow[] = [];
   for (const r of names.match) {
     const s = map.get(`i:match/${r.id}`);
     if (!s) continue;
     let differs = false;
     for (const d of r.d) for (const h of r.h) for (const a of r.a)
-      if (!differs && (matchSlug(side(r.hid, h), side(r.aid, a), d) !== s || matchSlug(bare(h), bare(a), d) !== s)) differs = true;
+      for (const v of [matchSlug(side(r.hid, h), side(r.aid, a), d), matchSlug(bare(h), bare(a), d)]) {
+        if (v === s) continue;
+        differs = true;
+        if (isSlug(v) && !map.has(`s:match/${v}`)) variants.push({ slug: v, id: String(r.id), primary: false, base: v });
+      }
     if (differs) client.m[r.id] = s;
   }
+  // INSERT OR IGNORE: a slug another item already holds stays that item's
+  if (variants.length) write(sport, 'match', [...new Map(variants.map(v => [v.slug, v])).values()]);
   await step();
   const st: SlugState = { sport, builtAt: Date.now(), map, client: JSON.stringify({ v: 1, ...client }), clientPlayers: JSON.stringify({ v: 1, p: clientP }), seasons: JSON.stringify(seasonStarts(sport)) };
   states.set(sport, st);

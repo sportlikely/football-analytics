@@ -112,7 +112,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
         const showRows = x.why.length > 0 && (!x.factors?.length || admin)
         const whyBlock = x.factors?.length || showRows || x.howCalc ? (
           <>
-            {x.factors && x.factors.length > 0 && <WhyPanel factors={x.factors} fav={pH > pA ? 'H' : pA > pH ? 'A' : null} home={x.home.name} away={x.away.name} otherPct={pH > pA ? pA : pA > pH ? pH : null} />}
+            {x.factors && x.factors.length > 0 && <WhyPanel factors={x.factors} fav={pH > pA ? 'H' : pA > pH ? 'A' : null} home={x.home.name} away={x.away.name} favPct={Math.max(pH, pA)} otherPct={pH > pA ? pA : pA > pH ? pH : null} />}
             {(showRows || (x.howCalc && (!x.factors?.length || admin))) && (
               <div className={`rounded-2xl border border-line/60 bg-surface2/30 p-4 ${x.factors?.length ? 'mt-4' : ''}`}>
                 {x.factors?.length ? <div className="text-sm font-bold text-ink mb-2">{t('Factor by factor')}</div> : null}

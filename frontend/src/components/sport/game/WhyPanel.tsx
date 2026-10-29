@@ -2,7 +2,7 @@ import { t } from '../../../lib/i18n'
 import { whyView, MARKET, type Factor, type Idle } from '../../../lib/whyFactors'
 
 /**
- * fix282: "Why we think so" — one panel, every sport (Yarin, 29 Oct: "I don't like when the model writes Barça will win
+ * fix282: "Why we think so" — one panel, every sport. fix282b: no count of factors anywhere a visitor sees (Yarin, 29 Oct: "I don't like when the model writes Barça will win
  * because they have a better squad value, there are many other things"). Every factor the model used for this game,
  * ranked by its share of the edge (its points / the sum of every factor's |points|, from the model's own sums:
  * lib/whyFactors.ts), a bar leaning to the side it helps (lime = the favourite's side, grey = the other), the factors
@@ -69,12 +69,14 @@ function idleText(i: Idle): string {
   }
 }
 
-export default function WhyPanel({ factors, fav, home, away, otherPct, className = '' }: {
+export default function WhyPanel({ factors, fav, home, away, favPct, otherPct, className = '' }: {
   factors: Factor[]
   /** the favourite by the shown chances */
   fav: 'H' | 'A' | null
   home: string
   away: string
+  /** the favourite's win chance, % (under 55 = too close to call) */
+  favPct: number | null
   /** the other side's win chance, % */
   otherPct: number | null
   className?: string
@@ -82,13 +84,11 @@ export default function WhyPanel({ factors, fav, home, away, otherPct, className
   const v = whyView(factors, fav)
   if (!v.n) return null
   const name = (s: 'H' | 'A') => (s === 'H' ? home : away)
-  const top = v.rows[0]
   const max = Math.max(1, ...v.rows.map(r => r.share))
-  const heading = !v.fav || !v.rows.length
-    ? t('We checked {0} things for this game. They come out level.', { 0: v.n })
-    : v.n === 1
-      ? t('We checked one thing for this game. It makes {0} the favourite.', { 0: name(v.fav) })
-      : `${t('We checked {0} things for this game. Together they make {1} the favourite.', { 0: v.n, 1: name(v.fav) })} ${top && top.share > 50 ? t('{0} counts for more than half.', { 0: factorName(top.k) }) : t('No single one decides it.')}`
+  // fix282b (Yarin, 29 Oct): never say how many factors we use — the heading names the favourite, not a count
+  const heading = v.fav && v.rows.length && favPct !== null && favPct >= 55
+    ? t('{0} are the favourite. Here is what tips it, from the biggest push to the smallest.', { 0: name(v.fav) })
+    : t('Too close to call. Here is what pushes each way.')
   const other: 'H' | 'A' | null = v.fav ? (v.fav === 'H' ? 'A' : 'H') : null
   const closing = v.fav ? [
     v.lead.length ? t('Biggest reasons for {0}: {1}.', { 0: name(v.fav), 1: v.lead.map(r => factorName(r.k)).join(', ') }) : '',

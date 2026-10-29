@@ -2472,7 +2472,6 @@
  "Last season replayed week by week: Brier score {0}, against {1} for reading the table as it stood. Lower is better.": "Прошлый сезон, переигранный неделя за неделей: показатель Brier {0} против {1} при чтении таблицы на тот момент. Чем ниже, тем лучше.",
  "Product news": "Новости продукта",
  "New features and Premium news, a few times a year. Off unless you turn it on.": "Новые функции и новости Premium несколько раз в год. Выключено, пока вы не включите.",
- "Our 13 factors: 1,000 points split": "Наши 13 факторов: раздел 1000 очков",
  "Both teams take many 3-pointers: this game is harder to call, so the chances sit closer to 50%.": "Обе команды много бросают из-за дуги: этот матч сложнее предсказать, поэтому шансы ближе к 50%.",
  "Each factor is measured for both teams before tip-off and weighted by how much it predicted results over three seasons (2022-23 to 2024-25), then checked on 2025-26. Edge = how many points (out of 1000) that factor moves toward one side.": "Каждый фактор измеряется для обеих команд до начала игры и взвешивается по тому, насколько хорошо он предсказывал результаты за три сезона (с 2022-23 по 2024-25), затем проверяется на 2025-26. Перевес = на сколько очков (из 1000) этот фактор сдвигает в одну сторону.",
  "Player impact of the expected rotation": "Влияние игроков ожидаемой ротации",
@@ -2951,7 +2950,6 @@
  "Medical stoppage": "Медицинский перерыв",
  "Motivation": "Мотивация",
  "No effect in this game": "Не влияет на этот матч",
- "No single one decides it.": "Ни один не решает в одиночку.",
  "Nothing in the numbers points the other way.": "Ничто в цифрах не говорит в пользу другой стороны.",
  "Player impact": "Влияние игроков",
  "Player talent": "Класс игроков",
@@ -2962,9 +2960,6 @@
  "Serve and return": "Подача и приём",
  "Surface switch": "Смена покрытия",
  "Team rating": "Рейтинг команды",
- "We checked one thing for this game. It makes {0} the favourite.": "Мы проверили одну вещь для этого матча. Она делает фаворитом {0}.",
- "We checked {0} things for this game. They come out level.": "Мы проверили {0} вещей для этого матча. Выходит поровну.",
- "We checked {0} things for this game. Together they make {1} the favourite.": "Мы проверили {0} вещей для этого матча. Вместе они делают фаворитом {1}.",
  "Where the market stands — used inside the model only": "Где стоит рынок — используется только внутри модели",
  "counted in the confirmed line-ups": "учтено в подтверждённых составах",
  "every usual starter is in the line-up": "все основные игроки в составе",
@@ -2977,7 +2972,6 @@
  "not enough meetings": "слишком мало очных встреч",
  "same rest for both sides": "одинаковый отдых у обеих",
  "share": "доля",
- "{0} counts for more than half.": "{0} — больше половины.",
  "{0}: the edge goes to {1}, which keeps a win for {1} possible ({2}%).": "{0}: преимущество у {1}, поэтому победа {1} остаётся возможной ({2}%).",
  "{0}: the edge goes to {1}.": "{0}: преимущество у {1}.",
  "Over 3.5 goals": "Больше 3,5 голов",
@@ -3065,5 +3059,8 @@
  "Possible": "Возможно",
  "A draw": "Ничья",
  "{0} win or draw": "{0}: победа или ничья",
- "No draw: one team wins": "Без ничьей: кто-то победит"
+ "No draw: one team wins": "Без ничьей: кто-то победит",
+ "{0} are the favourite. Here is what tips it, from the biggest push to the smallest.": "Фаворит — {0}. Вот что склоняет чашу весов, от самого сильного толчка к самому слабому.",
+ "Too close to call. Here is what pushes each way.": "Слишком равно, чтобы назвать фаворита. Вот что тянет в каждую сторону.",
+ "Our factors: 1,000 points split": "Наши факторы: раздел 1000 очков"
 }
