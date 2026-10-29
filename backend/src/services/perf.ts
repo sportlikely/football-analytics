@@ -457,7 +457,7 @@ export function heavy<T>(label: string, fn: () => T | Promise<T>): Promise<T | u
  * frontend/scripts/web-routes-check.ts (npm run parity) checks every sport has its model jobs listed here.
  */
 export const MODEL_JOBS: Record<'football' | 'basketball' | 'nfl' | 'tennis', string[]> = {
-  football: ['model daily job', 'league fix', 'football calibration', 'feature state', 'more predictions backtest', 'more predictions first backtest', 'season forecast accuracy'],
+  football: ['model daily job', 'league fix', 'market anchor', 'football calibration', 'feature state', 'more predictions backtest', 'more predictions first backtest', 'season forecast accuracy'],
   basketball: ['bb model', 'bb tune', 'bb miss fit', 'bb impact fit', 'bb impact regate', 'bb league tune', 'bb calibration', 'basketball calibration'],
   nfl: ['nfl ratings', 'nfl model', 'af calibration'],
   tennis: ['tennis model', 'tennis benchmark', 'tennis calibration']

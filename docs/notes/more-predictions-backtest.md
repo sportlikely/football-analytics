@@ -535,3 +535,26 @@ Their table is in `/api/admin/more-predictions` (backtests); copy it here after 
 
 Per output: games, top-pick hit rate, and said vs happened in 10% steps once 200+ games are checked (before that:
 "Tracking since <date>: N games so far"). Every competition counts (fix203). Only public outputs are listed.
+
+
+## fix278 (29 Oct 2026): close to the market — feed, anchor, market gate
+
+Yarin, 29 Oct: "there is no chance we give a basketball game 215+ while the market gives 225+". NBA that night, ours vs
+market: CLE@ATL spread CLE −1.1 vs ATL −1.5, total 233.8 vs 238; SAC@NOP −6.3 vs −6.5, total 233.1 vs 236.5; MEM@POR
+POR −14.8 vs −7.5, total 228.8 vs 234 — totals 3–5 low every game, and nothing measured it (no basketball / NFL market feed).
+
+- **Feed** (admin-only): `services/marketLines.ts` stores the consensus (median over books) of every market of the games
+  of the next 48 h every 2 h, plus one closing snapshot in the last 35 minutes, in `market_lines` (sport, game, market,
+  closing). Markets and parsing in `utils/marketLines.ts` (`gameConsensus`, `marketOf`); a Football-Data twin whose
+  API-Football fixture is the other way round is swapped (`swapConsensus`).
+- **Anchor**: shown = (1 − w)·model + w·market (chances in log-odds), w ∈ 0…1 chosen walk-forward (each game's w from the
+  games before it, the first 100 only train), kept only when that blend beats the model alone and the market alone on
+  those games; 300+ games needed, a league group of its own at 300+. Basketball / NFL: total, spread and win chance on the
+  predicted score; the extras use the model's own line, their fix204c corrections, then the same weights. Football: the
+  goals set's over / under 2.5. Early-season level (basketball / NFL): + n/(n+k)·mean(actual − predicted) of the league's
+  season so far (k 40 / 32), used only when it beat the model walk-forward.
+- **Gate**: an output stays public only when calibrated (fix204d) AND its median |gap| to the closing line on 300+
+  settled games (90 days) is within: basketball total 3 / spread 2, NFL 2.5 / 1.5, tennis total games 1.5, football
+  over / under 2.5 chance 5 points, both teams score 5 (clean sheets). The reason is written ("4.8 points from the market
+  on totals (limit 3)"). Data health "Close to the market (<sport>)".
+- Not yet measured on real data (no database copy in the session): the first gap report and fits are the server's.

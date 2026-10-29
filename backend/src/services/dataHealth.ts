@@ -29,7 +29,9 @@ import { missingPredictions } from './missingPredictions';
 import { tennisDataCheck } from './tennis';
 import { bbStandingsCheck } from './bbSite';
 import { voidedThisMonth } from './unsettled';
-import { moreHealth } from './morePredictions';
+import { moreHealth, outputPublic } from './morePredictions';
+import { marketHealth } from './marketLines';
+import type { MoreSport } from '../utils/moreMath';
 import { createHealthStore, NOT_YET } from '../utils/healthStore';
 import { LATE_MS } from '../utils/liveBox';
 import { BB_MAJOR } from './basketball';
@@ -267,6 +269,14 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     }
   } catch (e: any) {
     checks.push({ id: 'more-predictions', label: 'More predictions saved and settled', level: 'warn', detail: `Check failed: ${e.message}` });
+  }
+  await slice();
+  // fix278: Close to the market (<sport>) — red when a public output's median gap to the closing line over the last 7 days
+  // is over its limit, yellow while the market lines are collected (under 300 settled games)
+  try {
+    for (const r of marketHealth((sport, output) => outputPublic(sport as MoreSport, output))) checks.push(r);
+  } catch (e: any) {
+    checks.push({ id: 'market-close-check', label: 'Close to the market', level: 'warn', detail: `Check failed: ${e.message}` });
   }
   await slice();
   // fix201: basketball tables — one line per league; a table whose rows are not unique teams, or a team in two tables

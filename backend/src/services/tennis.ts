@@ -22,6 +22,8 @@ import zlib from 'zlib';
 import readline from 'readline';
 import { applyTennisFix } from './resultChecks';
 import { db } from '../db';
+import { tennisMarkets } from '../utils/marketLines';
+import { storeTennisMarkets } from './marketAnchor';
 import logger from '../utils/logger';
 import { every, after, slicer, stalledWithin, yieldLoop, everyHeavy, afterHeavy, heavy } from './perf';
 import { isAbbreviated, fullName } from '../utils/tennisNames';
@@ -968,7 +970,7 @@ async function syncStoppages(max = 150) {
 
 /** Admin benchmark: the match-winner market of singles matches starting in 45–75 min, once each (the last pre-match price). */
 async function syncPrices() {
-  const todo = db.prepare(`SELECT m.id FROM tennis_matches m WHERE m.status = 'upcoming' AND m.id > 0 AND m.scheduled_at BETWEEN ? AND ?
+  const todo = db.prepare(`SELECT m.id, m.scheduled_at, m.tour FROM tennis_matches m WHERE m.status = 'upcoming' AND m.id > 0 AND m.scheduled_at BETWEEN ? AND ?
     AND NOT EXISTS (SELECT 1 FROM tennis_prices p WHERE p.match_id = m.id) LIMIT 120`).all(new Date(Date.now() + 45 * 60000).toISOString(), new Date(Date.now() + 75 * 60000).toISOString()) as any[];
   const up = db.prepare(`INSERT OR REPLACE INTO tennis_prices (match_id, p1_mid, p2_mid, p1_bid, p1_ask, p2_bid, p2_ask, at, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
@@ -980,6 +982,11 @@ async function syncPrices() {
     const a = side(1), b = side(2);
     up.run(r.id, num(a.mid), num(b.mid), num(a.bid), num(a.ask), num(b.bid), num(b.ask), str(a.timestamp) || str(b.timestamp), nowIso());
     if (mk) n++;
+    // fix278: total games and set betting when the feed sends them (admin-only, market_lines); the names of every market seen
+    try {
+      const tm = tennisMarkets(j?.data || []);
+      storeTennisMarkets(r.id, r.scheduled_at, r.tour, tm.list, tm.names, Date.parse(r.scheduled_at) - Date.now() <= 60 * 60000);
+    } catch { /* optional */ }
   }
   return `${todo.length} matches, ${n} with a market`;
 }

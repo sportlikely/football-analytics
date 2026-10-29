@@ -331,9 +331,15 @@ export function tennisExtras(d: { sets: Record<string, number>; first: number; g
       games: { labels: [`<${cuts[0]}`, ...cuts.slice(0, -1).map((c, k) => `${c}–${cuts[k + 1] - 1}`), `${cuts[cuts.length - 1]}+`], p: norm1(gp), cuts: [...cuts] },
       tb: { labels: ['yes', 'no'], p: [tb, 1 - tb] }
     },
-    info: { bo: bo === 5 ? 5 : 3 }
+    // fix278: the expected total games (the gap to the market's total-games line)
+    info: { bo: bo === 5 ? 5 : 3, expGames: expGamesOf(d.games) }
   };
 }
+const expGamesOf = (g: ArrayLike<number>) => {
+  let s = 0, m = 0;
+  for (let x = 0; x < g.length; x++) { const v = g[x] || 0; s += v; m += x * v; }
+  return s > 0 ? Math.round((m / s) * 10) / 10 : null;
+};
 
 /* ---------- checking a set against what happened ---------- */
 

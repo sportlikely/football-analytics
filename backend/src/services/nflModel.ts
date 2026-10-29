@@ -36,6 +36,7 @@ import { teamBox, NflGame } from './nflSite';
 import { rememberFirstPrediction } from './nflGameExtras';
 import { HIDE_OTHER, type LeagueId } from './nfl';
 import { calibrated, strongLineOf, collegeSeg, ncaaV2Live } from './afCalibState';
+import { anchorPoints } from './marketAnchor';
 
 export const NFL_MODEL = 'nfl-v1';
 export const NCAA_MODEL = 'ncaa-v1';
@@ -62,6 +63,8 @@ db.exec(`
 `);
 // fix220: the model's own chance before the calibration layer (null on rows saved before it)
 try { db.exec(`ALTER TABLE nfl_predictions ADD COLUMN p_raw REAL`); } catch { /* already there */ }
+// fix278: the model's own numbers before the season's scoring level and the market anchor
+for (const c of ['p_model REAL', 'margin_raw REAL', 'total_raw REAL', 'level_shift REAL', 'line_why TEXT']) { try { db.exec(`ALTER TABLE nfl_predictions ADD COLUMN ${c}`); } catch { /* already there */ } }
 
 /* ---------- data ---------- */
 
@@ -852,7 +855,7 @@ export function predictNfl(gameId: number): NflPred | null {
  */
 export async function saveNflPredictions(): Promise<number> {
   const now = new Date();
-  const rows = db.prepare(`SELECT game_id, season, kickoff, home_id, away_id FROM nfl_games WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS') AND (stage IS NULL OR stage NOT LIKE 'Pre%')`)
+  const rows = db.prepare(`SELECT game_id, season, kickoff, home_id, away_id, league FROM nfl_games WHERE kickoff > ? AND kickoff < ? AND (status IS NULL OR status = 'NS') AND (stage IS NULL OR stage NOT LIKE 'Pre%')`)
     .all(now.toISOString(), new Date(now.getTime() + 9 * DAY).toISOString()) as any[];
   const out: { r: any; pr: NflPred }[] = [];
   let i = 0;
@@ -861,13 +864,18 @@ export async function saveNflPredictions(): Promise<number> {
     if (pr) out.push({ r, pr });
     if (++i % 25 === 0) await yieldLoop();
   }
-  const up = db.prepare(`INSERT OR REPLACE INTO nfl_predictions (game_id, season, kickoff, model, p_home, margin, total, home_pts, away_pts, why, made_at, p_raw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const up = db.prepare(`INSERT OR REPLACE INTO nfl_predictions (game_id, season, kickoff, model, p_home, margin, total, home_pts, away_pts, why, made_at, p_raw, p_model, margin_raw, total_raw, level_shift, line_why) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const at = new Date().toISOString();
   db.exec('BEGIN');
   try {
     // a game that kicked off while we were computing keeps the prediction it had at kick-off
     for (const { r, pr } of out) if (Date.parse(r.kickoff) > Date.now()) {
-      up.run(r.game_id, r.season, r.kickoff, pr.model, pr.pHome / 100, pr.margin, pr.total, pr.homePts, pr.awayPts, JSON.stringify(pr.why), at, Math.round(pr.pRaw * 10000) / 10000);
+      // fix278: the shown line = the model + the season's scoring level, blended with the market's latest line by the
+      // walk-forward weights (services/marketAnchor.ts; model only until a fit is kept or without a market line)
+      const a = anchorPoints('nfl', r.game_id, r.league ?? 1, { pHome: pr.pHome / 100, margin: pr.margin, total: pr.total });
+      const lineWhy = JSON.stringify({ raw: Math.round(pr.total * 10) / 10, shift: a.shift, anchored: a.anchored, notes: [] });
+      up.run(r.game_id, r.season, r.kickoff, pr.model, a.pHome, a.margin, a.total, a.home, a.away, JSON.stringify(pr.why), at, Math.round(pr.pRaw * 10000) / 10000,
+        pr.pHome / 100, pr.margin, pr.total, a.shift, lineWhy);
       // fix174: the first version of each game (who was out then), for "numbers changed because…"
       try { rememberFirstPrediction(r.game_id, r.home_id, r.away_id, pr.pHome / 100, pr.margin, pr.why?.qb, at); } catch { /* optional */ }
     }

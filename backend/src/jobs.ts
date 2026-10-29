@@ -76,6 +76,7 @@ import { dailySummaryTick } from './services/adminMail';
 import { diffViewFreezeTick } from './services/diffView';
 import { startDbSpaceScheduler } from './services/dbSpace';
 import { runLeagueFix, leagueFixDue } from './services/leagueFix';
+import { marketTick, runMarketFits, marketFitDue } from './services/marketLines';
 
 let started = false;
 
@@ -121,6 +122,13 @@ export function startJobs() {
   const leagueFix = () => { if (leagueFixDue() && process.env.LEAGUE_FIX !== 'off') heavy('league fix', () => timed('league fix', () => runLeagueFix())).catch(e => logger.warn(`league fix: ${e?.message || e}`)); };
   after('league fix', leagueFix, 25 * 60 * 1000).unref();
   every('league fix', leagueFix, 10 * 60 * 1000).unref();
+  // fix278: market lines (admin-only data) — games of the next 48 h every 2 h + a closing snapshot in the last 35 min
+  // (ticks every 10 min, each call inside the day's quota); the anchor fits + scoring levels + market gates once a day
+  after('market lines', () => marketTick().catch(e => logger.warn(`market lines: ${e?.message || e}`)), 6 * 60 * 1000).unref();
+  every('market lines', () => marketTick().catch(e => logger.warn(`market lines: ${e?.message || e}`)), 10 * 60 * 1000).unref();
+  const marketFit = () => { if (marketFitDue() && process.env.MARKET_ANCHOR !== 'off') heavy('market anchor', () => timed('market anchor', () => runMarketFits())).catch(e => logger.warn(`market anchor: ${e?.message || e}`)); };
+  after('market anchor', marketFit, 35 * 60 * 1000).unref();
+  every('market anchor', marketFit, 30 * 60 * 1000).unref();
   // fix246: "Our different view" (admin only) — games with a 5+ point gap to the market written once after kick-off
   every('different view', () => { diffViewFreezeTick(); }, 5 * 60 * 1000).unref();
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the

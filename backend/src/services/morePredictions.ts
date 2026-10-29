@@ -29,6 +29,8 @@ import { mainRank } from './tracking';
 import { leagueModelInfo, bbWalkForward, leagueTotalsCheck, allWalkForward, setWalkForward } from './bbModel';
 import { threadJobsOn, inThread } from './threadJob';
 import { applyStored } from './shared';
+import { pointsMarketFor, anchorFootballGoals, gateGap } from './marketAnchor';
+import { blendLine, marketGateWhy, MARKET_LIMITS } from '../utils/marketLines';
 import { nflWalkForward, buildReport as buildNflReport } from './nflModel';
 import { tennisExtrasDist, tennisServeChances, tennisRuleFor, tennisExtrasWalkForward } from './tennisModel';
 import { isSiteLang, type SiteLang } from '../utils/langs';
@@ -59,7 +61,7 @@ db.exec(`
   if (!cols.has('public_ll')) db.exec(`ALTER TABLE more_pred_gate ADD COLUMN public_ll REAL`);
 }
 /** bump when the maths behind saved rows changes: upcoming games are saved again on the next tick */
-export const MORE_CALC = '204d';
+export const MORE_CALC = '278'; // fix278: market anchor, tennis expected games
 
 export const MORE_SPORTS: MoreSport[] = ['football', 'basketball', 'nfl', 'tennis'];
 /** the outputs of each sport, in page order */
@@ -286,7 +288,18 @@ export function applyCalib(x: Extras, c: Calibs | null): Extras {
 
 /* ---------- points (basketball, NFL / college) ---------- */
 
-export interface PtsGame { league: string; pHome: number; margin: number; total: number; home: number; away: number; fit: LeagueFit }
+export interface PtsGame {
+  league: string; pHome: number; margin: number; total: number; home: number; away: number; fit: LeagueFit
+  /** fix278: the market's latest total / margin and the anchor weights (null = the model alone) */
+  mk?: { total: number | null; margin: number | null; wT: number; wM: number } | null
+}
+/** fix278: the corrected total / margin blended with the market's (each side moved by half of each change) */
+function anchorPts(t: number, h: number, a: number, mk: PtsGame['mk']): { t: number; h: number; a: number; dM: number } {
+  if (!mk) return { t, h, a, dM: 0 };
+  const t2 = blendLine(t, mk.total, mk.wT), d = h - a, d2 = blendLine(d, mk.margin, mk.wM);
+  const dT = t2 - t, dM = d2 - d;
+  return { t: t2, h: h + dT / 2 + dM / 2, a: a + dT / 2 - dM / 2, dM };
+}
 const pointsFitOf = (src: PointsSource | null, league: string): PointsFit | null => {
   const l = src?.leagues[league];
   return l && l.n >= MIN_LEAGUE_GAMES ? l : src?.all || null;
@@ -297,20 +310,25 @@ const pointsFitOf = (src: PointsSource | null, league: string): PointsFit | null
  */
 export function pointsMake(sport: 'basketball' | 'nfl', g: PtsGame, src: PointsSource | null): Extras {
   const pf = pointsFitOf(src, g.league);
-  if (!pf) return normalExtras({ sport, pHome: g.pHome, margin: g.margin, total: g.total, homePts: g.home, awayPts: g.away, fit: g.fit });
+  if (!pf) {
+    const an = anchorPts(g.total, g.home, g.away, g.mk);
+    const x0 = normalExtras({ sport, pHome: g.pHome, margin: g.margin + an.dM, total: an.t, homePts: an.h, awayPts: an.a, fit: g.fit });
+    return g.mk ? { ...x0, info: { ...x0.info, anchored: true } } : x0;
+  }
   // centre: the league's own mean prediction (its fit, even a small one), else its typical total
   const own = src?.leagues[g.league], mT = own?.mT ?? g.fit.meanTotal, mH = own?.mH ?? g.fit.meanTotal / 2, mA = own?.mA ?? g.fit.meanTotal / 2;
   // fix204d: the margin bands centred on the de-biased margin with the measured spread (the win chance as it is)
-  const margin = pf.rM ? { marginMu: g.margin - (pf.bM || 0), sdMargin: g.fit.sigma * pf.rM } : {};
+  const an = anchorPts(correctPts(g.total, mT, pf.bT, pf.kT), correctPts(g.home, mH, pf.bH, pf.kH), correctPts(g.away, mA, pf.bA, pf.kA), g.mk);
+  const margin = pf.rM ? { marginMu: g.margin - (pf.bM || 0) + an.dM, sdMargin: g.fit.sigma * pf.rM } : {};
   const { sd } = marginSpread(g.pHome, g.margin, g.fit.sigma), st = teamSd(g.fit.sigmaT, sd);
   const x = normalExtras({
     sport, pHome: g.pHome, margin: g.margin, fit: g.fit,
-    total: correctPts(g.total, mT, pf.bT, pf.kT), homePts: correctPts(g.home, mH, pf.bH, pf.kH), awayPts: correctPts(g.away, mA, pf.bA, pf.kA),
+    total: an.t, homePts: an.h, awayPts: an.a,
     sdT: g.fit.sigmaT * pf.rT, sdHome: st * pf.rH, sdAway: st * pf.rA, ...margin,
     // the shape of the misses: sport-wide (every league's games)
     shapeT: src?.all?.qT || null, shapeTeam: src?.all?.qTeam || null
   });
-  return { ...x, info: { ...x.info, bias: [pf.bT, pf.bH, pf.bA], slope: [pf.kT ?? 1, pf.kH ?? 1, pf.kA ?? 1], spread: [pf.rT, pf.rH, pf.rA] } };
+  return { ...x, info: { ...x.info, bias: [pf.bT, pf.bH, pf.bA], slope: [pf.kT ?? 1, pf.kH ?? 1, pf.kA ?? 1], spread: [pf.rT, pf.rH, pf.rA], ...(g.mk ? { anchored: true } : {}) } };
 }
 const ptsRow = (g: PtsGame, hs: number, as: number): PointsRow => ({
   league: g.league, margin: g.margin, sdM: g.fit.sigma, total: g.total, home: g.home, away: g.away, hs, as, sdT: g.fit.sigmaT, sdTeam: teamSd(g.fit.sigmaT, marginSpread(g.pHome, g.margin, g.fit.sigma).sd)
@@ -504,29 +522,34 @@ function footballSources(only?: number): Src[] {
   const src = footballSource(), cal = readCalib('football');
   return [...best.values()].map(r => ({
     id: r.match_id, model: r.model, kickoff: r.utc_date, at: r.updated_at,
-    make: () => applyCalib(footballMake({ league: divisionOf(r.competition_code), xh: r.xg_home, xa: r.xg_away, share: htShareFor(r.competition_code) }, src), cal)
+    // fix278: over / under 2.5 blended with the market's (walk-forward weight; no line = unchanged)
+    make: () => anchorFootballGoals(r.match_id, divisionOf(r.competition_code), applyCalib(footballMake({ league: divisionOf(r.competition_code), xh: r.xg_home, xa: r.xg_away, share: htShareFor(r.competition_code) }, src), cal))
   }));
 }
 function basketballSources(only?: number): Src[] {
-  const rows = db.prepare(`SELECT game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at FROM bb_predictions WHERE kickoff > ? ${only ? 'AND game_id = ?' : ''}`)
+  // fix278: the model's own line (before the season's level and the anchor; the extras have their own corrections), the market blended in pointsMake
+  const rows = db.prepare(`SELECT game_id, code, kickoff, model, COALESCE(p_model, p_home) AS p_home, COALESCE(margin_raw, margin) AS margin, COALESCE(total_raw, total) AS total,
+    CASE WHEN total_raw IS NULL THEN home_pts ELSE (total_raw + margin_raw) / 2 END AS home_pts, CASE WHEN total_raw IS NULL THEN away_pts ELSE (total_raw - margin_raw) / 2 END AS away_pts, made_at
+    FROM bb_predictions WHERE kickoff > ? ${only ? 'AND game_id = ?' : ''}`)
     .all(...[now(), ...(only ? [only] : [])]) as any[];
   const src = pointsSource('basketball'), cal = readCalib('basketball');
   return rows.map(r => ({
     id: r.game_id, model: r.model, kickoff: r.kickoff, at: r.made_at,
-    make: () => applyCalib(pointsMake('basketball', { league: r.code, pHome: r.p_home, margin: r.margin, total: r.total, home: r.home_pts, away: r.away_pts, fit: bbFit(r.code) }, src), cal),
+    make: () => applyCalib(pointsMake('basketball', { league: r.code, pHome: r.p_home, margin: r.margin, total: r.total, home: r.home_pts, away: r.away_pts, fit: bbFit(r.code), mk: pointsMarketFor('basketball', r.game_id, r.code) }, src), cal),
     check: x => rangeAlarm(x.info.expected[0] + x.info.expected[1], leagueRange('basketball', r.code))
   }));
 }
 // NFL / tennis (fix204b): the game's own current start time (a moved game is saved under its new time), any row whose
 // game has not started — the prediction table's copy of the time can lag behind the schedule
 function nflSources(only?: number): Src[] {
-  const rows = db.prepare(`SELECT p.game_id, COALESCE(g.kickoff, p.kickoff) AS kickoff, p.model, p.p_home, p.margin, p.total, p.home_pts, p.away_pts, p.made_at, g.league FROM nfl_predictions p
+  const rows = db.prepare(`SELECT p.game_id, COALESCE(g.kickoff, p.kickoff) AS kickoff, p.model, COALESCE(p.p_model, p.p_home) AS p_home, COALESCE(p.margin_raw, p.margin) AS margin, COALESCE(p.total_raw, p.total) AS total,
+    CASE WHEN p.total_raw IS NULL THEN p.home_pts ELSE (p.total_raw + p.margin_raw) / 2 END AS home_pts, CASE WHEN p.total_raw IS NULL THEN p.away_pts ELSE (p.total_raw - p.margin_raw) / 2 END AS away_pts, p.made_at, g.league FROM nfl_predictions p
     JOIN nfl_games g ON g.game_id = p.game_id WHERE COALESCE(g.kickoff, p.kickoff) > ? AND (g.status IS NULL OR g.status = 'NS') ${only ? 'AND p.game_id = ?' : ''}`)
     .all(...[now(), ...(only ? [only] : [])]) as any[];
   const src = pointsSource('nfl'), cal = readCalib('nfl');
   return rows.map(r => ({
     id: r.game_id, model: r.model, kickoff: r.kickoff, at: r.made_at,
-    make: () => applyCalib(pointsMake('nfl', { league: String(r.league || 1), pHome: r.p_home, margin: r.margin, total: r.total, home: r.home_pts, away: r.away_pts, fit: nflFit(r.league || 1) }, src), cal),
+    make: () => applyCalib(pointsMake('nfl', { league: String(r.league || 1), pHome: r.p_home, margin: r.margin, total: r.total, home: r.home_pts, away: r.away_pts, fit: nflFit(r.league || 1), mk: pointsMarketFor('nfl', r.game_id, r.league || 1) }, src), cal),
     check: x => rangeAlarm(x.info.expected[0] + x.info.expected[1], leagueRange('nfl', r.league || 1))
   }));
 }
@@ -736,16 +759,55 @@ function writeGates(sport: MoreSport, sum: Record<string, any>, note: string, ex
   let old: any = null;
   try { old = JSON.parse((db.prepare(`SELECT report FROM more_pred_backtest WHERE sport = ?`).get(sport) as any)?.report || 'null'); } catch { old = null; }
   const up = db.prepare(`INSERT OR REPLACE INTO more_pred_gate (sport, output, public, games, worst, why, at, ll, public_ll) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const gaps = marketGaps(sport);
   for (const k of MORE_KEYS[sport]) {
     const s = sum[k];
     const prev = prevRows.get(k) ?? (old?.outputs?.[k]?.public && Number.isFinite(old.outputs[k].logLoss) ? old.outputs[k].logLoss : null);
-    const gt = gateOf(s, prev);
-    if (s) s.gate = { public: gt.public, llGuard: prev, why: gt.why };
+    const base = gateOf(s, prev);
+    // fix278: calibrated AND within its limit to the market's closing line (300+ settled games)
+    const mk = base.public ? marketGateWhy(sport, k, gaps[MARKET_LIMITS[sport]?.[k]?.market]) : null;
+    const gt = mk ? { public: false, why: mk } : base;
+    if (s) s.gate = { public: gt.public, llGuard: prev, why: gt.why, base: { public: base.public, why: base.why }, market: mk };
     up.run(sport, k, gt.public ? 1 : 0, s?.games || 0, s?.worst ?? null, gt.why, t, s?.logLoss ?? null, gt.public ? s.logLoss : prev);
   }
   db.prepare(`INSERT OR REPLACE INTO more_pred_backtest (sport, report, at) VALUES (?, ?, ?)`).run(sport, JSON.stringify({ note, outputs: sum, ...extra }), t);
   gateCache = null;
 }
+
+/** fix278: the gap of each market an output of this sport is held to (settled games of 90 days, closing lines) */
+function marketGaps(sport: MoreSport): Record<string, ReturnType<typeof gateGap>> {
+  const out: Record<string, ReturnType<typeof gateGap>> = {};
+  for (const l of Object.values(MARKET_LIMITS[sport] || {})) if (!out[l.market]) { try { out[l.market] = gateGap(sport, l.market); } catch { /* no table yet */ } }
+  return out;
+}
+/**
+ * fix278: the gates again with today's market gaps, on the stored backtest verdicts (the daily anchor job; the backtests
+ * themselves run on their own schedule): an output public by calibration stays public only within its market limit.
+ */
+export function applyMarketGates(): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const up = db.prepare(`UPDATE more_pred_gate SET public = ?, why = ?, at = ? WHERE sport = ? AND output = ?`);
+  for (const sport of MORE_SPORTS) {
+    let rep: any = null;
+    try { rep = JSON.parse((db.prepare(`SELECT report FROM more_pred_backtest WHERE sport = ?`).get(sport) as any)?.report || 'null'); } catch { rep = null; }
+    if (!rep?.outputs) continue;
+    const gaps = marketGaps(sport), changed: string[] = [];
+    for (const k of Object.keys(MARKET_LIMITS[sport] || {})) {
+      const g = rep.outputs[k]?.gate;
+      if (!g) continue;
+      const base = g.base || { public: g.public, why: g.why };
+      const mk = base.public ? marketGateWhy(sport, k, gaps[MARKET_LIMITS[sport][k].market]) : null;
+      const pub = base.public && !mk, why = mk || base.why;
+      const row = db.prepare(`SELECT public, why FROM more_pred_gate WHERE sport = ? AND output = ?`).get(sport, k) as any;
+      if (row && (!!row.public !== pub || (row.why || null) !== (why || null))) { up.run(pub ? 1 : 0, why, now(), sport, k); changed.push(`${k} ${pub ? 'public' : `admin-only (${why})`}`); }
+    }
+    if (changed.length) out[sport] = changed;
+  }
+  gateCache = null;
+  return out;
+}
+/** fix278: is an output public now (data health "Close to the market") */
+export const outputPublic = (sport: MoreSport, output: string) => !!gates().get(`${sport}|${output}`)?.public;
 
 /* ---------- walk-forward backtests (fix204c) ---------- */
 /*

@@ -46,6 +46,8 @@ import { roleByKey, listRoles, listStaff, createRole, updateRole, deleteRole, Ro
 import { consoleRow, sessionUnlocked, lockSession, setupOwn, setFor, renameFor, consoleLogin, changeOwn, resetOwn, removeFor, consoleUsers, ConsoleError } from './services/staffConsole';
 import { modelV2Status, runBacktest, runBacktestAll, backtestProgress, backtestRows, backtestRunsList } from './services/historyModel';
 import { oddsTick, oddsStatus, fetchCompetitionOdds, SPORT_KEYS } from './services/odds';
+import { stripMarket } from './utils/marketKeys';
+import { marketGapReport, marketGapText, runMarketFits, lastMarketFit } from './services/marketLines';
 import { syncSquadValues, squadValuesStatus, squadCompetitions } from './services/squadValues';
 import { syncClubValueHistory, clubValueHistoryStatus, findClub } from './services/squadHistory';
 import { compareModels } from './services/compareModels';
@@ -579,22 +581,7 @@ every('proxy limits cleanup', () => proxyLimiter.prune(), 5 * 60000).unref();
 /** fix166: team / player pages of every sport make no provider call for a crawler (stored or database data only). */
 const crawlerSafe = <T>(fn: () => T): T => (isCrawlerRequest() ? noProviderCalls(fn) : fn());
 
-// No bookmakers on the site (Oct 2026): odds, bookmaker names and market comparisons are internal data only.
-// For everyone except admins, every API response is cleaned of them before it leaves the server.
-const MARKET_KEYS = new Set(['odds', 'bookmaker', 'books', 'clv', 'price', 'bestPrice', 'marketDraw', 'marketHit', 'marketHits', 'marketN', 'marketHitRate', 'bookmakers', 'roi', 'msw', 'overround']);
-function stripMarket(x: any, depth = 0): any {
-  if (depth > 12 || x === null || typeof x !== 'object') return x;
-  if (Array.isArray(x)) return x.map(v => stripMarket(v, depth + 1));
-  if (x instanceof Date) return x;
-  const out: any = {};
-  for (const [k, v] of Object.entries(x)) {
-    if (MARKET_KEYS.has(k)) continue;
-    // "market" as an object / number / null is bookmaker data; as a string it is a bet type ("double chance")
-    if (k === 'market' && typeof v !== 'string') continue;
-    out[k] = stripMarket(v, depth + 1);
-  }
-  return out;
-}
+// No bookmakers on the site (Oct 2026): utils/marketKeys.ts (MARKET_KEYS + stripMarket, fix278: the market lines' fields too)
 app.use('/api', (req, res, next) => {
   if (req.access === 'admin') return next();
   // fix172: our own plan / pick-pack prices are not bookmaker data ("price" was stripped: /premium crashed for visitors)
@@ -4086,6 +4073,18 @@ app.get('/api/admin/league-fix', (req, res) => {
     if (req.query.run === '1') startAdminJob('league fix', null, () => runLeagueFix());
     res.json({ data: adminJobAnswer('league fix', lastLeagueFix(), () => lastLeagueFix()) });
   } catch (e) { sendError(res, e, 'League test failed'); }
+});
+// fix278 (admin only, not in OPEN_API): "Our lines vs the market" — the gap report per sport × market (30 / 90 days,
+// per league, who was closer, the 10 biggest gaps today), the feed's status and the anchor fits. ?fresh=1 rebuilds,
+// ?run=1 runs the anchor fits now (heavy queue), ?format=text = the Copy for Claude text. Market prices stay admin-only.
+app.get('/api/admin/market-gap', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (req.query.run === '1') startAdminJob('market anchor', null, () => runMarketFits());
+    const rep = marketGapReport(Date.now(), req.query.fresh === '1');
+    if (req.query.format === 'text') return res.type('text/plain').send(marketGapText(rep));
+    res.json({ data: { ...adminJobAnswer('market anchor', lastMarketFit(), r => r), report: rep, text: marketGapText(rep) } });
+  } catch (e) { sendError(res, e, 'Market gap report failed'); }
 });
 // fix224 (admin): basketball injuries read from news ("reported out"): the review list, dismiss (never applied again) / ok
 app.get('/api/admin/bb/news-injuries', (_req, res) => {
