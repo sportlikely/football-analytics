@@ -99,7 +99,7 @@ import { deployErrorsMiddleware, noteLoading } from './services/deployErrors';
 import { stallsSinceReady, slowSinceReady } from './services/perf';
 import { stringifyAsync } from './utils/jsonAsync';
 import { workerRoutes, workerRoutesStatus, sendStartupCopy, newsIsStored } from './services/workerRoutes';
-import { namesTick, namesJson, namesAdmin, setAdminName, latinFor, viewOf, VIEW_SQL } from './services/names';
+import { namesTick, namesJson, namesAdmin, setAdminName, approveName, latinFor, viewOf, VIEW_SQL } from './services/names';
 import { deadlineStart, lateCopy, slowRequests } from './services/deadline';
 import { buildBundle, noteBundleAsked, isBundleCall, type BundleSport } from './services/gameBundle';
 import { threadJobsOn, inThread, threadJobStatus } from './services/threadJob';
@@ -3022,10 +3022,15 @@ app.get('/api/names/:lang(he|ar)', (req, res) => {
 // fix261 (admin): Data & feeds → "Names in Hebrew / Arabic": the most opened names, their spelling and source; edit one
 app.get('/api/admin/names', async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  try { if (req.query.run === '1') await namesTick({ collect: true, wd: req.query.wd ? Number(req.query.wd) : undefined }); res.json({ data: namesAdmin({ q: String(req.query.q || ''), kind: String(req.query.kind || ''), limit: Number(req.query.limit) || 200 }) }); } catch (e) { sendError(res, e, 'Names failed'); }
+  try { if (req.query.run === '1') await namesTick({ collect: true, wd: req.query.wd ? Number(req.query.wd) : undefined }); res.json({ data: namesAdmin({ q: String(req.query.q || ''), kind: String(req.query.kind || ''), limit: Number(req.query.limit) || 300, flagged: req.query.flagged === '1' }) }); } catch (e) { sendError(res, e, 'Names failed'); }
 });
 app.post('/api/admin/names', (req, res) => {
   const b = req.body || {};
+  // fix283: { approve: true } = the spelling as it is is right (shown even when a check flagged it); else the admin's own spelling
+  if (b.approve !== undefined) {
+    const a = approveName(String(b.sport ?? ''), String(b.kind || ''), String(b.latin || ''), String(b.lang || ''), b.approve !== false);
+    return a.ok ? res.json({ ok: true }) : res.status(400).json({ error: a.error });
+  }
   const r = setAdminName(String(b.sport ?? ''), String(b.kind || ''), String(b.latin || ''), String(b.lang || ''), String(b.name ?? ''));
   if (!r.ok) return res.status(400).json({ error: r.error });
   res.json({ ok: true });

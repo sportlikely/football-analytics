@@ -127,6 +127,10 @@ is model work, the matching note, in the same commit.
   `/api/names/<lang>` loaded before the first paint (`frontend/src/lib/names.ts`: API answers' name fields swapped, socket
   too); links / slugs / fixed Latin lists use `latinOf()`; the server's own texts `nameIn()` (crawler titles + body,
   emails, push, calendar); search takes both scripts (`latinFor`). Admin → Data & feeds → "Names in Hebrew / Arabic".
+  fix283: spellings are built from the first-last name (`personOrder`: API-Basketball writes "Lillard Damian"); Wikidata by
+  provider ids first (`name_items.ext`, SPARQL; a name-only player match needs birth date / nationality / club), he label else
+  the hewiki title; the AI (`services/namesAi.ts`, only with ANTHROPIC_API_KEY, cap NAMES_AI_DAILY_USD) for the rest; checks
+  (`spellingFlags`) block a spelling; visitors see only `visibleName` rows (never letter rules) — else the Latin name.
 - Phones first: check layouts at 375 px. Bottom nav on phones; floating accessibility button bottom-left.
 - Don't add dependencies without a reason; the backend uses Node's built-in `node:sqlite`, no ORM.
 - The server can't be reached from local tests; test model changes on a database copy (admins can download one from

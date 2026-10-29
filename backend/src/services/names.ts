@@ -20,7 +20,19 @@
 import { db, DB_READ_ONLY } from '../db';
 import logger from '../utils/logger';
 import { yieldEvery } from './perf';
-import { NAME_LANGS, type NameLang, isNameLang, fallbackName, nameKey, LOCAL_SCRIPT } from '../utils/nameScript';
+import { NAME_LANGS, type NameLang, isNameLang, fallbackName, nameKey, LOCAL_SCRIPT, personOrder, spellingFlags, visibleName, FLAG_TEXT, type NameFlag } from '../utils/nameScript';
+import { namesAiTick, namesAiStatus } from './namesAi';
+
+/*
+ * fix283 (Yarin, 29 Oct: "many mistakes" — 161 of the top 200 were letter rules): the spelling is built from the name in
+ * first-last order (utils/nameScript.ts personOrder: API-Basketball writes "Lillard Damian"); Wikidata is matched by the
+ * provider-linked ids it holds (name_items.ext: Transfermarkt, NBA.com, Basketball-Reference, Pro-Football-Reference,
+ * ATP / WTA …, batch SPARQL) and a name search only counts for a player when birth date / nationality / club agree; the
+ * Hebrew label, else the Hebrew Wikipedia title; labels refreshed weekly. Names nobody else spells go to the AI
+ * (services/namesAi.ts, only with ANTHROPIC_API_KEY). Letter rules stay as the last step but are never shown: a row is
+ * shown only when nameScript.visibleName says so (no check flagged it; AI confident enough; admin / approved always),
+ * else the page keeps the Latin name and the row waits in the admin list.
+ */
 
 export type NameKind = 'team' | 'league' | 'country' | 'city' | 'player';
 export const NAME_KINDS: NameKind[] = ['team', 'league', 'country', 'city', 'player'];
@@ -30,7 +42,13 @@ const DAY = 86400000;
 const WD_PER_RUN = Number(process.env.NAMES_WD_PER_RUN) || 120;
 /** players in the map the app loads (most opened, then most played); teams, leagues, countries, cities: all */
 const MAP_PLAYERS = Number(process.env.NAMES_MAP_PLAYERS) || 6000;
-const RANK: Record<string, number> = { admin: 4, press: 3, wikidata: 2, translit: 1 };
+const RANK: Record<string, number> = { admin: 6, press: 5, wikidata: 4, ai: 3, translit: 1 };
+/** fix283: Wikidata properties of the provider-linked ids (name_items.ext = {"P2446": "28003", …}) */
+export const WD_ID_PROPS: Record<string, string> = {
+  P2446: 'Transfermarkt player', P7223: 'Transfermarkt club', P3647: 'NBA.com player', P2685: 'Basketball-Reference player',
+  P3561: 'Pro-Football-Reference player', P3686: 'ESPN NFL athlete', P536: 'ATP player', P597: 'WTA player',
+  P12302: 'Sofascore player', P5750: 'FBref player', P2369: 'Soccerway player'
+};
 
 if (!DB_READ_ONLY) {
   db.exec(`CREATE TABLE IF NOT EXISTS name_items (sport TEXT NOT NULL, kind TEXT NOT NULL, latin TEXT NOT NULL, id TEXT, country TEXT,
@@ -39,17 +57,33 @@ if (!DB_READ_ONLY) {
     source TEXT NOT NULL, id TEXT, qid TEXT, at TEXT NOT NULL, PRIMARY KEY (sport, kind, latin, lang))`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_names_lang ON names(lang, name)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_name_items_id ON name_items(sport, kind, id)`);
+  // fix283: the name in first-last order and what Wikidata is checked against; the checks' result per spelling
+  for (const col of ['display TEXT', 'first TEXT', 'last TEXT', 'dob TEXT', 'team TEXT', 'ext TEXT']) { try { db.exec(`ALTER TABLE name_items ADD COLUMN ${col}`); } catch { /* there */ } }
+  for (const col of ['conf REAL', 'flags TEXT', 'approved INTEGER NOT NULL DEFAULT 0', 'basis TEXT']) { try { db.exec(`ALTER TABLE names ADD COLUMN ${col}`); } catch { /* there */ } }
+  db.exec(`CREATE TABLE IF NOT EXISTS names_meta (key TEXT PRIMARY KEY, value TEXT, at TEXT NOT NULL)`);
+}
+/** the name the spelling is built from: first-last order */
+const basisOf = (it: { sport: string; kind: string; latin: string; display?: string | null }) => it.display || personOrder(it.latin, { sport: it.sport, kind: it.kind });
+/** fix283: a provider's ids of one item (Wikidata properties, WD_ID_PROPS) — kept for the next names run */
+export function setNameExtIds(sport: string, kind: NameKind, id: string | number, ids: Record<string, string | number | null | undefined>) {
+  const clean = Object.fromEntries(Object.entries(ids).filter(([p, v]) => WD_ID_PROPS[p] && v != null && String(v).trim()).map(([p, v]) => [p, String(v).trim()]));
+  if (!Object.keys(clean).length) return;
+  const row = db.prepare(`SELECT latin, ext FROM name_items WHERE sport = ? AND kind = ? AND id = ?`).get(sport, kind, String(id)) as any;
+  if (!row) return;
+  let old: Record<string, string> = {};
+  try { old = row.ext ? JSON.parse(row.ext) : {}; } catch { /* none */ }
+  db.prepare(`UPDATE name_items SET ext = ? WHERE sport = ? AND kind = ? AND latin = ?`).run(JSON.stringify({ ...old, ...clean }), sport, kind, row.latin);
 }
 
 const all = (sql: string, ...a: any[]): any[] => { try { return db.prepare(sql).all(...a) as any[]; } catch { return []; } };
 const daysAgo = (d: number) => new Date(Date.now() - d * DAY).toISOString();
 
 /* ---------- what the site shows ---------- */
-type Item = { sport: string; kind: NameKind; latin: string; id: string | null; country: string | null; weight: number };
+type Item = { sport: string; kind: NameKind; latin: string; id: string | null; country: string | null; weight: number; display?: string | null; dob?: string | null; team?: string | null };
 /** every team / league / country / city / player name of the last ~13 months, with how often it was played */
 export function collectItems(): Item[] {
   const out = new Map<string, Item>();
-  const add = (sport: string, kind: NameKind, latin: unknown, id: unknown, weight = 1, country: unknown = null) => {
+  const add = (sport: string, kind: NameKind, latin: unknown, id: unknown, weight = 1, country: unknown = null, more: { first?: string | null; last?: string | null; dob?: string | null; team?: string | null } = {}) => {
     const n = String(latin ?? '').trim();
     if (!n || n.length > 80 || LOCAL_SCRIPT.test(n)) return;
     const k = `${sport}|${kind}|${n}`;
@@ -61,7 +95,8 @@ export function collectItems(): Item[] {
       else if (!x.country && country) x.country = String(country);
       return;
     }
-    out.set(k, { sport, kind, latin: n, id: id == null ? null : String(id), country: country ? String(country) : null, weight });
+    const display = kind === 'player' ? personOrder(n, { sport, kind, first: more.first, last: more.last }) : null;
+    out.set(k, { sport, kind, latin: n, id: id == null ? null : String(id), country: country ? String(country) : null, weight, display: display && display !== n ? display : null, dob: more.dob || null, team: more.team || null });
   };
   const since = daysAgo(400), sinceDay = since.slice(0, 10);
   // football: API-Football fixtures (+ league country), Football-Data.org predictions, national teams, players
@@ -82,17 +117,31 @@ export function collectItems(): Item[] {
     add('football', 'team', r.n, AF + r.id, r.c);
     add('', 'country', r.n, null, r.c); // a national team's name is its country's
   }
-  for (const r of all(`SELECT player_id AS id, name, SUM(COALESCE(apps, 0)) AS a FROM af_player_season WHERE season >= (SELECT MAX(season) - 1 FROM af_player_season) GROUP BY player_id, name`)) add('football', 'player', r.name, r.id, Math.max(1, r.a || 0));
+  const afTeam = new Map<number, string>();
+  for (const r of all(`SELECT home_id AS id, MAX(home_name) AS n FROM af_fixtures WHERE date >= ? GROUP BY home_id`, sinceDay)) afTeam.set(r.id, r.n);
+  for (const r of all(`SELECT player_id AS id, name, SUM(COALESCE(apps, 0)) AS a, MAX(team_id) AS t FROM af_player_season WHERE season >= (SELECT MAX(season) - 1 FROM af_player_season) GROUP BY player_id, name`)) add('football', 'player', r.name, r.id, Math.max(1, r.a || 0), null, { team: afTeam.get(r.t) || null });
   // basketball
   for (const r of all(`SELECT code, name, country FROM bb_leagues`)) { add('basketball', 'league', r.name, r.code, 20, r.country); if (r.country) add('', 'country', r.country, null, 5); }
   for (const r of all(`SELECT home_id AS id, home_name AS n, COUNT(*) AS c FROM bb_games WHERE kickoff >= ? GROUP BY home_id, home_name UNION ALL SELECT away_id, away_name, COUNT(*) FROM bb_games WHERE kickoff >= ?1 GROUP BY away_id, away_name`, since)) add('basketball', 'team', r.n, r.id, r.c);
-  for (const r of all(`SELECT ps.player_id AS id, ps.name AS name, COUNT(*) AS c FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff >= ? GROUP BY ps.player_id, ps.name`, since)) add('basketball', 'player', r.name, r.id, r.c);
+  // fix283: API-Basketball writes players surname first ("Lillard Damian"): balldontlie's first / last when it is the NBA
+  // player of the same name, else the given name (the last word) first (personOrder); their team for the Wikidata check
+  const bbTeam = new Map<number, string>();
+  for (const r of all(`SELECT home_id AS id, MAX(home_name) AS n FROM bb_games WHERE kickoff >= ? GROUP BY home_id`, since)) bbTeam.set(r.id, r.n);
+  const bdl = new Map<string, { first: string; last: string; country: string | null }[]>();
+  for (const r of all(`SELECT first, last, country FROM bdl_players WHERE active = 1`)) { const k = nameKey(`${r.last} ${r.first}`); bdl.set(k, [...(bdl.get(k) || []), r]); }
+  for (const r of all(`SELECT ps.player_id AS id, ps.name AS name, COUNT(*) AS c, MAX(ps.team_id) AS t FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff >= ? GROUP BY ps.player_id, ps.name`, since)) {
+    const b = bdl.get(nameKey(r.name || ''));
+    const one = b && b.length === 1 ? b[0] : null;
+    add('basketball', 'player', r.name, r.id, r.c, one?.country || null, { first: one?.first, last: one?.last, team: bbTeam.get(r.t) || null });
+  }
   // American football
   for (const r of all(`SELECT team_id, name, city FROM nfl_teams`)) { add('nfl', 'team', r.name, r.team_id, 30); if (r.city) add('', 'city', r.city, null, 3); }
-  for (const r of all(`SELECT player_id, name FROM nfl_players`)) add('nfl', 'player', r.name, r.player_id, 2);
+  const nflTeam = new Map<number, string>(all(`SELECT team_id, name FROM nfl_teams`).map(r => [r.team_id, r.name]));
+  for (const r of all(`SELECT player_id, name, team_id FROM nfl_players`)) add('nfl', 'player', r.name, r.player_id, 2, null, { team: nflTeam.get(r.team_id) || null });
   // tennis
-  for (const r of all(`SELECT id, name, country, ranking FROM tennis_players`)) {
-    add('tennis', 'player', r.name, r.id, r.ranking ? Math.max(1, 600 - r.ranking) : 1);
+  const tp = all(`SELECT id, name, country, ranking, dob, first_name, last_name FROM tennis_players`);
+  for (const r of tp.length ? tp : all(`SELECT id, name, country, ranking FROM tennis_players`)) {
+    add('tennis', 'player', r.name, r.id, r.ranking ? Math.max(1, 600 - r.ranking) : 1, r.country && String(r.country).length > 3 ? r.country : null, { first: r.first_name, last: r.last_name, dob: r.dob });
     if (r.country && String(r.country).length > 3) add('', 'country', r.country, null, 1);
   }
   // cities of the venues (weather card)
@@ -133,20 +182,90 @@ const cleanLabel = (s: string, lang: NameLang): string => {
   return x.trim();
 };
 /** one name → the Wikidata item (or null) by search + kind check (+ the country in the description when we know it) */
-export async function wikidataItem(it: { sport: string; kind: NameKind; latin: string; country: string | null }): Promise<string | null> {
+export async function wikidataItem(it: { sport: string; kind: NameKind; latin: string; country: string | null; display?: string | null }): Promise<string | null> {
+  return (await wikidataCandidates(it))[0] ?? null;
+}
+/** fix283: the items a name search finds that fit the kind (best first; the country in the description first) */
+export async function wikidataCandidates(it: { sport: string; kind: NameKind; latin: string; country: string | null; display?: string | null }): Promise<string[]> {
+  const q = it.kind === 'player' ? basisOf(it as any) : it.latin;
   // an initial ("E. Haaland") or a two-letter code finds nothing reliable
-  if (/^\p{L}\.\s/u.test(it.latin) || it.latin.length < 3) return null;
-  const s = await get(`${WD}action=wbsearchentities&type=item&limit=8&language=en&uselang=en&search=${encodeURIComponent(it.latin)}`);
-  const want = nameKey(it.latin.replace(/\b(FC|CF|AFC|SC|BC|KK)\b/g, ''));
+  if (/^\p{L}\.\s/u.test(q) || /(^|\s)\p{L}\.(\s|$)/u.test(q) || q.length < 3) return [];
+  const s = await get(`${WD}action=wbsearchentities&type=item&limit=8&language=en&uselang=en&search=${encodeURIComponent(q)}`);
+  const want = nameKey(q.replace(/\b(FC|CF|AFC|SC|BC|KK)\b/g, ''));
   const rx = (KIND_DESC[it.sport] || KIND_DESC[''])[it.kind];
   const fits = (s?.search || []).filter((c: any) => {
     const label = nameKey(String(c.match?.text || c.label || '').replace(/\b(FC|CF|AFC|SC|BC|KK)\b/g, ''));
     return label === want && rx.test(String(c.description || ''));
   });
-  if (!fits.length) return null;
   const country = it.country ? it.country.toLowerCase() : null;
-  const best = (country && fits.find((c: any) => String(c.description || '').toLowerCase().includes(country))) || fits[0];
-  return /^Q\d+$/.test(best.id) ? best.id : null;
+  const sorted = [...fits.filter((c: any) => country && String(c.description || '').toLowerCase().includes(country)), ...fits.filter((c: any) => !(country && String(c.description || '').toLowerCase().includes(country)))];
+  return sorted.map((c: any) => String(c.id)).filter(id => /^Q\d+$/.test(id)).slice(0, 3);
+}
+
+/** fix283: provider-linked ids → items (one SPARQL query per property and 50 ids) */
+export async function wikidataByIds(prop: string, values: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!/^P\d+$/.test(prop)) return out;
+  for (let i = 0; i < values.length; i += 50) {
+    const part = values.slice(i, i + 50).map(v => String(v).replace(/["\\\n]/g, ''));
+    const q = `SELECT ?item ?v WHERE { VALUES ?v { ${part.map(v => `"${v}"`).join(' ')} } ?item wdt:${prop} ?v . }`;
+    const j = await get(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(q)}`);
+    for (const b of j?.results?.bindings || []) {
+      const qid = String(b?.item?.value || '').split('/').pop() || '', v = String(b?.v?.value || '');
+      if (/^Q\d+$/.test(qid) && v && !out.has(v)) out.set(v, qid);
+    }
+  }
+  return out;
+}
+type Ent = { en: string[]; labels: Partial<Record<NameLang, string>>; dob: string | null; nat: string[]; teams: string[] };
+const claimIds = (e: any, p: string): string[] => (e?.claims?.[p] || []).map((c: any) => c?.mainsnak?.datavalue?.value?.id).filter((x: any) => typeof x === 'string');
+/** fix283: items → English names, he / ar label (else the he / ar Wikipedia title), birth date, citizenship and clubs (English labels) */
+export async function wikidataEntities(qids: string[], withRefs: boolean): Promise<Map<string, Ent>> {
+  const out = new Map<string, Ent>();
+  const raw = new Map<string, any>();
+  for (let i = 0; i < qids.length; i += 50) {
+    const part = qids.slice(i, i + 50);
+    const j = await get(`${WD}action=wbgetentities&props=labels|aliases|claims|sitelinks&languages=en|${NAME_LANGS.join('|')}&sitefilter=${NAME_LANGS.map(l => `${l}wiki`).join('|')}&ids=${part.join('|')}`);
+    for (const id of part) if (j?.entities?.[id]) raw.set(id, j.entities[id]);
+  }
+  const refs = new Map<string, string>();
+  if (withRefs) {
+    const want = [...new Set([...raw.values()].flatMap(e => [...claimIds(e, 'P27'), ...claimIds(e, 'P54')]))].slice(0, 400);
+    for (let i = 0; i < want.length; i += 50) {
+      const part = want.slice(i, i + 50);
+      const j = await get(`${WD}action=wbgetentities&props=labels&languages=en&ids=${part.join('|')}`);
+      for (const id of part) { const v = j?.entities?.[id]?.labels?.en?.value; if (v) refs.set(id, v); }
+    }
+  }
+  for (const [id, e] of raw) {
+    const labels: Partial<Record<NameLang, string>> = {};
+    for (const lang of NAME_LANGS) {
+      const v = cleanLabel(e?.labels?.[lang]?.value || '', lang) || cleanLabel(e?.sitelinks?.[`${lang}wiki`]?.title || '', lang);
+      if (v && LOCAL_SCRIPT.test(v)) labels[lang] = v;
+    }
+    const t = String(e?.claims?.P569?.[0]?.mainsnak?.datavalue?.value?.time || '');
+    const m = /^\+?(\d{4})-(\d{2})-(\d{2})/.exec(t);
+    out.set(id, {
+      en: [e?.labels?.en?.value, ...((e?.aliases?.en || []).map((a: any) => a?.value))].filter(Boolean),
+      labels, dob: m ? (m[2] === '00' ? m[1] : `${m[1]}-${m[2]}-${m[3]}`) : null,
+      nat: claimIds(e, 'P27').map(q => refs.get(q)).filter(Boolean) as string[], teams: claimIds(e, 'P54').map(q => refs.get(q)).filter(Boolean) as string[]
+    });
+  }
+  return out;
+}
+const dobOk = (ours: string, wd: string) => (wd.length === 4 ? ours.slice(0, 4) === wd : Math.abs(Date.parse(ours.slice(0, 10)) - Date.parse(wd)) <= 86400000);
+const sameish = (a: string, b: string) => { const x = nameKey(a).replace(/\b(fc|cf|afc|sc|bc|kk|club|the)\b/g, '').trim(), y = nameKey(b).replace(/\b(fc|cf|afc|sc|bc|kk|club|the)\b/g, '').trim(); return !!x && !!y && (x.includes(y) || y.includes(x)); };
+/**
+ * fix283: is this item our player? Found by a provider id: the surname must be in its English name (and a birth date we
+ * know must fit). Found by name: a birth date we know must fit, and one more thing must agree (birth date, citizenship or
+ * a club) — a name alone is not enough (Wikidata has many "Jordan Washington"s).
+ */
+export function playerFits(it: { latin: string; display?: string | null; sport: string; kind: string; dob?: string | null; country?: string | null; team?: string | null }, e: Ent, byId: boolean): boolean {
+  const basis = basisOf(it as any);
+  if (it.dob && e.dob && !dobOk(it.dob, e.dob)) return false;
+  if (byId) { const last = nameKey(basis).split(' ').pop() || ''; return !last || e.en.some(n => nameKey(n).split(' ').includes(last)); }
+  const agree = (it.dob && e.dob && dobOk(it.dob, e.dob)) || (it.country && e.nat.some(n => sameish(n, it.country!))) || (it.team && e.teams.some(t => sameish(t, it.team!)));
+  return !!agree;
 }
 /** the he / ar labels of a few items */
 export async function wikidataLabels(qids: string[]): Promise<Map<string, Partial<Record<NameLang, string>>>> {
@@ -165,16 +284,37 @@ export async function wikidataLabels(qids: string[]): Promise<Map<string, Partia
 }
 
 /* ---------- writing ---------- */
-const upsertName = () => db.prepare(`INSERT INTO names (sport, kind, latin, lang, name, source, id, qid, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(sport, kind, latin, lang) DO UPDATE SET name = excluded.name, source = excluded.source, id = COALESCE(excluded.id, names.id), qid = COALESCE(excluded.qid, names.qid), at = excluded.at`);
+const upsertName = () => db.prepare(`INSERT INTO names (sport, kind, latin, lang, name, source, id, qid, at, conf, flags, approved, basis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+  ON CONFLICT(sport, kind, latin, lang) DO UPDATE SET name = excluded.name, source = excluded.source, id = COALESCE(excluded.id, names.id), qid = COALESCE(excluded.qid, names.qid), at = excluded.at,
+    conf = excluded.conf, flags = excluded.flags, approved = 0, basis = excluded.basis`);
 let oldName: ReturnType<typeof db.prepare> | null = null;
-/** a name's row, unless a more trusted one is already there */
-function writeName(st: ReturnType<typeof upsertName>, it: { sport: string; kind: string; latin: string; id?: string | null }, lang: NameLang, name: string, source: string, qid: string | null = null) {
-  oldName ||= db.prepare(`SELECT name, source FROM names WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`);
+type It = { sport: string; kind: string; latin: string; id?: string | null; display?: string | null };
+/**
+ * a name's row, unless a more trusted one is already there. fix283: every spelling but an admin's goes through the checks
+ * (flags); an admin's or an approved row is never overwritten; a flagged row gives way to a clean one of any source but
+ * the letter rules.
+ */
+function writeName(st: ReturnType<typeof upsertName>, it: It, lang: NameLang, name: string, source: string, qid: string | null = null, conf: number | null = null) {
+  oldName ||= db.prepare(`SELECT name, source, flags, approved FROM names WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`);
   const old = oldName.get(it.sport, it.kind, it.latin, lang) as any;
-  if (old && ((RANK[old.source] || 0) > (RANK[source] || 0) || (old.source === source && old.name === name))) return false;
-  st.run(it.sport, it.kind, it.latin, lang, name, source, it.id ?? null, qid, new Date().toISOString());
+  const basis = basisOf(it);
+  const flags = source === 'admin' ? '' : spellingFlags(basis, name, lang, it.kind).join(',');
+  if (old) {
+    if (old.source === 'admin' || old.approved) return false;
+    if (old.source === source && old.name === name && (old.flags || '') === flags) return false;
+    const cleanOverFlagged = old.flags && !flags && source !== 'translit';
+    if ((RANK[old.source] || 0) > (RANK[source] || 0) && !cleanOverFlagged) return false;
+  }
+  st.run(it.sport, it.kind, it.latin, lang, name, source, it.id ?? null, qid, new Date().toISOString(), conf, flags || null, basis);
   return true;
+}
+/** fix283: the AI's spellings (services/namesAi.ts) */
+export function writeAiNames(rows: { it: It; lang: NameLang; name: string; conf: number }[]): number {
+  const st = upsertName();
+  let n = 0;
+  for (const r of rows) if (writeName(st, r.it, r.lang, r.name, 'ai', null, r.conf)) n++;
+  if (n) void buildMaps();
+  return n;
 }
 /**
  * fix272: rows written SLICE at a time, each slice one transaction (never across a yield: another job's write would land
@@ -197,8 +337,23 @@ async function inSlices<T>(list: T[], fn: (x: T) => void, step: () => Promise<vo
 let lastCollect = 0, running = false;
 const lastRun: { at: string | null; items: number; written: number; wdTried: number; wdFound: number; error: string | null } = { at: null, items: 0, written: 0, wdTried: 0, wdFound: 0, error: null };
 
+const meta = (key: string): string | null => { try { return ((db.prepare(`SELECT value FROM names_meta WHERE key = ?`).get(key) as any)?.value ?? null); } catch { return null; } };
+/**
+ * fix283, once: the press / letter-rule rows are built again from the first-last name with the new rules (deleted here,
+ * written by step 2), every Wikidata row goes through the checks, and every name is looked up on Wikidata again (by ids
+ * first). Admin rows stay as they are.
+ */
+async function rerunAll(step: () => Promise<void>) {
+  db.exec(`DELETE FROM names WHERE source IN ('press', 'translit') AND COALESCE(approved, 0) = 0`);
+  const rows = all(`SELECT n.sport, n.kind, n.latin, n.lang, n.name, i.display FROM names n LEFT JOIN name_items i ON i.sport = n.sport AND i.kind = n.kind AND i.latin = n.latin WHERE n.source NOT IN ('admin')`);
+  const upd = db.prepare(`UPDATE names SET flags = ?, basis = ? WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`);
+  await inSlices(rows, r => { if (!isNameLang(r.lang)) return; const b = basisOf(r); upd.run(spellingFlags(b, r.name, r.lang, r.kind).join(',') || null, b, r.sport, r.kind, r.latin, r.lang); }, step);
+  db.exec(`UPDATE name_items SET wd_at = NULL`);
+  db.prepare(`INSERT OR REPLACE INTO names_meta (key, value, at) VALUES ('fix283', ?, ?)`).run(String(rows.length), new Date().toISOString());
+}
+
 /** the worker's "names" job */
-export async function namesTick(opts: { collect?: boolean; wd?: number } = {}): Promise<typeof lastRun> {
+export async function namesTick(opts: { collect?: boolean; wd?: number; ai?: boolean } = {}): Promise<typeof lastRun> {
   if (running || DB_READ_ONLY) return lastRun;
   running = true;
   const step = yieldEvery(50, 100);
@@ -208,49 +363,70 @@ export async function namesTick(opts: { collect?: boolean; wd?: number } = {}): 
     if (opts.collect || Date.now() - lastCollect > 6 * 3600 * 1000) {
       const items = collectItems();
       const now = new Date().toISOString();
-      const up = db.prepare(`INSERT INTO name_items (sport, kind, latin, id, country, weight, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(sport, kind, latin) DO UPDATE SET id = COALESCE(excluded.id, name_items.id), country = COALESCE(excluded.country, name_items.country), weight = excluded.weight, seen_at = excluded.seen_at`);
-      await inSlices(items, it => { up.run(it.sport, it.kind, it.latin, it.id, it.country, it.weight, now); }, step);
+      const up = db.prepare(`INSERT INTO name_items (sport, kind, latin, id, country, weight, seen_at, display, dob, team) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(sport, kind, latin) DO UPDATE SET id = COALESCE(excluded.id, name_items.id), country = COALESCE(excluded.country, name_items.country), weight = excluded.weight, seen_at = excluded.seen_at,
+          display = excluded.display, dob = COALESCE(excluded.dob, name_items.dob), team = COALESCE(excluded.team, name_items.team)`);
+      await inSlices(items, it => { up.run(it.sport, it.kind, it.latin, it.id, it.country, it.weight, now, it.display ?? null, it.dob ?? null, it.team ?? null); }, step);
       lastCollect = Date.now();
       lastRun.items = items.length;
     }
-    // 2. press spelling / transliteration for names without a row
+    // fix283: once — every existing name again through the new steps (order, checks, Wikidata by ids, AI)
+    if (!meta('fix283')) await rerunAll(step);
+    // 2. press spelling / transliteration for names without a row (built from the first-last name)
     const st = upsertName();
     for (const lang of NAME_LANGS) {
-      const rows = all(`SELECT i.sport, i.kind, i.latin, i.id, i.country FROM name_items i LEFT JOIN names n ON n.sport = i.sport AND n.kind = i.kind AND n.latin = i.latin AND n.lang = ? WHERE n.latin IS NULL`, lang);
+      const rows = all(`SELECT i.sport, i.kind, i.latin, i.id, i.country, i.display FROM name_items i LEFT JOIN names n ON n.sport = i.sport AND n.kind = i.kind AND n.latin = i.latin AND n.lang = ? WHERE n.latin IS NULL`, lang);
       await inSlices(rows, r => {
-        const f = fallbackName(r.latin, lang, r.kind, r.country);
+        const f = fallbackName(basisOf(r), lang, r.kind, r.country) || (r.display ? fallbackName(r.latin, lang, r.kind, r.country) : null);
         if (f && writeName(st, r, lang, f.name, f.source)) written++;
       }, step);
     }
     // fix272: the maps now — the pages get the press / letter-rule names at once, Wikidata's labels on top later
     if (written || !maps.size) { await buildMaps(step); mapped = written; }
-    // 3. Wikidata: the most opened / played names not tried yet (or tried 60+ days ago without an item)
+    // 3. Wikidata (fix283): the most opened / played names not tried yet, tried 60+ days ago without an item, or with an
+    // item whose labels are a week old. Provider-linked ids first (SPARQL), then a name search with the player checks.
     const budget = opts.wd ?? (process.env.NAMES_WIKIDATA === '0' ? 0 : WD_PER_RUN);
     if (budget > 0) {
-      const todo = all(`SELECT sport, kind, latin, id, country FROM name_items WHERE (wd_at IS NULL OR (qid IS NULL AND wd_at < ?)) AND kind != 'city'
-        ORDER BY views DESC, weight DESC LIMIT ?`, daysAgo(60), budget);
-      const found: { it: any; qid: string }[] = [];
+      const todo = all(`SELECT sport, kind, latin, id, country, display, dob, team, ext, qid FROM name_items
+        WHERE kind != 'city' AND (wd_at IS NULL OR (qid IS NULL AND wd_at < ?) OR (qid IS NOT NULL AND wd_at < ?))
+        ORDER BY views DESC, weight DESC LIMIT ?`, daysAgo(60), daysAgo(7), budget);
       const mark = db.prepare(`UPDATE name_items SET qid = ?, wd_at = ? WHERE sport = ? AND kind = ? AND latin = ?`);
-      for (const it of todo) {
-        let qid: string | null = null;
-        try { qid = await wikidataItem(it); } catch (e: any) { lastRun.error = String(e?.message || e); break; }
-        wdTried++;
-        mark.run(qid, new Date().toISOString(), it.sport, it.kind, it.latin);
-        if (qid) found.push({ it, qid });
-        await step();
-      }
-      if (found.length) {
-        try {
-          const labels = await wikidataLabels([...new Set(found.map(f => f.qid))]);
-          for (const { it, qid } of found) {
-            const l = labels.get(qid) || {};
-            let any = false;
-            for (const lang of NAME_LANGS) if (l[lang] && writeName(st, it, lang, l[lang]!, 'wikidata', qid)) { written++; any = true; }
-            if (any) wdFound++;
-          }
-        } catch (e: any) { lastRun.error = String(e?.message || e); }
-      }
+      const cands = new Map<any, { qids: string[]; byId: boolean }>();
+      try {
+        // ids → items
+        const byProp = new Map<string, Map<string, any[]>>();
+        for (const it of todo) {
+          let ext: Record<string, string> = {};
+          try { ext = it.ext ? JSON.parse(it.ext) : {}; } catch { /* none */ }
+          for (const [p, v] of Object.entries(ext)) { if (!WD_ID_PROPS[p]) continue; const m = byProp.get(p) || new Map(); m.set(String(v), [...(m.get(String(v)) || []), it]); byProp.set(p, m); }
+        }
+        for (const [p, m] of byProp) {
+          const hits = await wikidataByIds(p, [...m.keys()]);
+          for (const [v, qid] of hits) for (const it of m.get(v) || []) if (!cands.has(it)) cands.set(it, { qids: [qid], byId: true });
+        }
+        // the rest: the item found before (weekly refresh) or a name search
+        for (const it of todo) {
+          if (cands.has(it)) continue;
+          if (it.qid) { cands.set(it, { qids: [it.qid], byId: true }); continue; }
+          cands.set(it, { qids: await wikidataCandidates(it), byId: false });
+          wdTried++;
+          await step();
+        }
+        const ents = await wikidataEntities([...new Set([...cands.values()].flatMap(c => c.qids))], true);
+        for (const [it, c] of cands) {
+          const qid = c.qids.find(q => { const e = ents.get(q); return e && (it.kind !== 'player' || playerFits(it, e, c.byId)); }) || null;
+          mark.run(qid, new Date().toISOString(), it.sport, it.kind, it.latin);
+          if (!qid) continue;
+          const l = ents.get(qid)!.labels;
+          let any = false;
+          for (const lang of NAME_LANGS) if (l[lang] && writeName(st, it, lang, l[lang]!, 'wikidata', qid)) { written++; any = true; }
+          if (any) wdFound++;
+        }
+      } catch (e: any) { lastRun.error = String(e?.message || e); }
+    }
+    // 4. fix283: the AI for names nobody else spells (only with ANTHROPIC_API_KEY; daily cost cap)
+    if (opts.ai !== false) {
+      try { const a = await namesAiTick(); written += a.written; if (a.error) lastRun.error = a.error; } catch (e: any) { lastRun.error = String(e?.message || e); }
     }
     Object.assign(lastRun, { at: new Date().toISOString(), written, wdTried, wdFound });
     if (written > mapped || !maps.size) await buildMaps(step);
@@ -264,22 +440,28 @@ export async function namesTick(opts: { collect?: boolean; wd?: number } = {}): 
 /* ---------- the maps (Latin → local) ---------- */
 const maps = new Map<NameLang, { json: string; map: Map<string, string>; builtAt: number }>();
 let mapsAt = 0;
-/** the map of one language: every team / league / country / city, the top players; the most trusted name per Latin */
+/**
+ * the map of one language: every team / league / country / city, the top players; the most trusted name per Latin.
+ * fix283: only rows visitors may see (nameScript.visibleName: never letter rules, never a flagged spelling, the AI only
+ * when confident) — anything else stays Latin on the page; a player's first-last name is a key too ("Damian Lillard").
+ */
 export async function buildMaps(step: () => Promise<void> = async () => {}) {
   for (const lang of NAME_LANGS) {
     const map = new Map<string, { n: string; r: number }>();
     // a league name two countries use with different spellings ("Premier League"): left Latin (unless an admin chose one)
     const leagueNames = new Map<string, Set<string>>();
-    const rows = all(`SELECT n.kind, n.latin, n.name, n.source, COALESCE(i.views, 0) AS v, COALESCE(i.weight, 0) AS w FROM names n
-      LEFT JOIN name_items i ON i.sport = n.sport AND i.kind = n.kind AND i.latin = n.latin WHERE n.lang = ?`, lang);
+    const rows = all(`SELECT n.kind, n.latin, n.name, n.source, n.conf, n.flags, n.approved, i.display, COALESCE(i.views, 0) AS v, COALESCE(i.weight, 0) AS w FROM names n
+      LEFT JOIN name_items i ON i.sport = n.sport AND i.kind = n.kind AND i.latin = n.latin WHERE n.lang = ?`, lang).filter(r => visibleName(r));
     const players = rows.filter(r => r.kind === 'player').sort((a, b) => (RANK[b.source] || 0) - (RANK[a.source] || 0) || b.v - a.v || b.w - a.w).slice(0, MAP_PLAYERS);
     const keep = [...rows.filter(r => r.kind !== 'player'), ...players];
     for (let i = 0; i < keep.length; i++) {
       const r = keep[i];
       const rank = (RANK[r.source] || 0) * 1e9 + r.v * 1e3 + Math.min(999, r.w) + (r.kind === 'player' ? 0 : 5e8);
       if (r.kind === 'league' && r.source !== 'admin') { const set = leagueNames.get(r.latin) || new Set(); set.add(r.name); leagueNames.set(r.latin, set); }
-      const x = map.get(r.latin);
-      if (!x || rank > x.r) map.set(r.latin, { n: r.name, r: rank });
+      for (const key of r.display && r.display !== r.latin ? [r.latin, r.display] : [r.latin]) {
+        const x = map.get(key);
+        if (!x || rank > x.r) map.set(key, { n: r.name, r: rank });
+      }
       if (i % 2000 === 1999) await step();
     }
     for (const [latin, set] of leagueNames) if (set.size > 1 && (map.get(latin)?.r || 0) < RANK.admin * 1e9) map.delete(latin);
@@ -343,52 +525,75 @@ export function viewOf(path: string): { sport: string; kind: NameKind; id: strin
 export const VIEW_SQL = `UPDATE name_items SET views = views + 1 WHERE sport = ? AND kind = ? AND id = ?`;
 
 /* ---------- admin: Data & feeds → "Names in Hebrew / Arabic" ---------- */
-export function namesAdmin(opts: { q?: string; kind?: string; limit?: number } = {}) {
-  const limit = Math.min(500, Math.max(1, opts.limit || 200));
+/** the source a visitor sees for a row ('latin' = the provider's name stays) */
+const shownSource = (r: any): string => (r && visibleName(r) ? r.source : 'latin');
+export function namesAdmin(opts: { q?: string; kind?: string; limit?: number; flagged?: boolean } = {}) {
+  const limit = Math.min(500, Math.max(1, opts.limit || 300));
   const q = String(opts.q || '').trim();
   const where: string[] = [], args: any[] = [];
-  if (q) { where.push(`(i.latin LIKE ? OR EXISTS (SELECT 1 FROM names x WHERE x.sport = i.sport AND x.kind = i.kind AND x.latin = i.latin AND x.name LIKE ?))`); args.push(`%${q}%`, `%${q}%`); }
+  if (q) { where.push(`(i.latin LIKE ? OR i.display LIKE ? OR EXISTS (SELECT 1 FROM names x WHERE x.sport = i.sport AND x.kind = i.kind AND x.latin = i.latin AND x.name LIKE ?))`); args.push(`%${q}%`, `%${q}%`, `%${q}%`); }
   if (opts.kind && NAME_KINDS.includes(opts.kind as NameKind)) { where.push(`i.kind = ?`); args.push(opts.kind); }
-  const items = all(`SELECT i.sport, i.kind, i.latin, i.id, i.country, i.views, i.weight, i.qid FROM name_items i ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+  if (opts.flagged) where.push(`EXISTS (SELECT 1 FROM names x WHERE x.sport = i.sport AND x.kind = i.kind AND x.latin = i.latin AND x.flags IS NOT NULL AND x.source != 'admin' AND COALESCE(x.approved, 0) = 0)`);
+  const items = all(`SELECT i.sport, i.kind, i.latin, i.display, i.id, i.country, i.views, i.weight, i.qid FROM name_items i ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY i.views DESC, i.weight DESC LIMIT ?`, ...args, limit);
-  const nm = db.prepare(`SELECT lang, name, source FROM names WHERE sport = ? AND kind = ? AND latin = ?`);
+  const nm = db.prepare(`SELECT lang, name, source, conf, flags, approved FROM names WHERE sport = ? AND kind = ? AND latin = ?`);
   const rows = items.map(i => {
-    const by: Record<string, { name: string; source: string }> = {};
-    for (const r of nm.all(i.sport, i.kind, i.latin) as any[]) by[r.lang] = { name: r.name, source: r.source };
+    const by: Record<string, { name: string; source: string; shown: string; conf: number | null; flags: string[]; approved: boolean }> = {};
+    for (const r of nm.all(i.sport, i.kind, i.latin) as any[]) by[r.lang] = { name: r.name, source: r.source, shown: shownSource(r), conf: r.conf ?? null, flags: r.flags ? String(r.flags).split(',') : [], approved: !!r.approved };
     return { ...i, names: by };
   });
-  return { langs: NAME_LANGS, rows, counts: namesCounts(), lastRun, mapSize: Object.fromEntries(NAME_LANGS.map(l => [l, maps.get(l)?.map.size ?? 0])) };
+  return { langs: NAME_LANGS, rows, counts: namesCounts(), top: topCounts(rows), lastRun, ai: namesAiStatus(), flagText: FLAG_TEXT, mapSize: Object.fromEntries(NAME_LANGS.map(l => [l, maps.get(l)?.map.size ?? 0])) };
 }
-/** how many names have an entry per language, kind and source (the reply's numbers; data health) */
+/** fix283: the list's rows per shown source and language (press / wikidata / ai / admin / latin) */
+function topCounts(rows: { names: Record<string, { shown: string }> }[]) {
+  const out: Record<string, Record<string, number>> = {};
+  for (const lang of NAME_LANGS) { const c: Record<string, number> = {}; for (const r of rows) { const k = r.names[lang]?.shown || 'latin'; c[k] = (c[k] || 0) + 1; } out[lang] = c; }
+  return out;
+}
+/** how many names have an entry per language, kind and source (the reply's numbers; data health); fix283: + what is shown */
 export function namesCounts() {
   const out: Record<string, Record<string, Record<string, number>>> = {};
   for (const r of all(`SELECT lang, kind, source, COUNT(*) AS n FROM names GROUP BY lang, kind, source`)) ((out[r.lang] ||= {})[r.kind] ||= {})[r.source] = r.n;
   const items = Object.fromEntries(all(`SELECT kind, COUNT(*) AS n FROM name_items GROUP BY kind`).map(r => [r.kind, r.n]));
-  return { byLang: out, items };
+  const shown: Record<string, Record<string, number>> = {};
+  for (const r of all(`SELECT lang, source, conf, flags, approved FROM names`)) { const c = (shown[r.lang] ||= {}); const k = shownSource(r); c[k] = (c[k] || 0) + 1; }
+  const flagged = Object.fromEntries(all(`SELECT lang, COUNT(*) AS n FROM names WHERE flags IS NOT NULL AND source != 'admin' AND COALESCE(approved, 0) = 0 GROUP BY lang`).map(r => [r.lang, r.n]));
+  return { byLang: out, items, shown, flagged };
 }
-/** an admin's own spelling ('' = remove it: the press / Wikidata / rule name comes back) */
+/** an admin's own spelling ('' = remove it: the press / Wikidata / rule name comes back); fix283: it wins forever */
 export function setAdminName(sport: string, kind: string, latin: string, lang: string, name: string): { ok: boolean; error?: string } {
   if (!isNameLang(lang)) return { ok: false, error: 'language' };
   if (!NAME_KINDS.includes(kind as NameKind)) return { ok: false, error: 'kind' };
-  const it = db.prepare(`SELECT sport, kind, latin, id, qid, country FROM name_items WHERE sport = ? AND kind = ? AND latin = ?`).get(sport, kind, latin) as any;
+  const it = db.prepare(`SELECT sport, kind, latin, id, qid, country, display FROM name_items WHERE sport = ? AND kind = ? AND latin = ?`).get(sport, kind, latin) as any;
   if (!it) return { ok: false, error: 'unknown name' };
   const n = String(name || '').trim().slice(0, 80);
   if (n) {
-    upsertName().run(sport, kind, latin, lang, n, 'admin', it.id, it.qid, new Date().toISOString());
+    upsertName().run(sport, kind, latin, lang, n, 'admin', it.id, it.qid, new Date().toISOString(), null, null, basisOf(it));
   } else {
     db.prepare(`DELETE FROM names WHERE sport = ? AND kind = ? AND latin = ? AND lang = ? AND source = 'admin'`).run(sport, kind, latin, lang);
-    const f = fallbackName(latin, lang, kind, it.country);
+    const f = fallbackName(basisOf(it), lang, kind, it.country);
     if (f) writeName(upsertName(), it, lang, f.name, f.source);
   }
   void buildMaps();
   return { ok: true };
 }
-/** Copy for Claude: the card's text (the top names and their sources) */
+/** fix283: "approve" — the spelling as it is is right: shown even when a check flagged it, never overwritten by the job */
+export function approveName(sport: string, kind: string, latin: string, lang: string, on = true): { ok: boolean; error?: string } {
+  if (!isNameLang(lang)) return { ok: false, error: 'language' };
+  const r = db.prepare(`UPDATE names SET approved = ? WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`).run(on ? 1 : 0, sport, kind, latin, lang);
+  if (!Number(r.changes)) return { ok: false, error: 'no spelling to approve' };
+  void buildMaps();
+  return { ok: true };
+}
+/** Copy for Claude: the card's text (the top names, their sources and the checks' flags) */
 export function namesForClaude(): string {
-  const a = namesAdmin({ limit: 60 });
-  const lines = [`Names in Hebrew / Arabic (fix261). Last run: ${a.lastRun.at || 'not yet'}; items ${JSON.stringify(a.counts.items)}; Wikidata tried ${a.lastRun.wdTried}, found ${a.lastRun.wdFound}${a.lastRun.error ? `; error: ${a.lastRun.error}` : ''}.`,
-    `Entries per language / kind / source: ${JSON.stringify(a.counts.byLang)}`, 'Most opened names (latin | he (source) | ar (source)):'];
-  for (const r of a.rows) lines.push(`${r.sport || '-'} ${r.kind} | ${r.latin} | ${r.names.he ? `${r.names.he.name} (${r.names.he.source})` : '—'} | ${r.names.ar ? `${r.names.ar.name} (${r.names.ar.source})` : '—'}`);
+  const a = namesAdmin({ limit: 80 });
+  const lines = [`Names in Hebrew / Arabic (fix261, fix283). Last run: ${a.lastRun.at || 'not yet'}; items ${JSON.stringify(a.counts.items)}; Wikidata tried ${a.lastRun.wdTried}, found ${a.lastRun.wdFound}${a.lastRun.error ? `; error: ${a.lastRun.error}` : ''}.`,
+    `Shown per source (all names): ${JSON.stringify(a.counts.shown)}; flagged: ${JSON.stringify(a.counts.flagged)}; top ${a.rows.length}: ${JSON.stringify(a.top)}`,
+    `AI: ${a.ai.configured ? `on (${a.ai.model}), today $${a.ai.today.usd.toFixed(2)} of $${a.ai.capUsd}, ${a.ai.today.names} names` : 'off (no ANTHROPIC_API_KEY)'}`,
+    'Most opened names (latin | he shown/source conf flags | ar shown/source conf flags):'];
+  const cell = (x: any) => (x ? `${x.name} (${x.shown}${x.shown !== x.source ? `/${x.source}` : ''}${x.conf != null ? ` ${x.conf}` : ''}${x.flags.length ? ` ⚑${x.flags.join('+')}` : ''})` : '—');
+  for (const r of a.rows) lines.push(`${r.sport || '-'} ${r.kind} | ${r.latin}${r.display ? ` (${r.display})` : ''} | ${cell(r.names.he)} | ${cell(r.names.ar)}`);
   return lines.join('\n');
 }
 
@@ -414,6 +619,8 @@ export function namesHealth(now = Date.now()): import('./dataHealth').Check {
     items: [
       ...per.map(p => `${p.lang} by kind / source: ${JSON.stringify(c.byLang[p.lang] || {})}`),
       `Last run: ${lastRun.written.toLocaleString('en-US')} written, Wikidata tried ${lastRun.wdTried}, found ${lastRun.wdFound}${lastRun.error ? ` · error: ${lastRun.error}` : ''}`,
+      ...per.map(p => `${p.lang} shown to visitors by source: ${JSON.stringify(c.shown[p.lang] || {})} · flagged for review ${c.flagged[p.lang] || 0}`),
+      (() => { const ai = namesAiStatus(); return ai.configured ? `AI spelling (${ai.model}): today $${ai.today.usd.toFixed(2)} of $${ai.capUsd}, ${ai.today.names} names` : 'AI spelling off (no ANTHROPIC_API_KEY)'; })(),
       ...(now - mapsAt < 3600 * 1000 ? [] : [`Map built ${mapsAt ? `${Math.round((now - mapsAt) / 60000)} min ago` : 'never'}`])
     ]
   };

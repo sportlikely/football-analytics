@@ -132,9 +132,9 @@ const P: Record<string, Pair> = {
   'wimbledon': ['וימבלדון', 'ويمبلدون'], 'roland garros': ['רולאן גארוס', 'رولان غاروس'], 'french open': ['רולאן גארוס', 'رولان غاروس'], 'us open': ['אליפות ארה"ב הפתוחה', 'بطولة أمريكا المفتوحة'],
   'australian open': ['אליפות אוסטרליה הפתוחה', 'بطولة أستراليا المفتوحة'],
   // the players everyone searches for
-  'lionel messi': ['ליונל מסי', 'ليونيل ميسي'], 'l messi': ['ל. מסי', 'ميسي'], 'cristiano ronaldo': ['כריסטיאנו רונאלדו', 'كريستيانو رونالدو'],
-  'kylian mbappe': ['קיליאן אמבפה', 'كيليان مبابي'], 'k mbappe': ['ק. אמבפה', 'مبابي'], 'erling haaland': ['ארלינג הולאנד', 'إيرلينغ هالاند'], 'e haaland': ['א. הולאנד', 'هالاند'],
-  'mohamed salah': ['מוחמד סלאח', 'محمد صلاح'], 'm salah': ['מ. סלאח', 'محمد صلاح'], 'harry kane': ['הארי קיין', 'هاري كين'], 'h kane': ['ה. קיין', 'هاري كين'],
+  'lionel messi': ['ליונל מסי', 'ليونيل ميسي'], 'l messi': ['L. מסי', 'L. ميسي'], 'cristiano ronaldo': ['כריסטיאנו רונאלדו', 'كريستيانو رونالدو'],
+  'kylian mbappe': ['קיליאן אמבפה', 'كيليان مبابي'], 'k mbappe': ['K. אמבפה', 'K. مبابي'], 'erling haaland': ['ארלינג הולאנד', 'إيرلينغ هالاند'], 'e haaland': ['E. הולאנד', 'E. هالاند'],
+  'mohamed salah': ['מוחמד סלאח', 'محمد صلاح'], 'm salah': ['M. סלאח', 'M. صلاح'], 'harry kane': ['הארי קיין', 'هاري كين'], 'h kane': ['H. קיין', 'H. كين'],
   'jude bellingham': ['ג\'וד בלינגהאם', 'جود بيلينغهام'], 'vinicius junior': ['ויניסיוס ג\'וניור', 'فينيسيوس جونيور'], 'vinicius jr': ['ויניסיוס ג\'וניור', 'فينيسيوس جونيور'],
   'lamine yamal': ['לאמין ימאל', 'لامين يامال'], 'robert lewandowski': ['רוברט לבנדובסקי', 'روبرت ليفاندوفسكي'], 'kevin de bruyne': ['קווין דה בריינה', 'كيفن دي بروين'],
   'neymar': ['ניימאר', 'نيمار'], 'karim benzema': ['קארים בנזמה', 'كريم بنزيما'], 'riyad mahrez': ['ריאד מחרז', 'رياض محرز'], 'achraf hakimi': ['אשרף חכימי', 'أشرف حكيمي'],
@@ -142,6 +142,7 @@ const P: Record<string, Pair> = {
   'lebron james': ['לברון ג\'יימס', 'ليبرون جيمس'], 'stephen curry': ['סטף קרי', 'ستيفن كوري'], 'nikola jokic': ['ניקולה יוקיץ\'', 'نيكولا يوكيتش'], 'luka doncic': ['לוקה דונצ\'יץ\'', 'لوكا دونتشيتش'],
   'giannis antetokounmpo': ['יאניס אנטטוקומפו', 'يانيس أنتيتوكومبو'], 'kevin durant': ['קווין דוראנט', 'كيفن ديورانت'], 'deni avdija': ['דני אבדיה', 'ديني أفدييا'],
   'victor wembanyama': ['ויקטור וומבניאמה', 'فيكتور ويمبانياما'], 'jayson tatum': ['ג\'ייסון טייטום', 'جايسون تاتوم'], 'shai gilgeous-alexander': ['שיי גילג\'ס-אלכסנדר', 'شاي غيلجس ألكسندر'],
+  'damian lillard': ['דמיאן לילארד', 'داميان ليلارد'], 'levante': ['לבאנטה', 'ليفانتي'], 'levante ud': ['לבאנטה', 'ليفانتي'],
   'carlos alcaraz': ['קרלוס אלקראס', 'كارلوس ألكاراز'], 'jannik sinner': ['יאניק סינר', 'يانيك سينر'], 'novak djokovic': ['נובאק ג\'וקוביץ\'', 'نوفاك ديوكوفيتش'],
   'aryna sabalenka': ['ארינה סבלנקה', 'أرينا سابالينكا'], 'iga swiatek': ['איגה שוויונטק', 'إيغا شفيونتيك'], 'coco gauff': ['קוקו גאוף', 'كوكو غوف'], 'ons jabeur': ['אונס ג\'אבר', 'أنس جابر']
 };
@@ -306,6 +307,8 @@ export function translitWord(word: string, lang: NameLang): string {
     out += hit[1];
     i += hit[0].length;
   }
+  // fix283: "w" + a vowel o / u wrote three vavs ("Bowling" → בווולינג): two at most
+  if (lang === 'he') out = out.replace(/ו{3,}/g, 'וו');
   if (r.finals && out) {
     const last = out[out.length - 1];
     if (r.finals[last]) out = out.slice(0, -1) + r.finals[last];
@@ -333,8 +336,8 @@ export function translit(name: string, lang: NameLang): string | null {
     if (two && words.has(two)) { parts.push(words.get(two)!); i++; changed = true; continue; }
     if (/^\d+$/.test(t)) { parts.push(t); continue; }
     if (/^\p{Lu}{2,5}$/u.test(t) && !words.has(nameKey(t))) { parts.push(t); continue; } // an acronym stays
-    // an initial: "E." → the first letter in the local script + "."
-    if (/^\p{L}\.$/u.test(t)) { const l = translitWord(nameKey(t), lang); parts.push(l ? `${firstLetter(l, lang)}.` : t); changed = true; continue; }
+    // fix283: initials stay Latin ("E." , "D.J."): a Hebrew final letter (ן.) or a lost dot read wrong ("N. Touliatos" → "ן.")
+    if (/^(\p{L}\.)+$/u.test(t)) { parts.push(t.toUpperCase()); continue; }
     const pieces = t.split('-').map(p => {
       const k = nameKey(p);
       if (!k) return '';
@@ -349,7 +352,6 @@ export function translit(name: string, lang: NameLang): string | null {
   const s = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   return changed && s ? (lang === 'ar' ? joinAl(s) : s) : null;
 }
-const firstLetter = (s: string, lang: NameLang) => (lang === 'he' && s[0] === 'א' && s[1] === 'י' ? 'א' : s[0]);
 /** Arabic writes the article on the word: "ال هلال" → "الهلال" */
 const joinAl = (s: string) => s.replace(/(^|\s)ال\s+/g, '$1ال');
 
@@ -382,4 +384,146 @@ export function fallbackName(name: string, lang: NameLang, kind?: string, countr
   if (p) return { name: p, source: 'press' };
   const t = translit(name, lang);
   return t ? { name: t, source: 'translit' } : null;
+}
+
+/* ---------- fix283: name order, the checks that block a spelling, what visitors may see ---------- */
+
+/**
+ * A person's name as people write it (first name first), before any spelling: the provider's own first / last fields
+ * when it sends them; "Surname, First" → "First Surname"; API-Basketball writes every player surname first
+ * ("Lillard Damian", "Jackson Jr. Jaren", "Harper D.") → the given name (the last word) goes first, as utils/personName.ts
+ * bbCommonName does for the pages and slugs. Everything else is already first-last.
+ */
+export function personOrder(latin: string, opts: { sport?: string; kind?: string; first?: string | null; last?: string | null } = {}): string {
+  const n = String(latin || '').trim().replace(/\s+/g, ' ');
+  if (opts.kind && opts.kind !== 'player') return n;
+  const f = String(opts.first || '').trim(), l = String(opts.last || '').trim();
+  if (f && l && !/^\p{L}\.?$/u.test(f)) return `${f} ${l}`;
+  const comma = /^([^,]+),\s*(.+)$/.exec(n);
+  if (comma) return `${comma[2]} ${comma[1]}`;
+  if (opts.sport === 'basketball') {
+    const w = n.split(' ');
+    if (w.length < 2 || /^(\p{Lu}\.)+$/u.test(w[0])) return n;
+    return [w[w.length - 1], ...w.slice(0, -1)].join(' ');
+  }
+  return n;
+}
+
+/**
+ * Words of the language that are places or plain words: a person's name never contains them, and a team / league name
+ * only when its Latin name means that place ("Jordan Washington" → "ירדן וושינגטון": ירדן is the country / river, the
+ * person is "ג'ורדן"). Value = the Latin words that may produce it. Countries are added from COUNTRIES below.
+ */
+const DICT_EXTRA: Record<NameLang, Record<string, string[]>> = {
+  he: {
+    'ירדן': ['jordan'], 'אביב': ['aviv'], 'שבע': ['sheva'], 'תל': ['tel'], 'גן': ['gan'], 'ים': [], 'הר': [], 'עיר': ['city'], 'בית': ['beit', 'bet'], 'שער': [],
+    'דרך': [], 'חוף': ['coast'], 'מלך': ['king'], 'שלום': ['shalom'], 'כרמל': ['carmel'], 'גליל': ['galil'], 'נגב': ['negev'], 'לבן': ['white'], 'אדום': ['red', 'crvena'], 'עמאן': ['oman', 'amman'],
+    'ירוק': ['green'], 'שחור': ['black'], 'זהב': ['gold', 'golden'], 'כסף': ['silver'], 'שמש': ['sun', 'shemesh'], 'ערב': ['arab', 'arabia'], 'אור': ['or', 'light'],
+    'יום': [], 'לילה': ['night'], 'לב': ['heart'], 'אש': ['fire'], 'מים': ['water'], 'אבן': ['stone', 'even'], 'ברק': ['barak', 'lightning'], 'נמר': ['tiger'], 'אריה': ['lion', 'arie', 'aryeh']
+  },
+  ar: {
+    'الأردن': ['jordan'], 'مصر': ['egypt', 'misr'], 'الملك': ['king'], 'البحر': ['sea'], 'المدينة': ['city', 'madina'], 'الذهب': ['gold', 'golden'], 'الشمس': ['sun'],
+    'عمان': ['oman', 'amman'], 'تونس': ['tunisia', 'tunis'], 'الجزائر': ['algeria', 'algiers'], 'الأبيض': ['white'], 'الأحمر': ['red', 'crvena'], 'الأخضر': ['green'], 'الأسود': ['black', 'lions'], 'النور': ['nour', 'noor'], 'الجبل': ['mountain'], 'النهر': ['river']
+  }
+};
+let dictCache: Record<NameLang, Map<string, Set<string>>> | null = null;
+function dict(lang: NameLang): Map<string, Set<string>> {
+  if (!dictCache) {
+    dictCache = { he: new Map(), ar: new Map() };
+    for (const l of NAME_LANGS) {
+      const m = dictCache[l];
+      for (const [lat, loc] of COUNTRIES[l]) if (!loc.includes(' ')) { const set = m.get(loc) || new Set(); for (const w of lat.split(' ')) set.add(w); m.set(loc, set); }
+      for (const [loc, lats] of Object.entries(DICT_EXTRA[l])) { const set = m.get(loc) || new Set(); for (const w of lats) set.add(w); m.set(loc, set); }
+    }
+  }
+  return dictCache[lang];
+}
+
+export type NameFlag = 'dictionary' | 'final-inside' | 'triple' | 'initials-lost' | 'latin-left' | 'empty';
+export const FLAG_TEXT: Record<NameFlag, string> = {
+  dictionary: 'a dictionary / place word that is not this name',
+  'final-inside': 'a final letter (ך ם ן ף ץ) inside a word',
+  triple: 'the same letter three times in a row',
+  'initials-lost': 'an initial of the Latin name is missing',
+  'latin-left': 'Latin letters left inside the name',
+  empty: 'no letters of the language'
+};
+const INITIAL_RX = /(?<=^|[\s.])\p{L}\.(?=\s|\p{L}\.|$)/gu;
+const LATIN_INITIAL_RX = /(?<=^|[\s.])[A-Z]\.(?=\s|\p{L}\.|$)/gu;
+const initialsOf = (s: string, rx = INITIAL_RX) => [...String(s || '').matchAll(rx)].length;
+
+/**
+ * fix283: what is wrong with a spelling (empty = fine). A flagged spelling is never shown to visitors (back to the Latin
+ * name) and is listed for review in Admin → Data & feeds → "Names in Hebrew / Arabic"; an admin's own spelling or
+ * "approve" overrides it.
+ */
+export function spellingFlags(latin: string, local: string, lang: NameLang, kind?: string): NameFlag[] {
+  const out: NameFlag[] = [];
+  const s = String(local || '').trim();
+  if (!LOCAL_SCRIPT.test(s)) return /\p{L}/u.test(s) ? [] : ['empty']; // an acronym as it is ("NBA", "MLS")
+  const latWords = new Set(nameKey(latin).split(' '));
+  const words = s.split(/[\s\-–־]+/).map(w => w.replace(/^["'׳״(]+|["'׳״).,]+$/g, '')).filter(Boolean);
+  const d = dict(lang);
+  // a person: no word of the name may be one; a team / league / place: the whole name may not be one it does not mean
+  // ("Coppa Italia" → "גביע איטליה" is right)
+  if (kind === 'player') { if (words.some(w => d.has(w))) out.push('dictionary'); }
+  else { const means = d.get(words.join(' ')); if (means && ![...means].some(m => latWords.has(m))) out.push('dictionary'); }
+  if (lang === 'he' && /[ךםןףץ](?=[א-ת])/.test(s)) out.push('final-inside');
+  if (/(\p{L})\1\1/u.test(s)) out.push('triple');
+  // initials stay the Latin capitals ("N. טוליאטוס"): "ן." / "ג' ריד" lost them
+  if (initialsOf(latin) > initialsOf(s, LATIN_INITIAL_RX)) out.push('initials-lost');
+  // Latin letters next to local ones: only Latin initials ("N.") and an acronym the Latin name has ("NBA") may stay
+  const rest = s.replace(LATIN_INITIAL_RX, '').split(/\s+/).filter(w => !(/^[A-Z0-9]{2,6}$/.test(w) && String(latin).split(/\s+/).includes(w))).join(' ');
+  if (/[A-Za-z]/.test(rest)) out.push('latin-left');
+  return out;
+}
+
+/** the sources, most trusted first ('translit' = letter rules; 'latin' = nothing shown, the provider's name stays) */
+export const NAME_SOURCES = ['admin', 'press', 'wikidata', 'ai', 'translit'] as const;
+/** the AI's confidence a spelling needs before visitors see it (NAMES_AI_MIN_CONF, 0–1) */
+export const aiMinConf = () => { const v = Number(process.env.NAMES_AI_MIN_CONF); return v > 0 && v <= 1 ? v : 0.8; };
+/**
+ * fix283: may visitors see this row? Admin spellings and approved rows always; press / Wikidata / AI (confident) when no
+ * check flagged them; letter rules never (they are the review list's starting point only).
+ */
+export function visibleName(r: { source: string; conf?: number | null; flags?: string | null; approved?: number | null }): boolean {
+  if (r.source === 'admin' || r.approved) return true;
+  if (r.flags) return false;
+  if (r.source === 'press' || r.source === 'wikidata') return true;
+  if (r.source === 'ai') return (r.conf ?? 0) >= aiMinConf();
+  return false;
+}
+
+/* ---------- the AI's batch (services/namesAi.ts sends it) ---------- */
+export type AiItem = { sport: string; kind: string; name: string; country?: string | null; team?: string | null };
+export const AI_SYSTEM = `You write sports names in Hebrew and Arabic the way the sports press writes them (Hebrew: ONE, Sport5, Walla Sport; Arabic: Kooora, beIN Sports).
+Rules:
+- Persons: first name, then last name, as given. Keep an initial as the Latin capital with a dot ("N. Touliatos" → "N. טוליאטוס"; "D.J. Reed" → "D.J. ריד").
+- Spell the sound of the name in its own language (Spanish, Serbian, Greek, Turkish …), not the English letters. Never translate a name into a word ("Jordan" the person is "ג'ורדן", never "ירדן").
+- Teams and leagues: the established press name (city names as the press writes them; club-form letters like FC dropped).
+- Hebrew: final letters (ך ם ן ף ץ) only at the end of a word; use ג' צ' ז' ת' for j / ch / zh / th sounds.
+- confidence: 0.0–1.0, how sure you are this is the spelling the press uses (≥ 0.9 only when you have seen it written that way).
+Answer with JSON only: [{"i": <index>, "he": "...", "he_conf": 0.0, "ar": "...", "ar_conf": 0.0}, ...] — one entry per input line, same index.`;
+export function aiPrompt(items: AiItem[]): string {
+  return items.map((it, i) => `${i}\t${it.sport || '-'}\t${it.kind}\t${it.name}${it.country ? `\tcountry: ${it.country}` : ''}${it.team ? `\tteam: ${it.team}` : ''}`).join('\n');
+}
+/** the AI's answer → per index { he, he_conf, ar, ar_conf } (anything malformed is left out) */
+export function parseAi(text: string, n: number): Map<number, Partial<Record<NameLang, { name: string; conf: number }>>> {
+  const out = new Map<number, Partial<Record<NameLang, { name: string; conf: number }>>>();
+  const m = /\[[\s\S]*\]/.exec(String(text || ''));
+  if (!m) return out;
+  let arr: any[] = [];
+  try { arr = JSON.parse(m[0]); } catch { return out; }
+  if (!Array.isArray(arr)) return out;
+  for (const x of arr) {
+    const i = Number(x?.i);
+    if (!Number.isInteger(i) || i < 0 || i >= n) continue;
+    const e: Partial<Record<NameLang, { name: string; conf: number }>> = {};
+    for (const lang of NAME_LANGS) {
+      const name = String(x?.[lang] ?? '').trim().slice(0, 80), conf = Math.max(0, Math.min(1, Number(x?.[`${lang}_conf`]) || 0));
+      if (name && LOCAL_SCRIPT.test(name)) e[lang] = { name, conf };
+    }
+    out.set(i, e);
+  }
+  return out;
 }

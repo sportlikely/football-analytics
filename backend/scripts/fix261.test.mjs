@@ -130,7 +130,7 @@ test('letter rules and press spellings: Hebrew and Arabic', () => {
   assert.equal(NS.translit('Declan Rice', 'he'), 'דקלן רייס');
   assert.equal(NS.translit('Los Angeles Lakers', 'he'), "לוס אנג'לס לייקרס");
   assert.equal(NS.translit('Boston Celtics', 'ar'), 'بوسطن سيلتكس');
-  assert.match(NS.translit('B. Saka', 'he'), /^ב\. /, 'an initial in the local script');
+  assert.match(NS.translit('B. Saka', 'he'), /^B\. /, 'fix283: an initial stays a Latin initial');
   assert.equal(NS.translit('PSV', 'he'), null, 'an acronym alone: no entry (stays as written)');
   assert.match(NS.translit('Getafe Madrid U21', 'he'), /עד גיל 21$/);
   for (const w of ['Napoli', 'Osasuna', 'Cagliari', 'Monza', 'Empoli', 'Lecce', 'Kasimpasa']) {
@@ -163,7 +163,8 @@ test('the names job: collect, rules, Wikidata, admin, maps, search, retention', 
       if (q === 'Gabriel Jesus') return ok({ search: [{ id: 'Q11', label: 'Gabriel Jesus', match: { text: 'Gabriel Jesus' }, description: 'Brazilian association football player' }] });
       return ok({ search: [] });
     }
-    if (/wbgetentities/.test(url)) return ok({ entities: { Q9: { labels: { he: { value: 'ארזורומספור (מועדון כדורגל)' }, ar: { value: 'نادي أرضروم سبور' } } }, Q11: { labels: { he: { value: "גבריאל ז'סוס" }, ar: { value: 'غابرييل جيسوس' } } } } });
+    // fix283: a player found by name needs one more thing that agrees — here his club (P54 → Arsenal)
+    if (/wbgetentities/.test(url)) return ok({ entities: { Q9: { labels: { he: { value: 'ארזורומספור (מועדון כדורגל)' }, ar: { value: 'نادي أرضروم سبور' } } }, Q11: { labels: { en: { value: 'Gabriel Jesus' }, he: { value: "גבריאל ז'סוס" }, ar: { value: 'غابرييل جيسوس' } }, claims: { P54: [{ mainsnak: { datavalue: { value: { id: 'Q1' } } } }] } }, Q1: { labels: { en: { value: 'Arsenal F.C.' } } } } });
     return { ok: false, status: 404, json: async () => ({}) };
   });
   const run = await names.namesTick({ collect: true, wd: 50 });
