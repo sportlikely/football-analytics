@@ -178,7 +178,7 @@ test('wiring: basketball in the nightly refit on p_raw, its shown chance through
 
 test('wiring: data health keeps 5 points and names the layer in use and its fit date', () => {
   const ch = read('src/services/calibrationHealth.ts');
-  assert.match(ch, /5 allowed/);
+  assert.match(ch, /allowed for \$\{w!\.n\} games/); // fix276: max(5 points, 2 standard errors) per band
   assert.match(ch, /layerInUse\(sport\)/);
   assert.match(read('src/utils/afCalib.ts'), /minBand = 50, maxGap = 5\)/);
   const rc = read('src/services/recentCalib.ts');

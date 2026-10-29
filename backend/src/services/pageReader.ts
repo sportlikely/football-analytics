@@ -10,6 +10,7 @@ import { Worker, isMainThread } from 'node:worker_threads';
 import logger from '../utils/logger';
 import { DB_FILE } from '../db';
 import { cachePlan } from '../utils/dbTune';
+import { inWarmUp } from './readiness';
 
 export type ReadRow = { text: string; etag: string | null; gz: Buffer | null };
 
@@ -100,13 +101,15 @@ function noteSmallSize(what: string, bytes: number | undefined) {
  * fix249: the same per hour (reads, over 500 ms, the longest and what it was), written to reader_hours every minute
  * (perfHistory.saveHours) — the data-health proof "no read over 500 ms for 3 h" reads it in the worker
  */
-export type ReaderHour = { hour: string; reads: number; over500: number; maxMs: number; top: string | null };
+/** fix276: a read over 500 ms in the warm-up (the first 10 minutes after ready) goes to `warm500`, not `over500` / the longest */
+export type ReaderHour = { hour: string; reads: number; over500: number; maxMs: number; top: string | null; warm500: number };
 const hours: ReaderHour[] = [];
 function noteHour(ms: number, what: string) {
   const hour = new Date().toISOString().slice(0, 13);
   let h = hours[hours.length - 1];
-  if (!h || h.hour !== hour) { h = { hour, reads: 0, over500: 0, maxMs: 0, top: null }; hours.push(h); if (hours.length > 4) hours.shift(); }
+  if (!h || h.hour !== hour) { h = { hour, reads: 0, over500: 0, maxMs: 0, top: null, warm500: 0 }; hours.push(h); if (hours.length > 4) hours.shift(); }
   h.reads++;
+  if (inWarmUp()) { if (ms > 500) h.warm500++; return; }
   if (ms > 500) h.over500++;
   if (ms > h.maxMs) { h.maxMs = ms; h.top = what.slice(0, 200); }
 }

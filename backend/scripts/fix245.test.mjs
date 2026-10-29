@@ -147,8 +147,8 @@ test("data health fails when a request from Google's ranges got a 429 / 503", ()
   `, baseEnv());
   assert.equal(r.ok, 'ok');
   assert.equal(r.level, 'fail');
-  assert.match(r.items[0], /429 \/api\/matches\/upcoming/);
-  assert.match(r.detail, /1 got 429 \/ 503/);
+  assert.ok(r.items.some(x => /429 \/api\/matches\/upcoming/.test(x)), r.items.join(' | '));
+  assert.match(r.detail, /1 of 2 got 429 \/ 503/); // fix276: red at 0.5% of the requests (here 1 of 2)
 });
 
 test('bot gate: a verified search engine waits (past the queue limit) and never gets null; others still get the 503', async () => {

@@ -188,6 +188,6 @@ test('stringifyAsync with a replacer, first-round order, the slow-request counte
   assert.equal(h.toolsSlow.level, 'warn', 'an admin tool over 3 s: yellow');
   assert.equal(h.admin.level, 'fail', 'an admin list over 1 s: red');
   assert.match(h.admin.detail, /^3 admin request/);
-  assert.equal(h.pub.level, 'fail');
+  assert.equal(h.pub.level, 'warn', 'fix276: 1–5 public requests over 1 s = yellow, red over 5');
   assert.match(h.pub.detail, /^1 public request.*1 of them signed in/);
 });

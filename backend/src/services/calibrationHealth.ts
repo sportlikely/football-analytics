@@ -7,10 +7,13 @@
  * with it; the line names the layer and the last nightly decision.
  * fix270: basketball too; the allowed gap stays 5 points; the detail names the layer in use and its fit date, the items
  * the last run's before → after table.
+ * fix276: each band's allowed gap grows with its size: max(5 points, 2 × the standard error of its hit rate)
+ * (utils/healthRules.ts calibVerdict) — over 5 but inside it = yellow "too few games to tell", outside = red; every
+ * band shows its allowed gap.
  * Cached 30 minutes (the records are read from the tables).
  */
 import { db } from '../db';
-import { calibCheck } from '../utils/afCalib';
+import { calibVerdict, calibAllowed } from '../utils/healthRules';
 import { winnerByConfidence } from '../utils/winnerBands';
 import { publicRecord } from './tracking';
 import { isPreseason } from './bbModel';
@@ -52,14 +55,18 @@ export function calibrationLine(sport: Sport): Line {
   const id = `calibration-${sport}`, label = `Calibration (${NAME[sport]})`;
   try {
     const { rows, note } = byConfidence(sport);
-    const c = calibCheck(rows);
-    const items = rows.filter(r => r.n).map(r => `${r.label ?? ''}: said ${r.said ?? '–'}%, happened ${r.hitRate ?? '–'}% (${r.n} games)`);
+    const c = calibVerdict(rows);
+    const sign = (g: number) => `${g > 0 ? '+' : ''}${g}`;
+    const items = rows.filter(r => r.n).map(r => `${r.label ?? ''}: said ${r.said ?? '–'}%, happened ${r.hitRate ?? '–'}% (${r.n} games)`
+      + (r.said != null && r.hitRate != null ? ` · gap ${sign(Math.round((r.said - r.hitRate) * 10) / 10)}, allowed ±${calibAllowed(r.n, r.hitRate)}${r.n < 50 ? ' (under 50 games: not judged)' : ''}` : ''));
     if (sport !== 'nfl') items.push(recentCalibLine(sport));
     const layer = sport !== 'nfl' ? ` · ${layerInUse(sport)}` : '';
+    const w = c.worst;
     const detail = (!c.enough ? `collecting: ${c.total} of 100 games in the last 30 days (${note})`
-      : c.fail ? `${c.worst!.label ?? ''} said ${c.worst!.said}%, happened ${c.worst!.hitRate}% over ${c.worst!.n} games (${c.worst!.gap > 0 ? '+' : ''}${c.worst!.gap} points; 5 allowed) · ${note}`
-        : `every band of 50+ games within 5 points (${c.total} games, ${note})`) + layer;
-    return { id, label, level: c.fail ? 'fail' : 'ok', detail, items };
+      : c.level === 'fail' ? `${w!.label ?? ''} said ${w!.said}%, happened ${w!.hitRate}% over ${w!.n} games (${sign(w!.gap)} points; ${w!.allowed} allowed for ${w!.n} games) · ${note}`
+        : c.level === 'warn' ? `${w!.label ?? ''} ${sign(w!.gap)} points over ${w!.n} games, inside the ${w!.allowed} allowed: too few games to tell (${w!.n} games) · ${note}`
+          : `every band of 50+ games within its allowed gap (${c.total} games, ${note})`) + layer;
+    return { id, label, level: c.level, detail, items };
   } catch (e: any) {
     return { id, label, level: 'warn', detail: `Check failed: ${e.message}`, items: [] };
   }

@@ -161,8 +161,8 @@ test('disk: warn when the growth fills the volume within 30 days, fail within 7 
   assert.equal(diskVerdict({ volFree: 1 * G, volTotal: 50 * G, dbBytes: 2 * G, walBytes: 0, growth7d: 0 }).level, 'fail');
   // shrinking: never full
   assert.equal(diskVerdict({ volFree: 40 * G, volTotal: 50 * G, dbBytes: 2 * G, walBytes: 0, growth7d: -G }).daysToFull, null);
-  // a big WAL is a warning of its own
-  assert.equal(diskVerdict({ volFree: 40 * G, volTotal: 50 * G, dbBytes: 2 * G, walBytes: DISK_RULES.walWarnBytes + 1, growth7d: 0 }).level, 'warn');
+  // fix276: a WAL over the 64 MB journal limit alone is no warning any more (red over 256 MB: fix273)
+  assert.equal(diskVerdict({ volFree: 40 * G, volTotal: 50 * G, dbBytes: 2 * G, walBytes: DISK_RULES.walWarnBytes + 1, growth7d: 0 }).level, 'ok'); // fix276: over the 64 MB journal limit alone is plain ok now
 });
 
 /* ---------- the slow reads ---------- */

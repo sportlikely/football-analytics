@@ -328,6 +328,15 @@ export function dbSpaceStatus() {
   };
 }
 
+/** fix276: the WAL and whether the last TRUNCATE ran, and when (the Disk line) */
+export function truncateLine(wal: number, c: { lastTruncate?: { at: string; busy?: number | boolean } | null; lastDone?: { at: string } | null }, now = Date.now()): string {
+  const ago = (at: string) => { const m = Math.max(0, Math.round((now - Date.parse(at)) / 60000)); return `${at.slice(11, 16)} UTC, ${m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`} ago`; };
+  const t = c.lastTruncate;
+  if (!t) return `WAL ${MB(wal)}, no TRUNCATE yet since the start`;
+  if (!t.busy) return `WAL ${MB(wal)}, last TRUNCATE ran ${ago(t.at)}`;
+  return `WAL ${MB(wal)}, last TRUNCATE tried ${ago(t.at)}, blocked by a reader${c.lastDone ? `; last one that ran ${ago(c.lastDone.at)}` : '; none ran since the start'}`;
+}
+
 export function diskHealth(): Check[] {
   const s = dbSpaceStatus();
   const v = s.verdict;
@@ -360,7 +369,7 @@ export function diskHealth(): Check[] {
     detail: `${vol ? `Volume ${v.freePct!.toFixed(0)}% free (${GB(vol.free)} of ${GB(vol.total)})` : 'Volume size unknown'} · database ${GB(s.files.db + s.files.wal)}`
       + `${s.growth6h ? ` · last 6 h ${s.growth6h.bytes >= 0 ? '+' : ''}${GB(s.growth6h.bytes)}` : ''}`
       + ` · 7-day growth ${s.growth7d != null ? `${s.growth7d >= 0 ? '+' : ''}${GB(s.growth7d)}` : 'not known yet (needs 2 days)'}`
-      + `${v.daysToFull != null ? ` · full in ${Math.floor(v.daysToFull)} days at this rate` : ''}${v.reasons.length ? ` — ${v.reasons.join('; ')}` : ''}`,
+      + `${v.daysToFull != null ? ` · full in ${Math.floor(v.daysToFull)} days at this rate` : ''} · ${truncateLine(s.files.wal, s.checkpoint)}${v.reasons.length ? ` — ${v.reasons.join('; ')}` : ''}`,
     items
   }];
   // fix269: the volume's own latency, by hour, + what the connections run with
@@ -370,7 +379,7 @@ export function diskHealth(): Check[] {
   let slow = 0;
   try {
     const since = Math.floor(Date.now() / 60_000) - 180;
-    slow = Number((db.prepare(`SELECT COALESCE(SUM(n - crawler), 0) AS n FROM slow_requests WHERE minute >= ?`).get(since) as any)?.n || 0);
+    slow = Number((db.prepare(`SELECT COALESCE(SUM(n - crawler - COALESCE(warm, 0)), 0) AS n FROM slow_requests WHERE minute >= ?`).get(since) as any)?.n || 0); // fix276: warm-up apart
   } catch { /* no table yet */ }
   const over = hours.reduce((t, h) => t + h.over500, 0), max = Math.max(0, ...hours.map(h => h.maxMs));
   // fix254: + the web thread's longest stall (target: none over 500 ms)
@@ -381,7 +390,7 @@ export function diskHealth(): Check[] {
     id: 'slow-reads', label: 'Slow reads (3 h)',
     level: !hours.length ? 'ok' : over || slow || stallMs > 500 ? 'warn' : 'ok',
     detail: !hours.length ? 'No numbers yet' : `${over} read(s) over 500 ms in the last 3 h, longest ${max.toLocaleString('en-US')} ms; ${slow} public request(s) over 1 s; longest web stall ${stallMs.toLocaleString('en-US')} ms (target: none of these)`,
-    items: [volumeLine(), ...hours.map(h => `${h.hour.slice(11)}:00 UTC: ${h.reads.toLocaleString('en-US')} reads, ${h.over500} over 500 ms, longest ${h.maxMs} ms`), ...(worst?.top && worst.maxMs > 500 ? [`Longest: ${worst.top}`] : [])]
+    items: [volumeLine(), ...hours.map(h => `${h.hour.slice(11)}:00 UTC: ${h.reads.toLocaleString('en-US')} reads, ${h.over500} over 500 ms, longest ${h.maxMs} ms${h.warm500 ? ` (+ ${h.warm500} over 500 ms in a start's warm-up: not counted)` : ''}`), ...(worst?.top && worst.maxMs > 500 ? [`Longest: ${worst.top}`] : [])]
   });
   return checks;
 }

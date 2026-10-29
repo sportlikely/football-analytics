@@ -21,6 +21,8 @@ import type express from 'express';
 import { db } from '../db';
 import { deferred } from './deferredWrites';
 import { isWeb, runsJobs } from './role';
+import { inWarmUp } from './readiness';
+import { slowVerdict } from '../utils/healthRules';
 
 export const DEADLINE_MS = Number(process.env.DEADLINE_MS) || 900;
 const SLOW_MS = 1000;
@@ -54,7 +56,8 @@ const SKIP_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection
 
 /* ---------- the slow-request counter ---------- */
 
-type Slow = { n: number; maxMs: number; crawler: number; admin: number; signed: number };
+/** fix276: `warm` = public (not crawler / admin) requests in the warm-up; `maxOut` = the longest public one outside it */
+type Slow = { n: number; maxMs: number; crawler: number; admin: number; signed: number; warm: number; maxOut: number };
 type Who = 'crawler' | 'admin' | 'signed' | 'anon';
 const minutes = new Map<number, Map<string, Slow>>(); // minute → route → counts (this process, last 60 minutes)
 const slowStats = { total: 0, pendingSent: 0, appPageSent: 0, lateServed: 0, lateStale: 0, lateKept: 0, lateRefreshed: 0 };
@@ -62,23 +65,24 @@ function noteSlow(route: string, ms: number, who: Who) {
   const m = Math.floor(Date.now() / 60_000);
   let b = minutes.get(m);
   if (!b) { minutes.set(m, (b = new Map())); for (const k of minutes.keys()) if (k < m - 60) minutes.delete(k); }
-  const e = b.get(route) || { n: 0, maxMs: 0, crawler: 0, admin: 0, signed: 0 };
+  const e = b.get(route) || { n: 0, maxMs: 0, crawler: 0, admin: 0, signed: 0, warm: 0, maxOut: 0 };
   e.n++; e.maxMs = Math.max(e.maxMs, Math.round(ms));
   if (who === 'crawler') e.crawler++; else if (who === 'admin') e.admin++; else if (who === 'signed') e.signed++;
+  if (who === 'signed' || who === 'anon') { if (inWarmUp()) e.warm++; else e.maxOut = Math.max(e.maxOut, Math.round(ms)); }
   if (b.size < 200 || b.has(route)) b.set(route, e);
   slowStats.total++;
 }
 if (runsJobs) {
   db.exec(`CREATE TABLE IF NOT EXISTS slow_requests (minute INTEGER NOT NULL, route TEXT NOT NULL, n INTEGER NOT NULL, max_ms INTEGER NOT NULL, crawler INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (minute, route))`);
-  for (const col of ['admin INTEGER NOT NULL DEFAULT 0', 'signed INTEGER NOT NULL DEFAULT 0']) { try { db.exec(`ALTER TABLE slow_requests ADD COLUMN ${col}`); } catch { /* there already */ } }
+  for (const col of ['admin INTEGER NOT NULL DEFAULT 0', 'signed INTEGER NOT NULL DEFAULT 0', 'warm INTEGER NOT NULL DEFAULT 0', 'max_out INTEGER']) { try { db.exec(`ALTER TABLE slow_requests ADD COLUMN ${col}`); } catch { /* there already */ } }
   setInterval(() => { try { db.prepare(`DELETE FROM slow_requests WHERE minute < ?`).run(Math.floor(Date.now() / 60_000) - 7 * 1440); } catch { /* next hour */ } }, 3600_000).unref();
 }
 // each finished minute goes to slow_requests (written by the worker: the web process writes nothing itself)
-const saveSlow = deferred(`INSERT OR REPLACE INTO slow_requests (minute, route, n, max_ms, crawler, admin, signed) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+const saveSlow = deferred(`INSERT OR REPLACE INTO slow_requests (minute, route, n, max_ms, crawler, admin, signed, warm, max_out) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const savedUpTo = { m: Math.floor(Date.now() / 60_000) - 1 };
 if (isWeb || runsJobs) setInterval(() => {
   const now = Math.floor(Date.now() / 60_000);
-  for (const [m, b] of minutes) if (m > savedUpTo.m && m < now) for (const [route, e] of b) { try { saveSlow.run(m, route, e.n, e.maxMs, e.crawler, e.admin, e.signed); } catch { /* next minute */ } }
+  for (const [m, b] of minutes) if (m > savedUpTo.m && m < now) for (const [route, e] of b) { try { saveSlow.run(m, route, e.n, e.maxMs, e.crawler, e.admin, e.signed, e.warm, e.maxOut); } catch { /* next minute */ } }
   savedUpTo.m = now - 1;
 }, 60_000).unref();
 
@@ -87,8 +91,8 @@ export function slowRequests() {
   const since = Math.floor(Date.now() / 60_000) - 60;
   const by = new Map<string, Slow>();
   for (const [m, b] of minutes) if (m >= since) for (const [r, e] of b) {
-    const x = by.get(r) || { n: 0, maxMs: 0, crawler: 0, admin: 0, signed: 0 };
-    x.n += e.n; x.maxMs = Math.max(x.maxMs, e.maxMs); x.crawler += e.crawler; x.admin += e.admin; x.signed += e.signed;
+    const x = by.get(r) || { n: 0, maxMs: 0, crawler: 0, admin: 0, signed: 0, warm: 0, maxOut: 0 };
+    x.n += e.n; x.maxMs = Math.max(x.maxMs, e.maxMs); x.crawler += e.crawler; x.admin += e.admin; x.signed += e.signed; x.warm += e.warm; x.maxOut = Math.max(x.maxOut, e.maxOut);
     by.set(r, x);
   }
   return { deadlineMs: DEADLINE_MS, ...slowStats, lastHour: [...by].sort((a, b) => b[1].n - a[1].n).slice(0, 20).map(([route, e]) => ({ route, ...e })), late: { copies: late.size, mb: Math.round(lateBytes / 1048576) } };
@@ -253,21 +257,30 @@ export const wasCut = (res: express.Response) => !!loc(res).slCut;
 type Check = { id: string; label: string; level: 'ok' | 'warn' | 'fail'; detail: string; items?: string[] };
 /** routes only staff use (admin tools, CRM, staff console) */
 const ADMIN_ROUTE = /^http GET \/api\/(admin|crm|staff|perf)(\/|$)/;
-/** data health (worker): public GETs over 1 s in the last hour (search engines apart: they wait on purpose) */
-export function slowRequestsHealth(): Check {
-  const since = Math.floor(Date.now() / 60_000) - 60;
+/**
+ * data health (worker): public GETs over 1 s in the last hour (search engines apart: they wait on purpose).
+ * fix276: the warm-up (the first 10 minutes after a start) is counted apart ("Errors during the last deploy"); red over
+ * 5 outside it, yellow 1–5 (utils/healthRules.ts slowVerdict); the detail names the 3 slowest routes.
+ */
+export function slowRequestsHealth(now = Date.now()): Check {
+  const since = Math.floor(now / 60_000) - 60;
   let rows: any[] = [];
-  try { rows = db.prepare(`SELECT route, SUM(n) AS n, MAX(max_ms) AS max_ms, SUM(crawler) AS crawler, SUM(admin) AS admin, SUM(signed) AS signed FROM slow_requests WHERE minute >= ? GROUP BY route ORDER BY n DESC`).all(since) as any[]; } catch { /* no table yet */ }
+  try { rows = db.prepare(`SELECT route, SUM(n) AS n, MAX(max_ms) AS max_ms, MAX(COALESCE(max_out, max_ms)) AS max_out, SUM(crawler) AS crawler, SUM(admin) AS admin, SUM(signed) AS signed, SUM(warm) AS warm FROM slow_requests WHERE minute >= ? GROUP BY route ORDER BY n DESC`).all(since) as any[]; } catch { /* no table yet */ }
   // fix266: visitors signed in or out (admins have their own check below; account / admin routes are only theirs)
-  const people = rows.filter(r => !ADMIN_ROUTE.test(r.route)).map(r => ({ ...r, people: r.n - r.crawler - r.admin })).filter(r => r.people > 0);
+  const pub = rows.filter(r => !ADMIN_ROUTE.test(r.route));
+  const warm = pub.reduce((t, r) => t + (r.warm || 0), 0);
+  const people = pub.map(r => ({ ...r, people: r.n - r.crawler - r.admin - (r.warm || 0) })).filter(r => r.people > 0);
   const crawlers = rows.reduce((t, r) => t + r.crawler, 0);
-  const total = people.reduce((t, r) => t + r.people, 0);
   const signed = people.reduce((t, r) => t + r.signed, 0);
+  const v = slowVerdict(people.map(r => ({ route: r.route, people: r.people, maxMs: r.max_out })));
+  const warmLine = warm ? ` · ${warm} more in a start's warm-up (first 10 min, counted in "Errors during the last deploy")` : '';
   return {
     id: 'slow-requests', label: 'Slow requests',
-    level: total ? 'fail' : 'ok',
-    detail: total ? `${total} public request(s) took over 1 s in the last hour (target 0)${signed ? `, ${signed} of them signed in` : ''}` : `No public request over 1 s in the last hour${crawlers ? ` (search engines waiting for a first page build: ${crawlers})` : ''}`,
-    items: people.slice(0, 15).map(r => `${r.route}: ${r.people} × over 1 s${r.signed ? ` (${r.signed} signed in)` : ''}, longest ${(r.max_ms / 1000).toFixed(1)} s`)
+    level: v.level,
+    detail: v.total ? `${v.total} public request(s) took over 1 s in the last hour outside the warm-up (red over 5, target 0)${signed ? `, ${signed} of them signed in` : ''} · slowest: ${v.slowest}${warmLine}`
+      : `No public request over 1 s in the last hour outside the warm-up${warmLine}${crawlers ? ` (search engines waiting for a first page build: ${crawlers})` : ''}`,
+    items: [...(warm ? [`warm-up: ${warm} public request(s) over 1 s in the first 10 minutes after a start (not counted)`] : []),
+      ...people.slice(0, 15).map(r => `${r.route}: ${r.people} × over 1 s${r.signed ? ` (${r.signed} signed in)` : ''}, longest ${(r.max_out / 1000).toFixed(1)} s`)]
   };
 }
 /**

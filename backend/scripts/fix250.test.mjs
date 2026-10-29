@@ -97,7 +97,7 @@ test('data health "Slow requests": fails on a public request over 1 s in the las
     process.exit(0);
   `, env());
   assert.equal(r.ok.level, 'ok');
-  assert.equal(r.bad.level, 'fail');
+  assert.equal(r.bad.level, 'warn', 'fix276: 1–5 = yellow, red over 5 outside the warm-up');
   assert.match(r.bad.detail, /^3 public request/);
   assert.deepEqual(r.bad.items, ['GET /api/search: 3 × over 1 s, longest 1.8 s']);
 });

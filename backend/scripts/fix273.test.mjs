@@ -240,7 +240,7 @@ test('the gate widens after 2 blocked tries; Disk is red over 256 MB of WAL or w
   const base = { volFree: 40e9, volTotal: 50e9, dbBytes: 2.83e9, growth7d: null };
   assert.equal(rules.diskVerdict({ ...base, walBytes: 2350 * MB }).level, 'fail', 'the 29 Oct WAL');
   assert.equal(rules.diskVerdict({ ...base, walBytes: 257 * MB }).level, 'fail');
-  assert.equal(rules.diskVerdict({ ...base, walBytes: 100 * MB }).level, 'warn');
+  assert.equal(rules.diskVerdict({ ...base, walBytes: 100 * MB }).level, 'ok', 'fix276: under 256 MB with TRUNCATE working = plain ok');
   assert.equal(rules.diskVerdict({ ...base, walBytes: 0, truncateAgeMs: 61 * 60000 }).level, 'fail');
   assert.equal(rules.diskVerdict({ ...base, walBytes: 0, truncateAgeMs: 20 * 60000 }).level, 'ok');
   assert.equal(rules.diskVerdict({ ...base, walBytes: 0, truncateAgeMs: null }).level, 'ok');

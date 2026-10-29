@@ -10,7 +10,7 @@ export type DiskVerdict = { level: 'ok' | 'warn' | 'fail'; freePct: number | nul
 
 export const DISK_RULES = { warnDays: 30, failDays: 7, fail6hDays: 3, warnFreePct: 20, failFreePct: 10, walWarnBytes: 64 * 1048576, walFailBytes: 256 * 1048576, truncateFailMs: 3600 * 1000 };
 // fix273: red over 256 MB (Yarin, 29 Oct: 2,350 MB with "blocked by a reader (8 in a row)") or with no TRUNCATE done
-// in an hour; yellow over the 64 MB journal_size_limit
+// in an hour; fix276: under that plain ok (the 64 MB journal_size_limit is the TRUNCATE trigger, not a warning)
 
 /** size history rows (day, total bytes = file + WAL) → bytes per day over the last 7 days (null under 2 days of rows) */
 export function growthPerDay(rows: { day: string; bytes: number }[], today: string): number | null {
@@ -67,8 +67,8 @@ export function diskVerdict(x: DiskInput): DiskVerdict {
   if (daysToFull6h != null && daysToFull6h < DISK_RULES.fail6hDays) raise('fail', `at the last 6 hours' growth the volume is full in ${daysToFull6h < 1 ? `${Math.max(1, Math.floor(daysToFull6h * 24))} hour(s)` : `${Math.floor(daysToFull6h)} day(s)`}`);
   if (daysToFull != null && daysToFull < DISK_RULES.failDays) raise('fail', `at this growth the volume is full in ${Math.floor(daysToFull)} day(s)`);
   else if (daysToFull != null && daysToFull < DISK_RULES.warnDays) raise('warn', `at this growth the volume is full in ${Math.floor(daysToFull)} days (under ${DISK_RULES.warnDays})`);
+  // fix276: no yellow over the 64 MB journal limit any more (113 MB on 29 Oct 18:04 with TRUNCATE working = plain ok)
   if (x.walBytes > DISK_RULES.walFailBytes) raise('fail', `the WAL file is ${(x.walBytes / 1048576).toFixed(0)} MB (over ${DISK_RULES.walFailBytes / 1048576} MB: checkpoints are not catching up)`);
-  else if (x.walBytes > DISK_RULES.walWarnBytes) raise('warn', `the WAL file is ${(x.walBytes / 1048576).toFixed(0)} MB (checkpoints are not catching up)`);
   if (x.truncateAgeMs != null && x.truncateAgeMs > DISK_RULES.truncateFailMs) raise('fail', `the WAL has not started over for ${Math.floor(x.truncateAgeMs / 60000)} min (TRUNCATE must succeed at least hourly)`);
   return { level, freePct, perDay, daysToFull, daysToFull6h, reasons };
 }

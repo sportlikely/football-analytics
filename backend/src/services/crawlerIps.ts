@@ -20,6 +20,9 @@ import { deferred } from './deferredWrites';
 import { every, after } from './perf';
 import { onState, publishState } from './shared';
 import { networkOf } from './asn';
+import { inWarmUp } from './readiness';
+import { noteCrawlerStartup } from './deployErrors';
+import { crawlerVerdict } from '../utils/healthRules';
 import { clientOf, hasEdgeHeader, hopLine } from '../utils/clientIp';
 import { CrawlerRanges, RANGE_SOURCES, SEED_RANGES, parseRangeFile, listedCrawler, engineOfUa, Engine } from '../utils/crawlerRanges';
 
@@ -91,11 +94,14 @@ export const crawlerRangesStatus = () => ({ status, ranges: ranges.size, at: sav
 
 /* ---------- what the search engines got (web process counts, the worker writes) ---------- */
 
-type EngineDay = { requests: number; verified: number; byList: number; byDns: number; refused: number; s429: number; s503: number; api: number };
+/** fix276: `startup` = 503 "Starting up" answered in the warm-up (not in refused / s503); `warm429` = the 429s of the warm-up;
+ *  `vRefused` / `v429` / `vWarm429` = the same for the verified requests only (the red rule) */
+type EngineDay = { requests: number; verified: number; byList: number; byDns: number; refused: number; s429: number; s503: number; api: number; startup?: number; warm429?: number;
+  vRefused?: number; v429?: number; vWarm429?: number };
 export type DnsSample = { at: string; ip: string; system: string; publicDns: string; forward: string; ok: boolean };
 /** fix254: one Googlebot-UA request as it reached us — every hop of the address chain, to see who the client really is */
 export type UaSample = { at: string; path: string; socket: string; xff: string; realIp: string; reqIp: string; client: string; asn: string; inGoogle: boolean; googleHop: string | null; edge?: boolean; oldRule?: string; hops?: string; why?: string };
-type Counts = { engines: Record<Engine, EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number } };
+type Counts = { engines: Record<Engine, EngineDay>; googleRanges: { requests: number; refused: number; s429: number; s503: number; startup?: number; warm429?: number } };
 /** fix262: `since` = when the counts start on the fixed client address; the day's counts before it are in `before262`
  *  (they were taken on Railway's edge address); `networks` = the clients' listed networks (names + counts, no address) */
 type Day = Counts & { day: string; refusedRecent: string[]; sample: DnsSample | null; uaLog?: UaSample[]; since?: string; before262?: Counts; networks?: Record<string, number>; edgeRequests?: number; requestsAll?: number;
@@ -174,21 +180,30 @@ export function noteCrawlerResponse(ua: string, ip: string | undefined, how: 'li
       e = null;
       if (!google) return;
     }
-    const bad = status === 429 || status === 503;
+    // fix276: a 503 "Starting up" in the warm-up is counted apart (and in "Errors during the last deploy")
+    const warm = inWarmUp(), startup = status === 503 && warm;
+    const bad = (status === 429 || status === 503) && !startup;
+    if (startup && (e || google)) noteCrawlerStartup();
+    const count = (d: { refused: number; s429: number; s503: number; startup?: number; warm429?: number }) => {
+      if (startup) d.startup = (d.startup || 0) + 1;
+      if (!bad) return;
+      d.refused++;
+      if (status === 429) { d.s429++; if (warm) d.warm429 = (d.warm429 || 0) + 1; } else d.s503++;
+    };
     if (e) {
       const d = cur.engines[e];
       d.requests++;
       if (reqPath.startsWith('/api/')) d.api++;
       if (how) { d.verified++; if (how === 'list') d.byList++; else d.byDns++; }
-      if (bad) { d.refused++; if (status === 429) d.s429++; else d.s503++; }
+      count(d);
+      if (how && bad) { d.vRefused = (d.vRefused || 0) + 1; if (status === 429) { d.v429 = (d.v429 || 0) + 1; if (warm) d.vWarm429 = (d.vWarm429 || 0) + 1; } }
     }
     if (google) {
       cur.googleRanges.requests++;
-      if (bad) {
-        cur.googleRanges.refused++;
-        if (status === 429) cur.googleRanges.s429++; else cur.googleRanges.s503++;
+      count(cur.googleRanges);
+      if (bad || startup) {
         if (cur.refusedRecent.length >= 20) cur.refusedRecent.shift();
-        cur.refusedRecent.push(`${new Date().toISOString().slice(11, 19)} ${status} ${reqPath.slice(0, 120)} (${ua.slice(0, 60)})`);
+        cur.refusedRecent.push(`${new Date().toISOString().slice(11, 19)} ${status} ${reqPath.slice(0, 120)} (${ua.slice(0, 60)})${startup ? ' — warm-up, "Starting up"' : warm ? ' — warm-up' : ''}`);
       }
     }
     dirty = true;
@@ -284,12 +299,21 @@ export function networksLine(d: Day | null): string {
   return `client networks since ${(d.since || '').slice(11, 16)} UTC: ${d.requestsAll} requests (${d.edgeRequests || 0} via Railway's edge headers, ${d.edgeAsnSkips || 0} with an edge-network hop skipped, ${d.allProxy || 0} with no client hop at all), from listed data-centre / proxy networks: ${top || 'none'}`;
 }
 
-/** data health "Search engines verified": fail when any request from Google's own ranges got a 429 or 503 today */
+/**
+ * data health "Search engines verified" — fix276: red only when ≥ 0.5% of a verified crawler's requests (or of the
+ * requests from Google's ranges) got 429 / 503, or any 429 outside a start's first 10 minutes (utils/healthRules.ts
+ * crawlerVerdict); the 503 "Starting up" of a start are counted apart ("Errors during the last deploy")
+ */
 export function crawlerHealth(edge?: { ranges: { range: string; lefts: number; share: number }[]; windowRequests: number }) {
   const d = crawlerDay() || fresh();
   const g = d.engines.google, gr = d.googleRanges;
-  const level: 'ok' | 'warn' | 'fail' = gr.refused > 0 ? 'fail' : g.requests >= 20 && g.verified * 2 < g.requests ? 'warn' : 'ok';
-  const items = [...d.refusedRecent.slice(-10)];
+  const engine = (name: string, x: EngineDay) => ({ name: `${name} (verified)`, requests: x.verified, refused: x.vRefused || 0, s429: x.v429 || 0, warm429: x.vWarm429 });
+  const v = crawlerVerdict([engine('Googlebot', g), engine('Bingbot', d.engines.bing), engine('Applebot', d.engines.apple),
+    { name: "Google's ranges", requests: gr.requests, refused: gr.refused, s429: gr.s429, warm429: gr.warm429 }]);
+  const level: 'ok' | 'warn' | 'fail' = v.level === 'fail' ? 'fail' : g.requests >= 20 && g.verified * 2 < g.requests ? 'warn' : 'ok';
+  const startups = (gr.startup || 0) + (g.startup || 0) + (d.engines.bing.startup || 0) + (d.engines.apple.startup || 0);
+  const items = [...(v.why ? [`Red: ${v.why}`] : []), ...d.refusedRecent.slice(-10)];
+  if (startups) items.push(`503 "Starting up" during a start's warm-up (not counted here: "Errors during the last deploy"): Google's ranges ${gr.startup || 0}, Googlebot ${g.startup || 0}, Bing ${d.engines.bing.startup || 0}, Apple ${d.engines.apple.startup || 0}`);
   items.push(`Googlebot-UA log: ${uaLogSummary(d)}`);
   if (edge) items.push(`Railway edge ranges (fix262, learned): ${edge.ranges.map(r => `${r.range} (${r.lefts}+ clients, ${Math.round(r.share * 100)}%)`).join(', ') || 'none yet'}`);
   items.push(networksLine(d));
@@ -302,7 +326,7 @@ export function crawlerHealth(edge?: { ranges: { range: string; lefts: number; s
   if (d.sample) items.push(`DNS sample ${d.sample.at.slice(11, 16)} ${d.sample.ip}: system ${d.sample.system} · public ${d.sample.publicDns} · forward ${d.sample.forward}`);
   return [{
     id: 'crawlers-verified', label: 'Search engines verified', level,
-    detail: `Googlebot ${d.before262 || d.beforeRule ? `since ${(d.since || '').slice(11, 16)} UTC` : 'today'}: ${g.requests} requests, ${g.verified} verified (${g.byList} by Google's list, ${g.byDns} by DNS), ${g.refused} refused · from Google's ranges: ${gr.refused} got 429 / 503 (${gr.s429} / ${gr.s503}) · Bing ${d.engines.bing.verified}/${d.engines.bing.requests}, Apple ${d.engines.apple.verified}/${d.engines.apple.requests} verified · lists: ${status}`,
+    detail: `Googlebot ${d.before262 || d.beforeRule ? `since ${(d.since || '').slice(11, 16)} UTC` : 'today'}: ${g.requests} requests, ${g.verified} verified (${g.byList} by Google's list, ${g.byDns} by DNS), ${g.refused} refused · from Google's ranges: ${gr.refused} of ${gr.requests.toLocaleString('en-US')} got 429 / 503 (${gr.s429} / ${gr.s503}; red at 0.5% or any 429 outside a start's first 10 min)${gr.startup ? ` + ${gr.startup} "Starting up" in a warm-up` : ''} · Bing ${d.engines.bing.verified}/${d.engines.bing.requests}, Apple ${d.engines.apple.verified}/${d.engines.apple.requests} verified · lists: ${status}`,
     ...(items.length ? { items } : {})
   }];
 }
