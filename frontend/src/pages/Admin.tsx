@@ -543,7 +543,7 @@ function BackupsCard() {
 }
 
 /** Basketball results the provider may have wrong (swapped / quarters don't add up), and recent corrections. */
-type SiteError = { sig: string; message: string; where: string | null; pageKind: string; kind: string; count: number; firstAt: string; lastAt: string; pages: string[]; browsers: string[]; version: string | null; resolvedAt: string | null }
+type SiteError = { sig: string; message: string; where: string | null; pageKind: string; kind: string; count: number; firstAt: string; lastAt: string; pages: string[]; browsers: string[]; version: string | null; builds?: string[]; resolvedAt: string | null; fixedBy?: string | null }
 /** Pages that broke in visitors' browsers (sent by the site itself). "Mark fixed" after a fix is deployed: it reopens if it happens again. */
 interface DailyCand {
   id: string; label: string; kind: string; n: { W: number; Wp: number }; W: { logLoss: number; hitRate: number }; Wp: { logLoss: number }
@@ -715,8 +715,10 @@ function SiteErrorsCard() {
   if (!d) return null
   const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
   const mark = (sig: string, resolved: boolean) => axios.post(`${API_URL}/admin/client-errors/${sig}`, { resolved }).then(load).catch(() => undefined)
-  const rows = d.rows.filter(r => showFixed || !r.resolvedAt)
-  const fixed = d.rows.length - d.open
+  // fix275: groups a newer build fixed in the last 24 h stay in the list, grey; older fixed ones behind "Show fixed"
+  const recent = (r: SiteError) => !!r.fixedBy && !!r.resolvedAt && Date.now() - Date.parse(r.resolvedAt) < 86400000
+  const rows = d.rows.filter(r => showFixed || !r.resolvedAt || recent(r))
+  const fixed = d.rows.filter(r => r.resolvedAt && !recent(r)).length
   return (
     <section className="card p-5 sm:p-6 mb-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
@@ -731,8 +733,9 @@ function SiteErrorsCard() {
             <li key={r.sig} className={`py-3 ${r.resolvedAt ? 'opacity-60' : ''}`}>
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="font-semibold text-ink">{r.pageKind}</span>
-                <span className="text-[11px] num text-loss font-bold">{r.count}×</span>
-                <span className="text-[11px] text-faint">last {when(r.lastAt)} · first {when(r.firstAt)}{r.browsers.length ? ` · ${r.browsers.join(', ')}` : ''}</span>
+                <span className={`text-[11px] num font-bold ${r.resolvedAt ? 'text-faint' : 'text-loss'}`}>{r.count}×</span>
+                <span className="text-[11px] text-faint">last {when(r.lastAt)} · first {when(r.firstAt)} · build {r.version || r.builds?.[r.builds.length - 1] || 'unknown'}{r.browsers.length ? ` · ${r.browsers.join(', ')}` : ''}</span>
+                {r.fixedBy && <span className="text-[11px] font-semibold text-faint">Fixed by a newer build ({r.fixedBy})</span>}
                 {/* fix259: one site error, with the newest others */}
                 {!r.resolvedAt && <CopyForClaude size="sm" className="ms-auto" req={() => ({ place: 'Admin → Site health → Site errors', scope: 'site-error', sig: r.sig })} />}
                 <button type="button" onClick={() => mark(r.sig, !r.resolvedAt)} className={`${r.resolvedAt ? 'ms-auto ' : ''}text-xs font-semibold text-accent hover:underline`}>

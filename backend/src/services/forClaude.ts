@@ -101,9 +101,9 @@ export function forClaudeText(b: ForClaudeBody, who: { viewer?: Viewer; security
       sections.push(rows.length ? siteErrorSection(rows) : { title: 'Site errors', lines: ['No open site errors.'] });
       let dc: ReturnType<typeof auditForClaude> | null = null;
       try { dc = c.id === 'for-claude' ? auditForClaude() : null; } catch { /* no check yet */ }
-      if (dc?.differences.length) sections.push({
+      if (dc?.differences.length) sections.push({ // fix275: known provider / league differences marked, left out of the %
         title: `Top-scorer check ${dc.at}: ${dc.matched} of ${dc.checked} match`,
-        lines: [...dc.differences.map(x => `- ${x.league}${x.player ? ` · ${x.player}` : ''}: ${x.detail}${x.reason ? ` (why: ${x.reason})` : ''}`),
+        lines: [...dc.differences.map(x => `- ${x.known ? '[known, not counted] ' : ''}${x.league}${x.player ? ` · ${x.player}` : ''}: ${x.detail}${x.reason ? ` (why: ${x.reason})` : ''}`),
           ...(dc.more ? [`… and ${dc.more} more`] : []), ...(dc.under.length ? [`Under 90% for 7+ days: ${dc.under.map(u => `${u.name} ${u.share}%`).join(', ')}`] : [])]
       });
     }

@@ -419,17 +419,19 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
       const issues = (a.issues || []) as any[];
       const bad = issues.filter(i => i.kind === 'mismatch' || i.kind === 'not-found');
       const lag = issues.filter(i => i.kind === 'lag');
-      const by = (a.byLeague || {}) as Record<string, { checked: number; matched: number; lag?: number }>;
+      const known = issues.filter(i => i.kind === 'known'); // fix275: provider and league disagree for good — not counted
+      const by = (a.byLeague || {}) as Record<string, { checked: number; matched: number; lag?: number; known?: number }>;
       const low = Object.entries(by).filter(([, t]) => { const s = leagueShare(t); return s != null && s < (a.target ?? AUDIT_TARGET); });
-      const pct = (t: { checked: number; matched: number; lag?: number }) => Math.round((leagueShare(t) ?? 1) * 100);
+      const pct = (t: { checked: number; matched: number; lag?: number; known?: number }) => Math.round((leagueShare(t) ?? 1) * 100);
       checks.push({
         id: 'players', label: 'Player pages match the official stats',
         level: age > 48 * 3600 * 1000 || low.length ? 'warn' : 'ok',
-        detail: `${a.matched} of ${a.checked - (a.lag || 0)} top scorers match (${a.leagues})${lag.length ? ` · ${lag.length} still updating after a game` : ''} · checked ${ago(age)} ago`
+        detail: `${a.matched} of ${a.checked - (a.lag || 0) - (a.known || 0)} top scorers match (${a.leagues})${lag.length ? ` · ${lag.length} still updating after a game` : ''}${known.length ? ` · ${known.length} known provider / league difference(s), not counted` : ''} · checked ${ago(age)} ago`
           + (low.length ? ` · under 95 %: ${low.map(([c, t]) => `${c} ${pct(t)} %`).join(', ')}` : ' · every league 95 %+'),
         // fix264: a player whose page waits for the provider's update after a game is "updating", not a difference
         items: [...bad.map((i: any) => `${i.league || ''} ${i.player || ''}: ${i.detail}${i.reason ? ` — ${i.reason}` : ''}`),
-          ...lag.map((i: any) => `updating · ${i.league || ''} ${i.player || ''}: ${i.detail} — not counted until the provider's next update`)].slice(0, 25)
+          ...lag.map((i: any) => `updating · ${i.league || ''} ${i.player || ''}: ${i.detail} — not counted until the provider's next update`),
+          ...known.map((i: any) => `known · ${i.league || ''} ${i.player || ''}: ${i.detail} — provider and league disagree (known), not counted`)].slice(0, 25)
       });
     }
   } catch { /* no report yet */ }

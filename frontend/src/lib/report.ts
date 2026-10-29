@@ -13,9 +13,10 @@ function browserName() {
   return os ? `${b} · ${os}` : b
 }
 
+/** the build id "index-<hash>" (fix275: from this file's own address when the page's script tags don't name it) */
 function version() {
   const s = [...document.scripts].map(x => x.src).find(x => /\/assets\/index-/.test(x)) || ''
-  return (s.match(/index-[A-Za-z0-9_-]+/) || [''])[0]
+  return (s.match(/index-[A-Za-z0-9_-]+/) || String(import.meta.url).match(/index-[A-Za-z0-9_-]+/) || [''])[0]
 }
 
 export function reportError(err: unknown, kind: 'page' | 'uncaught') {

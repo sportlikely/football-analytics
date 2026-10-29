@@ -34,11 +34,12 @@ export interface AdminSummary {
   backupOk: boolean | null; lastBackupAt: string | null; at: string
 }
 /** fix253: the daily "for Claude" list (open site-error groups, top 10) */
-export interface ForClaude { day: string; open: number; top: { message: string; page: string; where: string | null; count: number; firstAt: string; lastAt: string; builds: string[] }[] }
+export interface ForClaude { day: string; open: number; top: { message: string; page: string; where: string | null; count: number; firstAt: string; lastAt: string; builds: string[]; build?: string | null }[] }
 /** fix254: the daily top-scorer check — differences go here instead of an email; leagues under 90% for 7+ days */
 export interface DataCheckForClaude {
-  at: string; checked: number; matched: number; more: number
-  differences: { league: string; player: string | null; detail: string; reason: string | null }[]
+  at: string; checked: number; matched: number; more: number; known?: number
+  /** fix275: known = the provider and the league disagree for good (shown grey, not counted) */
+  differences: { league: string; player: string | null; detail: string; reason: string | null; known?: boolean }[]
   under: { league: string; name: string; since: string; share: number }[]
 }
 export interface HealthCheck { id: string; label: string; level: Level; detail: string; items?: string[] }
@@ -61,7 +62,7 @@ export const ADMIN_CARDS: AdminCardDef[] = [
   // ---------- Needs you ----------
   { id: 'needs-you', tab: 'needs-you', title: 'Waiting for you', what: 'Only what a person must handle: messages from customers and payment problems. Everything else the site decides by itself.', todo: 'Answer the messages; each one leaves once it is marked answered.' },
   { id: 'done-for-you', tab: 'needs-you', title: 'Done for you', what: 'Every decision the site made by itself (injury news applied, results corrected or voided, site errors closed), with why and the source.', todo: 'Nothing — press Undo within 24 hours if one is wrong.', checks: ['done-for-you'] },
-  { id: 'for-claude', tab: 'needs-you', title: 'For Claude today', what: 'Site errors still open, grouped by message: the 10 with the most reports, with their counts and builds. They close by themselves after 24 hours with no report once a newer build is live. Also the top-scorer check’s differences (players whose page and the official list disagree): no email for those; an email comes only when a league stays under 90% for 7 days.', todo: 'Nothing to press — paste the list to Claude when you have a session open.', status: s => (s.forClaude?.open || s.dataCheck?.under.length ? 'warn' : 'ok') },
+  { id: 'for-claude', tab: 'needs-you', title: 'For Claude today', what: 'Site errors still open, grouped by message: the 10 with the most reports, with their counts and builds. A group fixed by a newer build leaves the list within minutes of the deploy (its last report came from an older build, or its code is gone from the new one); otherwise it closes after 24 hours with no report once a newer build is live. Also the top-scorer check’s differences (players whose page and the official list disagree): no email for those; an email comes only when a league stays under 90% for 7 days. A page ahead of the official list by the same gap on 3+ checks is “Provider and league disagree (known)”: grey, not counted.', todo: 'Nothing to press — paste the list to Claude when you have a session open.', status: s => (s.forClaude?.open || s.dataCheck?.under.length ? 'warn' : 'ok') },
 
   // ---------- Visitors & users ----------
   { id: 'visitors', tab: 'users', title: 'Visitors', what: 'How many people opened the site today, this week and this month, and from which countries (never their address).', todo: 'Nothing — it is information only.' },
@@ -94,7 +95,7 @@ export const ADMIN_CARDS: AdminCardDef[] = [
   // ---------- Site health ----------
   { id: 'speed', tab: 'site', title: 'Speed', what: 'Whether the website and the background jobs freeze, how much memory they use and how often they restarted.', todo: 'Nothing if it happens once — tell Claude if it stays red.', checks: ['perf:'] },
   { id: 'deploy-errors', tab: 'site', title: 'Errors during the last deploy', what: 'Pages or files that failed for visitors in the 5 minutes after the site last restarted (target: none).', todo: 'Tell Claude, with the time of the deploy.', checks: ['deploy-errors'] },
-  { id: 'site-errors', tab: 'site', title: 'Site errors', what: 'Pages that broke in visitors’ browsers, sent by the site itself, grouped by message. A group closes by itself after 24 hours with no report, once a newer build went live after its last one.', todo: 'Nothing — the open ones are on the “For Claude today” list in Needs you.', status: s => (s.siteErrors24h ? 'warn' : 'ok') },
+  { id: 'site-errors', tab: 'site', title: 'Site errors', what: 'Pages that broke in visitors’ browsers, sent by the site itself, grouped by message, with the build each came from. A group is “Fixed by a newer build” (grey) as soon as a newer build is live and its last report came from an older one or its code is gone; otherwise it closes after 24 hours with no report once a newer build went live. A new report from the live build opens it again.', todo: 'Nothing — the open ones are on the “For Claude today” list in Needs you.', status: s => (s.siteErrors24h ? 'warn' : 'ok') },
   { id: 'link-check', tab: 'site', title: 'Broken team links', what: 'Team links on the games of the last and next 7 days that would open "team not found".', todo: 'Tell Claude — usually a team the data source renamed.' },
   { id: 'backups', tab: 'site', title: 'Database backups', what: 'The daily copy of the database, on the server and off-site, and the free disk space.', todo: 'Press "Back up now"; if it fails again, tell Claude.', status: s => (s.backupOk === false ? 'fail' : 'ok') },
   { id: 'parity', tab: 'site', title: 'Same features in every sport', what: 'Whether every block on the football pages also exists for basketball, American football and tennis.', todo: 'Tell Claude which gaps to build.' },

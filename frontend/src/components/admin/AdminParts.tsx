@@ -326,7 +326,7 @@ export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
               <li key={i} className="py-2 flex flex-wrap items-baseline gap-x-3">
                 <span className="num w-12 text-end font-bold text-ink">{x.count}×</span>
                 <span className="text-ink break-words min-w-0 flex-1">{x.message}</span>
-                <span className="text-[11px] text-faint">{x.page} · last {day(x.lastAt)}</span>
+                <span className="text-[11px] text-faint">{x.page} · last {day(x.lastAt)} · build {x.build || x.builds[x.builds.length - 1] || 'unknown'}</span>
               </li>
             ))}
           </ol>
@@ -334,10 +334,10 @@ export function ForClaudeCard({ ctx }: { ctx: Ctx }) {
       )}
       {dc && dc.differences.length > 0 && (
         <div className="mt-4 pt-3 border-t border-line/60">
-          <p className="text-sm text-muted mb-1">Top-scorer check ({day(dc.at)}): <b className="num text-ink">{dc.matched}</b> of {dc.checked} match · {dc.differences.length + dc.more} difference(s){dc.under.length ? <> · <span className="text-loss">under 90% for 7+ days: {dc.under.map(u => `${u.name} ${u.share}%`).join(', ')}</span></> : null}</p>
+          <p className="text-sm text-muted mb-1">Top-scorer check ({day(dc.at)}): <b className="num text-ink">{dc.matched}</b> of {dc.checked - (dc.known || 0)} match · {dc.differences.length + dc.more - (dc.known || 0)} difference(s){dc.known ? ` · ${dc.known} known, not counted` : ''}{dc.under.length ? <> · <span className="text-loss">under 90% for 7+ days: {dc.under.map(u => `${u.name} ${u.share}%`).join(', ')}</span></> : null}</p>
           <ul className="divide-y divide-line/50 text-[12px]">
             {dc.differences.slice(0, 12).map((x, i) => (
-              <li key={i} className="py-1.5 break-words"><span className="text-ink">{x.league}{x.player ? ` · ${x.player}` : ''}</span> <span className="text-faint">{x.detail}{x.reason ? ` — ${x.reason}` : ''}</span></li>
+              <li key={i} className={`py-1.5 break-words ${x.known ? 'opacity-60' : ''}`}><span className={x.known ? 'text-faint' : 'text-ink'}>{x.league}{x.player ? ` · ${x.player}` : ''}</span> <span className="text-faint">{x.detail}{x.reason ? ` — ${x.reason}` : ''}</span></li>
             ))}
           </ul>
           {dc.differences.length + dc.more > 12 && <p className="text-[11px] text-faint mt-1">+ {dc.differences.length + dc.more - 12} more</p>}

@@ -9,6 +9,10 @@
  * for 24 h, once a build newer than its last report went live (fix253b), closes itself (Done for you, Undo = open again); the open
  * groups are a daily "for Claude" list in /api/admin/summary (top 10 messages with their counts), never Needs you.
  *
+ * fix275: every report carries its build ("index-<hash>": taken from whatever the browser sends, or the build live when
+ * it came in), and a group is "Fixed by a newer build" as soon as a newer build is live and its last report came from an
+ * older one (or its stack's files are gone from the live build) — no 24 h wait; the 24 h rule stays as the fallback.
+ *
  * Privacy: no IP address, no user id, no cookies — only the message, a few lines of code location, the page path,
  * the site version and a short browser name. Kept 30 days.
  */
@@ -32,9 +36,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_client_errors_last ON client_errors(last_at);
   CREATE TABLE IF NOT EXISTS client_builds (version TEXT PRIMARY KEY, first_at TEXT NOT NULL);
 `);
-if (!(db.prepare('PRAGMA table_info(client_errors)').all() as any[]).some(c => c.name === 'builds')) db.exec(`ALTER TABLE client_errors ADD COLUMN builds TEXT NOT NULL DEFAULT '[]'`);
+{
+  const cols = (db.prepare('PRAGMA table_info(client_errors)').all() as any[]).map(c => c.name);
+  if (!cols.includes('builds')) db.exec(`ALTER TABLE client_errors ADD COLUMN builds TEXT NOT NULL DEFAULT '[]'`);
+  // fix275: the build that fixed it (grey "Fixed by a newer build"); the live build an admin reopened it on (not closed again on it)
+  if (!cols.includes('fixed_by')) db.exec(`ALTER TABLE client_errors ADD COLUMN fixed_by TEXT`);
+  if (!cols.includes('kept_open')) db.exec(`ALTER TABLE client_errors ADD COLUMN kept_open TEXT`);
+}
 
 const clean = (v: unknown, n: number) => String(v ?? '').replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n);
+
+/** fix275: the build id "index-<hash>" out of whatever arrives (the full script URL from the loader, "index-<hash>.js", the id) */
+export function buildId(v: unknown): string | null {
+  return (String(v ?? '').match(/index-[A-Za-z0-9_-]+/) || [null])[0]?.slice(0, 40) || null;
+}
+const buildFirstAt = (v: string | null): string | null =>
+  v ? ((db.prepare('SELECT first_at FROM client_builds WHERE version = ?').get(v) as any)?.first_at ?? null) : null;
+/** fix275: the build that was live at `iso` (the newest one live by then) */
+export function buildAt(iso: string): string | null {
+  return ((db.prepare('SELECT version FROM client_builds WHERE first_at <= ? ORDER BY first_at DESC LIMIT 1').get(iso) as any)?.version) ?? null;
+}
+const buildsOf = (json: string | null): string[] => [...new Set((JSON.parse(json || '[]') as string[]).map(buildId).filter(Boolean) as string[])];
 
 /** "/es/match/575346" → "/match/:id" so the same problem on different games is one row */
 export function pageKind(path: string) {
@@ -59,7 +81,8 @@ export function reportClientError(body: any) {
   const top = (where || '').split('\n')[0].replace(/-[A-Za-z0-9_]{8}\.js/g, '.js').replace(/:\d+:\d+/g, ''); // same bug in a new build = same row
   const sig = crypto.createHash('sha1').update(`${message}|${pk}|${top}`).digest('hex').slice(0, 16);
   const now = new Date().toISOString();
-  const version = clean(body?.version, 40) || null;
+  // fix275: the id only ("index-<hash>"; the loader sends the whole script URL), else the build live right now
+  const version = buildId(clean(body?.version, 300)) || buildAt(now);
   const browser = clean(body?.browser, 40);
   const row = db.prepare('SELECT * FROM client_errors WHERE sig = ?').get(sig) as any;
   if (!row) {
@@ -70,10 +93,15 @@ export function reportClientError(body: any) {
     if (!pages.includes(path)) pages.unshift(path);
     const browsers: string[] = JSON.parse(row.browsers || '[]');
     if (browser && !browsers.includes(browser)) browsers.push(browser);
-    const builds: string[] = JSON.parse(row.builds || '[]');
+    const builds = buildsOf(row.builds);
     if (version && !builds.includes(version)) builds.push(version);
-    // a problem marked fixed that comes back is open again
-    db.prepare(`UPDATE client_errors SET count = count + 1, last_at = ?, pages = ?, browsers = ?, version = ?, builds = ?, where_ = COALESCE(?, where_), resolved_at = NULL WHERE sig = ?`)
+    // a problem marked fixed that comes back is open again — fix275: but a tab still running a build older than the one
+    // that fixed it does not reopen it (counted, stays grey)
+    const fixAt = row.resolved_at && row.fixed_by ? buildFirstAt(row.fixed_by) : null;
+    const repAt = version && version !== row.fixed_by ? buildFirstAt(version) : null;
+    const stale = !!(fixAt && repAt && repAt < fixAt);
+    db.prepare(`UPDATE client_errors SET count = count + 1, last_at = ?, pages = ?, browsers = ?, version = ?, builds = ?, where_ = COALESCE(?, where_),
+        resolved_at = ${stale ? 'resolved_at' : 'NULL'}, fixed_by = ${stale ? 'fixed_by' : 'NULL'}, kept_open = NULL WHERE sig = ?`)
       .run(now, JSON.stringify(pages.slice(0, 20)), JSON.stringify(browsers.slice(0, 10)), version, JSON.stringify(builds.slice(-10)), where, sig);
   }
   maybeEmail(sig).catch(() => undefined);
@@ -84,7 +112,7 @@ async function maybeEmail(sig: string) {
   const to = (process.env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean)[0];
   if (!to) return;
   const r = db.prepare('SELECT * FROM client_errors WHERE sig = ?').get(sig) as any;
-  if (!r) return;
+  if (!r || r.resolved_at) return; // fix275: a group fixed by a newer build sends no email
   if (r.emailed_at && Date.now() - new Date(r.emailed_at).getTime() < 86400000) return;
   const day = new Date().toISOString().slice(0, 10);
   if (emailsToday.day !== day) emailsToday = { day, n: 0 };
@@ -109,7 +137,7 @@ export function clientErrorList(days = 30) {
   const rows = (db.prepare('SELECT * FROM client_errors WHERE last_at >= ? ORDER BY (resolved_at IS NULL) DESC, last_at DESC LIMIT 200').all(since) as any[]).map(r => ({
     sig: r.sig, message: r.message, where: r.where_, pageKind: r.page_kind, kind: r.kind, count: r.count,
     firstAt: r.first_at, lastAt: r.last_at, pages: JSON.parse(r.pages || '[]'), browsers: JSON.parse(r.browsers || '[]'),
-    version: r.version, resolvedAt: r.resolved_at
+    version: buildId(r.version), builds: buildsOf(r.builds), resolvedAt: r.resolved_at, fixedBy: r.fixed_by as string | null
   }));
   const dayAgo = new Date(Date.now() - 86400000).toISOString();
   return {
@@ -121,7 +149,9 @@ export function clientErrorList(days = 30) {
 
 /** Admin: mark a problem fixed (it reopens by itself if it happens again). */
 export function resolveClientError(sig: string, resolved: boolean) {
-  db.prepare('UPDATE client_errors SET resolved_at = ? WHERE sig = ?').run(resolved ? new Date().toISOString() : null, sig);
+  // fix275: reopened by hand = not closed again on the build live now (a new report or a newer build starts over)
+  db.prepare('UPDATE client_errors SET resolved_at = ?, fixed_by = NULL, kept_open = ? WHERE sig = ?')
+    .run(resolved ? new Date().toISOString() : null, resolved ? null : currentBuild() || 'unknown', sig);
 }
 
 /* ---------- fix253: groups close themselves after a build that stops them; the daily "for Claude" list ---------- */
@@ -148,7 +178,7 @@ export function closeStoppedErrors(now = Date.now()): number {
   const rows = db.prepare(`SELECT e.sig, e.message, e.page_kind, e.count, e.last_at, e.builds,
       (SELECT b.version FROM client_builds b WHERE b.first_at > e.last_at ORDER BY b.first_at LIMIT 1) AS bv,
       (SELECT b.first_at FROM client_builds b WHERE b.first_at > e.last_at ORDER BY b.first_at LIMIT 1) AS bat
-    FROM client_errors e WHERE e.resolved_at IS NULL AND e.last_at <= ?`).all(new Date(now - CLOSE_AFTER_MS).toISOString()) as any[];
+    FROM client_errors e WHERE e.resolved_at IS NULL AND e.kept_open IS NULL AND e.last_at <= ?`).all(new Date(now - CLOSE_AFTER_MS).toISOString()) as any[];
   const at = new Date(now).toISOString();
   let n = 0;
   for (const row of rows) {
@@ -167,20 +197,87 @@ export function closeStoppedErrors(now = Date.now()): number {
 }
 onUndo('site-errors', (p: { sig: string }) => { resolveClientError(p.sig, false); return 'Open again.'; });
 
+/* ---------- fix275: fixed by a newer build = not red, right away ---------- */
+
+/** the hashed file names in a stack ("GameExtras-C0ATdfL8.js", "index-<hash>.js") */
+export function stackFiles(where: string | null): string[] {
+  return [...new Set((String(where || '').match(/[^/\s()@]+\.js/g) || []).filter(f => /-[A-Za-z0-9_-]{8}\.js$/.test(f)))];
+}
+let assetsCache: { build: string | null; files: Set<string> | null } = { build: null, files: null };
+/** the live build's file names (frontend/dist/assets), read once per build */
+export function liveAssets(build: string | null, dir = STATIC_DIR): Set<string> | null {
+  if (!build) return null;
+  if (assetsCache.build !== build) {
+    let files: Set<string> | null = null;
+    try { files = new Set(fs.readdirSync(path.join(dir, 'assets'))); } catch { /* no build on disk */ }
+    assetsCache = { build, files };
+  }
+  return assetsCache.files;
+}
+
+/**
+ * A group is "Fixed by a newer build" (grey, Done for you; out of Needs you, the red totals, the For Claude list and the
+ * email) as soon as the live build went live after its last report AND (a) its last report came from an older build
+ * (a report without one = the build live then), or (b) a file of its stack is not in the live build. Neither known:
+ * the 24 h rule (closeStoppedErrors) decides. A new report from the live build opens it again (reportClientError).
+ */
+export function closeFixedByBuild(now = Date.now(), live: string | null = currentBuild(), assets: Set<string> | null = liveAssets(live)): number {
+  if (!live) return 0;
+  const liveAt = buildFirstAt(live);
+  if (!liveAt) return 0;
+  const rows = db.prepare(`SELECT sig, message, page_kind, count, last_at, version, where_, kept_open FROM client_errors
+    WHERE resolved_at IS NULL AND last_at < ?`).all(liveAt) as any[];
+  const at = new Date(now).toISOString();
+  let n = 0;
+  for (const r of rows) {
+    if (r.kept_open === live) continue; // an admin reopened it on this build
+    const old = buildId(r.version) || buildAt(r.last_at);
+    const oldAt = old ? buildFirstAt(old) : null;
+    let why = '';
+    if (old && old !== live && (!oldAt || oldAt < liveAt)) why = `it last happened on ${old}, no report on the new one`;
+    else if (assets) {
+      const gone = stackFiles(r.where_).filter(f => !assets.has(f));
+      if (gone.length) why = `its code (${gone.slice(0, 2).join(', ')}) is not in the new build, no report on it`;
+    }
+    if (!why) continue;
+    const res = db.prepare('UPDATE client_errors SET resolved_at = ?, fixed_by = ?, kept_open = NULL WHERE sig = ? AND resolved_at IS NULL').run(at, live, r.sig);
+    if (!Number(res.changes)) continue;
+    n++;
+    recordDone({
+      kind: 'site-errors', sport: null, ref: `${r.sig}:fixed:${live}`, title: `Fixed by a newer build: “${String(r.message).slice(0, 90)}” (${r.page_kind})`,
+      why: `Fixed by build ${live} (live ${israelTime(liveAt)}): ${why}. ${r.count} report(s), the last ${israelTime(r.last_at)}. Opens again by itself if it comes back.`,
+      link: adminUrl('site'), undo: { sig: r.sig }
+    }, now);
+  }
+  if (n) logger.info(`site errors: ${n} group(s) fixed by build ${live}`);
+  return n;
+}
+/** worker start / every 5 min: note the live build, then close what it fixed (and the 24 h fallback) */
+export function checkSiteErrors(now = Date.now()) {
+  const live = currentBuild();
+  noteBuild(live, now);
+  const fixed = closeFixedByBuild(now, live);
+  const quiet = closeStoppedErrors(now);
+  return { live, fixed, quiet };
+}
+
 /** The daily "for Claude" list: open groups, the 10 with most reports (24 h first), with their counts and builds. */
 export function errorsForClaude(now = Date.now()) {
   const dayAgo = new Date(now - 86400000).toISOString();
-  const rows = db.prepare(`SELECT message, page_kind, where_, count, first_at, last_at, builds FROM client_errors WHERE resolved_at IS NULL
+  const rows = db.prepare(`SELECT message, page_kind, where_, count, first_at, last_at, version, builds FROM client_errors WHERE resolved_at IS NULL
     ORDER BY (last_at >= ?) DESC, count DESC LIMIT 10`).all(dayAgo) as any[];
   const open = (db.prepare('SELECT COUNT(*) AS n FROM client_errors WHERE resolved_at IS NULL').get() as any).n as number;
   return {
     day: new Date(now).toISOString().slice(0, 10), open,
-    top: rows.map(r => ({ message: r.message, page: r.page_kind, where: r.where_ ? String(r.where_).split('\n')[0] : null, count: r.count, firstAt: r.first_at, lastAt: r.last_at, builds: JSON.parse(r.builds || '[]') }))
+    top: rows.map(r => ({ message: r.message, page: r.page_kind, where: r.where_ ? String(r.where_).split('\n')[0] : null, count: r.count, firstAt: r.first_at, lastAt: r.last_at, builds: buildsOf(r.builds), build: buildId(r.version) }))
   };
 }
 
-if (!isWebProc) after('site errors: this build', () => { noteBuild(currentBuild()); closeStoppedErrors(); }, 60 * 1000).unref();
-if (!isWebProc) every('site errors: close stopped groups', () => { try { closeStoppedErrors(); } catch (e: any) { logger.warn(`site errors close: ${e.message}`); } }, 3600000).unref();
+// fix275: the live build is noted at once (a report in the first minute gets the right build), the check runs a minute
+// after the start and every 5 min, so a deploy clears what it fixed within minutes
+if (!isWebProc) { try { noteBuild(currentBuild()); } catch { /* table not ready */ } }
+if (!isWebProc) after('site errors: this build', () => { checkSiteErrors(); }, 60 * 1000).unref();
+if (!isWebProc) every('site errors: fixed by a newer build', () => { try { checkSiteErrors(); } catch (e: any) { logger.warn(`site errors close: ${e.message}`); } }, 5 * 60000).unref();
 
 if (!isWebProc) every('client errors cleanup', () => { // fix210b: worker only
   try { db.prepare('DELETE FROM client_errors WHERE last_at < ?').run(new Date(Date.now() - 30 * 86400000).toISOString()); } catch { /* ignore */ }

@@ -114,14 +114,14 @@ export function checkSection(c: CheckLike, o: { measuredAt?: string | null; hist
   return { title: `Check: ${o.plain?.title || c.label}`, lines };
 }
 
-export interface SiteErrorLike { message: string; pageKind: string; pages?: string[]; where?: string | null; builds?: string[]; browsers?: string[]; count: number; firstAt: string; lastAt: string; resolvedAt?: string | null }
+export interface SiteErrorLike { message: string; pageKind: string; pages?: string[]; where?: string | null; builds?: string[]; version?: string | null; browsers?: string[]; count: number; firstAt: string; lastAt: string; resolvedAt?: string | null; fixedBy?: string | null }
 /** site errors: the newest groups (message, page, where, build, browser family, time) and the stored stack */
 export function siteErrorSection(rows: SiteErrorLike[], title = 'Site errors (newest first)'): Section {
   const lines: string[] = [];
   rows.forEach((r, i) => {
-    lines.push(`${i + 1}. ${r.count}× "${r.message}"${r.resolvedAt ? ' (marked fixed)' : ''}`);
+    lines.push(`${i + 1}. ${r.count}× "${r.message}"${r.fixedBy ? ` (fixed by build ${r.fixedBy})` : r.resolvedAt ? ' (marked fixed)' : ''}`);
     lines.push(`   page ${r.pageKind}${r.pages?.length ? ` (${r.pages.slice(0, 5).join(', ')}${r.pages.length > 5 ? `, +${r.pages.length - 5} more` : ''})` : ''}`);
-    lines.push(`   last ${ilTime(r.lastAt)} · first ${ilTime(r.firstAt)} Israel time · builds ${r.builds?.length ? r.builds.join(', ') : 'unknown'} · browsers ${r.browsers?.length ? r.browsers.join(', ') : 'unknown'}`);
+    lines.push(`   last ${ilTime(r.lastAt)} · first ${ilTime(r.firstAt)} Israel time · builds ${r.builds?.length ? r.builds.join(', ') : r.version || 'unknown'} · browsers ${r.browsers?.length ? r.browsers.join(', ') : 'unknown'}`);
     if (r.where) lines.push(...String(r.where).split('\n').map((l, j) => `   ${j ? '   ' : 'stack: '}${l.trim()}`));
   });
   return { title, lines };

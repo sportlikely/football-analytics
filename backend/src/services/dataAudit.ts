@@ -24,7 +24,7 @@ import { getAfScorers } from './afMatches';
 import { emailEnabled, sendEmail } from './email';
 import { renderAdminMail, adminUrl, israelTime, type AdminMail } from './adminMail';
 import { every, after } from './perf';
-import { leaguesUnderFor, dueForEmail, STREAK_DAYS, STREAK_SHARE, type AuditRun } from '../utils/auditStreak';
+import { leaguesUnderFor, dueForEmail, isKnownGap, goalGap, STREAK_DAYS, STREAK_SHARE, KNOWN_CHECKS, type AuditRun, type PastIssue } from '../utils/auditStreak';
 
 db.exec(`CREATE TABLE IF NOT EXISTS data_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, json TEXT NOT NULL)`);
 // fix254: when each league was last emailed for staying under 90%
@@ -41,10 +41,12 @@ const PER_LEAGUE = parseInt(process.env.DATA_CHECK_PER_LEAGUE || '20', 10);
  *    provider records of one player, another competition filed under the league …)
  *  - 'lag': his club played in the last 30 h and his page was rebuilt after the game, but the provider has not
  *    updated the season numbers yet — checked again on the next run, not counted against the league
+ *  - 'known' (fix275): his page has more goals than the official list by the same gap on 3+ checks in a row ("Provider
+ *    and league disagree (known)") — shown grey, not counted against the league
  *  - 'sanity': provider quirks on the rest of the page (and, for Football-Data leagues, assists: the two providers
  *    credit assists by different rules), shown, nothing to do
  */
-export interface AuditIssue { kind: 'mismatch' | 'not-found' | 'sanity' | 'error' | 'lag'; league?: string; player?: string; playerId?: number; detail: string; reason?: string }
+export interface AuditIssue { kind: 'mismatch' | 'not-found' | 'sanity' | 'error' | 'lag' | 'known'; league?: string; player?: string; playerId?: number; detail: string; reason?: string }
 
 /** A league's share of matching top scorers must reach this (lag cases left out). */
 export const AUDIT_TARGET = 0.95;
@@ -61,7 +63,18 @@ function clubGamesSince(teamAf: number, since: string): string[] {
   } catch { return []; }
 }
 
-type Verdict = 'ok' | 'lag' | 'bad';
+type Verdict = 'ok' | 'lag' | 'known' | 'bad';
+
+/** fix275: the earlier runs (newest first), for the known-difference rule */
+let pastRuns: { leagues: string[]; issues: PastIssue[] }[] = [];
+function loadPastRuns(n = 6) {
+  try {
+    return (db.prepare(`SELECT json FROM data_audit ORDER BY id DESC LIMIT ?`).all(n) as any[]).map(r => {
+      const j = JSON.parse(r.json);
+      return { leagues: Object.keys(j.byLeague || {}), issues: (j.issues || []).filter((i: any) => i.kind === 'mismatch' || i.kind === 'known') };
+    });
+  } catch { return []; }
+}
 
 export async function runDataAudit(notify = true) {
   if (running) throw new Error('A data check is already running');
@@ -69,13 +82,15 @@ export async function runDataAudit(notify = true) {
   running = true;
   const t0 = Date.now();
   const issues: AuditIssue[] = [];
-  let checked = 0, matched = 0, lag = 0;
-  const byLeague: Record<string, { checked: number; matched: number; lag: number }> = {};
+  let checked = 0, matched = 0, lag = 0, known = 0;
+  const byLeague: Record<string, { checked: number; matched: number; lag: number; known: number }> = {};
   const tally = (code: string, r: Verdict) => {
-    const t = (byLeague[code] ||= { checked: 0, matched: 0, lag: 0 });
+    const t = (byLeague[code] ||= { checked: 0, matched: 0, lag: 0, known: 0 });
     t.checked++;
-    if (r === 'ok') t.matched++; else if (r === 'lag') t.lag++;
+    if (r === 'ok') t.matched++; else if (r === 'lag') t.lag++; else if (r === 'known') t.known++;
+    if (r === 'known') known++;
   };
+  pastRuns = loadPastRuns();
   try {
     for (const code of LEAGUES) {
       let list: any = null;
@@ -127,18 +142,18 @@ export async function runDataAudit(notify = true) {
   } finally {
     running = false;
   }
-  const report = { at: new Date().toISOString(), ms: Date.now() - t0, leagues: [...LEAGUES, ...AF_LEAGUES].join(', '), checked, matched, lag, target: AUDIT_TARGET, byLeague, issues };
+  const report = { at: new Date().toISOString(), ms: Date.now() - t0, leagues: [...LEAGUES, ...AF_LEAGUES].join(', '), checked, matched, lag, known, target: AUDIT_TARGET, byLeague, issues };
   db.prepare(`INSERT INTO data_audit (at, json) VALUES (?, ?)`).run(report.at, JSON.stringify(report));
   logger.info(`Data check: ${matched}/${checked} matched, ${lag} still updating after a game, ${issues.filter(i => i.kind === 'mismatch' || i.kind === 'not-found').length} to look at`
-    + ` · ${Object.entries(byLeague).map(([c, t]) => `${c} ${t.matched}/${t.checked - t.lag}`).join(' ')}`);
+    + ` · ${Object.entries(byLeague).map(([c, t]) => `${c} ${t.matched}/${t.checked - t.lag - t.known}`).join(' ')}`);
   for (const i of issues) if (i.kind === 'mismatch' || i.kind === 'not-found') logger.info(`data check ${i.league} ${i.player}: ${i.detail} — ${i.reason || '?'}`);
   if (notify) await emailReport(report).catch(e => logger.warn(`data check email: ${e.message}`));
   return report;
 }
 
 /** A league's share of matching players, lag cases left out (null = nothing checked). */
-export function leagueShare(t: { checked: number; matched: number; lag?: number }): number | null {
-  const n = t.checked - (t.lag || 0);
+export function leagueShare(t: { checked: number; matched: number; lag?: number; known?: number }): number | null {
+  const n = t.checked - (t.lag || 0) - (t.known || 0); // fix275: known differences left out too
   return n > 0 ? t.matched / n : null;
 }
 
@@ -196,6 +211,10 @@ async function checkPlayer(id: number, code: string, name: string, s: any, leagu
     if (recent.length && rows.length && Math.abs(goals - official) <= 3 * recent.length && (s.playedMatches == null || Math.abs(apps - s.playedMatches) <= recent.length + 1)) {
       push({ kind: 'lag', league: code, player: name, detail, reason: `his club played on ${recent[recent.length - 1].slice(0, 10)}; the provider has not updated his season yet — checked again on the next run` });
       verdict = 'lag';
+    } else if (rows.length && isKnownGap(pastRuns, code, { name, id: p.player?.id ?? id }, goalGap(detail) ?? 0)) {
+      // fix275: the same "page ahead" gap on 3+ checks: the provider and the league disagree for good — not a fault
+      push({ kind: 'known', league: code, player: name, detail, reason: `Provider and league disagree (known): the same difference on ${KNOWN_CHECKS}+ checks — ${reason}` });
+      verdict = 'known';
     } else {
       push({ kind: 'mismatch', league: code, player: name, detail, reason });
       verdict = 'bad';
@@ -263,10 +282,12 @@ export function recentAuditRuns(days = STREAK_DAYS + 7): AuditRun[] {
 /** fix254: the "For Claude" part of the check: the latest run's differences, and the leagues under 90% for 7+ days */
 export function auditForClaude(report: any = lastDataAudit(), runs: AuditRun[] = recentAuditRuns(), now = Date.now()) {
   if (!report) return null;
-  const issues: AuditIssue[] = (report.issues || []).filter((i: AuditIssue) => i.kind === 'mismatch' || i.kind === 'not-found');
+  // fix275: the known provider / league differences after the real ones, flagged (shown grey, not counted)
+  const all: AuditIssue[] = report.issues || [];
+  const issues: AuditIssue[] = [...all.filter(i => i.kind === 'mismatch' || i.kind === 'not-found'), ...all.filter(i => i.kind === 'known')];
   return {
-    at: report.at as string, checked: report.checked as number, matched: report.matched as number,
-    differences: issues.slice(0, 40).map(i => ({ league: leagueName(i.league), player: i.player || null, detail: i.detail, reason: i.reason || null })),
+    at: report.at as string, checked: report.checked as number, matched: report.matched as number, known: (report.known as number) || 0,
+    differences: issues.slice(0, 40).map(i => ({ league: leagueName(i.league), player: i.player || null, detail: i.detail, reason: i.reason || null, known: i.kind === 'known' })),
     more: Math.max(0, issues.length - 40),
     under: leaguesUnderFor(runs, now).map(u => ({ ...u, name: leagueName(u.league) }))
   };
@@ -275,7 +296,7 @@ export function auditForClaude(report: any = lastDataAudit(), runs: AuditRun[] =
 /** The email (fix239's admin template), fix254: only for leagues under 90% for 7 days — the differences are on the For Claude list. */
 export function auditEmail(report: any, under: { league: string; since: string; share: number }[]) {
   const by = report.byLeague || {};
-  const leagues = Object.keys(by).map(c => `${leagueName(c)} ${by[c].matched}/${by[c].checked - (by[c].lag || 0)}`).join(' · ');
+  const leagues = Object.keys(by).map(c => `${leagueName(c)} ${by[c].matched}/${by[c].checked - (by[c].lag || 0) - (by[c].known || 0)}`).join(' · ');
   const n = under.length;
   const mail: AdminMail = {
     label: 'Data check', tone: 'warn',

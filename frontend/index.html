@@ -104,7 +104,7 @@
         var report = function (why) {
           try {
             fetch('/api/client-error', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', keepalive: true,
-              body: JSON.stringify({ message: 'App did not load (fix227 loader): ' + why, page: location.pathname, kind: 'uncaught', version: (main() || {}).src || '', browser: navigator.userAgent.slice(0, 120) }) })['catch'](function () {});
+              body: JSON.stringify({ message: 'App did not load (fix227 loader): ' + why, page: location.pathname, kind: 'uncaught', version: (((main() || {}).src || '').match(/index-[A-Za-z0-9_-]+/) || [''])[0], browser: navigator.userAgent.slice(0, 120) }) })['catch'](function () {});
           } catch (e) {}
         };
         // fix252: an old page (a browser / CDN copy naming the last build's files, gone after a deploy) — before the card,
