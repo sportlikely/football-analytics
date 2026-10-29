@@ -146,3 +146,77 @@ export function edgePages(dataDir) {
   db.close();
   return out;
 }
+
+/*
+ * fix280: every match link the matches lists print resolves to that game (29 Oct: /football/matches linked Barça –
+ * Alavés to barcelona-vs-deportivo-alaves-…, which opened "Nothing found"). Each sport's /<sport>/matches is opened as
+ * a visitor; every /<sport>/match/<slug> link of the next `days` days is asked of /api/slug: it must be the table's own
+ * slug (not a search, not a move to another slug). Returns one entry per list: { url, role, width, why[] , links }.
+ */
+export const LIST_PAGES = ['football', 'basketball', 'american-football', 'tennis'].map(s => ({ sport: s, url: `/${s}/matches` }));
+export async function listMatchLinks(browser, base, { days = 7, log = () => undefined } = {}) {
+  const host = new URL(base).host;
+  const today = new Date().toISOString().slice(0, 10), last = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+  const out = [];
+  for (const { sport, url } of LIST_PAGES) {
+    const why = [], links = [];
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block', extraHTTPHeaders: { 'X-Forwarded-For': `2001:db8:280::${out.length + 1}` } });
+    try {
+      const page = await ctx.newPage();
+      await page.route(u => new URL(u.href).host !== host, r => r.abort('blockedbyclient'));
+      await page.goto(base + url, { waitUntil: 'load', timeout: 30_000 });
+      // the list loads after the page, and its links are drawn again when the sport's exception list arrives
+      // (a list still being built answers 202 and is asked again: up to 25 s for the first link, then until the count holds 1 s)
+      let n = -1, same = 0;
+      for (const t0 = Date.now(); Date.now() - t0 < 25_000;) {
+        const c = await page.evaluate(() => document.querySelectorAll('a[href*="/match/"]').length).catch(() => 0);
+        const busy = await page.evaluate(() => !!document.querySelector('main [aria-busy="true"], main .animate-spin')).catch(() => false);
+        same = c === n && !busy ? same + 1 : 0;
+        n = c;
+        if (c > 0 && same >= 4) break;
+        await sleep(250);
+      }
+      const hrefs = await page.evaluate(() => [...document.querySelectorAll('a[href]')].map(a => a.getAttribute('href') || ''));
+      const re = new RegExp(`^/${sport}/match/([a-z0-9-]+)(?:/[a-z-]+)?$`);
+      for (const h of new Set(hrefs)) {
+        const m = re.exec(h);
+        const day = m && /(\d{4}-\d{2}-\d{2})(?:-\d+)?$/.exec(m[1])?.[1];
+        if (m && day && day >= today && day <= last) links.push(m[1]);
+      }
+      for (const slug of [...new Set(links)]) {
+        let r, j = null;
+        try { r = await fetch(`${base}/api/slug/${sport}/match/${slug}`, { headers: { 'X-Forwarded-For': '2001:db8:280::99' }, signal: AbortSignal.timeout(15_000) }); j = await r.json().catch(() => null); }
+        catch (e) { why.push(`/${sport}/match/${slug}: no answer (${e.message})`); continue; }
+        if (r.status === 404) why.push(`/${sport}/match/${slug} opens the search (${j?.search || 'no such slug'}): the list printed a link the slugs table does not have`);
+        else if (r.status >= 400) why.push(`/${sport}/match/${slug}: /api/slug answers ${r.status}`);
+        else if (!j?.data?.id) why.push(`/${sport}/match/${slug} is not the table's slug (moves to ${j?.data?.slug || '?'}): the list and the slugs table disagree`);
+      }
+      log(`${url}: ${links.length} match links of the next ${days} days, ${why.length} broken`);
+    } catch (e) { why.push(`did not open: ${String(e.message).split('\n')[0]}`); }
+    await ctx.close();
+    out.push({ url, role: 'out', width: 1280, why, links });
+  }
+  return out;
+}
+/** fix280 (seeded data): the window games the football list must print (site-seed.mjs FD_WINDOW_GAMES) — their table slugs */
+export function seededListSlugs(dataDir, ids) {
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
+  const db = new DatabaseSync(path.join(dataDir, 'bet-to-beat.sqlite'), { readOnly: true });
+  const q = db.prepare(`SELECT slug FROM slugs WHERE sport = 'football' AND kind = 'match' AND id = ? AND is_primary = 1`);
+  const out = ids.map(id => ({ id, slug: q.get(String(id))?.slug || null }));
+  db.close();
+  return out;
+}
+/** fix280: the list check as test failures (+ the seeded games missing from the football list) */
+export async function listLinkFailures(browser, site, { log } = {}) {
+  const lists = await listMatchLinks(browser, site.base, { log });
+  if (!site.copy) {
+    const { FD_WINDOW_GAMES } = await import('./site-seed.mjs');
+    const fb = lists.find(l => l.url === '/football/matches');
+    for (const g of seededListSlugs(site.dataDir, FD_WINDOW_GAMES)) {
+      if (!g.slug) fb.why.push(`seeded window game ${g.id} has no slug (the slugs job missed a game the list prints)`);
+      else if (!fb.links.includes(g.slug)) fb.why.push(`the list does not link seeded game ${g.id} to its slug ${g.slug} (links: ${fb.links.filter(l => /alaves/.test(l)).join(', ') || 'none'})`);
+    }
+  }
+  return lists.map(({ links, ...r }) => r);
+}

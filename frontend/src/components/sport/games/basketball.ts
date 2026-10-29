@@ -7,7 +7,7 @@ import { useAuth } from '../../../lib/auth'
 import { useBbConfig, useBbFavorites, bbLeagueFav, bbRank, BB_COUNTRY, type BbGame } from '../../../lib/bb'
 import { toGame, toResult } from '../../SportHome/basketball'
 import type { GamesAdapter, GamesData, SGame, SLeague, SChip } from '../types'
-import { teamHref, leagueHref } from '../../../lib/links'
+import { teamHref, leagueHref, useSlugVersion } from '../../../lib/links'
 
 /** Basketball's adapter for the shared Games page (fix152a): data + labels only. */
 
@@ -40,6 +40,9 @@ function useData(): GamesData {
     return () => { off = true; clearInterval(iv) }
   }, [access])
 
+  // fix280: the rows' links are drawn again when the sport's slug exceptions / seasons arrive (lib/links.ts): drawn before,
+  // they kept the rules' slug (a dead link) or none
+  const slugV = useSlugVersion()
   return useMemo(() => {
     const leagues: SLeague[] = (cfg?.leagues || []).map(l => ({ code: l.code, name: l.name, logo: l.logo, country: BB_COUNTRY[l.code] || 'world', rank: bbRank(l.code), href: leagueHref('basketball', l.code, l.name)!, fav: bbLeagueFav(l) }))
     const byCode = new Map(leagues.map(l => [l.code, l]))
@@ -61,7 +64,7 @@ function useData(): GamesData {
       favLeagues: favs.leagues.map(f => f.ref),
       hasFavorites: favs.all.length > 0
     }
-  }, [games, results, error, cfg, favs.all.length])
+  }, [games, results, error, cfg, favs.all.length, slugV])
 }
 
 export const basketballGames: GamesAdapter = {

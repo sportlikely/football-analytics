@@ -9,7 +9,7 @@ import { toGame, toResult } from '../../SportHome/nfl'
 import { NflLeagueChips, NflLeaguePanel } from '../../../pages/nfl/parts'
 import { winnerChips } from './basketball'
 import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
-import { teamHref, leagueHref } from '../../../lib/links'
+import { teamHref, leagueHref, useSlugVersion } from '../../../lib/links'
 
 /** NFL + college football's adapter for the shared Games page (fix152a): data + labels only; the league from the URL. */
 
@@ -45,6 +45,9 @@ function useData(): GamesData {
     return () => { off = true; clearInterval(iv) }
   }, [access, league])
 
+  // fix280: the rows' links are drawn again when the sport's slug exceptions / seasons arrive (lib/links.ts): drawn before,
+  // they kept the rules' slug (a dead link) or none
+  const slugV = useSlugVersion()
   return useMemo(() => {
     // fix185: both leagues mixed by time (each game in its own league); fix213: the left column / phone chips choose one
     const lgs = new Map(([1, 2] as NflLeague[]).map(l => [l, leagueOf(l)]))
@@ -67,7 +70,7 @@ function useData(): GamesData {
       favLeagues: list.filter(f => f.kind === 'nfl-league').map(f => f.ref),
       hasFavorites: favs.all.length > 0
     }
-  }, [games, results, error, league, favs.all.length, list])
+  }, [games, results, error, league, favs.all.length, list, slugV])
 }
 
 /** fix185: NFL and college together; the All · NFL · College chips (in the address) filter. */

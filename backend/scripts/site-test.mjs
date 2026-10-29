@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startSite, samplePages, edgePages, EDGE_PAGES, siteLanguages, findChromium, playwright } from './site-server.mjs';
+import { startSite, samplePages, edgePages, EDGE_PAGES, siteLanguages, findChromium, playwright, listLinkFailures } from './site-server.mjs';
 import { TEST_USERS } from './site-seed.mjs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
@@ -292,6 +292,8 @@ function testedTree() {
     // fix279: the speed list — routes the web must answer from stored copies (never a build on the request): asked twice
     // as a visitor, the second answer within SITE_SPEED_MS (the live target is 100 ms; CI runners are slower) and 200 / 202
     if ((process.env.SITE_SHARD || '1/1').startsWith('1/') && !only) results.push(...await speedList(site.base, sample));
+    // fix280: every match link of the next 7 days on each sport's matches list resolves to its game (not the search)
+    if ((process.env.SITE_SHARD || '1/1').startsWith('1/') && !only) for (const r of await listLinkFailures(browser, site, { log })) { results.push(r); if (r.why.length) log(`FAIL list links ${r.url}: ${r.why.join(' | ')}`); }
     let next = 0, done = 0;
     await Promise.all(Array.from({ length: CONC }, async () => {
       while (next < todo.length) {

@@ -71,6 +71,11 @@ The crawler pages are still built from the old addresses inside (`internalPage`)
   click opens the page at once (`components/SlugRoute.tsx`; the address bar then gets the item's own slug if it differs).
   Old in-app addresses (`<OldLink>` routes) move to the slug address.
 - Guard: `npm run parity` → `frontend/scripts/links-check.ts`. Tests: `npm run test:fix229` (backend/scripts/slugs.test.mjs).
+- fix280 — one source for list links and the table: the slugs job registers every game a list prints (the Football-Data.org
+  window too, with or without a saved prediction) with every name the lists show (full + short name), and publishes a match
+  exception whenever any of those names / days (with or without the side ids) would make another slug. One primary slug per
+  match. A list's memo re-draws its links when the exceptions arrive (`useSlugVersion()` in its deps). test:site / test:links
+  check every match link of the next 7 days on every sport's matches list against /api/slug.
 
 ## After a deploy
 

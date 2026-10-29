@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSlugVersion } from '../../../lib/links'
 import axios from 'axios'
 import { API_URL } from '../../../lib/socket'
 import { t as tt } from '../../../lib/i18n'
@@ -64,6 +65,9 @@ function useData(): GamesData {
     return () => { off = true; clearInterval(iv) }
   }, [access, tour])
 
+  // fix280: the rows' links are drawn again when the sport's slug exceptions / seasons arrive (lib/links.ts): drawn before,
+  // they kept the rules' slug (a dead link) or none
+  const slugV = useSlugVersion()
   return useMemo(() => {
     const leagues = new Map<string, SLeague>()
     const games: SGame[] = (matches || []).filter(m => m.state === 'upcoming' || m.state === 'live').map(m => {
@@ -78,7 +82,7 @@ function useData(): GamesData {
       favLeagues: list.filter(f => f.kind === 'tennis-tournament').map(f => f.ref),
       hasFavorites: favs.all.length > 0
     }
-  }, [matches, results, error, favs.all.length, list])
+  }, [matches, results, error, favs.all.length, list, slugV])
 }
 
 /** The Matches page: football's layout; tournaments in the sidebar, the tour chips above. */

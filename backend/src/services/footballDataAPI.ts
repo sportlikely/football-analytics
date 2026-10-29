@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { isMainThread } from 'node:worker_threads';
 import { applyLeagueFix } from './leagueFixLive';
 import { withLive } from './liveChance';
 import { cachedPredictions, clearPredictionCache, mainPrediction } from './predCache';
@@ -16,7 +17,7 @@ import { reconcileFdWindow, freezeCheck, applyFreezeCheck, frozenText, fdFrozen 
 import { predictClubEuro } from './clubElo';
 import { withMarket, oddsFor } from './odds';
 import { runsJobs } from './role';
-import { onState, publishState } from './shared';
+import { onState, publishState, applyStored } from './shared';
 
 // Competitions to load. Override with COMPETITIONS=PL,PD,... in .env
 const DEFAULT_COMPETITIONS = ['PL', 'PD', 'SA', 'BL1', 'FL1', 'CL', 'DED', 'PPL', 'ELC'];
@@ -311,6 +312,11 @@ class FootballDataAPI {
       }
       clearPredictionCache();
     } else if (key === 'fd:live') this.liveLast = v;
+  }
+
+  /** fix280 (worker): the window's matches as they are now (the slugs job registers each one, its names as the lists print them) */
+  windowMatches(): any[] {
+    return this.window || [];
   }
 
   get windowAge() {
@@ -797,4 +803,7 @@ class FootballDataAPI {
 
 const footballDataAPI = new FootballDataAPI();
 onState('fd:', (k, v) => footballDataAPI.applyShared(k, v));
+// fix280: the worker starts from the last window it published (the web process already shows that copy) until its
+// first refresh — a restart while Football-Data.org is down kept an empty window in the worker: no slugs for its games
+if (runsJobs && isMainThread) { try { applyStored('fd:window'); } catch { /* none stored yet */ } }
 export default footballDataAPI;

@@ -10,7 +10,7 @@ import { toGame, toResult, mainPred, type Match } from '../../SportHome/football
 import { LeaguePanel } from '../../../pages/Dashboard'
 import type { GamesAdapter, GamesData, SGame, SLeague } from '../types'
 import { footballTeamHref } from '../../../lib/teamLink'
-import { leagueHref } from '../../../lib/links'
+import { leagueHref, useSlugVersion } from '../../../lib/links'
 
 /** Football's adapter for the shared Matches page (fix152a): data + labels only. */
 
@@ -52,6 +52,9 @@ function useData(): GamesData {
     return () => { off = true; clearInterval(timer); socket.off('matches:live', onLive); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pageshow', onShow) }
   }, [])
 
+  // fix280: the rows' links are drawn again when the sport's slug exceptions / seasons arrive (lib/links.ts): drawn before,
+  // they kept the rules' slug (a dead link) or none
+  const slugV = useSlugVersion()
   return useMemo(() => {
     const leagues = new Map<string, SLeague>()
     for (const m of matches) {
@@ -93,7 +96,7 @@ function useData(): GamesData {
       favLeagues: favList.filter(f => f.kind === 'league').map(f => f.code || f.ref),
       hasFavorites: favList.length > 0
     }
-  }, [matches, loading, error, results, favList, reasons, full])
+  }, [matches, loading, error, results, favList, reasons, full, slugV])
 }
 
 export const footballGames: GamesAdapter = {

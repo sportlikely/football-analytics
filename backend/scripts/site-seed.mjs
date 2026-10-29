@@ -173,6 +173,32 @@ function seedFootballData(db) {
   });
 }
 
+// fix280: the 29 Oct "Nothing found" link — a Football-Data.org window game the list prints with the teams' full names
+// (FC Barcelona – Deportivo Alavés) while `predictions` keeps the short ones (Barça – Alavés), and a window game with
+// no saved prediction yet (RCD Espanyol de Barcelona, a team the team index never resolved). The window is published as
+// the worker publishes it (shared state 'fd:window'; the site's worker starts from that copy).
+export const FD_WINDOW_GAMES = [990451, 990452];
+function seedFdWindow(db, require, dist) {
+  const now = iso(T0);
+  db.prepare(`INSERT OR REPLACE INTO af_teams (grp, team_id, name, fd_name, score) VALUES ('AF140', 9430, 'Alavés', 'Deportivo Alavés', 55)`).run();
+  db.prepare(`INSERT OR REPLACE INTO team_resolve (fd_id, af_id, via, at) VALUES (263, 9430, 'seed', ?)`).run(now);
+  const barca = db.prepare(`SELECT af_id FROM team_resolve WHERE fd_id = 81`).get()?.af_id;
+  db.prepare(`INSERT OR REPLACE INTO af_fixtures (fixture_id, league_id, season, grp, division, kickoff, date, home_id, away_id, home_name, away_name, status, hg, ag, lineups, stats) VALUES (990591, 140, 2026, 'AF140', 'La Liga', ?, ?, 9430, ?, 'Alavés', 'Barcelona', 'FT', 0, 1, 0, 0)`)
+    .run(at(-25, 19), at(-25, 19).slice(0, 10), barca);
+  const comp = { id: 2014, name: 'Primera Division', code: 'PD', type: 'LEAGUE', emblem: null };
+  const team = (id, name, shortName, tla) => ({ id, name, shortName, tla, crest: null });
+  const game = (id, days, h, a) => ({ id, utcDate: at(days, 20), status: 'TIMED', matchday: 11, stage: 'REGULAR_SEASON', group: null, lastUpdated: now,
+    area: { id: 2224, name: 'Spain', code: 'ESP' }, competition: comp, season: { id: 2400, startDate: '2026-08-15', endDate: '2027-05-23', currentMatchday: 11 },
+    homeTeam: h, awayTeam: a, score: { winner: null, duration: 'REGULAR', fullTime: { home: null, away: null }, halfTime: { home: null, away: null } }, referees: [] });
+  const alaves = team(263, 'Deportivo Alavés', 'Alavés', 'ALA');
+  const window = [game(FD_WINDOW_GAMES[0], 2, team(81, 'FC Barcelona', 'Barça', 'FCB'), alaves), game(FD_WINDOW_GAMES[1], 5, team(80, 'RCD Espanyol de Barcelona', 'Espanyol', 'ESP'), alaves)];
+  // the saved prediction of the first one, with the short names (tracking.ts saves shortName || name)
+  db.prepare(`INSERT OR REPLACE INTO predictions (match_id, model, competition_code, competition_name, utc_date, home_team_id, home_team, away_team_id, away_team, p_home, p_draw, p_away, xg_home, xg_away, over25, btts, confidence, locked, settled, created_at, updated_at, backfilled) VALUES (?, 'grid-v3', 'PD', 'Primera Division', ?, 81, 'Barça', 263, 'Alavés', 0.66, 0.2, 0.14, 2.1, 0.8, 0.58, 0.44, 'high', 0, 0, ?, ?, 0)`)
+    .run(FD_WINDOW_GAMES[0], at(2, 20), at(-1, 12), at(-1, 12));
+  const { applyState } = require(dist('services/shared.js'));
+  applyState('fd:window', { window, loadedAt: T0, standings: new Map() });
+}
+
 // fix271: the pages that crashed on null (28 Oct: the Game extras box on college team pages with no next game) — in every
 // sport a team with no upcoming game and a player with no current season; college teams with no game at all and one
 // whose only next game has no opponent yet (the provider's TBD: null name and id). EDGE_PAGES (site-server.mjs) opens them.
@@ -227,7 +253,7 @@ export async function seedSite(dataDir, { usersOnly = false } = {}) {
   seedUsers(db);
   if (!usersOnly) {
     const has = (db.prepare(`SELECT COUNT(*) AS n FROM bb_games`).get()).n;
-    if (!has) { seedBasketball(db); seedNfl(db); seedTennis(db); seedFootball(db); seedFootballData(db); seedEdge(db); }
+    if (!has) { seedBasketball(db); seedNfl(db); seedTennis(db); seedFootball(db); seedFootballData(db); seedFdWindow(db, require, dist); seedEdge(db); }
     const { buildSlugs } = require(dist('services/slugs.js'));
     await buildSlugs({ full: true });
   }

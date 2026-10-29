@@ -6,6 +6,7 @@
 //   - the address answers 404 / 410 (a past season's match page answers 410 on purpose: allowed) / 5xx
 //   - a redirect loop, or more than one redirect hop (old links move in one hop, docs/notes/links.md)
 //   - the page opens the app's 404, or the search (a slug the site drew but does not know)
+//   - fix280: any match link of the next 7 days on a sport's matches list that is not the slugs table's own slug
 // Each broken link is listed with up to three pages that carry it. Outside addresses are not followed.
 //
 //   npm run test:links          (after `npx tsc` here and `npx vite build` in frontend)
@@ -14,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startSite, languages, findChromium, playwright } from './site-server.mjs';
+import { startSite, languages, findChromium, playwright, listLinkFailures } from './site-server.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAX = Number(process.env.LINKS_MAX) || 4000;
@@ -163,6 +164,8 @@ async function http(base, url) {
       };
       pump();
     });
+    // fix280: every match link of the next 7 days on each sport's matches list (all of them, not only the crawled ones)
+    for (const r of await listLinkFailures(browser, site, { log })) for (const w of r.why) add(`${r.url} (list links)`, w, r.url);
     const list = [...problems.entries()].map(([url, p]) => ({ url, why: [...p.why], from: [...p.from].filter(f => f !== 'seed').slice(0, 3) }));
     fs.writeFileSync(REPORT, JSON.stringify({ test: 'test:links', at: new Date().toISOString(), checked, opened: pagesOpened, broken: list.length, database: site.copy ? 'copy' : 'seeded', seconds: Math.round((Date.now() - t0) / 1000), links: list }, null, 1));
     log(`${checked} addresses checked, ${pagesOpened} pages opened in ${Math.round((Date.now() - t0) / 1000)} s: ${list.length ? `${list.length} BROKEN` : 'no broken link'} (report ${REPORT})`);

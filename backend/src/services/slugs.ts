@@ -448,6 +448,30 @@ const FB_LEAGUE_TWINS: Record<string, string> = { AF39: 'PL', AF40: 'ELC', AF140
 
 type Built = { teams: Map<string, string>; names: Map<string, string[]>; aliasIds: Map<string, string> };
 
+/*
+ * fix280: the Football-Data.org window (the next 30 days of the top competitions) as the lists print it. 29 Oct:
+ * /football/matches linked Barça – Alavés to barcelona-vs-deportivo-alaves-2026-10-31, the table had
+ * barcelona-vs-alaves-…: `predictions` keeps a team's short name ("Alavés"), the list shows its full name ("Deportivo
+ * Alavés"), and the window's games without a saved prediction had no slug at all. Every window game gets one here, and
+ * both of its names count for the app's exceptions (publishSport).
+ */
+type FdSide = { id: number | null; name: string; short: string };
+type FdGame = { id: string; d: string; c: string | null; h: FdSide; a: FdSide };
+function fdWindow(): FdGame[] {
+  let w: any[] = [];
+  try { w = (require('./footballDataAPI').default as typeof import('./footballDataAPI').default).windowMatches(); } catch { return []; }
+  const side = (t: any): FdSide | null => {
+    const name = String(t?.name || t?.shortName || '').trim(), short = String(t?.shortName || t?.name || '').trim();
+    return name ? { id: t?.id != null ? Number(t.id) : null, name, short } : null;
+  };
+  const out: FdGame[] = [];
+  for (const m of w) {
+    const h = side(m?.homeTeam), a = side(m?.awayTeam);
+    if (m?.id != null && m.utcDate && h && a) out.push({ id: String(m.id), d: String(m.utcDate), c: m.competition?.code || null, h, a });
+  }
+  return out;
+}
+
 /** football: leagues, teams (API-Football ids; Football-Data.org ids → their club), players, matches */
 async function buildFootball(step: () => Promise<void>, full: boolean) {
   const sport: LinkSport = 'football';
@@ -504,6 +528,16 @@ async function buildFootball(step: () => Promise<void>, full: boolean) {
     const k = String(r.id);
     fdNames.set(k, [...(fdNames.get(k) || []), r.n]);
   }
+  // fix280: + the window's teams, both names (the list prints the full one, predictions keep the short one)
+  const win = fdWindow();
+  const winTeam = new Map<string, { n: string; c: string | null }>();
+  for (const m of win) for (const t of [m.h, m.a]) {
+    if (t.id == null || t.id >= AF) continue;
+    const k = String(t.id), ns = fdNames.get(k) || [];
+    for (const n of [t.short, t.name]) if (n && !ns.includes(n)) ns.push(n);
+    fdNames.set(k, ns);
+    if (!winTeam.has(k)) winTeam.set(k, { n: t.short, c: m.c });
+  }
   // the Football-Data.org teams of the last two years the team page never opened: found the way the page finds them
   const done = new Set(fdPairs.map(p => p[0]));
   try {
@@ -512,6 +546,12 @@ async function buildFootball(step: () => Promise<void>, full: boolean) {
       if (!r.id || done.has(String(r.id))) continue;
       const af = resolveAfTeamId(Number(r.id), r.c || undefined, r.n || undefined);
       if (af) { fdPairs.push([String(r.id), String(AF + af)]); done.add(String(r.id)); }
+      await step();
+    }
+    for (const [id, t] of winTeam) {
+      if (done.has(id)) continue;
+      const af = resolveAfTeamId(Number(id), t.c || undefined, t.n || undefined);
+      if (af) { fdPairs.push([id, String(AF + af)]); done.add(id); }
       await step();
     }
   } catch { /* team index not loaded yet: next run */ }
@@ -572,6 +612,9 @@ async function buildFootball(step: () => Promise<void>, full: boolean) {
     const out: MatchEntity[] = [];
     for (const r of all(`SELECT match_id, MAX(utc_date) AS d, MAX(home_team_id) AS hid, MAX(home_team) AS h, MAX(away_team_id) AS aid, MAX(away_team) AS a FROM predictions WHERE utc_date >= ? AND utc_date < ? GROUP BY match_id`, from, to))
       if (r.h && r.a) out.push({ id: String(r.match_id), home: fdTeam(r.hid, r.h), away: fdTeam(r.aid, r.a), date: r.d });
+    // fix280: a window game without a saved prediction yet (not predicted, or before its first save)
+    const got = new Set(out.map(r => r.id));
+    for (const m of win) if (m.d >= from && m.d < to && !got.has(m.id)) out.push({ id: m.id, home: fdTeam(m.h.id, m.h.short), away: fdTeam(m.a.id, m.a.short), date: m.d });
     for (const r of all(`SELECT fixture_id, kickoff, home_id, home_name, away_id, away_name FROM af_fixtures WHERE kickoff >= ? AND kickoff < ?`, from, to)) {
       const id = String(AF + r.fixture_id);
       if (twinOf.has(id)) continue;
@@ -694,9 +737,10 @@ async function buildMatches(sport: LinkSport, step: () => Promise<void>, full: b
   let cur = full || !have.size ? new Date(Date.UTC(2015, 0, 1)) : new Date(Date.UTC(back.getUTCFullYear(), back.getUTCMonth(), 1));
   while (cur < end) {
     const next = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
-    const rows = (await rowsOf(cur.toISOString(), next.toISOString())).filter(r => !have.has(r.id));
+    // fix280: each id once (a predicted API-Football game is in predictions and af_fixtures: it got two primary slugs, "-2")
+    const rows: MatchEntity[] = [];
+    for (const r of await rowsOf(cur.toISOString(), next.toISOString())) if (!have.has(r.id)) { have.add(r.id); rows.push(r); }
     if (rows.length) write(sport, 'match', assignMatchSlugs(slugs, rows));
-    for (const r of rows) have.add(r.id);
     cur = next;
     await step();
   }
@@ -784,8 +828,18 @@ async function publishSport(sport: LinkSport, step: () => Promise<void>) {
   const names = nameRows(sport);
   for (const [id, ns] of names.team) { const s = map.get(`i:team/${id}`); if (s && ns.some(n => teamSlug(n) !== s)) client.t[id] = s; }
   for (const [id, ns] of names.player) { const s = map.get(`i:player/${id}`); if (s && ns.some(n => playerSlug(n) !== s)) clientP[id] = s; }
+  const bare = (n: string) => (sport === 'tennis' ? playerSlug(n) : teamSlug(n));
   const side = (id: string | null, n: string) => (id && client.t[id]) || (sport === 'tennis' ? (id && clientP[id]) || playerSlug(n) : teamSlug(n));
-  for (const r of names.match) { const s = map.get(`i:match/${r.id}`); if (s && s !== matchSlug(side(r.hid, r.h), side(r.aid, r.a), r.d)) client.m[r.id] = s; }
+  // fix280: a game is an exception when ANY name / day a list may print for it (full or short name, with the side's id
+  // or without: several lists pass names only) makes another slug — the app then takes the slug from this list
+  for (const r of names.match) {
+    const s = map.get(`i:match/${r.id}`);
+    if (!s) continue;
+    let differs = false;
+    for (const d of r.d) for (const h of r.h) for (const a of r.a)
+      if (!differs && (matchSlug(side(r.hid, h), side(r.aid, a), d) !== s || matchSlug(bare(h), bare(a), d) !== s)) differs = true;
+    if (differs) client.m[r.id] = s;
+  }
   await step();
   const st: SlugState = { sport, builtAt: Date.now(), map, client: JSON.stringify({ v: 1, ...client }), clientPlayers: JSON.stringify({ v: 1, p: clientP }), seasons: JSON.stringify(seasonStarts(sport)) };
   states.set(sport, st);
@@ -843,13 +897,28 @@ const MATCH_SQL: Record<LinkSport, string> = {
   tennis: `SELECT id FROM tennis_matches WHERE scheduled_at >= ? AND scheduled_at < ?`
 };
 function matchIdsInWindow(sport: LinkSport): Set<string> {
-  return new Set(all(MATCH_SQL[sport], daysAgo(WINDOW_BACK), daysAgo(-WINDOW_AHEAD)).map(r => String(r.id)));
+  const ids = new Set(all(MATCH_SQL[sport], daysAgo(WINDOW_BACK), daysAgo(-WINDOW_AHEAD)).map(r => String(r.id)));
+  // fix280: + the Football-Data.org window's games without a saved prediction
+  if (sport === 'football') for (const m of fdWindow()) ids.add(m.id);
+  return ids;
 }
 /** the names the app shows for teams / players / the window's matches (each id with every name it had) */
 function nameRows(sport: LinkSport) {
   const team = new Map<string, string[]>(), player = new Map<string, string[]>();
   const add = (m: Map<string, string[]>, id: unknown, n: unknown) => { if (id == null || !n) return; const k = String(id), a = m.get(k) || []; if (!a.includes(String(n))) a.push(String(n)); m.set(k, a); };
-  const match: { id: string; hid: string | null; h: string; aid: string | null; a: string; d: string }[] = [];
+  // fix280: each game once, with every name of each side and every day it was listed on
+  const games = new Map<string, { id: string; hid: string | null; h: string[]; aid: string | null; a: string[]; d: string[] }>();
+  const push = (m: { id: string; hid: string | null; h: string; aid: string | null; a: string; d: string }) => {
+    const g = games.get(m.id) || { id: m.id, hid: m.hid, h: [], aid: m.aid, a: [], d: [] };
+    if (g.hid == null) g.hid = m.hid;
+    if (g.aid == null) g.aid = m.aid;
+    if (m.h && !g.h.includes(m.h)) g.h.push(m.h);
+    if (m.a && !g.a.includes(m.a)) g.a.push(m.a);
+    const day = String(m.d || '').slice(0, 10);
+    if (day && !g.d.includes(day)) g.d.push(day);
+    games.set(m.id, g);
+  };
+  const match = { push };
   const from = daysAgo(WINDOW_BACK), to = daysAgo(-WINDOW_AHEAD);
   if (sport === 'football') {
     for (const r of all(`SELECT match_id AS id, MAX(utc_date) AS d, MAX(home_team_id) AS hid, MAX(home_team) AS h, MAX(away_team_id) AS aid, MAX(away_team) AS a FROM predictions WHERE utc_date >= ? AND utc_date < ? GROUP BY match_id`, from, to)) {
@@ -858,6 +927,14 @@ function nameRows(sport: LinkSport) {
     for (const r of all(`SELECT fixture_id, kickoff, home_id, home_name, away_id, away_name FROM af_fixtures WHERE kickoff >= ? AND kickoff < ?`, from, to)) {
       add(team, AF + r.home_id, r.home_name); add(team, AF + r.away_id, r.away_name);
       match.push({ id: String(AF + r.fixture_id), hid: String(AF + r.home_id), h: r.home_name, aid: String(AF + r.away_id), a: r.away_name, d: r.kickoff });
+    }
+    // fix280: the Football-Data.org window as the list prints it (full name; predictions keep the short one)
+    for (const m of fdWindow()) {
+      if (m.d < from || m.d >= to) continue;
+      const hid = m.h.id != null ? String(m.h.id) : null, aid = m.a.id != null ? String(m.a.id) : null;
+      for (const [id, t] of [[hid, m.h], [aid, m.a]] as const) { add(team, id, t.name); add(team, id, t.short); }
+      match.push({ id: m.id, hid, h: m.h.name, aid, a: m.a.name, d: m.d });
+      match.push({ id: m.id, hid, h: m.h.short, aid, a: m.a.short, d: m.d });
     }
     for (const r of all(`SELECT home_id AS id, home_name AS n FROM af_fixtures WHERE date >= ? GROUP BY home_id, home_name`, daysAgo(400).slice(0, 10))) add(team, AF + r.id, r.n);
     for (const r of all(`SELECT player_id AS id, name FROM af_player_season WHERE season >= (SELECT MAX(season) - 1 FROM af_player_season) GROUP BY player_id, name`)) add(player, r.id, r.name);
@@ -881,8 +958,20 @@ function nameRows(sport: LinkSport) {
       if (r.p1_name && r.p2_name) match.push({ id: String(r.id), hid: r.p1_id != null ? String(r.p1_id) : null, h: r.p1_name, aid: r.p2_id != null ? String(r.p2_id) : null, a: r.p2_name, d: r.scheduled_at });
     }
   }
-  return { team, player, match };
+  return { team, player, match: [...games.values()].filter(g => g.h.length && g.a.length && g.d.length) };
 }
+
+/**
+ * fix280: one primary slug per match — a predicted API-Football game came twice in one batch (predictions + af_fixtures)
+ * and got two ("…-2" too). The later one becomes an alias (its links 301 to the first); once per worker start.
+ */
+export function onePrimaryPerMatch(): number {
+  try {
+    return Number(db.prepare(`UPDATE slugs SET is_primary = 0 WHERE kind = 'match' AND is_primary = 1 AND rowid IN (
+      SELECT rid FROM (SELECT rowid AS rid, ROW_NUMBER() OVER (PARTITION BY sport, id ORDER BY rowid) AS n FROM slugs WHERE kind = 'match' AND is_primary = 1) WHERE n > 1)`).run().changes);
+  } catch (e: any) { logger.warn(`slugs: one primary per match: ${e?.message || e}`); return 0; }
+}
+let dupesDone = false;
 
 let running = false, lastFull = 0;
 export const slugStatus = () => Object.fromEntries(LINK_SPORTS.map(s => {
@@ -897,6 +986,7 @@ export async function buildSlugs(opts: { full?: boolean; sports?: LinkSport[] } 
   const full = opts.full || Date.now() - lastFull > 6 * 3600 * 1000;
   const step = yieldEvery(50, 100);
   try {
+    if (!dupesDone) { dupesDone = true; const n = onePrimaryPerMatch(); if (n) logger.info(`slugs: ${n} second primary match slugs made aliases`); }
     for (const sport of opts.sports || LINK_SPORTS) {
       const t0 = Date.now();
       try {
