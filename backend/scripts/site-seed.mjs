@@ -178,11 +178,16 @@ function seedFootballData(db) {
 // whose only next game has no opponent yet (the provider's TBD: null name and id). EDGE_PAGES (site-server.mjs) opens them.
 function seedEdge(db) {
   const now = iso(T0);
-  // American football: three college teams (league 2) and an NFL team whose last game is behind it
-  const college = [[9211, 'Colorado State', 'Mountain West'], [9212, 'Alabama State', 'SWAC'], [9213, 'Utah State', 'Mountain West']];
+  // American football: the six college teams (league 2) whose pages crashed on 28 Oct (fix271 / fix272) and an NFL team
+  // whose last game is behind it
+  const college = [[9211, 'Colorado State', 'Mountain West'], [9212, 'Alabama State', 'SWAC'], [9213, 'Utah State', 'Mountain West'],
+    [9214, 'Chicago State', 'NEC'], [9215, 'Washington State', 'Pac-12'], [9216, 'Fresno State', 'Mountain West']];
   for (const [tid, name, conf] of college)
     db.prepare(`INSERT OR REPLACE INTO nfl_teams (team_id, name, code, city, conference, division, updated_at, league, level) VALUES (?, ?, NULL, NULL, ?, NULL, ?, 2, ?)`)
-      .run(tid, name, conf, now, conf === 'SWAC' ? 'FCS' : 'FBS');
+      .run(tid, name, conf, now, conf === 'SWAC' || conf === 'NEC' ? 'FCS' : 'FBS');
+  // (Washington State's next game: the home side not known yet)
+  db.prepare(`INSERT OR REPLACE INTO nfl_games (game_id, season, week, stage, kickoff, home_id, home_name, away_id, away_name, status, home_pts, away_pts, updated_at, league) VALUES (990193, 2026, 'Week 11', 'Regular Season', ?, NULL, NULL, 9215, 'Washington State', 'NS', NULL, NULL, ?, 2)`)
+    .run(at(12, 18), now);
   db.prepare(`INSERT OR REPLACE INTO nfl_games (game_id, season, week, stage, kickoff, home_id, home_name, away_id, away_name, status, home_pts, away_pts, updated_at, league) VALUES (990191, 2026, 'Week 10', 'Regular Season', ?, 9213, 'Utah State', NULL, NULL, 'NS', NULL, NULL, ?, 2)`)
     .run(at(5, 18), now);
   db.prepare(`INSERT OR REPLACE INTO nfl_teams (team_id, name, code, city, conference, division, updated_at, league, level) VALUES (9205, 'New York Jets', 'NYJ', 'New York', 'American Football Conference', 'AFC East', ?, 1, NULL)`).run(now);

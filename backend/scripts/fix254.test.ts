@@ -216,7 +216,7 @@ test('(2) hot keys: page times / ETags and state versions come from the worker i
   const pc = read('src/services/pageCache.ts');
   // (fix263: the whole list from the worker; memory answers for a key held while the list is in, or younger than its keep time)
   assert.match(pc, /if \(h && \(hotComplete \|\| Date\.now\(\) - h\.at < keepOf\(key\)\)\) \{ hotStats\.hits\+\+; return h\.at; \}/);
-  assert.match(pc, /sendIpc\(\{ t: 'page', key, builtAt: at, etags, kb \}\)/);
+  assert.match(pc, /sendIpc\(\{ t: 'page', key, builtAt: at, etags, kb(, \.\.\.\(same \? \{ sameAs: prevAt \} : \{\}\))? \}\)/); // fix272: + sameAs (an unchanged build)
   assert.match(pc, /onIpc\('page-meta'/);
   const sh = read('src/services/shared.ts');
   assert.match(sh, /sendIpc\(\{ t: 'state-vers', vers: workerVers\(\) \}\)/);

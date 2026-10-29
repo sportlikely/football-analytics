@@ -58,6 +58,7 @@ import { edgeStatus } from './edgeHops';
 import { modelDailyHealth } from './modelDailyHealth';
 import { leagueFixHealth } from './leagueFixHealth';
 import { diskHealth } from './dbSpace';
+import { namesHealth } from './names';
 import { careerHealth } from './playerCareers';
 
 type Level = 'ok' | 'warn' | 'fail';
@@ -441,6 +442,8 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
   try { checks.push(photoSourceHealth()); } catch (e: any) { logger.warn(`photo health: ${e?.message || e}`); }
   // fix267: "Player careers" — the share of each sport's top 100 players with a complete career
   try { checks.push(careerHealth()); } catch (e: any) { logger.warn(`career health: ${e?.message || e}`); }
+  // fix272: "Names (he / ar)" — entries per language and in the map the pages load (it stayed empty 9 h after fix261)
+  try { checks.push(namesHealth(now)); } catch (e: any) { logger.warn(`names health: ${e?.message || e}`); }
   // fix217: basketball leagues (NBA first) — the last 30 days' hit rate against the league's backtest (50+ games)
   try {
     const list = bbLiveVsBacktest(now);

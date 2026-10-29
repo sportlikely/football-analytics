@@ -742,3 +742,31 @@ the numbers come from the server itself.
   health "Slow reads (3 h)" = the proof (no read over 500 ms, no slow request); "Disk" = volume free %, file + WAL,
   7-day growth from db_size_days, days until full (warn < 30, fail < 7 or < 10% free), the 15 biggest tables / indexes
   from the daily dbstat report (01:10 UTC, upkeep thread) with their own 7-day growth (db_space_tables).
+
+## fix272 — the WAL that never started over (28–29 Oct)
+
+Data health 29 Oct 01:40 UTC: "database" 7.88 GB (2.97 GB at 20:30), volume p95 1,520 ms. The figure is file + WAL.
+fix269 (deployed that evening) stopped every connection's own checkpoints (wal_autocheckpoint 0) so only the upkeep
+thread writes the WAL back — and its TRUNCATE ran only when PASSIVE had caught up *exactly* (log === checkpointed).
+With stored pages rewritten every few seconds and reader threads always reading, some frames were always newer than
+the oldest reader's snapshot: no TRUNCATE ever ran, the WAL never started over and journal_size_limit never applied.
+No production copy was in the session: the per-table sizes come from the server itself (Disk, after the deploy).
+
+- **Checkpoints** (workers/dbMaint.ts, services/dbSpace.ts): PASSIVE every minute (only a few seconds of frames each
+  time); every 5 min TRUNCATE while the WAL is over 64 MB (else every 30 min) once PASSIVE left ≤ 4,096 frames
+  (16,384 over 1 GB) — TRUNCATE copies those under the writer lock and waits for old readers: 300 ms, 1 s (WAL
+  > 256 MB or 3 failed tries), 2 s (> 1 GB or 6), 4 s (> 3 GB or 12) (`utils/diskRules.truncatePlan`). One
+  checkpoint at a time; 10-min timeout. Disk shows frames left, the wait, the last start-over that worked.
+- **Write load**: a stored page rebuilt unchanged (the page's and every view's ETag equal to the last copy's) only
+  moves built_at (one UPDATE in place, no gzip made); the web keeps its copy (`sameAs` in the page message). A changed
+  build sweeps the previous build's leftovers (parts past the new count, a view it has no more). `/api/perf` → page
+  memory `builds` { written, touched }.
+- **Names job** (services/names.ts): rows in slices of 500, one transaction each (never across a yield), one prepared
+  lookup; the map the he / ar pages load is built right after the press / letter-rule rows, before Wikidata. It wrote
+  every row as its own commit and built the map only at the end: /api/names/he empty 9 h after fix261.
+- **Disk**: the size every 10 min (db_size_hours, 72 h); "last 6 h" growth; red when the volume would fill within
+  3 days at that rate; ≥ 1 GB in 6 h runs the dbstat report on its own (at most every 6 h) and each table shows its
+  growth since the report before (meta report_prev). Space back: the WAL file goes to 0 at the first TRUNCATE; free
+  pages in the file are given back by the incremental vacuum (fix249) once auto_vacuum is INCREMENTAL.
+- Test: `npm run test:fix272` (a real SQLite file with a reader on an old snapshot: the fix249 rule stays busy, the
+  new one truncates the WAL to 0).

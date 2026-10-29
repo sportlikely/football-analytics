@@ -329,6 +329,10 @@ const noteRequested = (key: string, def: PageDef) => {
 const freshOf = (def: PageDef, body: () => any) => { try { return def.freshOf ? def.freshOf(body()) : def.freshMs; } catch { return def.freshMs; } };
 // worker: when each key was last built (the copy itself is in page_cache, not in memory)
 const builtAtMem = new Map<string, number>();
+// fix272 (worker): each key's last stored copy — its time and the ETags of the page and every view (an unchanged build
+// only moves built_at); how many builds were written / only touched since the start (/api/perf: pageMemStatus().builds)
+const lastSig = new Map<string, { sig: string; at: number }>();
+const touchStats = { written: 0, touched: 0 };
 /**
  * fix210: pages with warm queries (the lists every visitor opens: big) are built one at a time in the worker; on-demand
  * pages (one player, one match: small, a visitor may be waiting) are built at once.
@@ -363,30 +367,43 @@ function buildNow(key: string): Promise<void> {
       await yieldLoop();
     }
     // fix221: ETag + gzip of every view made here (gzip runs off the thread), so the web process only sends them
-    const variants: [string, View][] = [];
-    for (const [v, text] of texts) {
-      variants.push([v, { text, etag: etagOf(text), gz: v !== 'rows' && text.length > 2048 ? await gzip(text, { level: 6 }) : null }]);
-      await yieldLoop();
-    }
+    const variants: [string, View][] = texts.map(([v, text]) => [v, { text, etag: etagOf(text), gz: null }]);
+    // fix272: the same page as the stored copy (every view's ETag and the page's own) → only its time moves (one small
+    // UPDATE in place); the lists rebuilt every 30 s rewrote every view + its gzip copy each time, changed or not
+    const sig = `${etagOf(json)}|${variants.map(([v, x]) => `${v}=${x.etag}`).join(',')}`;
+    const prev = isWorker ? lastSig.get(key) : undefined;
     const at = Date.now();
-    const ins = db.prepare(`INSERT INTO page_cache (key, json, built_at, ms, etag, gz, kb) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET json = excluded.json, built_at = excluded.built_at, ms = excluded.ms, etag = excluded.etag, gz = excluded.gz, kb = excluded.kb`);
-    const dropParts = db.prepare(`DELETE FROM page_cache WHERE key > ? AND key < ?`);
-    db.exec('BEGIN');
-    try {
-      ins.run(key, json, at, at - t0, null, null, Math.round(json.length / 1024));
+    let same = false, prevAt = 0;
+    if (prev && prev.sig === sig) {
+      const n = Number(db.prepare(`UPDATE page_cache SET built_at = ? WHERE built_at = ? AND (key = ? OR (key > ? AND key < ?))`).run(at, prev.at, key, `${key}#`, `${key}#￿`).changes);
+      if (n >= 1 + variants.length) { same = true; prevAt = prev.at; touchStats.touched++; }
+    }
+    if (!same) {
       for (const [v, x] of variants) {
-        const vk = `${key}#${v}`;
-        // fix250: a view over 2 MB is stored as a marker row + 2 MB parts (the web reads the parts in parallel: no single
-        // read is slow); the previous build's parts go
-        dropParts.run(`${vk}~`, `${vk}~￿`);
-        if (x.text.length <= SPLIT_CHARS) { ins.run(vk, x.text, at, 0, x.etag, x.gz, Math.round(x.text.length / 1024)); continue; }
-        const n = Math.ceil(x.text.length / SPLIT_CHARS);
-        ins.run(vk, partsMarker(n), at, 0, x.etag, x.gz, Math.round(x.text.length / 1024));
-        for (let i = 0; i < n; i++) ins.run(partKey(vk, i), x.text.slice(i * SPLIT_CHARS, (i + 1) * SPLIT_CHARS), at, 0, null, null, 0);
+        if (v !== 'rows' && x.text.length > 2048) x.gz = await gzip(x.text, { level: 6 });
+        await yieldLoop();
       }
-      db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); throw e; }
+      const ins = db.prepare(`INSERT INTO page_cache (key, json, built_at, ms, etag, gz, kb) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET json = excluded.json, built_at = excluded.built_at, ms = excluded.ms, etag = excluded.etag, gz = excluded.gz, kb = excluded.kb`);
+      db.exec('BEGIN');
+      try {
+        ins.run(key, json, at, at - t0, null, null, Math.round(json.length / 1024));
+        for (const [v, x] of variants) {
+          const vk = `${key}#${v}`;
+          // fix250: a view over 2 MB is stored as a marker row + 2 MB parts (the web reads the parts in parallel: no single
+          // read is slow)
+          if (x.text.length <= SPLIT_CHARS) { ins.run(vk, x.text, at, 0, x.etag, x.gz, Math.round(x.text.length / 1024)); continue; }
+          const n = Math.ceil(x.text.length / SPLIT_CHARS);
+          ins.run(vk, partsMarker(n), at, 0, x.etag, x.gz, Math.round(x.text.length / 1024));
+          for (let i = 0; i < n; i++) ins.run(partKey(vk, i), x.text.slice(i * SPLIT_CHARS, (i + 1) * SPLIT_CHARS), at, 0, null, null, 0);
+        }
+        // the previous build's leftovers: parts past the new count, a view this build has no more (fix272: one sweep)
+        db.prepare(`DELETE FROM page_cache WHERE key > ? AND key < ? AND built_at < ?`).run(`${key}#`, `${key}#￿`, at);
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+      touchStats.written++;
+    }
+    if (isWorker) { lastSig.delete(key); lastSig.set(key, { sig, at }); if (lastSig.size > 5000) lastSig.delete(lastSig.keys().next().value as string); }
     if (!isWorker) memSet(key, { builtAt: at, checkedAt: at, body, variants: new Map(variants.filter(([v]) => v !== 'rows')), bytes: (json.length + variants.reduce((n, [, x]) => n + x.text.length, 0)) * 2 });
     else { builtAtMem.delete(key); builtAtMem.set(key, at); if (builtAtMem.size > 5000) builtAtMem.delete(builtAtMem.keys().next().value as string); }
     const st = statOf(key);
@@ -394,7 +411,7 @@ function buildNow(key: string): Promise<void> {
     const etags = Object.fromEntries(variants.filter(([v]) => v !== 'rows').map(([v, x]) => [v, x.etag]));
     const kb = Object.fromEntries(variants.map(([v, x]) => [v, Math.round(x.text.length / 1024)]));
     noteRecentBuild(key, at, etags, kb);
-    sendIpc({ t: 'page', key, builtAt: at, etags, kb });
+    sendIpc({ t: 'page', key, builtAt: at, etags, kb, ...(same ? { sameAs: prevAt } : {}) });
   }).catch(e => {
     logger.warn(`page ${key}: ${e?.message || e}`);
     sendIpc({ t: 'page', key, builtAt: 0 }); // a request waiting for a first copy answers now (503) instead of after 10 s
@@ -551,6 +568,9 @@ if (isWorker) setTimeout(() => { void sendPageList(); }, Number(process.env.PAGE
 if (isWeb) onIpc('page', m => {
   const key = String(m.key);
   if (Number(m.builtAt) > 0) { hotStats.messages++; hotSet(key, { at: Number(m.builtAt), etags: (m.etags as Record<string, string>) || undefined, kb: (m.kb as Record<string, number>) || undefined }); }
+  // fix272: the same copy with a new time (the worker only moved built_at): the one held here is still right
+  const cur = m.sameAs ? mem.get(key) : undefined;
+  if (cur && cur.builtAt === Number(m.sameAs)) { cur.builtAt = Number(m.builtAt); cur.checkedAt = Date.now(); }
   newerCopy(key, Number(m.builtAt));
   for (const w of waiters.get(key) || []) w();
   waiters.delete(key);
@@ -792,7 +812,9 @@ export const _firstOrder = (keys: string[], stale: (key: string) => boolean) => 
 export const pageMemStatus = () => ({
   copies: mem.size - holdCopies, mb: Math.round(memBytes / 1048576), maxCopies: MEM_MAX, maxMb: Math.round(MEM_MAX_BYTES / 1048576),
   // fix269: the held lists / homes / standings / news / config copies
-  held: { copies: holdCopies, mb: Math.round(holdBytes / 1048576), maxMb: Math.round(HOLD_MAX_BYTES / 1048576), refreshing: refreshing.size, ...holdStats }
+  held: { copies: holdCopies, mb: Math.round(holdBytes / 1048576), maxMb: Math.round(HOLD_MAX_BYTES / 1048576), refreshing: refreshing.size, ...holdStats },
+  // fix272 (worker): builds written vs unchanged (only built_at moved)
+  builds: { ...touchStats }
 });
 /** tests (fix263): every warm key */
 export const _warmKeys = () => [...defs.values()].flatMap(d => (d.warm || []).map(q => pageKey(d.name, q)));

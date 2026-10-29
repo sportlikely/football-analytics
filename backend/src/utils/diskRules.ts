@@ -1,11 +1,13 @@
 /**
  * fix249: the "Disk" data-health verdict (services/dbSpace.ts): volume free %, database size and its 7-day growth,
- * and how many days until the growth would fill the volume. Pure (scripts/fix249.test.ts).
+ * and how many days until the growth would fill the volume. Pure (scripts/fix249.test.ts, fix272.test.ts).
+ * fix272: + the growth of the last 6 hours (red when the volume would fill within 3 days at that rate), how long a
+ * TRUNCATE checkpoint waits for old readers, and when the size report runs again on its own.
  */
-export type DiskInput = { volFree: number | null; volTotal: number | null; dbBytes: number; walBytes: number; growth7d: number | null };
-export type DiskVerdict = { level: 'ok' | 'warn' | 'fail'; freePct: number | null; perDay: number | null; daysToFull: number | null; reasons: string[] };
+export type DiskInput = { volFree: number | null; volTotal: number | null; dbBytes: number; walBytes: number; growth7d: number | null; perDay6h?: number | null };
+export type DiskVerdict = { level: 'ok' | 'warn' | 'fail'; freePct: number | null; perDay: number | null; daysToFull: number | null; daysToFull6h: number | null; reasons: string[] };
 
-export const DISK_RULES = { warnDays: 30, failDays: 7, warnFreePct: 20, failFreePct: 10, walWarnBytes: 512 * 1048576 };
+export const DISK_RULES = { warnDays: 30, failDays: 7, fail6hDays: 3, warnFreePct: 20, failFreePct: 10, walWarnBytes: 512 * 1048576 };
 
 /** size history rows (day, total bytes = file + WAL) → bytes per day over the last 7 days (null under 2 days of rows) */
 export function growthPerDay(rows: { day: string; bytes: number }[], today: string): number | null {
@@ -18,17 +20,48 @@ export function growthPerDay(rows: { day: string; bytes: number }[], today: stri
   return days > 0 ? (last.bytes - first.bytes) / days : null;
 }
 
+/**
+ * fix272: growth over the last `hours` from the 10-minute size rows (at = ISO time, bytes = file + WAL) up to `now`:
+ * { bytes grown, per day, hours covered } from the oldest row inside the window; null under an hour of rows
+ */
+export function growthOver(rows: { at: string; bytes: number }[], now: { at: string; bytes: number }, hours = 6): { bytes: number; perDay: number; hours: number } | null {
+  const t = Date.parse(now.at), from = t - hours * 3600 * 1000;
+  const first = rows.filter(r => Date.parse(r.at) >= from && Date.parse(r.at) < t).sort((a, b) => a.at.localeCompare(b.at))[0];
+  if (!first) return null;
+  const h = (t - Date.parse(first.at)) / 3600000;
+  if (h < 1) return null;
+  const bytes = now.bytes - first.bytes;
+  return { bytes, perDay: (bytes / h) * 24, hours: h };
+}
+
+/**
+ * fix272: how long TRUNCATE waits for readers on an old snapshot (writers wait as long) and how many WAL frames PASSIVE
+ * may have left for it to copy under the writer lock — longer / more as the WAL grows or keeps failing to start over
+ */
+export function truncatePlan(walBytes: number, busyStreak: number): { busyMs: number; catchUp: number } {
+  const GB = 1073741824;
+  const busyMs = walBytes > 3 * GB || busyStreak >= 12 ? 4000 : walBytes > GB || busyStreak >= 6 ? 2000 : walBytes > 256 * 1048576 || busyStreak >= 3 ? 1000 : 300;
+  return { busyMs, catchUp: walBytes > GB ? 16384 : 4096 };
+}
+
+/** fix272: run the dbstat size report again now? (≥ 1 GB grown in 6 h, the last report over 6 h old) */
+export function reportDue(grown6h: number | null, lastReportAt: number | null, now: number): boolean {
+  return grown6h != null && grown6h >= 1073741824 && (lastReportAt == null || now - lastReportAt > 6 * 3600 * 1000);
+}
+
 export function diskVerdict(x: DiskInput): DiskVerdict {
   const reasons: string[] = [];
   const freePct = x.volFree != null && x.volTotal ? (x.volFree / x.volTotal) * 100 : null;
   const perDay = x.growth7d != null ? x.growth7d / 7 : null;
   const daysToFull = perDay != null && perDay > 0 && x.volFree != null ? x.volFree / perDay : null;
+  const daysToFull6h = x.perDay6h != null && x.perDay6h > 0 && x.volFree != null ? x.volFree / x.perDay6h : null;
   let level: DiskVerdict['level'] = 'ok';
   const raise = (l: 'warn' | 'fail', why: string) => { reasons.push(why); if (l === 'fail' || level === 'ok') level = l; };
   if (freePct != null && freePct < DISK_RULES.failFreePct) raise('fail', `volume ${freePct.toFixed(0)}% free (under ${DISK_RULES.failFreePct}%)`);
   else if (freePct != null && freePct < DISK_RULES.warnFreePct) raise('warn', `volume ${freePct.toFixed(0)}% free (under ${DISK_RULES.warnFreePct}%)`);
+  if (daysToFull6h != null && daysToFull6h < DISK_RULES.fail6hDays) raise('fail', `at the last 6 hours' growth the volume is full in ${daysToFull6h < 1 ? `${Math.max(1, Math.floor(daysToFull6h * 24))} hour(s)` : `${Math.floor(daysToFull6h)} day(s)`}`);
   if (daysToFull != null && daysToFull < DISK_RULES.failDays) raise('fail', `at this growth the volume is full in ${Math.floor(daysToFull)} day(s)`);
   else if (daysToFull != null && daysToFull < DISK_RULES.warnDays) raise('warn', `at this growth the volume is full in ${Math.floor(daysToFull)} days (under ${DISK_RULES.warnDays})`);
   if (x.walBytes > DISK_RULES.walWarnBytes) raise('warn', `the WAL file is ${(x.walBytes / 1048576).toFixed(0)} MB (checkpoints are not catching up)`);
-  return { level, freePct, perDay, daysToFull, reasons };
+  return { level, freePct, perDay, daysToFull, daysToFull6h, reasons };
 }

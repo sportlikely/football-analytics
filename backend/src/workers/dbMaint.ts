@@ -16,7 +16,7 @@ db.exec(`PRAGMA journal_size_limit = ${Number(workerData.walLimit) || 64 * 10485
 const pragma = (name: string) => { const r: any = db.prepare(`PRAGMA ${name}`).get(); return r ? Number(Object.values(r)[0]) : 0; };
 const pragmas = () => ({ pageSize: pragma('page_size'), pages: pragma('page_count'), freePages: pragma('freelist_count'), autoVacuum: pragma('auto_vacuum') });
 
-type Msg = { id: number; op: 'checkpoint'; mode: 'PASSIVE' | 'TRUNCATE'; busyMs?: number } | { id: number; op: 'report' } | { id: number; op: 'incremental'; pages: number } | { id: number; op: 'convert' } | { id: number; op: 'pragmas' };
+type Msg = { id: number; op: 'checkpoint'; mode: 'PASSIVE' | 'TRUNCATE'; busyMs?: number; catchUp?: number } | { id: number; op: 'report' } | { id: number; op: 'incremental'; pages: number } | { id: number; op: 'convert' } | { id: number; op: 'pragmas' };
 
 parentPort!.on('message', (m: Msg) => {
   const t0 = performance.now();
@@ -24,19 +24,25 @@ parentPort!.on('message', (m: Msg) => {
     let out: unknown;
     if (m.op === 'checkpoint') {
       // PASSIVE first: it copies the WAL back without any lock (writers go on). TRUNCATE takes the writer lock BEFORE it
-      // copies, so it only runs once PASSIVE caught up (little left to copy), with a short wait for old readers
+      // copies, so it only runs once PASSIVE (nearly) caught up — little left to copy — with a short wait for old readers.
+      // fix272: "nearly" = at most `catchUp` frames left. It waited for log === checkpointed, which with the stored pages
+      // rewritten every few seconds and the readers always busy was never true: no TRUNCATE ran after fix269 took the
+      // other checkpoints away, the WAL never started over and "database" grew 2.97 → 7.88 GB in 5 h (28–29 Oct)
       db.exec('PRAGMA busy_timeout = 0');
       let r: any = db.prepare(`PRAGMA wal_checkpoint(PASSIVE)`).get();
       let busy = Number(r?.busy ?? 0);
+      const left = Math.max(0, Number(r?.log ?? 0) - Number(r?.checkpointed ?? 0));
+      let truncated = false;
       if (m.mode === 'TRUNCATE') {
-        if (Number(r?.log ?? 0) === Number(r?.checkpointed ?? 0)) {
-          db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.min(2000, m.busyMs ?? 300))}`);
+        if (left <= Math.max(0, m.catchUp ?? 4096)) {
+          db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.min(5000, m.busyMs ?? 300))}`);
           r = db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
           busy = Number(r?.busy ?? 0);
-        } else busy = 1; // a reader on an old snapshot keeps frames: the WAL cannot start over
+          truncated = !busy;
+        } else busy = 1; // a reader on an old snapshot keeps many frames: the WAL cannot start over yet
       }
       db.exec('PRAGMA busy_timeout = 1000');
-      out = { busy, log: Number(r?.log ?? 0), checkpointed: Number(r?.checkpointed ?? 0) };
+      out = { busy, log: Number(r?.log ?? 0), checkpointed: Number(r?.checkpointed ?? 0), left, truncated };
     } else if (m.op === 'report') {
       // bytes and rows per table / index (rows: leaf cells of a table; every cell of an index)
       const rows = db.prepare(`SELECT s.name AS name, m.type AS type, m.tbl_name AS tbl, SUM(s.pgsize) AS bytes,

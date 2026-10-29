@@ -20,7 +20,7 @@ import logger from '../utils/logger';
 import { runsJobs } from './role';
 import { every, after, heavy } from './perf';
 import { runRetention, type RetentionResult } from '../utils/retention';
-import { diskVerdict, growthPerDay } from '../utils/diskRules';
+import { diskVerdict, growthPerDay, growthOver, truncatePlan, reportDue } from '../utils/diskRules';
 import { readerHourRows, perfHours } from './perfHistory';
 import type { Check } from './dataHealth';
 import { volumeLatency, volumeLine, volumeTick, volumeHealth } from './volumeProbe';
@@ -32,6 +32,8 @@ if (runsJobs) {
   db.exec(`CREATE TABLE IF NOT EXISTS db_space_tables (day TEXT NOT NULL, name TEXT NOT NULL, tbl TEXT, type TEXT, bytes INTEGER NOT NULL,
     rows INTEGER NOT NULL, PRIMARY KEY (day, name))`);
   db.exec(`CREATE TABLE IF NOT EXISTS db_space_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
+  // fix272: the size every 10 minutes (72 h kept): the 6-hour growth (a day's peak row hid 5 GB in 5 h, 28–29 Oct)
+  db.exec(`CREATE TABLE IF NOT EXISTS db_size_hours (at TEXT PRIMARY KEY, db_bytes INTEGER NOT NULL, wal_bytes INTEGER NOT NULL, vol_free INTEGER)`);
 }
 
 const MB = (n: number) => `${(n / 1048576).toLocaleString('en-US', { maximumFractionDigits: n < 10 * 1048576 ? 1 : 0 })} MB`;
@@ -103,21 +105,35 @@ function autoCheckpoint(on: boolean) {
 }
 export const autoCheckpointPages = () => autoCkpt;
 
-type Ckpt = { at: string; mode: string; busy: number; log: number; checkpointed: number; ms: number; walAfter: number };
-const ckpt: { last: Ckpt | null; lastTruncate: Ckpt | null; busyStreak: number; errors: number } = { last: null, lastTruncate: null, busyStreak: 0, errors: 0 };
+type Ckpt = { at: string; mode: string; busy: number; log: number; checkpointed: number; left?: number; truncated?: boolean; busyMs?: number; ms: number; walBefore?: number; walAfter: number };
+const ckpt: { last: Ckpt | null; lastTruncate: Ckpt | null; lastDone: Ckpt | null; busyStreak: number; errors: number } = { last: null, lastTruncate: null, lastDone: null, busyStreak: 0, errors: 0 };
+let ckptRunning = false;
 export async function checkpoint(mode: 'PASSIVE' | 'TRUNCATE'): Promise<Ckpt | null> {
+  if (ckptRunning) return null; // (a long write-back on a slow volume: the next tick waits for it, never queues behind it)
+  ckptRunning = true;
   try {
-    const r = await maint<{ busy: number; log: number; checkpointed: number; ms: number }>({ op: 'checkpoint', mode, busyMs: mode === 'TRUNCATE' ? 300 : 0 });
-    const c: Ckpt = { at: new Date().toISOString(), mode, ...r, walAfter: files().wal };
+    const walBefore = files().wal;
+    // fix272: the bigger the WAL / the longer it could not start over, the longer TRUNCATE waits for old readers
+    const plan = truncatePlan(walBefore, ckpt.busyStreak);
+    const r = await maint<{ busy: number; log: number; checkpointed: number; left: number; truncated: boolean; ms: number }>(
+      { op: 'checkpoint', mode, busyMs: mode === 'TRUNCATE' ? plan.busyMs : 0, catchUp: plan.catchUp }, 10 * 60 * 1000);
+    const c: Ckpt = { at: new Date().toISOString(), mode, ...r, busyMs: mode === 'TRUNCATE' ? plan.busyMs : 0, walBefore, walAfter: files().wal };
     ckpt.last = c;
     if (mode === 'TRUNCATE') {
       ckpt.lastTruncate = c;
+      if (!c.busy) ckpt.lastDone = c;
       // busy = a reader on an old snapshot (or a writer) kept the WAL from starting over
       ckpt.busyStreak = c.busy ? ckpt.busyStreak + 1 : 0;
-      if (ckpt.busyStreak === 6) logger.warn(`db checkpoint: TRUNCATE busy 6 times in a row (3 h), WAL ${MB(c.walAfter)}, ${c.checkpointed}/${c.log} frames written back`);
+      if (ckpt.busyStreak === 12) logger.warn(`db checkpoint: TRUNCATE busy 12 times in a row (1 h), WAL ${MB(c.walAfter)}, ${c.checkpointed}/${c.log} frames written back`);
+      if (!c.busy && walBefore > 256 * 1048576) logger.info(`db checkpoint: WAL ${GB(walBefore)} → ${MB(c.walAfter)} (TRUNCATE, ${c.ms} ms, waited up to ${plan.busyMs} ms for readers)`);
     }
     return c;
-  } catch (e: any) { ckpt.errors++; logger.warn(`db checkpoint ${mode}: ${e?.message || e}`); return null; }
+  } catch (e: any) { ckpt.errors++; logger.warn(`db checkpoint ${mode}: ${e?.message || e}`); return null; } finally { ckptRunning = false; }
+}
+/** fix272 (every 5 min): TRUNCATE when the WAL is over its 64 MB limit or the last one is 30 min old; else PASSIVE */
+async function checkpointTick() {
+  const due = files().wal > 64 * 1048576 || !ckpt.lastDone || Date.now() - Date.parse(ckpt.lastDone.at) > 30 * 60 * 1000;
+  return checkpoint(due ? 'TRUNCATE' : 'PASSIVE');
 }
 
 /* ---------- retention ---------- */
@@ -206,7 +222,7 @@ async function vacuumTick() {
 /* ---------- size report + history ---------- */
 
 export type TableRow = { name: string; tbl: string | null; type: string | null; bytes: number; rows: number };
-export async function sizeReport(): Promise<{ at: string; ms: number; rows: TableRow[]; pageSize: number; pages: number; freePages: number; autoVacuum: number }> {
+export async function sizeReport(): Promise<{ at: string; ms: number; rows: TableRow[]; pageSize: number; pages: number; freePages: number; autoVacuum: number; wal?: number; file?: number }> {
   const r = await maint<any>({ op: 'report' }, 15 * 60 * 1000);
   const rows: TableRow[] = (r.rows as any[]).map(x => ({ name: x.name, tbl: x.tbl ?? null, type: x.type ?? (x.name === 'sqlite_schema' ? 'table' : null), bytes: Number(x.bytes), rows: Number(x.cells) }));
   const day = today();
@@ -216,13 +232,45 @@ export async function sizeReport(): Promise<{ at: string; ms: number; rows: Tabl
     for (const x of rows) ins.run(day, x.name, x.tbl, x.type, x.bytes, x.rows);
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
-  const out = { at: new Date().toISOString(), ms: r.ms, rows, pageSize: r.pageSize, pages: r.pages, freePages: r.freePages, autoVacuum: r.autoVacuum };
+  const f = files();
+  const out = { at: new Date().toISOString(), ms: r.ms, rows, pageSize: r.pageSize, pages: r.pages, freePages: r.freePages, autoVacuum: r.autoVacuum, wal: f.wal, file: f.db };
+  // fix272: the report before this one (name → bytes), so Disk shows each table's growth since then (hours, not a week)
+  const prev = storedReport();
+  if (prev) setMeta('report_prev', JSON.stringify({ at: prev.at, wal: prev.wal ?? null, file: prev.file ?? null, freePages: prev.freePages, pageSize: prev.pageSize, bytes: Object.fromEntries(prev.rows.map(x => [x.name, x.bytes])) }));
   setMeta('report', JSON.stringify(out));
   logger.info(`db size report (${r.ms} ms): ${rows.slice(0, 5).map(x => `${x.name} ${GB(x.bytes)}`).join(', ')}; free pages ${MB(r.freePages * r.pageSize)}`);
   return out;
 }
 export function storedReport(): Awaited<ReturnType<typeof sizeReport>> | null {
   try { return JSON.parse(meta('report') || 'null'); } catch { return null; }
+}
+type PrevReport = { at: string; wal: number | null; file: number | null; freePages: number; pageSize: number; bytes: Record<string, number> };
+function prevReport(): PrevReport | null {
+  try { return JSON.parse(meta('report_prev') || 'null'); } catch { return null; }
+}
+/** fix272: the size every 10 minutes (file + WAL, 72 h kept) */
+function recordSizeRow(now = Date.now()) {
+  const f = files(), v = volume();
+  db.prepare(`INSERT OR REPLACE INTO db_size_hours (at, db_bytes, wal_bytes, vol_free) VALUES (?, ?, ?, ?)`).run(new Date(now).toISOString().slice(0, 16), f.db, f.wal, v?.free ?? null);
+  db.prepare(`DELETE FROM db_size_hours WHERE at < ?`).run(new Date(now - 72 * 3600 * 1000).toISOString().slice(0, 16));
+}
+/** fix272: file + WAL growth over the last 6 hours (from the 10-minute rows) */
+export function growth6h(now = Date.now()) {
+  try {
+    const rows = (db.prepare(`SELECT at, db_bytes + wal_bytes AS bytes FROM db_size_hours WHERE at >= ?`).all(new Date(now - 6 * 3600 * 1000 - 60_000).toISOString().slice(0, 16)) as any[])
+      .map(r => ({ at: `${r.at}:00.000Z`, bytes: Number(r.bytes) }));
+    const f = files();
+    return growthOver(rows, { at: new Date(now).toISOString(), bytes: f.db + f.wal }, 6);
+  } catch { return null; }
+}
+let reportRunning = false;
+/** fix272: ≥ 1 GB in 6 h → the size report again (at most every 6 h), so Disk names the tables that grew */
+async function growthAlarm(now = Date.now()) {
+  const g = growth6h(now), rep = storedReport();
+  if (reportRunning || !reportDue(g?.bytes ?? null, rep ? Date.parse(rep.at) : null, now)) return;
+  reportRunning = true;
+  logger.warn(`db size: +${GB(g!.bytes)} in ${g!.hours.toFixed(1)} h (file ${GB(files().db)}, WAL ${GB(files().wal)}) — size report now`);
+  try { await heavy('db size report', () => sizeReport().then(() => undefined)); } finally { reportRunning = false; }
 }
 /** today's size row (the largest of the day is kept: the growth is measured on the peaks) */
 export async function recordSize(now = Date.now()) {
@@ -256,12 +304,17 @@ export function dbSpaceStatus() {
   const f = files(), v = volume(), rep = storedReport(), grow = tableGrowth();
   const hist = sizeDays(30).map(r => ({ day: r.day, bytes: r.db_bytes + r.wal_bytes, db: r.db_bytes, wal: r.wal_bytes, free: r.free_bytes }));
   const perDay = growthPerDay(hist.map(h => ({ day: h.day, bytes: h.bytes })), today());
+  const g6 = growth6h(), prev = prevReport();
   let convert: any = null;
   try { convert = JSON.parse(meta('convert_result') || 'null'); } catch { /* none */ }
   return {
-    files: f, volume: v, perDay, growth7d: perDay != null ? perDay * 7 : null,
-    verdict: diskVerdict({ volFree: v?.free ?? null, volTotal: v?.total ?? null, dbBytes: f.db, walBytes: f.wal, growth7d: perDay != null ? perDay * 7 : null }),
-    report: rep ? { at: rep.at, ms: rep.ms, pageSize: rep.pageSize, pages: rep.pages, freePages: rep.freePages, autoVacuum: rep.autoVacuum, top: rep.rows.slice(0, 15).map(x => ({ ...x, growth7d: grow.get(x.name) ?? null })) } : null,
+    files: f, volume: v, perDay, growth7d: perDay != null ? perDay * 7 : null, growth6h: g6,
+    verdict: diskVerdict({ volFree: v?.free ?? null, volTotal: v?.total ?? null, dbBytes: f.db, walBytes: f.wal, growth7d: perDay != null ? perDay * 7 : null, perDay6h: g6?.perDay ?? null }),
+    report: rep ? {
+      at: rep.at, ms: rep.ms, pageSize: rep.pageSize, pages: rep.pages, freePages: rep.freePages, autoVacuum: rep.autoVacuum, wal: rep.wal ?? null, file: rep.file ?? null,
+      prev: prev ? { at: prev.at, wal: prev.wal, file: prev.file, freePages: prev.freePages } : null,
+      top: rep.rows.slice(0, 15).map(x => ({ ...x, growth7d: grow.get(x.name) ?? null, sincePrev: prev ? x.bytes - (prev.bytes[x.name] ?? 0) : null }))
+    } : null,
     history: hist, checkpoint: ckpt, retention: lastRetention, vacuum: lastVacuum, convert, volumeLatency: volumeLatency()
   };
 }
@@ -272,19 +325,27 @@ export function diskHealth(): Check[] {
   const vol = s.volume;
   const items: string[] = [];
   items.push(`Database file ${GB(s.files.db)} + WAL ${MB(s.files.wal)}${s.report ? ` · free pages ${MB(s.report.freePages * s.report.pageSize)} · incremental vacuum ${s.report.autoVacuum === 2 ? 'on' : 'off'}` : ''}`);
-  if (s.checkpoint.lastTruncate) items.push(`Last WAL truncate ${s.checkpoint.lastTruncate.at.slice(11, 16)} UTC: ${s.checkpoint.lastTruncate.busy ? `blocked by a reader (${s.checkpoint.busyStreak} in a row)` : 'done'}, WAL ${MB(s.checkpoint.lastTruncate.walAfter)}`);
+  if (s.checkpoint.lastTruncate) {
+    const t = s.checkpoint.lastTruncate;
+    items.push(`Last WAL truncate ${t.at.slice(11, 16)} UTC: ${t.busy ? `blocked by a reader (${s.checkpoint.busyStreak} in a row${t.left ? `, ${t.left.toLocaleString('en-US')} frames left` : ''})` : 'done'}, WAL ${MB(t.walAfter)}${t.busyMs ? ` · waited up to ${t.busyMs} ms` : ''}`);
+    if (t.busy && s.checkpoint.lastDone) items.push(`Last WAL start-over that worked: ${s.checkpoint.lastDone.at.slice(0, 16).replace('T', ' ')} UTC`);
+  }
+  if (s.growth6h) items.push(`Last ${s.growth6h.hours.toFixed(1)} h: ${s.growth6h.bytes >= 0 ? '+' : ''}${GB(s.growth6h.bytes)} (${s.growth6h.perDay >= 0 ? '+' : ''}${GB(s.growth6h.perDay)} a day at that rate)${v.daysToFull6h != null ? ` · volume full in ${v.daysToFull6h < 1 ? `${Math.max(1, Math.floor(v.daysToFull6h * 24))} h` : `${Math.floor(v.daysToFull6h)} days`} at that rate` : ''}`);
   items.push(volumeLine()); // fix254
   if (s.retention) items.push(`Retention ${s.retention.at.slice(11, 16)} UTC: ${s.retention.deleted.toLocaleString('en-US')} old rows deleted${s.retention.results.length ? ` (${s.retention.results.map(r => `${r.table} ${r.deleted}${r.error ? ' error' : ''}`).join(', ')})` : ''}`);
   if (s.vacuum) items.push(`Vacuum ${s.vacuum.at.slice(11, 16)} UTC: ${MB(s.vacuum.freedPages * s.vacuum.pageSize)} given back, file ${GB(s.vacuum.fileBefore)} → ${GB(s.vacuum.fileAfter)}`);
   if (s.convert) items.push(`Full vacuum ${String(s.convert.at).slice(0, 16).replace('T', ' ')} UTC: ${s.convert.msg}`);
   if (s.report) {
-    items.push(`Biggest tables and indexes (${s.report.at.slice(0, 10)}):`);
-    for (const t of s.report.top) items.push(`${t.name}${t.type === 'index' ? ` (index of ${t.tbl})` : ''}: ${GB(t.bytes)}, ${t.rows.toLocaleString('en-US')} rows${t.growth7d ? ` · ${t.growth7d > 0 ? '+' : ''}${GB(t.growth7d)} in 7 days` : ''}`);
+    const p = s.report.prev, since = p ? `since ${p.at.slice(5, 16).replace('T', ' ')} UTC` : '';
+    items.push(`Biggest tables and indexes (${s.report.at.slice(0, 16).replace('T', ' ')} UTC${s.report.wal != null ? ` · WAL then ${GB(s.report.wal)}` : ''} · free pages ${MB(s.report.freePages * s.report.pageSize)}${p ? `; growth ${since}` : ''}):`);
+    const sign = (n: number) => `${n > 0 ? '+' : ''}${GB(n)}`;
+    for (const t of s.report.top) items.push(`${t.name}${t.type === 'index' ? ` (index of ${t.tbl})` : ''}: ${GB(t.bytes)}, ${t.rows.toLocaleString('en-US')} rows${t.sincePrev ? ` · ${sign(t.sincePrev)} ${since}` : ''}${t.growth7d ? ` · ${sign(t.growth7d)} in 7 days` : ''}`);
   }
   const checks: Check[] = [{
     id: 'disk', label: 'Disk',
     level: v.level,
     detail: `${vol ? `Volume ${v.freePct!.toFixed(0)}% free (${GB(vol.free)} of ${GB(vol.total)})` : 'Volume size unknown'} · database ${GB(s.files.db + s.files.wal)}`
+      + `${s.growth6h ? ` · last 6 h ${s.growth6h.bytes >= 0 ? '+' : ''}${GB(s.growth6h.bytes)}` : ''}`
       + ` · 7-day growth ${s.growth7d != null ? `${s.growth7d >= 0 ? '+' : ''}${GB(s.growth7d)}` : 'not known yet (needs 2 days)'}`
       + `${v.daysToFull != null ? ` · full in ${Math.floor(v.daysToFull)} days at this rate` : ''}${v.reasons.length ? ` — ${v.reasons.join('; ')}` : ''}`,
     items
@@ -327,11 +388,16 @@ function volumeNotes(): string[] {
 /* ---------- schedule (jobs.ts) ---------- */
 
 export function startDbSpaceScheduler() {
-  every('db checkpoint', () => checkpoint('PASSIVE'), 5 * 60 * 1000).unref();
+  // fix272: PASSIVE every minute (a few seconds of frames each time, so TRUNCATE finds it caught up), TRUNCATE every
+  // 5 min while the WAL is over 64 MB (else every 30 min)
+  every('db checkpoint', () => checkpoint('PASSIVE'), 60 * 1000).unref();
   after('db checkpoint', () => checkpoint('TRUNCATE'), 2 * 60 * 1000).unref();
-  every('db checkpoint', () => checkpoint('TRUNCATE'), 30 * 60 * 1000).unref();
+  every('db checkpoint', () => checkpointTick(), 5 * 60 * 1000).unref();
   after('db size', () => recordSize(), 3 * 60 * 1000).unref();
   every('db size', () => recordSize(), 3600 * 1000).unref();
+  // fix272: the size every 10 minutes (6-hour growth) and a size report of its own when 1 GB+ grew in 6 h
+  after('db size', () => recordSizeRow(), 60 * 1000).unref();
+  every('db size', () => { recordSizeRow(); return growthAlarm(); }, 10 * 60 * 1000).unref();
   after('db retention', () => retentionTick(), 6 * 60 * 1000).unref();
   every('db retention', () => retentionTick(), 3600 * 1000).unref();
   every('db vacuum', () => vacuumTick(), 10 * 60 * 1000).unref();

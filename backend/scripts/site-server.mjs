@@ -132,6 +132,7 @@ export function samplePages(dataDir) {
 // player with no current season (site-seed.mjs seedEdge; on a production copy the ones whose slug exists there)
 export const EDGE_PAGES = [
   '/american-football/team/colorado-state', '/american-football/team/alabama-state', '/american-football/team/utah-state',
+  '/american-football/team/chicago-state', '/american-football/team/washington-state', '/american-football/team/fresno-state',
   '/american-football/team/new-york-jets', '/american-football/player/aaron-rodgers',
   '/basketball/team/utah-jazz', '/basketball/player/lauri-markkanen',
   '/football/team/burnley', '/football/player/jay-rodriguez',

@@ -167,12 +167,31 @@ export async function wikidataLabels(qids: string[]): Promise<Map<string, Partia
 /* ---------- writing ---------- */
 const upsertName = () => db.prepare(`INSERT INTO names (sport, kind, latin, lang, name, source, id, qid, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(sport, kind, latin, lang) DO UPDATE SET name = excluded.name, source = excluded.source, id = COALESCE(excluded.id, names.id), qid = COALESCE(excluded.qid, names.qid), at = excluded.at`);
+let oldName: ReturnType<typeof db.prepare> | null = null;
 /** a name's row, unless a more trusted one is already there */
 function writeName(st: ReturnType<typeof upsertName>, it: { sport: string; kind: string; latin: string; id?: string | null }, lang: NameLang, name: string, source: string, qid: string | null = null) {
-  const old = db.prepare(`SELECT name, source FROM names WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`).get(it.sport, it.kind, it.latin, lang) as any;
+  oldName ||= db.prepare(`SELECT name, source FROM names WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`);
+  const old = oldName.get(it.sport, it.kind, it.latin, lang) as any;
   if (old && ((RANK[old.source] || 0) > (RANK[source] || 0) || (old.source === source && old.name === name))) return false;
   st.run(it.sport, it.kind, it.latin, lang, name, source, it.id ?? null, qid, new Date().toISOString());
   return true;
+}
+/**
+ * fix272: rows written SLICE at a time, each slice one transaction (never across a yield: another job's write would land
+ * inside it), a yield between. The job wrote every row as its own commit — tens of thousands of commits on a volume with
+ * 1.5-s reads, still on its first run 9 h after the deploy, the map the pages load (built at the end) empty meanwhile.
+ */
+const SLICE = 500;
+async function inSlices<T>(list: T[], fn: (x: T) => void, step: () => Promise<void>) {
+  for (let i = 0; i < list.length; i += SLICE) {
+    const own = !(db as any).isTransaction;
+    if (own) db.exec('BEGIN');
+    try {
+      for (const x of list.slice(i, i + SLICE)) fn(x);
+      if (own) db.exec('COMMIT');
+    } catch (e) { if (own) { try { db.exec('ROLLBACK'); } catch { /* none open */ } } throw e; }
+    await step();
+  }
 }
 
 let lastCollect = 0, running = false;
@@ -183,7 +202,7 @@ export async function namesTick(opts: { collect?: boolean; wd?: number } = {}): 
   if (running || DB_READ_ONLY) return lastRun;
   running = true;
   const step = yieldEvery(50, 100);
-  let written = 0, wdTried = 0, wdFound = 0;
+  let written = 0, mapped = 0, wdTried = 0, wdFound = 0;
   try {
     // 1. the names the site shows (every 6 hours)
     if (opts.collect || Date.now() - lastCollect > 6 * 3600 * 1000) {
@@ -191,11 +210,7 @@ export async function namesTick(opts: { collect?: boolean; wd?: number } = {}): 
       const now = new Date().toISOString();
       const up = db.prepare(`INSERT INTO name_items (sport, kind, latin, id, country, weight, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(sport, kind, latin) DO UPDATE SET id = COALESCE(excluded.id, name_items.id), country = COALESCE(excluded.country, name_items.country), weight = excluded.weight, seen_at = excluded.seen_at`);
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        up.run(it.sport, it.kind, it.latin, it.id, it.country, it.weight, now);
-        if (i % 500 === 499) await step();
-      }
+      await inSlices(items, it => { up.run(it.sport, it.kind, it.latin, it.id, it.country, it.weight, now); }, step);
       lastCollect = Date.now();
       lastRun.items = items.length;
     }
@@ -203,13 +218,13 @@ export async function namesTick(opts: { collect?: boolean; wd?: number } = {}): 
     const st = upsertName();
     for (const lang of NAME_LANGS) {
       const rows = all(`SELECT i.sport, i.kind, i.latin, i.id, i.country FROM name_items i LEFT JOIN names n ON n.sport = i.sport AND n.kind = i.kind AND n.latin = i.latin AND n.lang = ? WHERE n.latin IS NULL`, lang);
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
+      await inSlices(rows, r => {
         const f = fallbackName(r.latin, lang, r.kind, r.country);
         if (f && writeName(st, r, lang, f.name, f.source)) written++;
-        if (i % 200 === 199) await step();
-      }
+      }, step);
     }
+    // fix272: the maps now — the pages get the press / letter-rule names at once, Wikidata's labels on top later
+    if (written || !maps.size) { await buildMaps(step); mapped = written; }
     // 3. Wikidata: the most opened / played names not tried yet (or tried 60+ days ago without an item)
     const budget = opts.wd ?? (process.env.NAMES_WIKIDATA === '0' ? 0 : WD_PER_RUN);
     if (budget > 0) {
@@ -238,7 +253,7 @@ export async function namesTick(opts: { collect?: boolean; wd?: number } = {}): 
       }
     }
     Object.assign(lastRun, { at: new Date().toISOString(), written, wdTried, wdFound });
-    if (written || !maps.size) await buildMaps(step);
+    if (written > mapped || !maps.size) await buildMaps(step);
   } catch (e: any) {
     lastRun.error = String(e?.message || e);
     logger.warn(`names: ${lastRun.error}`);
@@ -371,4 +386,31 @@ export function namesForClaude(): string {
     `Entries per language / kind / source: ${JSON.stringify(a.counts.byLang)}`, 'Most opened names (latin | he (source) | ar (source)):'];
   for (const r of a.rows) lines.push(`${r.sport || '-'} ${r.kind} | ${r.latin} | ${r.names.he ? `${r.names.he.name} (${r.names.he.source})` : '—'} | ${r.names.ar ? `${r.names.ar.name} (${r.names.ar.source})` : '—'}`);
   return lines.join('\n');
+}
+
+/** fix272: data health "Names (he / ar)": entries per language, the map the pages load, the last run */
+export function namesHealth(now = Date.now()): import('./dataHealth').Check {
+  const c = namesCounts();
+  const per = NAME_LANGS.map(lang => {
+    const kinds = c.byLang[lang] || {};
+    const n = Object.values(kinds).reduce((s, by) => s + Object.values(by).reduce((a, b) => a + b, 0), 0);
+    const clubs = Object.values(kinds.team || {}).reduce((a, b) => a + b, 0), leagues = Object.values(kinds.league || {}).reduce((a, b) => a + b, 0);
+    return { lang, n, clubs, leagues, map: maps.get(lang)?.map.size ?? 0 };
+  });
+  const items = Object.values(c.items).reduce((a: number, b: any) => a + Number(b), 0);
+  const upMin = process.uptime() / 60;
+  // the first run starts ~6 min after the worker (after the first round of stored pages, ≤ 10 min more)
+  const empty = per.some(p => !p.map);
+  const level: 'ok' | 'warn' = empty && (upMin > 45 || lastRun.at) ? 'warn' : 'ok';
+  return {
+    id: 'local-names', label: 'Names (he / ar)', level,
+    detail: `${per.map(p => `${p.lang}: ${p.n.toLocaleString('en-US')} entries (${p.clubs.toLocaleString('en-US')} teams, ${p.leagues.toLocaleString('en-US')} leagues), ${p.map.toLocaleString('en-US')} in the pages' map`).join(' · ')}`
+      + ` · ${items.toLocaleString('en-US')} names collected${lastRun.at ? ` · last run ${new Date(lastRun.at).toISOString().slice(11, 16)} UTC` : running ? ' · first run going' : ' · not run yet'}`
+      + `${empty && level === 'warn' ? ' — the pages get no local names' : ''}`,
+    items: [
+      ...per.map(p => `${p.lang} by kind / source: ${JSON.stringify(c.byLang[p.lang] || {})}`),
+      `Last run: ${lastRun.written.toLocaleString('en-US')} written, Wikidata tried ${lastRun.wdTried}, found ${lastRun.wdFound}${lastRun.error ? ` · error: ${lastRun.error}` : ''}`,
+      ...(now - mapsAt < 3600 * 1000 ? [] : [`Map built ${mapsAt ? `${Math.round((now - mapsAt) / 60000)} min ago` : 'never'}`])
+    ]
+  };
 }
