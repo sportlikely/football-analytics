@@ -6,6 +6,7 @@
  * WTA, Challenger, Grand Slams (ITF stays admin-only). Market prices (tennis_prices) never reach this file.
  * Admin-only until TENNIS_PUBLIC=1 (the routes in index.ts check). Every read is indexed or bounded by date.
  */
+import { tennisFactors } from '../utils/whyFactors';
 import { db } from '../db';
 import { pubPath } from './slugs';
 import { tennisModelInternals, tennisStrongLine, tennisPlayerModel, tennisLiveChance, tennisServeChances, tennisRecordSince, TENNIS_MODEL } from './tennisModel';
@@ -179,7 +180,7 @@ function predOf(m: TMatch, s: Saved, full: boolean) {
     ...base,
     firstSet: s.firstSetP1 == null ? null : { pHome: r1(100 * s.firstSetP1), pAway: r1(100 - 100 * s.firstSetP1) },
     sets, games,
-    ...(full ? { why: Array.isArray(s.why?.lines) ? s.why.lines : [], numbers: s.why?.numbers ? { eloSurface: s.why.numbers.eloSurface, eloOverall: s.why.numbers.eloOverall, servePoint: s.why.numbers.servePoint } : null } : {})
+    ...(full ? { why: Array.isArray(s.why?.lines) ? s.why.lines : [], factors: s.why?.terms ? tennisFactors(s.why.terms) : null, numbers: s.why?.numbers ? { eloSurface: s.why.numbers.eloSurface, eloOverall: s.why.numbers.eloOverall, servePoint: s.why.numbers.servePoint } : null } : {})
   };
 }
 /** Attach the saved prediction (and the live chance on live matches the viewer may see) to a list. `full(id)` = numbers. */

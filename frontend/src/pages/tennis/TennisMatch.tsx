@@ -100,6 +100,7 @@ export default function TennisMatch() {
               { label: p?.firstSet ? t('First set: {0}', { 0: p.firstSet.pHome >= p.firstSet.pAway ? hs : as }) : t('First set'), value: p?.firstSet ? `${Math.round(Math.max(p.firstSet.pHome, p.firstSet.pAway))}%` : '–' }
             ]}
             why={(p?.why || []).map(line => toWhy(line, m))}
+            factors={p && !p.locked ? p.factors : null}
             howCalc={p && !p.locked && p.numbers ? <TennisParts m={m} p={p} /> : undefined}
             noPrediction={m.state === 'upcoming' ? t('Our prediction for this match is saved in the 48 hours before the first serve.') : t('No prediction for this match.')}
           />

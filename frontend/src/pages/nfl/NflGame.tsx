@@ -135,6 +135,7 @@ export default function NflGame() {
               { label: t('Total points'), value: typeof p?.total === 'number' ? p.total.toFixed(1) : '–' }
             ]}
             why={p ? whyRows(g, p) : []}
+            factors={p && !p.locked ? p.factors : null}
             howCalc={p && p.why && !p.locked ? <NflModelParts g={g} p={p} injuries={d.injuries} /> : undefined}
             noPrediction={g.state === 'upcoming' ? t('Our prediction for this game is saved in the week of the game, before kick-off.') : t('No prediction for this game.')}
           />

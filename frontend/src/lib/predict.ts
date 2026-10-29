@@ -1,4 +1,5 @@
 import { t } from './i18n'
+import { shownScore } from './whyFactors'
 import { slModel, slModelOf } from './modelNames'
 // Prediction shape served by the backend (see backend/src/services/predictionModel.ts)
 export interface Prediction {
@@ -47,6 +48,8 @@ export interface Prediction {
     drawPot: { base: number; factors: number; volatility: number; closeness?: number; total: number }
     reasons: string[]
     scope?: 'league' | 'national' | 'cups'
+    /** fix282: grid-v3's league home advantage in the rows' points */
+    homeEdge?: number
   }
 }
 
@@ -182,5 +185,6 @@ export function doubleChanceOf(p: { home: number; draw: number; away: number }):
 }
 
 /** fix163: a factor score as shown (0–10). The model's value scale is open on purpose (about -2 to 13, gridModel CONV); the
- *  page never shows more than 10 — edges and labels keep the real values. */
-export const score10 = (x: number) => Math.min(10, Math.max(0, x))
+ *  page never shows more than 10 — edges and labels keep the real values. fix282: strictly increasing (lib/whyFactors
+ *  shownScore), so two strong teams are never both "10.0" while one of them has the edge. */
+export const score10 = shownScore

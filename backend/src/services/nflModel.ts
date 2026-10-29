@@ -37,6 +37,7 @@ import { rememberFirstPrediction } from './nflGameExtras';
 import { HIDE_OTHER, type LeagueId } from './nfl';
 import { calibrated, strongLineOf, collegeSeg, ncaaV2Live } from './afCalibState';
 import { anchorPoints } from './marketAnchor';
+import { nflFactors } from '../utils/whyFactors';
 
 export const NFL_MODEL = 'nfl-v1';
 export const NCAA_MODEL = 'ncaa-v1';
@@ -895,6 +896,8 @@ export function savedNflPrediction(gameId: number) {
   return {
     pHome, pAway: r1(100 - pHome), pick: (r.p_home >= 0.5 ? 'H' : 'A') as 'H' | 'A', margin: r1(r.margin), total: r1(r.total), homePts: r1(r.home_pts), awayPts: r1(r.away_pts),
     strong: Math.max(r.p_home, 1 - r.p_home) >= strongForModel(r.model), model: r.model, why,
+    // fix282: "Why we think so" — the Elo terms + the market anchor's move (Elo points, never a price)
+    factors: why ? nflFactors(why, typeof r.p_model === 'number' ? { pModel: r.p_model, pHome: r.p_home } : null) : null,
     hit: done && r.hs !== r.as_ ? (r.p_home >= 0.5) === (r.hs > r.as_) : null
   };
 }
@@ -908,7 +911,7 @@ export function withNflPrediction<T extends NflGame>(g: T, full: boolean): T & {
   if (!s) return { ...g, prediction: null };
   if (full) return { ...g, prediction: { ...s, locked: false } };
   // finished games: everyone sees the numbers and the hit (like basketball), not the reasons
-  if (g.state === 'done') { const { why: _why, ...rest } = s; return { ...g, prediction: { ...rest, locked: false } }; }
+  if (g.state === 'done') { const { why: _why, factors: _f, ...rest } = s; return { ...g, prediction: { ...rest, locked: false } }; }
   return { ...g, prediction: { locked: true, model: s.model } };
 }
 

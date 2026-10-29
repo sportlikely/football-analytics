@@ -34,6 +34,7 @@ export const PARITY = [
   /* ---------- game page ---------- */
   { key: 'game.prediction', label: 'Prediction', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.why', label: 'Why we think so', football: true, basketball: true, nfl: true, tennis: true },
+  { key: 'game.whyFactors', label: 'Why we think so: every factor ranked by its share of the edge, from the model\'s own points (WhyPanel, fix282)', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.howCalculated', label: 'How we calculated it', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.preview', label: 'Match / game preview text', football: true, basketball: true, nfl: true, tennis: true },
   { key: 'game.beforeAfter', label: 'Before / after (saved prediction vs result)', football: true, basketball: true, nfl: true, tennis: 'na: no line-up or injury news moves a tennis prediction (it only updates from new results until the first serve)' },

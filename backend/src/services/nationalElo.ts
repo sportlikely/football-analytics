@@ -16,6 +16,7 @@ import { Meetings, commonSense, type H2H } from './h2hGuard';
 import { nationalValueFor } from './squadValues';
 import { runSteps, runStepsAsync, afterHeavy, everyHeavy } from './perf';
 import { onState, publishState } from './shared';
+import { keepSign } from '../utils/whyFactors';
 import { threadJobsOn, inThread } from './threadJob';
 
 export const MODEL_ELO = 'elo-intl';
@@ -226,7 +227,7 @@ function nll(xs: { f: Feat; o: 'H' | 'D' | 'A' }[], w: GridW) {
 const fitGrid = (xs: { f: Feat; o: 'H' | 'D' | 'A' }[], start: GridW, fixed: string[] = []): GridW => runSteps(fitGridSteps(xs, start, fixed));
 /** fix167: the fit as steps (a yield after each weight tried), so the scheduled rebuild gives the thread back. */
 function* fitGridSteps(xs: { f: Feat; o: 'H' | 'D' | 'A' }[], start: GridW, fixed: string[] = []): Generator<unknown, GridW> {
-  const w: any = { ...start };
+  const w: any = Object.fromEntries(Object.entries(start).map(([k, v]) => [k, keepSign(k, v as number)]));
   let best = nll(xs, w);
   let step = 0.2;
   for (let pass = 0; pass < 80 && step > 0.002; pass++) {
@@ -235,9 +236,10 @@ function* fitGridSteps(xs: { f: Feat; o: 'H' | 'D' | 'A' }[], start: GridW, fixe
       if (fixed.includes(k)) continue;
       for (const dir of [1, -1]) {
         const old = w[k];
-        w[k] = old + dir * step;
+        w[k] = keepSign(k, old + dir * step); // fix282: a "more is better" factor never gets a negative weight
         if (k === 'm_friendly') w[k] = Math.min(1.5, Math.max(0.3, w[k]));
         if (k.startsWith('c_')) w[k] = Math.max(0.05, w[k]);
+        if (w[k] === old) continue;
         const v = nll(xs, w);
         yield;
         if (v < best - 1e-7) { best = v; improved = true; break; }
@@ -633,7 +635,7 @@ export function predictNational(match: any, leagueId: number): Prediction | null
     const w = gridW;
     const mult = f.kind === 'friendly' ? w.m_friendly : 1;
     const edge = (x: number) => Math.round(x * mult * 250) / 10; // z units → points-ish (display)
-    const relOf = (x: number) => Math.max(1, Math.min(5, Math.round(Math.abs(x) * 5)));
+    const relOf = (x: number) => (Math.abs(x) < 1e-9 ? 0 : Math.max(1, Math.min(5, Math.round(Math.abs(x) * 5)))); // fix282: weight 0 = not used
     const eur = (x: number | null) => (x ? `€${Math.round(x / 1e6)}m` : 'n/a');
     const rows: NonNullable<Prediction['grid']>['rows'] = [
       { id: '#1e', name: 'Strength (rating)', rel: relOf(w.w_elo), home: scale(H.elo, ps.elo.mean, ps.elo.sd), away: scale(A.elo, ps.elo.mean, ps.elo.sd), edge: edge(w.w_elo * f.dElo), note: `rating ${Math.round(H.elo)} vs ${Math.round(A.elo)}` },

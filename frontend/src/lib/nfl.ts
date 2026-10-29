@@ -1,3 +1,4 @@
+import type { Factor } from './whyFactors'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
@@ -51,6 +52,8 @@ export interface NflPred {
   margin?: number; total?: number; homePts?: number; awayPts?: number
   strong?: boolean; hit?: boolean | null
   why?: NflWhy | null
+  /** fix282: "Why we think so" — the Elo terms (+ the market anchor's move), the model's own points */
+  factors?: Factor[] | null
   /** fix174: live win chance + projected score while the game is on (numbers unlocked) */
   live?: { pHome: number; pAway: number; score: { home: number; away: number }; total: number } | null
 }

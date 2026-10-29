@@ -10,6 +10,9 @@ import { Section } from './GamePage'
 import { ModelName } from './ModelName'
 import { slModelOf, type ModelSport } from '../../../lib/modelNames'
 import { tg } from '../../../lib/genText'
+import { useAuth } from '../../../lib/auth'
+import type { Factor } from '../../../lib/whyFactors'
+import WhyPanel from './WhyPanel'
 
 /**
  * The prediction block of the sports where our pick is the winner (basketball, NFL + college; fix152c — it was
@@ -35,6 +38,8 @@ export interface WinnerPredictionProps {
   strongAt: number
   stats: { label: string; value: string }[]
   why: WhyRow[]
+  /** fix282: every factor with the model's own points ("Why we think so" panel); the why lines + howCalc stay for admins */
+  factors?: Factor[] | null
   howCalc?: ReactNode
   badges?: ReactNode
   noPrediction: string
@@ -71,6 +76,7 @@ export function Stat({ label, value }: { label: string; value: ReactNode }) {
 
 export default function WinnerPrediction(x: WinnerPredictionProps) {
   const p = x.p
+  const admin = !!useAuth().user?.isAdmin
   const open = !!p && !p.locked && typeof p.pHome === 'number'
   const { hidden, reveal } = useReveal(x.rid, x.status, open)
   const [anim, setAnim] = useState(false)
@@ -140,9 +146,13 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
             <div className="mt-5 grid grid-cols-3 gap-2">
               {x.stats.map(s => <Stat key={s.label} label={s.label} value={s.value} />)}
             </div>
-            {x.why.length > 0 && (
+            {x.factors && x.factors.length > 0 && (() => {
+              const ph = p.pHome || 0, pa = p.pAway ?? 100 - ph
+              return <WhyPanel className="mt-5" factors={x.factors} fav={ph > pa ? 'H' : pa > ph ? 'A' : null} home={x.home.name} away={x.away.name} otherPct={ph > pa ? pa : pa > ph ? ph : null} />
+            })()}
+            {x.why.length > 0 && (!x.factors?.length || admin) && (
               <div className="mt-5 rounded-2xl border border-line/60 bg-surface2/30 p-4">
-                <div className="text-sm font-bold text-ink mb-2">{t('Why we think so')}</div>
+                <div className="text-sm font-bold text-ink mb-2">{x.factors?.length ? t('Factor by factor') : t('Why we think so')}</div>
                 <ul className="space-y-2">
                   {x.why.map((w, i) => (
                     <li key={i} className={`flex items-start gap-3 text-sm ${w.sub ? 'ps-5' : ''}`}>

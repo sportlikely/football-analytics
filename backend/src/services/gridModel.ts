@@ -979,7 +979,10 @@ export function scoreMatch(state: GroupState, all: HistoryMatch[], home: string,
       totals: { home: Math.round(totH), away: Math.round(totA) },
       rows,
       drawPot: { base, factors: Math.round(drawFactors), volatility, closeness: Math.round(closeness), total: drawPts },
-      reasons
+      reasons,
+      // fix282: the league's home advantage (CONV.homeGap + the league's own) in the rows' points, so "Why we think so"
+      // ranks it with the rows from the model's own sums (gap = Σedge / scale + home)
+      homeEdge: Math.round((CONV.homeGap + (lc?.home || 0)) * (CONV.gapMode === 1 ? 11 * Math.max(1, relSum) : totH + totA) * 10) / 10
     }
   };
 }

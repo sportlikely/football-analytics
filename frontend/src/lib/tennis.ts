@@ -1,3 +1,4 @@
+import type { Factor } from './whyFactors'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { matchHref, playerHref, leagueHref } from './links'
@@ -28,6 +29,8 @@ export interface TPred {
   sets?: { score: string; pct: number }[]
   games?: { mean: number | null; median: number | null; over: Record<string, number> } | null
   why?: string[]
+  /** fix282: "Why we think so" — the model's logit terms */
+  factors?: Factor[] | null
   numbers?: { eloSurface: [number, number]; eloOverall: [number, number]; servePoint: [number, number] } | null
   live?: { pHome: number; pAway: number; score: { home: number; away: number }; total: number } | null
 }

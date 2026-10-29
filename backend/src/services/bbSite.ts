@@ -3,6 +3,7 @@
  * Built from bb_games / bb_team_stats / bb_player_stats (services/basketball.ts) and the bb-v1 model (services/bbModel.ts).
  * Visible to everyone when BASKETBALL_PUBLIC=1; before that, admins only (everyone else sees the "coming soon" page).
  */
+import { bbGridFactors, bbV3Factors } from '../utils/whyFactors';
 import { db } from '../db';
 import logger from '../utils/logger';
 import { yieldLoop } from './perf';
@@ -255,6 +256,15 @@ function reasons(g: Row, pr: any, full: boolean) {
   return sorted;
 }
 
+/** fix282: the panel's factors (see utils/whyFactors.ts) */
+function bbFactorsOf(g: Row, pr: any, why: ReturnType<typeof reasons>) {
+  const anchored = pr?.line?.anchored && Number.isFinite(pr.line.pModel) ? { pModel: pr.line.pModel as number, pHome: pr.pHome as number } : null;
+  if (pr?.grid?.rows?.length) return bbGridFactors(pr.grid, anchored, g.code === 'NBA');
+  if (!why.length) return null;
+  const sigma = leagueModelInfo(g.code)?.sigma || 12;
+  return bbV3Factors(why, anchored ? { ...anchored, sigma } : null);
+}
+
 /**
  * Points markets from the prediction (normal model on the margin and the total, the same one behind the win %):
  * winning margin bands, alternative spreads, total points lines, each team's points, overtime and the first half.
@@ -458,6 +468,9 @@ export async function bbGame(id: number, full: boolean) {
     keyPlayers,
     // fix219: bb-v4 "1,000 points split" (football's grid table) for whoever sees the full prediction of a game to come
     grid: open && pr?.grid ? pr.grid : null,
+    // fix282: "Why we think so" — every factor with its share of the edge, from the model's own sums (bb-v4 grid rows,
+    // else bb-v3's margin terms) + the market anchor's move in the same units (never a price)
+    factors: (full || game.state === 'done') ? bbFactorsOf(g, pr, why) : null,
     model: info ? { version: info.version, avgPoints: Math.round(info.avgPoints * 10) / 10, homeEdge: Math.round(((pr as any)?.hca ?? info.homeEdge) * 10) / 10, b2b: info.b2b, gamesRated: info.gamesRated } : null,
     players
   };

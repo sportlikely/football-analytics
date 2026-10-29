@@ -11,6 +11,7 @@ export const PARITY_PROVIDES: ParityProvides = {
     'game.highlights',
     'game.prediction',
     'game.why',
+    'game.whyFactors', // fix282: WhyPanel in the shared WinnerPrediction
     'game.howCalculated',
     'game.preview',
     'game.injuries',

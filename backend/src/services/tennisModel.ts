@@ -1376,15 +1376,21 @@ export interface TennisPred {
   p1: number; p2: number; p1Raw: number; p1Pre: number; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
   sets: Record<string, number>; games: ReturnType<typeof gamesSummary>; why: string[];
   numbers: { eloSurface: [number, number]; eloOverall: [number, number]; servePoint: [number, number]; pElo: number; pPoint: number; mode: string; bo?: number; rule?: number }
+  /** fix282: the model's logit terms for player 1 (sum = the model's logit before the calibration layers) */
+  terms: Record<string, number>
 }
 function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): TennisPred {
   const s = L.s;
   const a = L.A.pre(R, i), b = L.B.pre(R, i), f = L.F.pre(R, i);
   const pE = sigma(a.logit), pP = winFast(b.pa, b.pb, R.bo[i], R.rule[i]);
   let p = s.mode === 'elo' ? pE : s.mode === 'point' ? pP : pE;
+  // fix282: each term's part of the logit ("Why we think so" ranks them by share)
+  const terms: Record<string, number> = s.mode === 'point' ? { point: logit(pP) } : { elo: a.logit };
   if (s.mode === 'blend' && s.blend) {
     const val = (name: string) => (name === 'elo' ? a.logit : name === 'point' ? logit(pP) : f[FEAT.indexOf(name as any)]);
-    p = sigma(s.blend.cols.reduce((acc, name, j) => acc + (val(name) / s.blend!.sd[j]) * s.blend!.w[j], 0));
+    for (const k of Object.keys(terms)) delete terms[k];
+    s.blend.cols.forEach((name, j) => { terms[name] = (terms[name] || 0) + (val(name) / s.blend!.sd[j]) * s.blend!.w[j]; });
+    p = sigma(Object.values(terms).reduce((acc, x) => acc + x, 0));
   }
   const cat = CAT_NAME[R.cat[i]];
   // fix222: the shown chance = the tour's calibration layer on the model's own (sets and totals follow the shown one)
@@ -1402,7 +1408,8 @@ function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): 
     p1: pct(p), p2: pct(1 - p), p1Raw: pct(pRaw), p1Pre: pct(pPre), pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
     firstSetP1: pct(d.first), sets: Object.fromEntries(Object.entries(d.sets).sort().map(([k, v]) => [k, pct(v)])), games: gamesSummary(d.games!, R.bo[i]),
     why: whyLines(L, R, i, names, a, b, f),
-    numbers: { eloSurface: [Math.round(a.a.s), Math.round(a.b.s)], eloOverall: [Math.round(a.a.o), Math.round(a.b.o)], servePoint: [pct(b.pa), pct(b.pb)], pElo: pct(pE), pPoint: pct(pP), mode: s.mode, bo: R.bo[i], rule: R.rule[i] }
+    numbers: { eloSurface: [Math.round(a.a.s), Math.round(a.b.s)], eloOverall: [Math.round(a.a.o), Math.round(a.b.o)], servePoint: [pct(b.pa), pct(b.pb)], pElo: pct(pE), pPoint: pct(pP), mode: s.mode, bo: R.bo[i], rule: R.rule[i] },
+    terms: Object.fromEntries(Object.entries(terms).map(([k, v]) => [k, Math.round(v * 10000) / 10000]))
   };
 }
 /** "Why" lines from fixed rules (admin view; plain English) */
@@ -1475,7 +1482,7 @@ export async function saveTennisPredictions(): Promise<number> {
   const at = new Date().toISOString();
   // a match that started while we were computing keeps the prediction it had at the start (and the SQL guard above)
   const params = (o: typeof out[number]) => [o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
-    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers }), at, o.pr.p1 / 100, at, o.pr.p1Raw / 100, o.pr.p1Pre / 100];
+    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers, terms: o.pr.terms }), at, o.pr.p1 / 100, at, o.pr.p1Raw / 100, o.pr.p1Pre / 100];
   if (sink) { for (const o of out) if (Date.parse(o.at) > Date.now()) sink.push({ sql: UP, params: params(o) }); return out.length; } // fix200: the worker
   const up = db.prepare(UP);
   for (let k = 0; k < out.length; k += 200) {

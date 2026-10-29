@@ -72,6 +72,8 @@ export interface Prediction {
     reasons: string[];
     /** 'national' = the national-team engine of v3 (values ranked among national teams) */
     scope?: 'league' | 'national' | 'cups';
+    /** fix282: grid-v3's league home advantage in the rows' points (elo-euro / elo-intl have a "Home advantage" row instead) */
+    homeEdge?: number;
   };
 }
 

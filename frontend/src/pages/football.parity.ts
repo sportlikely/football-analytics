@@ -6,6 +6,7 @@ export const PARITY_PROVIDES: ParityProvides = {
   keys: [
     'game.prediction',
     'game.why',
+    'game.whyFactors', // fix282: WhyPanel in PredictionStory
     'game.howCalculated',
     'game.preview',
     'game.beforeAfter',

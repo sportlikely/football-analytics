@@ -4,12 +4,15 @@ import { explainPrediction } from '../lib/explain'
 import { t as tt } from '../lib/i18n'
 import { tg } from '../lib/genText'
 import { nm } from '../lib/names'
+import { useAuth } from '../lib/auth'
+import { footballFactors } from '../lib/whyFactors'
+import WhyPanel from './sport/game/WhyPanel'
 
 /*
  * "Why we think so" for a revealed prediction, in plain language:
  *   1. the verdict in one sentence
- *   2. every factor the model weighs, as a tug of war between the two teams (who it favours and how much)
- *   3. how that adds up to the percentages (out of 1000 points, and where the draw chance comes from)
+ *   2. fix282: every factor the model used, ranked by its share of the edge (components/sport/game/WhyPanel, every sport)
+ *   3. admins: every factor as a tug of war (scores out of 10) and how it adds up to the percentages (1000 points)
  *   4. what could still change it (lineups, missing players, friendlies, thin data)
  * Everything comes from the prediction itself (the grid rows every engine sends).
  */
@@ -70,6 +73,7 @@ function Block({ title, children, note }: { title: string; children: ReactNode; 
 function Tug({ r, max, total, hn, an }: { r: Row; max: number; total: number; hn: string; an: string }) {
   const side: Side | null = r.edge > 0 ? 'H' : r.edge < 0 ? 'A' : null
   const width = max ? (Math.abs(r.edge) / max) * 50 : 0
+  const [sh, sa] = fmtPair(score10(r.home), score10(r.away))
   const who = side === 'H' ? hn : side === 'A' ? an : null
   const note = r.note && /\d/.test(r.note) && !/^(stands in|market value of|Elo over|regulars listed|usual starters left|how strong the clubs)/i.test(r.note) ? tg(r.note) : HINT[r.id] || (r.note ? tg(r.note) : '')
   return (
@@ -81,9 +85,9 @@ function Tug({ r, max, total, hn, an }: { r: Row; max: number; total: number; hn
         </span>
       </div>
       <div className="mt-1.5 flex items-center gap-2">
-        <span className={`w-9 text-end num text-xs ${side === 'H' ? 'font-bold text-ink' : 'text-muted'}`}>{fmt(score10(r.home))}</span>
+        <span className={`w-9 text-end num text-xs ${side === 'H' ? 'font-bold text-ink' : 'text-muted'}`}>{sh}</span>
         <div className="relative flex-1 h-2.5 rounded-full bg-surface2">
-          <span className="absolute left-1/2 top-[-3px] bottom-[-3px] w-px bg-line" aria-hidden />
+          <span className="absolute start-1/2 top-[-3px] bottom-[-3px] w-px bg-line" aria-hidden />
           {side && (
             <span
               className={`absolute top-0 bottom-0 rounded-full ${side === 'H' ? 'bg-home end-1/2' : 'bg-away start-1/2'}`}
@@ -91,13 +95,15 @@ function Tug({ r, max, total, hn, an }: { r: Row; max: number; total: number; hn
             />
           )}
         </div>
-        <span className={`w-9 num text-xs ${side === 'A' ? 'font-bold text-ink' : 'text-muted'}`}>{fmt(score10(r.away))}</span>
+        <span className={`w-9 num text-xs ${side === 'A' ? 'font-bold text-ink' : 'text-muted'}`}>{sa}</span>
       </div>
       {note && <div className="mt-1 text-[11px] text-faint">{note}</div>}
     </li>
   )
 }
 const fmt = (x: number) => (Math.round(x * 10) / 10).toFixed(1)
+/** fix282: two scores that round to the same tenth but differ get a second decimal (the edge side shows the higher one) */
+const fmtPair = (h: number, a: number): [string, string] => (fmt(h) === fmt(a) && h !== a ? [h.toFixed(2), a.toFixed(2)] : [fmt(h), fmt(a)])
 
 /** The most likely of: the result, double chance, over/under 1.5 and 2.5, both teams to score (same as the record page). */
 function safestBet(p: Prediction, home: string, away: string): { label: string; p: number } | null {
@@ -121,6 +127,7 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
 }) {
   const g = p.grid
   const ex = explainPrediction(p, home, away, upcoming)
+  const admin = !!useAuth().user?.isAdmin
   if (!g || !ex) return null
 
   const team = g.rows.filter(r => !DRAW_ROWS.has(r.id))
@@ -160,7 +167,7 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
     <div className="mt-4 rounded-2xl border border-line bg-surface2/40 p-4 sm:p-5 space-y-6">
       {/* 1. verdict */}
       <div>
-        <div className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{tt("Why we think so")}</div>
+        <div className="text-[11px] font-extrabold uppercase tracking-wide text-accent">{tt("Our pick")}</div>
         <p className="mt-1.5 text-lg font-display font-bold text-ink leading-snug">{ex.dcHeadline}</p>
         <p className="mt-1 text-sm text-muted leading-snug">{ex.headline}</p>
         {(() => {
@@ -174,14 +181,6 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
             </div>
           ) : null
         })()}
-        {ex.forPick.length > 0 && (
-          <ul className="mt-2 space-y-1 text-sm text-muted">
-            {ex.forPick.map((t, i) => (
-              <li key={i} className="flex gap-2"><span className="text-win mt-[1px]">+</span><span>{t}</span></li>
-            ))}
-            {ex.against && <li className="flex gap-2"><span className="text-loss mt-[1px]">−</span><span>{tt("On the other side:")}{' '}{ex.against}</span></li>}
-          </ul>
-        )}
         {p.mix?.disagrees && (() => {
           const k = p.mix.favourite === 'H' ? 'home' : p.mix.favourite === 'A' ? 'away' : 'draw'
           const who = k === 'home' ? home : k === 'away' ? away : tt("a draw")
@@ -193,8 +192,11 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
         })()}
       </div>
 
-      {/* 2. factor by factor */}
-      {moving.length > 0 && (
+      {/* 2. fix282: every factor, ranked by its share of the edge (the model's own points) */}
+      <WhyPanel factors={footballFactors(g)} fav={p.home > p.away ? 'H' : p.away > p.home ? 'A' : null} home={home} away={away} otherPct={p.home > p.away ? p.away : p.away > p.home ? p.home : null} />
+
+      {/* 3. admins: factor by factor (scores out of 10) */}
+      {admin && moving.length > 0 && (
         <Block title={tt("Factor by factor")} note={tt("{0} ← → {1} · scores out of 10", { 0: home, 1: away })}>
           <ul className="divide-y divide-line/50">
             {moving.map(r => <Tug key={r.id} r={r} max={max} total={total} hn={home} an={away} />)}
@@ -207,8 +209,8 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
         </Block>
       )}
 
-      {/* 3. how it adds up */}
-      <Block title={tt("How it adds up")}>
+      {/* admins: how it adds up */}
+      {admin && <Block title={tt("How it adds up")}>
         <div className="flex h-3 gap-[3px] rounded-full overflow-hidden" aria-hidden>
           <div className="bg-home" style={{ width: `${pts.home / 10}%` }} />
           <div className="bg-draw" style={{ width: `${pts.draw / 10}%` }} />
@@ -237,7 +239,7 @@ export default function PredictionStory({ p, home, away, upcoming, friendly }: {
             {tt("The rest is split by the edge: {0}% {1}, {2}% {3}.", { 0: Math.round(p.home), 1: home, 2: Math.round(p.away), 3: away })}
           </p>
         </div>
-      </Block>
+      </Block>}
 
       {/* 4. what could change it */}
       <Block title={tt("What could change it")}>

@@ -22,6 +22,7 @@ import { StatsTab, RestTab, H2HTab, StandingsTab } from './GameTabs'
 import { MarketsCard, CompareCard, PlayersCard, ModelTable, type Markets, type ModelInfo, type GamePlayer } from './GameExtras'
 import GamePage, { useGameTab, GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
 import WinnerPrediction, { type WhyRow } from '../../components/sport/game/WinnerPrediction'
+import type { Factor } from '../../lib/whyFactors'
 import GamePreview from '../../components/sport/game/GamePreview'
 import Court, { type CourtPlayer } from '../../components/sport/game/Court'
 import NewsChange from '../../components/sport/game/NewsChange'
@@ -75,6 +76,8 @@ interface Detail {
   beforeAfter?: { before: { pHome: number; pAway: number }; after: { pHome: number; pAway: number }; players: { id: number; name: string; status: string; points: number; side: 'H' | 'A' }[] } | null
   /** fix219: bb-v4's 1,000 points split (games to come, full prediction only) */
   grid?: GridView | null
+  /** fix282: "Why we think so" — every factor with the model's own points */
+  factors?: Factor[] | null
   /** fix224: each team's key players; reasons = missing players who move the margin 1.5+ points (full prediction only) */
   keyPlayers?: { home: KeySide | null; away: KeySide | null; reasons: KeyReason[] } | null
 }
@@ -164,6 +167,7 @@ export default function BbGame() {
               { label: t('Total points'), value: typeof p?.total === 'number' ? p.total.toFixed(1) : '–' }
             ]}
             why={bbWhy(d)}
+            factors={d.factors}
             howCalc={d.model ? <>{d.grid && <GridSplit grid={d.grid} home={g.home.name} away={g.away.name} />}<ModelTable g={g} model={d.model} ratings={d.ratings} /></> : undefined}
             badges={g.resultCheck ? <span title={t('The final score from our data provider looks wrong. This game doesn’t count in our record until it is checked.')} className="ms-auto rounded-full px-3 py-1 text-xs font-bold bg-draw/15 text-draw">{t('Result being checked')}</span> : undefined}
             noPrediction={t('No prediction for this game.')}

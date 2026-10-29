@@ -10,6 +10,7 @@ export const PARITY_PROVIDES: ParityProvides = {
   keys: [
     'game.prediction',
     'game.why',
+    'game.whyFactors', // fix282: WhyPanel in the shared WinnerPrediction
     'game.howCalculated', // TennisParts (ModelParts)
     'game.preview', // tennisWriteup, English pages
     'game.injuries', // stoppages (medical timeouts, retirements) in Schedule & rest

@@ -14,6 +14,7 @@ import { Meetings, commonSense, type H2H } from './h2hGuard';
 import { Prediction } from './predictionModel';
 import { every, after, runSteps, runStepsAsync } from './perf';
 import { onState, publishState } from './shared';
+import { keepSign } from '../utils/whyFactors';
 
 export const MODEL_EURO = 'elo-euro';
 const AF_OFFSET = 1_000_000_000;
@@ -297,15 +298,16 @@ function cupNll(xs: { f: CFeat; o: 'H' | 'D' | 'A' }[], w: CupW) {
 const factorsOf = (f: CFeat, w: CupW) => w.w_elo * f.dElo + w.w_squad * f.lv + w.w_goals * f.gl + w.w_form * f.form + w.w_rest * f.rest + (w.w_h2h || 0) * f.h2h;
 /** fix167: the fit as steps (a yield after each weight tried), so the scheduled rebuild gives the thread back. */
 function* fitCup(xs: { f: CFeat; o: 'H' | 'D' | 'A' }[], start: CupW, fixed: string[] = []): Generator<unknown, CupW> {
-  const w: any = { ...start };
+  const w: any = Object.fromEntries(Object.entries(start).map(([k, v]) => [k, keepSign(k, v as number)]));
   let best = cupNll(xs, w), step = 0.2;
   for (let pass = 0; pass < 80 && step > 0.002; pass++) {
     let improved = false;
     for (const k of CW) for (const dir of [1, -1]) {
       if (fixed.includes(k)) continue;
       const old = w[k];
-      w[k] = old + dir * step;
+      w[k] = keepSign(k, old + dir * step); // fix282: a "more is better" factor never gets a negative weight
       if (k.startsWith('c_')) w[k] = Math.max(0.05, w[k]);
+      if (w[k] === old) continue;
       const v = cupNll(xs, w);
       yield;
       if (v < best - 1e-7) { best = v; improved = true; break; }
@@ -601,7 +603,7 @@ export function predictClubEuro(match: any): Prediction | null {
     const w = cupW;
     const avg = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
     const edge = (x: number) => Math.round(x * 250) / 10;
-    const relOf = (x: number) => Math.max(1, Math.min(5, Math.round(Math.abs(x) * 5)));
+    const relOf = (x: number) => (Math.abs(x) < 1e-9 ? 0 : Math.max(1, Math.min(5, Math.round(Math.abs(x) * 5)))); // fix282: weight 0 = not used
     const eur = (x: number | null) => (x ? `€${Math.round(x / 1e6)}m` : 'n/a');
     const rows: NonNullable<Prediction['grid']>['rows'] = [
       { id: '#1e', name: 'Strength (rating)', rel: relOf(w.w_elo), home: scale(H.elo, ps.elo), away: scale(A.elo, ps.elo), edge: edge(w.w_elo * f.dElo), note: `rating ${Math.round(H.elo)} vs ${Math.round(A.elo)}` },
