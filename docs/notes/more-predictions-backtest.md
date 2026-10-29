@@ -558,3 +558,7 @@ POR −14.8 vs −7.5, total 228.8 vs 234 — totals 3–5 low every game, and n
   over / under 2.5 chance 5 points, both teams score 5 (clean sheets). The reason is written ("4.8 points from the market
   on totals (limit 3)"). Data health "Close to the market (<sport>)".
 - Not yet measured on real data (no database copy in the session): the first gap report and fits are the server's.
+- **fix278b (29 Oct):** the first report showed basketball spread mean gap +11 — a sign error in the parse, not the model:
+  books write the away handicap either as its own ("Away +6.5") or as the home side's number ("Away -6.5"); both
+  pairings are now built and the one that looks like real two-way prices is kept (+ a money-line guard). Stored line =
+  home handicap; home margin = −line, read once (`marketNumber`). Old handicap rows were removed and re-read.

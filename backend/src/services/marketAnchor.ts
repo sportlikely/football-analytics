@@ -212,7 +212,8 @@ export function oursOfExtras(sport: MarketSport, market: string, x: Extras | nul
 /** the market's number of a stored line in the same terms */
 export function marketNumber(market: string, line: number | null, p: Record<string, number> | null): number | null {
   if (market === 'total' || market === 'total_games') return line;
-  if (market === 'spread') return line == null ? null : -line;
+  // fix278b: a handicap (home favoured = negative) → our home margin (home favoured = positive): the one conversion
+  if (market === 'spread' || market === 'ah' || market === 'h1_spread') return line == null ? null : -line;
   if (market.startsWith('ou')) return p?.over != null ? p.over * 100 : null;
   if (market === 'btts') return p?.Yes != null ? p.Yes * 100 : p?.yes != null ? p.yes * 100 : null;
   return null;

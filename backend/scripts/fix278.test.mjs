@@ -281,3 +281,67 @@ test('wiring: basketball / NFL predictions are anchored where they are made; ext
   const ml = SRC('src/services/marketLines.ts');
   assert.equal((ml.match(/await callOdds\(/g) || []).length, (ml.match(/if \(!quotaOk\(sport\)\)/g) || []).length);
 });
+
+/* ---------- fix278b: the spread's sign ---------- */
+
+// 29 Oct 20:55: basketball spread mean gap +11.02 over 44 games — SAC@NOP ours +6.3 (home margin) vs market NOP −6.5
+// (home handicap) is really 0.2 apart. Both ways books write a handicap: the away side with its own number, or with the home side's.
+const hcpBooks = (name) => {
+  const own = [{ value: 'Home -6.5', odd: '1.91' }, { value: 'Away +6.5', odd: '1.91' }, { value: 'Home -4.5', odd: '1.65' }, { value: 'Away +4.5', odd: '2.25' }, { value: 'Home -8.5', odd: '2.25' }, { value: 'Away +8.5', odd: '1.65' }];
+  const homeNum = [{ value: 'Home -6.5', odd: '1.90' }, { value: 'Away -6.5', odd: '1.92' }, { value: 'Home -4.5', odd: '1.66' }, { value: 'Away -4.5', odd: '2.22' }, { value: 'Home +6.5', odd: '1.10' }, { value: 'Away +6.5', odd: '6.50' }];
+  return [book('own', [{ name, values: own }]), book('home-number', [{ name, values: homeNum }])];
+};
+
+for (const [sport, betName, market] of [['basketball', 'Asian Handicap', 'spread'], ['nfl', 'Asian Handicap', 'spread'], ['football', 'Asian Handicap', 'ah']]) {
+  test(`fix278b ${sport}: a home favourite by 6.5 in the market (both ways of writing it) and +6.3 in our model → gap −0.2`, () => {
+    for (const books of [[hcpBooks(betName)[0]], [hcpBooks(betName)[1]], hcpBooks(betName)]) {
+      const c = M.gameConsensus(sport, books).find(x => x.market === market);
+      assert.equal(c.line, -6.5, `${books.map(b => b.name).join('+')}: stored as the home side's handicap`);
+      assert.equal(M.marketMargin(c), 6.5, 'the market\'s home margin');
+      assert.equal(M.gapStats([{ ours: 6.3, market: M.marketMargin(c) }]).meanGap, -0.2);
+    }
+  });
+}
+
+test('fix278b: a handicap against its own money line is turned round (home 70% → the home side gives the points)', () => {
+  const books = [book('A', [{ name: 'Asian Handicap', values: [{ value: 'Home +6.5', odd: '1.90' }, { value: 'Away -6.5', odd: '1.90' }] }, { name: 'Home/Away', values: [{ value: 'Home', odd: '1.35' }, { value: 'Away', odd: '3.30' }] }])];
+  const c = Object.fromEntries(M.gameConsensus('basketball', books).map(x => [x.market, x]));
+  assert.equal(c.spread.line, -6.5);
+});
+
+test('fix278b: the gap report, gate and fits read the market\'s home margin once — basketball, NFL, football handicap', () => {
+  const out = child(`
+    const { db } = require(D + '/db');
+    require(D + '/services/bbModel.js'); require(D + '/services/nflModel.js'); require(D + '/services/morePredictions.js');
+    const A = require(D + '/services/marketAnchor.js');
+    const ML = require(D + '/services/marketLines.js');
+    const U = require(D + '/utils/marketLines.js');
+    const k = new Date(Date.now() + 5 * 3600000).toISOString(), t = new Date().toISOString();
+    const books = [{ name: 'B', bets: [{ name: 'Asian Handicap', values: [{ value: 'Home -6.5', odd: '1.90' }, { value: 'Away -6.5', odd: '1.92' }, { value: 'Home +6.5', odd: '1.10' }, { value: 'Away +6.5', odd: '6.50' }] }] }];
+    db.prepare("INSERT INTO bb_games (game_id, code, league_id, season, kickoff, status, home_id, home_name, away_id, away_name, updated_at) VALUES (1, 'NBA', 12, '2026-2027', ?, 'NS', 1, 'NOP', 2, 'SAC', ?)").run(k, t);
+    db.prepare("INSERT INTO bb_predictions (game_id, code, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at) VALUES (1, 'NBA', ?, 'bb-v4', 0.7, 6.3, 233.1, 119.7, 113.4, ?)").run(k, t);
+    db.prepare("INSERT INTO nfl_games (game_id, season, kickoff, home_id, home_name, away_id, away_name, status, league, updated_at) VALUES (2, 2026, ?, 1, 'H', 2, 'A', 'NS', 1, ?)").run(k, t);
+    db.prepare("INSERT INTO nfl_predictions (game_id, season, kickoff, model, p_home, margin, total, home_pts, away_pts, made_at) VALUES (2, 2026, ?, 'nfl-v1', 0.7, 6.3, 44, 25.15, 18.85, ?)").run(k, t);
+    db.prepare("INSERT INTO prediction_extras (sport, game_id, model, kickoff, made_at, json, settled) VALUES ('football', 3, 'grid-v3', ?, ?, ?, 0)").run(k, t, JSON.stringify({ sport: 'football', v: 1, sets: {}, info: { xg: [7.3, 1.0] } }));
+    A.storeLines('basketball', 1, k, 'NBA', U.gameConsensus('basketball', books), false);
+    A.storeLines('nfl', 2, k, '1', U.gameConsensus('nfl', books), false);
+    A.storeLines('football', 3, k, 'E0', U.gameConsensus('football', books), false);
+    const rep = ML.marketGapReport(Date.now(), true);
+    const g = (s, m) => rep.sports.find(x => x.sport === s).markets.find(x => x.market === m).windows.d30.upcoming;
+    const big = rep.sports.find(x => x.sport === 'basketball').biggest.find(b => b.market === 'spread');
+    console.log(JSON.stringify({ bb: g('basketball', 'spread'), nfl: g('nfl', 'spread'), fb: g('football', 'ah'), big, num: A.marketNumber('ah', -6.5, null) }));
+  `);
+  assert.equal(out.bb.meanGap, -0.2, JSON.stringify(out.bb));
+  assert.equal(out.nfl.meanGap, -0.2, JSON.stringify(out.nfl));
+  assert.equal(out.fb.meanGap, -0.2, JSON.stringify(out.fb));
+  assert.equal(out.big.ours, 6.3);
+  assert.equal(out.big.marketLine, 6.5, 'the report shows the market as a home margin too');
+  assert.equal(out.num, 6.5);
+});
+
+test('fix278b: handicap rows stored before the fix are removed once and taken again', () => {
+  const s = SRC('src/services/marketLines.ts');
+  assert.match(s, /DELETE FROM market_lines WHERE market IN \('spread', 'ah', 'h1_spread'\)/);
+  assert.match(s, /repairHandicapsOnce\(\);/);
+  assert.match(s, /marketNumber\('spread', c\.line, null\)/, 'the anchor fit reads the same conversion');
+});

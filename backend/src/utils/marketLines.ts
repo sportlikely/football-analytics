@@ -85,22 +85,39 @@ export const lineKind = (market: string): 'ou' | 'hcp' | null => LINE_KIND[marke
 
 /**
  * one book's two-sided lines of a market: line → [price of over / home, price of under / away].
- * Handicaps are keyed by the home side's handicap (−5.5 = home gives 5.5): "Away +5.5" pairs with "Home -5.5".
+ * Handicaps are keyed by the HOME side's handicap (−5.5 = home gives 5.5; the market's home margin = −line, read once by
+ * marketMargin / marketNumber). fix278b: books write the away side two ways — "Away +5.5" (its own handicap) or
+ * "Away -5.5" (the home side's number, both sides) — so both pairings are built and the one whose pairs look like real
+ * two-way prices (more complete pairs, then 1/a + 1/b nearest a normal 105% book) is kept. (29 Oct: the wrong pairing
+ * stored home favourites as +6.5: basketball spread mean gap +11 against ours.)
  */
 export function bookLines(kind: 'ou' | 'hcp', values: RawValue[]): Map<number, [number | null, number | null]> {
-  const out = new Map<number, [number | null, number | null]>();
-  for (const v of values || []) {
-    const [side, line] = sideLine(v.value), p = price(v.odd);
-    if (line == null || p == null || !side) continue;
-    const a = kind === 'ou' ? side === 'over' : side === 'home';
-    const b = kind === 'ou' ? side === 'under' : side === 'away';
-    if (!a && !b) continue;
-    const key = kind === 'hcp' && b ? -line : line;
-    const cur = out.get(key) || [null, null];
-    if (a) cur[0] = p; else cur[1] = p;
-    out.set(key, cur);
-  }
-  return out;
+  const build = (awayOwn: boolean) => {
+    const out = new Map<number, [number | null, number | null]>();
+    for (const v of values || []) {
+      const [side, line] = sideLine(v.value), p = price(v.odd);
+      if (line == null || p == null || !side) continue;
+      const a = kind === 'ou' ? side === 'over' : side === 'home';
+      const b = kind === 'ou' ? side === 'under' : side === 'away';
+      if (!a && !b) continue;
+      const key = kind === 'hcp' && b && awayOwn ? -line : line;
+      const cur = out.get(key) || [null, null];
+      if (a) cur[0] = p; else cur[1] = p;
+      out.set(key, cur);
+    }
+    return out;
+  };
+  if (kind === 'ou') return build(false);
+  const own = build(true), home = build(false);
+  const score = (m: Map<number, [number | null, number | null]>) => {
+    const pairs = [...m.values()].filter(([a, b]) => a != null && b != null) as [number, number][];
+    const off = pairs.length ? pairs.reduce((s, [a, b]) => s + Math.abs(1 / a + 1 / b - 1.05), 0) / pairs.length : Infinity;
+    return { n: pairs.length, off };
+  };
+  const so = score(own), sh = score(home);
+  if (sh.n > so.n) return home;
+  if (sh.n === so.n && sh.off < so.off - 1e-9) return home;
+  return own;
 }
 
 /** a book's main line: the two-sided line whose margin-free chance is closest to 50 / 50 (ties: the lower line) */
@@ -189,6 +206,12 @@ export function gameConsensus(sport: MarketSport, books: RawBook[]): Consensus[]
     }
     const c = kind ? lineConsensus(m, kind, vs) : outcomeConsensus(m, vs, { normalise: !NO_NORMALISE.has(m), top: TOP[m] });
     if (c) out.push(c);
+  }
+  // fix278b guard: the main handicap must agree with the money line's favourite (home 60%+ → the home side gives points)
+  const ml = out.find(c => c.market === 'ml'), pH = ml ? (ml.p.Home ?? ml.p.home ?? ml.p['1']) : undefined;
+  if (pH != null) for (const c of out) {
+    if (lineKind(c.market) !== 'hcp' || c.market.startsWith('h1') || c.line == null || Math.abs(c.line) < 1) continue;
+    if ((pH >= 0.6 && c.line > 0) || (pH <= 0.4 && c.line < 0)) Object.assign(c, { line: -c.line, prices: { home: c.prices.away, away: c.prices.home }, p: { home: c.p.away, away: c.p.home } });
   }
   return out.sort((a, b) => a.market.localeCompare(b.market));
 }

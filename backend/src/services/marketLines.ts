@@ -32,7 +32,7 @@ import {
   gameConsensus, swapConsensus, fitAnchorGroups, levelTest, levelShift, LEVEL_K, gapStats, closerStats, MARKET_LIMITS, GATE_MARKET_GAMES,
   type MarketSport, type AnchorRow, type LevelRow, type AnchorKind, type Consensus
 } from '../utils/marketLines';
-import { readFeed, writeFeed, type FeedStatus, storeLines, storeAnchor, anchorFits, levelStates, anchorGroup, marketNumber, oursOfExtras, gateGap, recentGap, overOf, bttsOf, type LevelState } from './marketAnchor';
+import { readFeed, writeFeed, type FeedStatus, storeLines, storeAnchor, bumpMarketVer, anchorFits, levelStates, anchorGroup, marketNumber, oursOfExtras, gateGap, recentGap, overOf, bttsOf, type LevelState } from './marketAnchor';
 
 
 const DAY = 86400000, HOUR = 3600000;
@@ -159,6 +159,22 @@ async function closeRun(sport: MarketSport, now: number, f: FeedStatus) {
   if (games.length) Object.assign(f, { lastClose: iso(now), closing: f.closing + n, calls: f.calls + calls });
 }
 
+/**
+ * fix278b: handicap rows stored before the sign fix may carry the home favourite as +x (the away side's numbers paired
+ * the wrong way): once per database they are removed and every sport's next snapshot is taken at once (closing lines
+ * of games already started cannot be read again; the gap report and the fits only use rows stored after this).
+ */
+function repairHandicapsOnce() {
+  const done = db.prepare(`SELECT 1 FROM market_feed WHERE sport = 'fix278b'`).get();
+  if (done) return;
+  const n = db.prepare(`DELETE FROM market_lines WHERE market IN ('spread', 'ah', 'h1_spread')`).run().changes;
+  db.prepare(`DELETE FROM market_anchor WHERE market = 'spread'`).run(); // refitted by the next daily run on the clean rows
+  for (const sport of FEED_SPORTS) { const f = readFeed(sport); f.lastFull = null; writeFeed(sport, f); }
+  db.prepare(`INSERT OR REPLACE INTO market_feed (sport, json, at) VALUES ('fix278b', ?, ?)`).run(JSON.stringify({ removed: n }), iso(Date.now()));
+  bumpMarketVer();
+  logger.info(`market lines (fix278b): ${n} handicap rows stored before the sign fix removed, snapshots taken again`);
+}
+
 let ticking = false;
 /** every 10 minutes (worker): closing snapshots, and the 2-hourly snapshot of each sport when due */
 export async function marketTick(now = Date.now()): Promise<Record<string, string>> {
@@ -166,6 +182,7 @@ export async function marketTick(now = Date.now()): Promise<Record<string, strin
   ticking = true;
   const out: Record<string, string> = {};
   try {
+    repairHandicapsOnce();
     for (const sport of FEED_SPORTS) {
       const f = readFeed(sport);
       f.skipped = null;
@@ -217,7 +234,7 @@ function anchorRows(sport: MarketSport, market: string, since: number): { kind: 
       if (!c) continue;
       const group = anchorGroup(sport, s.league);
       if (market === 'total' && c.line != null) out.push({ t: s.t, model: s.model.total, market: c.line, actual: s.total, group });
-      if (market === 'spread' && c.line != null) out.push({ t: s.t, model: s.model.margin, market: -c.line, actual: s.margin, group });
+      if (market === 'spread' && c.line != null) out.push({ t: s.t, model: s.model.margin, market: marketNumber('spread', c.line, null)!, actual: s.margin, group });
       if (market === 'ml' && mlHome(c.p) != null && s.total > 0 && s.margin !== 0) out.push({ t: s.t, model: s.model.p, market: mlHome(c.p)!, actual: s.won, group });
     }
     return { kind: market === 'ml' ? 'chance' : 'line', rows: out };
@@ -294,7 +311,7 @@ export function marketFitDue(now = Date.now()): boolean {
 const REPORT_MARKETS: Record<MarketSport, { market: string; kind: AnchorKind; label: string }[]> = {
   basketball: [{ market: 'total', kind: 'line', label: 'Total points' }, { market: 'spread', kind: 'line', label: 'Spread (home margin)' }, { market: 'ml', kind: 'chance', label: 'Winner (home %)' }],
   nfl: [{ market: 'total', kind: 'line', label: 'Total points' }, { market: 'spread', kind: 'line', label: 'Spread (home margin)' }, { market: 'ml', kind: 'chance', label: 'Winner (home %)' }],
-  football: [{ market: 'ou1.5', kind: 'chance', label: 'Over 1.5 goals %' }, { market: 'ou2.5', kind: 'chance', label: 'Over 2.5 goals %' }, { market: 'ou3.5', kind: 'chance', label: 'Over 3.5 goals %' }, { market: 'btts', kind: 'chance', label: 'Both teams score %' }],
+  football: [{ market: 'ou1.5', kind: 'chance', label: 'Over 1.5 goals %' }, { market: 'ou2.5', kind: 'chance', label: 'Over 2.5 goals %' }, { market: 'ou3.5', kind: 'chance', label: 'Over 3.5 goals %' }, { market: 'btts', kind: 'chance', label: 'Both teams score %' }, { market: 'ah', kind: 'line', label: 'Asian handicap (home goal margin)' }],
   tennis: [{ market: 'total_games', kind: 'line', label: 'Total games' }]
 };
 interface Pair { id: number; league: string; ours: number; market: number; actual: number | null; why?: string | null; kickoff: string }
@@ -333,11 +350,12 @@ function pairs(sport: MarketSport, market: string, from: number, to: number, set
     for (const r of db.prepare(`SELECT game_id, kickoff, json, result, settled FROM prediction_extras WHERE sport = ? AND game_id IN (${q})`).all(sport, ...part) as any[]) {
       if (settled !== (r.settled === 1)) continue;
       const x = parse(r.json), m = mk.get(r.game_id);
-      const ours = market.startsWith('ou') ? (overOf(x, Number(market.slice(2))) ?? NaN) * 100 : market === 'btts' ? (bttsOf(x) ?? NaN) * 100 : oursOfExtras(sport, market, x);
+      const ours = market.startsWith('ou') ? (overOf(x, Number(market.slice(2))) ?? NaN) * 100 : market === 'btts' ? (bttsOf(x) ?? NaN) * 100
+        : market === 'ah' ? (Array.isArray(x?.info?.xg) ? x.info.xg[0] - x.info.xg[1] : NaN) : oursOfExtras(sport, market, x);
       const mkt = marketNumber(market, m.line, parse(m.prices)?.p || null);
       if (ours == null || !Number.isFinite(ours) || mkt == null) continue;
       const res = parse(r.result)?.actual;
-      const actual = !res ? null : market.startsWith('ou') ? (res.goals > Number(market.slice(2)) ? 100 : 0) : market === 'btts' ? (res.cleanHome === 'no' && res.cleanAway === 'no' ? 100 : 0) : Number.isFinite(res.games) ? res.games : null;
+      const actual = !res ? null : market === 'ah' ? (Number.isFinite(res.homeGoals) && Number.isFinite(res.awayGoals) ? res.homeGoals - res.awayGoals : null) : market.startsWith('ou') ? (res.goals > Number(market.slice(2)) ? 100 : 0) : market === 'btts' ? (res.cleanHome === 'no' && res.cleanAway === 'no' ? 100 : 0) : Number.isFinite(res.games) ? res.games : null;
       const xg = x?.info?.xg;
       out.push({ id: r.game_id, league: String(m.league || ''), ours, market: mkt, actual, kickoff: r.kickoff, why: Array.isArray(xg) ? `expected goals ${xg[0]} – ${xg[1]}${x.info?.anchored ? ' · anchored' : ''}` : null });
     }
