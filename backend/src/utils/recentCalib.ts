@@ -188,7 +188,7 @@ export interface Band { lo: number; hi: number; n: number; said: number | null; 
 export interface RecentDecision {
   decision: 'promote' | 'keep' | 'rollback' | 'held';
   reason: string; verdict: Verdict | null;
-  mode: 'walk-forward' | 'cross-fit';
+  mode: 'walk-forward' | 'cross-fit' | 'young';
   /** the layer to go live on 'promote' (walk-forward: the candidate that passed, fit before the test days; cross-fit: the fit on every settled game) */
   live: IsoLayer | null;
   /** the candidate (null = too few games to fit) and how its kind was chosen */
@@ -233,16 +233,49 @@ export const CROSS_FOLDS = 5;
  * only from 25 Oct): every game scored by a Platt fit on the other blocks of time (CROSS_FOLDS contiguous blocks), so
  * each game's number comes from a fit that never saw it. Returns the out-of-fold view of each row.
  */
-export function crossFit(rows: CRow[], K = CROSS_FOLDS): Map<CRow, P3> {
+export function crossFit(rows: CRow[], K = CROSS_FOLDS, kind: LayerKind = 'platt'): Map<CRow, P3> {
   const s = rows.slice().sort((a, b) => a.t - b.t);
   const out = new Map<CRow, P3>();
   for (let j = 0; j < K; j++) {
     const lo = Math.floor((j * s.length) / K), hi = Math.floor(((j + 1) * s.length) / K);
     const train = s.slice(0, lo).concat(s.slice(hi));
-    const L: LayerFn | null = train.length ? { x: [], y: [], kind: 'platt', ...fitPlattTop(tops(train)) } : null;
+    // fix273: either kind (isotonic shrunk SHRINK games' worth per block; Platt with its ridge prior at the identity)
+    const L: LayerFn | null = !train.length ? null : kind === 'iso' ? { ...fitIso(tops(train)), kind: 'iso' } : { x: [], y: [], kind: 'platt', ...fitPlattTop(tops(train)) };
     for (const r of s.slice(lo, hi)) out.set(r, shown(L, r));
   }
   return out;
+}
+
+/*
+ * fix273 — a young sport (basketball, tennis: their raw chances are saved only since 25 Oct). fix270's bar (better in
+ * 90% of 2,000 resamples, a gain of 0.0005, one promotion a week) kept the layer out while data health stayed red
+ * (29 Oct: basketball 50–60% said 54.9 happened 46.9 on 64 games, 60–70% said 65.1 happened 59.3 on 81; tennis 60–70%
+ * said 64.9 happened 75.8 on 95). While it has fewer than YOUNG_MAX settled games (YOUNG_MIN at least):
+ *  - the kind is chosen out of fold: isotonic and Platt (both shrunk toward no change) each scored on every settled game
+ *    by fits on the other time blocks; the one with the lower log loss is fitted on every settled game and goes live;
+ *  - the lower bar: better on log loss overall AND in each half of the games (earlier / later: a gain carried by one
+ *    stretch doesn't count), better in ≥ YOUNG_CONFIDENCE (75%) of the paired resamples, hit rate not down > 0.5 pp;
+ *  - re-tested every night (one promotion a day, not a week); the rollback rule as before.
+ */
+export const YOUNG_MAX = 1000;
+export const YOUNG_MIN = 150;
+export const YOUNG_CONFIDENCE = 0.75;
+
+/** fix273: the young-sport bar on the out-of-fold games (`view`) against what was shown (`champ`) */
+export function judgeYoung(rows: CRow[], view: (r: CRow) => P3, champ: (r: CRow) => P3, R = DAILY_RULES, seed = 273, minTest = MIN_TEST): Verdict & { halves: [number, number] } {
+  const s = rows.slice().sort((a, b) => a.t - b.t), h = Math.floor(s.length / 2);
+  const pw = (sel: CRow[]) => paired(sel.map(r => ({ c: view(r), b: champ(r), y: r.y })));
+  const all = pw(s), A = pw(s.slice(0, h)), B = pw(s.slice(h));
+  const halves: [number, number] = [A.s.diff, B.s.diff];
+  const on = 'every settled game, out of fold';
+  if (all.s.n < minTest) return { pass: false, why: `${all.s.n} games (< ${minTest})`, boot: null, gap: `needs ${minTest - all.s.n} more games`, halves };
+  if (all.s.diff >= 0) return { pass: false, why: `not better on ${on} (${sg(all.s.diff)})`, boot: null, gap: `${sg(all.s.diff)}: needs below 0`, halves };
+  if (A.s.diff >= 0 || B.s.diff >= 0) return { pass: false, why: `not better in both halves (earlier ${sg(A.s.diff)}, later ${sg(B.s.diff)})`, boot: null, gap: 'needs both halves below 0', halves };
+  const boot = pairedBootstrap(all.d, R.resamples, seed);
+  const hitDrop = Math.round((all.s.hitB - all.s.hitC) * 10) / 10;
+  if (boot.pBetter < YOUNG_CONFIDENCE) return { pass: false, why: `better but not sure enough: better in ${Math.round(boot.pBetter * 100)}% of resamples (needs ${Math.round(YOUNG_CONFIDENCE * 100)}%)`, boot, gap: `${Math.round(boot.pBetter * 100)}% of the ${Math.round(YOUNG_CONFIDENCE * 100)}% needed`, halves };
+  if (hitDrop > R.maxHitDrop) return { pass: false, why: `hit rate ${all.s.hitC}% vs ${all.s.hitB}% (down more than ${R.maxHitDrop} pp)`, boot, gap: `hit rate down ${hitDrop.toFixed(1)} pp (max ${R.maxHitDrop})`, halves };
+  return { pass: true, why: `${on} ${sg(all.s.diff)} per game over ${all.s.n} games (earlier half ${sg(A.s.diff)}, later ${sg(B.s.diff)}), better in ${Math.round(boot.pBetter * 100)}% of resamples`, boot, gap: null, halves };
 }
 
 /**
@@ -253,19 +286,29 @@ export function crossFit(rows: CRow[], K = CROSS_FOLDS): Map<CRow, P3> {
  *  - cross-fit (fewer, but MIN_FIT+ settled games in all): tested out of fold on every game (crossFit); the layer that
  *    goes live is the Platt fit on all of them.
  */
-export function decideRecent(rows: CRow[], champion: IsoLayer | null, championSince: string | null, lastPromotion: string | null, now = Date.now(), R = DAILY_RULES, seed = 270, edges = [50, 60, 70, 80]): RecentDecision {
+export function decideRecent(rows: CRow[], champion: IsoLayer | null, championSince: string | null, lastPromotion: string | null, now = Date.now(), R = DAILY_RULES, seed = 270, edges = [50, 60, 70, 80], opts: { young?: boolean } = {}): RecentDecision {
   const day0 = Math.floor(now / DAY) * DAY;
   const T0 = day0 - TEST_DAYS * DAY;
   const d = (x: number) => new Date(x).toISOString().slice(0, 10);
   const settled = rows.filter(r => r.t < day0);
   const fitRows = settled.filter(r => r.t < T0);
-  const mode: 'walk-forward' | 'cross-fit' = fitRows.length < MIN_FIT && settled.length >= MIN_FIT ? 'cross-fit' : 'walk-forward';
+  // fix273: a young sport (opts.young) with YOUNG_MIN–YOUNG_MAX settled games: the young rule (see judgeYoung)
+  const young = !!opts.young && settled.length >= YOUNG_MIN && settled.length < YOUNG_MAX;
+  const mode: RecentDecision['mode'] = young ? 'young' : fitRows.length < MIN_FIT && settled.length >= MIN_FIT ? 'cross-fit' : 'walk-forward';
   // the champion: the live layer, or with none live what was shown (the model's own, or basketball's season layer)
   const champ = (r: CRow): P3 => (champion ? shown(champion, r) : r.cur ?? shown(null, r));
   const firstOf = (sel: CRow[], dflt: number) => d(sel.length ? sel.reduce((m, r) => Math.min(m, r.t), Infinity) : dflt);
 
   let cand: IsoLayer | null, kindWhy: string | null, test: CRow[], view: ((r: CRow) => P3) | null, on: string;
-  if (mode === 'cross-fit') {
+  if (mode === 'young') {
+    const oi = crossFit(settled, CROSS_FOLDS, 'iso'), op = crossFit(settled, CROSS_FOLDS, 'platt');
+    const li = meanLL(settled, r => oi.get(r)!)!, lp = meanLL(settled, r => op.get(r)!)!;
+    const kind: LayerKind = li < lp ? 'iso' : 'platt';
+    cand = fitLayer(settled, 0, day0, YOUNG_MIN, kind);
+    kindWhy = `young sport (${settled.length} settled games, under ${YOUNG_MAX}): ${kind === 'iso' ? `isotonic ${li} vs Platt ${lp}` : `Platt ${lp} vs isotonic ${li}`} out of fold (${CROSS_FOLDS} time blocks), fitted on every settled game`;
+    const oof = kind === 'iso' ? oi : op;
+    test = settled; view = r => oof.get(r)!; on = 'every settled game, out of fold';
+  } else if (mode === 'cross-fit') {
     const oof = crossFit(settled);
     cand = fitLayer(settled, 0, day0, MIN_FIT, 'platt');
     kindWhy = `fewer than ${MIN_FIT} games before the last ${TEST_DAYS} days: Platt, each game tested by a fit on the other ${CROSS_FOLDS - 1} of ${CROSS_FOLDS} time blocks`;
@@ -280,8 +323,8 @@ export function decideRecent(rows: CRow[], champion: IsoLayer | null, championSi
   const pw = paired(test.map(r => ({ c: view ? view(r) : null, b: champ(r), y: r.y })));
   const base = {
     mode, candidate: cand, kindWhy,
-    fit: mode === 'cross-fit' ? { from: firstOf(settled, day0), to: d(day0), n: settled.length } : { from: firstOf(fitRows, T0), to: d(T0), n: fitRows.length },
-    test: { from: mode === 'cross-fit' ? firstOf(settled, day0) : d(T0), to: d(day0), n: test.length, diff: pw.s.diff, champion: meanLL(test, champ), candidate: view ? meanLL(test, view) : null, none: meanLL(test, r => shown(null, r)) },
+    fit: mode !== 'walk-forward' ? { from: firstOf(settled, day0), to: d(day0), n: settled.length } : { from: firstOf(fitRows, T0), to: d(T0), n: fitRows.length },
+    test: { from: mode !== 'walk-forward' ? firstOf(settled, day0) : d(T0), to: d(day0), n: test.length, diff: pw.s.diff, champion: meanLL(test, champ), candidate: view ? meanLL(test, view) : null, none: meanLL(test, r => shown(null, r)) },
     bands: bandTable(test, champ, view, edges),
     live: null as IsoLayer | null
   };
@@ -298,9 +341,10 @@ export function decideRecent(rows: CRow[], champion: IsoLayer | null, championSi
     }
   }
   if (!cand) return { ...base, decision: 'keep', reason: `No change: ${settled.length} settled games (${MIN_FIT} needed to fit).`, verdict: null, guard };
-  const v = judgeTest(pw, R, seed, MIN_TEST, on);
+  const v = mode === 'young' && view ? judgeYoung(test, view, champ, R, seed) : judgeTest(pw, R, seed, MIN_TEST, on);
   if (!v.pass) return { ...base, decision: 'keep', reason: `No change: ${v.why}.`, verdict: v, guard };
-  const wait = promotionWait(lastPromotion, d(day0), R);
+  // fix273: a young sport is re-tested and may move every night
+  const wait = promotionWait(lastPromotion, d(day0), mode === 'young' ? { ...R, minDaysBetween: 1 } : R);
   if (wait > 0) return { ...base, decision: 'held', reason: `No change: a new layer passed (${v.why}), but the last promotion was on ${lastPromotion} — at most one in ${R.minDaysBetween} days (${wait} day(s) to go).`, verdict: v, guard };
   const kindName = cand.kind === 'platt' ? `Platt a ${cand.a}, b ${cand.b}` : `isotonic, ${cand.x.length} knots`;
   return { ...base, live: cand, decision: 'promote', reason: `New layer (${kindName}; fit ${cand.from} → ${cand.to}, ${cand.n} games): ${v.why}.`, verdict: v, guard };

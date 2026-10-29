@@ -22,6 +22,7 @@ import { ADMIN_TABS, adminPath, adminTabOf, healthTab, waitingCount, type AdminS
 import { PARITY_REPORT } from '../lib/sportParity.report'
 import { slAdmin } from '../lib/modelNames'
 import { matchHref } from '../lib/links'
+import { poll } from '../lib/poll'
 
 type Row = User & { lastLoginAt: string | null }
 type Stats = { total: number; premium: number; verified: number; optIn: number }
@@ -52,8 +53,7 @@ export default function Admin() {
   useEffect(() => {
     if (access !== 'admin') return
     reload()
-    const t = setInterval(reload, 60 * 1000)
-    return () => clearInterval(t)
+    return poll(reload) // fix273: every 5 min, paused while the tab is hidden
   }, [access, reload])
 
   if (loading) return null
@@ -438,8 +438,7 @@ function BackupsCard() {
   useEffect(() => { load() }, [])
   useEffect(() => {
     if (!d?.running) return
-    const t = setInterval(load, 4000)
-    return () => clearInterval(t)
+    return poll(load, 4000) // (while a backup runs; paused while the tab is hidden)
   }, [d?.running])
 
   const runNow = async () => {
@@ -682,7 +681,7 @@ function LinkCheckCard() {
     }).catch(() => undefined).finally(() => setBusy(false))
   }, [])
   useEffect(() => { load() }, [load])
-  useEffect(() => { if (!running) return; const t = setInterval(() => load(), 3000); return () => clearInterval(t) }, [running, load])
+  useEffect(() => { if (!running) return; return poll(() => load(), 3000) }, [running, load])
   if (!d) return running ? <section className="card p-5 sm:p-6 mb-8 text-sm text-faint">Broken team links: the first check is running…</section> : null
   const n = d.failures.length, total = Object.values(d.checked).reduce((a, b) => a + b, 0)
   return (
@@ -808,7 +807,7 @@ function AfUsageCard() {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState<string | null>(null)
   const load = () => axios.get(`${API_URL}/admin/af-usage`).then(r => setD(r.data.data)).catch(e => setErr(errorText(e, 'API-Football usage failed')))
-  useEffect(() => { load(); const iv = setInterval(load, 60000); return () => clearInterval(iv) }, [])
+  useEffect(() => { load(); return poll(load) }, []) // fix273: every 5 min, paused while hidden
   const n = (x: number | null | undefined) => (x === null || x === undefined ? '–' : x.toLocaleString('en-GB'))
   const q = d?.quota
   const pct = q && q.used !== null && q.limitDay ? Math.min(100, (q.used / q.limitDay) * 100) : null

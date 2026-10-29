@@ -7,6 +7,9 @@ import { countryOf, geoStatus } from './geo';
 import { dataCentreOf, asnStatus } from './asn';
 import { every } from './perf';
 import { isFakeCrawler } from './crawlerIps';
+import { onState, publishState } from './shared';
+import { inThread, threadJobsOn } from './threadJob';
+import { visitorDbSummary } from './visitorSummary';
 
 /**
  * Visitor counts for the admin page (Oct 2026): who is on the site now, and unique visitors per day / 7 / 30 days.
@@ -43,7 +46,6 @@ db.exec(`CREATE TABLE IF NOT EXISTS visit_meta (k TEXT PRIMARY KEY, v TEXT)`);
 // leagues still missing season-forecast rules by their visitors
 db.exec(`CREATE TABLE IF NOT EXISTS league_visits (day TEXT NOT NULL, sport TEXT NOT NULL, code TEXT NOT NULL, vid TEXT NOT NULL, PRIMARY KEY (day, sport, code, vid))`);
 db.prepare(`INSERT OR IGNORE INTO visit_meta (k, v) VALUES ('people_since', ?)`).run(new Date().toISOString().slice(0, 10));
-const peopleSince = (): string => (db.prepare(`SELECT v FROM visit_meta WHERE k = 'people_since'`).get() as any)?.v || '';
 
 function salt(): string {
   const row = db.prepare('SELECT salt FROM visit_salt WHERE id = 1').get();
@@ -162,41 +164,39 @@ if (!isWeb) every('visitors cleanup', () => {
 }, 6 * 3600000).unref();
 
 const since = (days: number) => new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
-// people: shown by the beacon or signed in; all callers (the old number): every caller without a bot user-agent
-const PEOPLE = `(human = 1 OR signed_in = 1)`;
 
-export function visitorStats() {
+/*
+ * fix273: Admin → Visitors is a stored string. The worker builds the database part every 5 min in a job thread
+ * (services/visitorSummary.ts) with the day's "Who" and search-engine numbers (the rows the web process writes every
+ * minute), publishes it ('visitors:summary'), and the web process only sends it with its own live numbers spliced in
+ * (who is online now: the web's memory; the country / network lists it loaded). It ran on the web thread on every
+ * poll: 13–23 s a call on 29 Oct 04:38–05:21 UTC, the whole site frozen while an admin tab was open.
+ */
+type Summary = { text: string; at: string; ms: number };
+let summary: Summary | null = null;
+export const SUMMARY_KEY = 'visitors:summary';
+onState(SUMMARY_KEY, (_k, v) => { summary = v as Summary; });
+/** worker: the summary now (job thread when there is one), stored + published */
+export async function refreshVisitorSummary(): Promise<Summary> {
+  const t0 = Date.now();
+  const base = threadJobsOn()
+    ? await inThread<ReturnType<typeof visitorDbSummary>>('visitors summary', [], 5 * 60 * 1000)
+    : visitorDbSummary();
+  const { whoOfDay } = await import('./proxyScrapers');
+  const { crawlerReport } = await import('./crawlerIps');
+  const body = { ...base, who: whoOfDay(), crawlers: crawlerReport(), builtAt: new Date().toISOString() };
+  summary = { text: JSON.stringify(body), at: body.builtAt, ms: Date.now() - t0 };
+  publishState(SUMMARY_KEY, summary);
+  return summary;
+}
+/** web: GET /api/admin/visitors — the stored string + the live part (online now, the lists loaded here); no query here */
+export function visitorsAnswer(): string {
   const now = Date.now();
   let onlineNow = 0, onlineSignedIn = 0, onlineAll = 0;
   for (const v of online.values()) if (v.at >= now - ONLINE_MS) { onlineAll++; if (v.human) onlineNow++; if (v.signedIn) onlineSignedIn++; }
-  const count = (days: number, where: string) => db.prepare(`SELECT COUNT(DISTINCT vid) AS n FROM visits WHERE day >= ? AND ${where}`).get(since(days)).n as number;
-  const uniq = (days: number) => count(days, PEOPLE);
-  const all = (days: number) => count(days, 'ua_bot = 0');
-  const daily = db.prepare(`
-    SELECT day, SUM(CASE WHEN ${PEOPLE} THEN 1 ELSE 0 END) AS visitors, SUM(signed_in) AS signedIn, SUM(hits) AS hits,
-      SUM(CASE WHEN ${PEOPLE} THEN 0 ELSE 1 END) AS bots, SUM(CASE WHEN ua_bot = 0 THEN 1 ELSE 0 END) AS allCallers
-    FROM visits WHERE day >= ? GROUP BY day ORDER BY day
-  `).all(since(30)) as { day: string; visitors: number; signedIn: number; hits: number; bots: number; allCallers: number }[];
-  const returning = db.prepare(`SELECT COUNT(*) AS n FROM (SELECT vid FROM visits WHERE day >= ? AND ${PEOPLE} GROUP BY vid HAVING COUNT(*) > 1)`).get(since(30)).n as number;
-  const first = db.prepare('SELECT MIN(day) AS d FROM visits').get()?.d || null;
-  const botReasons = db.prepare(`SELECT COALESCE(bot, 'no-signs') AS reason, COUNT(*) AS n FROM visits WHERE day = ? AND NOT ${PEOPLE} GROUP BY COALESCE(bot, 'no-signs') ORDER BY n DESC`).all(since(1)) as { reason: string; n: number }[];
-  // visitors by country (one row per visitor: the country of their latest day); people and filtered callers apart
-  const byCountry = (days: number) => db.prepare(`
-    SELECT COALESCE(country, '??') AS country, SUM(person) AS visitors, SUM(signed) AS signedIn, SUM(1 - person) AS bots FROM (
-      SELECT vid, MAX(signed_in) AS signed, MAX(CASE WHEN ${PEOPLE} THEN 1 ELSE 0 END) AS person,
-        (SELECT v2.country FROM visits v2 WHERE v2.vid = v.vid AND v2.day >= ? AND v2.country IS NOT NULL ORDER BY v2.day DESC LIMIT 1) AS country
-      FROM visits v WHERE day >= ? AND ua_bot = 0 GROUP BY vid
-    ) GROUP BY COALESCE(country, '??') ORDER BY visitors DESC, bots DESC`).all(since(days), since(days)) as { country: string; visitors: number; signedIn: number; bots: number }[];
-  const countriesSince = db.prepare('SELECT MIN(day) AS d FROM visits WHERE country IS NOT NULL').get()?.d || null;
-  return {
-    onlineNow, onlineSignedIn, onlineAll, onlineWindowMin: ONLINE_MS / 60000,
-    today: uniq(1), last7: uniq(7), last30: uniq(30), returning30: returning,
-    // fix183: what was filtered today and the old number (every API caller without a bot user-agent), for a week
-    todayBots: count(1, `NOT ${PEOPLE}`), todayAll: all(1), last7All: all(7), last30All: all(30), botReasons,
-    peopleSince: peopleSince(), datacentre: asnStatus(),
-    daily, countingSince: first,
-    countries: { last7: byCountry(7), last30: byCountry(30), since: countriesSince, geo: geoStatus() }
-  };
+  const live = JSON.stringify({ onlineNow, onlineSignedIn, onlineAll, onlineWindowMin: ONLINE_MS / 60000, datacentre: asnStatus(), geo: geoStatus() });
+  if (!summary?.text?.startsWith('{')) return `{"data":${live.slice(0, -1)},"pending":true}}`;
+  return `{"data":${live.slice(0, -1)},${summary.text.slice(1)}}`;
 }
 
 /** fix230: people (beacon or signed in) who opened each league's page in the last `days` days: 'sport|code' → count */

@@ -3,7 +3,9 @@ import axios from 'axios'
 import { API_URL } from '../lib/socket'
 import CopyForClaude from './admin/CopyForClaude'
 import { elText } from '../lib/forClaude'
+import { poll } from '../lib/poll'
 
+type Geo = { loaded: boolean; status: string; source: string }
 interface Visitors {
   onlineNow: number; onlineSignedIn: number; onlineWindowMin: number; onlineAll?: number
   today: number; last7: number; last30: number; returning30: number
@@ -12,7 +14,9 @@ interface Visitors {
   peopleSince?: string; datacentre?: { loaded: boolean; status: string }
   daily: { day: string; visitors: number; signedIn: number; hits: number; bots?: number; allCallers?: number }[]
   countingSince: string | null
-  countries?: { last7: CountryRow[]; last30: CountryRow[]; since: string | null; geo: { loaded: boolean; status: string; source: string } }
+  countries?: { last7: CountryRow[]; last30: CountryRow[]; since: string | null; geo?: Geo }
+  // fix273: the stored summary's time (the worker builds it every 5 min); the country list in use (live); not built yet
+  builtAt?: string; geo?: Geo; pending?: boolean
   who?: Who
   crawlers?: Crawlers
 }
@@ -46,7 +50,7 @@ try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }) } catch { 
 const nameOf = (cc: string) => (cc === '??' ? 'Unknown' : (() => { try { return regionNames?.of(cc) || cc } catch { return cc } })())
 
 /** Visitors by country (from the IP at the moment of the visit; only the country is kept). */
-function Countries({ c }: { c: NonNullable<Visitors['countries']> }) {
+function Countries({ c, geo }: { c: NonNullable<Visitors['countries']>; geo?: Geo }) {
   const [range, setRange] = useState<'last7' | 'last30'>('last30')
   const [all, setAll] = useState(false)
   const rows = c[range]
@@ -62,7 +66,7 @@ function Countries({ c }: { c: NonNullable<Visitors['countries']> }) {
           <button type="button" onClick={() => setRange('last30')} className={`seg-btn ${range === 'last30' ? 'seg-btn-active' : ''}`}>30 days</button>
         </div>
       </div>
-      {!c.geo.loaded && <p className="text-xs text-draw mb-2">Country data not loaded yet ({c.geo.status}). It downloads by itself a minute after the server starts.</p>}
+      {geo && !geo.loaded && <p className="text-xs text-draw mb-2">Country data not loaded yet ({geo.status}). It downloads by itself a minute after the server starts.</p>}
       {rows.length === 0 ? <p className="text-sm text-faint">No visits yet.</p> : (
         <ul className="space-y-1.5">
           {shown.map(r => (
@@ -195,8 +199,8 @@ export default function VisitorsCard() {
     let off = false
     const load = () => axios.get(`${API_URL}/admin/visitors`).then(r => { if (!off) { setV(r.data.data); setErr(false) } }).catch(() => !off && setErr(true))
     load()
-    const iv = setInterval(load, 30000)
-    return () => { off = true; clearInterval(iv) }
+    const stop = poll(load) // fix273: every 5 min, paused while the tab is hidden (the summary is rebuilt every 5 min)
+    return () => { off = true; stop() }
   }, [])
   if (err && !v) return null
 
@@ -204,7 +208,7 @@ export default function VisitorsCard() {
   const days: { day: string; visitors: number; signedIn: number; bots: number }[] = []
   for (let i = 29; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10)
-    const r = v?.daily.find(x => x.day === d)
+    const r = v?.daily?.find(x => x.day === d)
     days.push({ day: d, visitors: r?.visitors || 0, signedIn: r?.signedIn || 0, bots: r?.bots || 0 })
   }
   const old = showOld(v?.peopleSince)
@@ -222,7 +226,7 @@ export default function VisitorsCard() {
     <section className="card p-5 sm:p-6 mb-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
         <h2 className="font-display text-lg font-bold text-ink">Visitors</h2>
-        <span className="text-xs text-faint">one visitor = one person (the page was open 5+ s and used, or signed in) · admins, bots, crawlers, data-centre networks and headless browsers not counted{v?.peopleSince ? ` · people only since ${new Date(v.peopleSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.countingSince ? ` · counting since ${new Date(v.countingSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}</span>
+        <span className="text-xs text-faint">one visitor = one person (the page was open 5+ s and used, or signed in) · admins, bots, crawlers, data-centre networks and headless browsers not counted{v?.peopleSince ? ` · people only since ${new Date(v.peopleSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.countingSince ? ` · counting since ${new Date(v.countingSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}{v?.builtAt ? ` · numbers of ${new Date(v.builtAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} (every 5 min)` : v?.pending ? ' · first numbers within 5 min of a restart' : ''}</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {tile('Online now', v?.onlineNow, v ? `people · ${v.onlineSignedIn} signed in · last ${v.onlineWindowMin} min` : undefined, true)}
@@ -236,7 +240,7 @@ export default function VisitorsCard() {
           {old && v?.todayAll != null && <div className="text-[10px] text-faint mt-1 num">old count: {v.todayAll} all API callers</div>}
         </div>
         {tile('Last 7 days', v?.last7, old && v?.last7All != null ? `people · old count ${v.last7All} callers` : 'people')}
-        {tile('Last 30 days', v?.last30, v ? `${v.returning30} came back on another day${old && v.last30All != null ? ` · old count ${v.last30All}` : ''}` : undefined)}
+        {tile('Last 30 days', v?.last30, v?.returning30 != null ? `${v.returning30} came back on another day${old && v.last30All != null ? ` · old count ${v.last30All}` : ''}` : undefined)}
       </div>
       {v?.botReasons && v.botReasons.length > 0 && (
         <p className="mt-2 text-[11px] text-faint">Filtered today: {v.botReasons.map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}{v.datacentre && !v.datacentre.loaded ? ` · data-centre list: ${v.datacentre.status}` : ''}{old && v.onlineAll != null ? ` · online now, all callers: ${v.onlineAll}` : ''}</p>
@@ -260,7 +264,7 @@ export default function VisitorsCard() {
           <span>Today</span>
         </div>
       </div>
-      {v?.countries && <Countries c={v.countries} />}
+      {v?.countries && <Countries c={v.countries} geo={v.geo ?? v.countries.geo} />}
       {v?.crawlers && <CrawlersCard c={v.crawlers} />}
       {v?.who && <WhoCard w={v.who} />}
     </section>

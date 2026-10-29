@@ -10,7 +10,7 @@
  * Memory holds salted address hashes only; the IP is written straight from the request to the security log.
  */
 import { db } from '../db';
-import { isWeb } from './role';
+import { isWeb, isWorker } from './role';
 import { deferred } from './deferredWrites';
 import logger from '../utils/logger';
 import { every } from './perf';
@@ -179,6 +179,20 @@ try {
     otherRequests = d.otherRequests || 0;
   }
 } catch { /* none */ }
+
+/**
+ * fix273 (worker): the day's "Who" numbers for the stored Admin → Visitors summary — the row the web process writes every
+ * minute (its memory is the live copy); in one process, the memory itself.
+ */
+export function whoOfDay(): ReturnType<typeof whoToday> {
+  if (!isWorker) return whoToday();
+  try {
+    const d = new Date().toISOString().slice(0, 10);
+    const r = db.prepare(`SELECT data FROM who_day WHERE day = ?`).get(d) as any;
+    if (r?.data) return JSON.parse(r.data);
+  } catch { /* none yet */ }
+  return { day: new Date().toISOString().slice(0, 10), agents: [], networks: [], otherRequests: 0, limits: PROXY_LIMITS } as any;
+}
 
 export type WhoRow = { name: string; requests: number; mark: WhoMark; addresses?: number; refused?: number; verified?: number; dc?: number; ua?: string };
 

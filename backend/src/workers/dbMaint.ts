@@ -29,12 +29,23 @@ parentPort!.on('message', (m: Msg) => {
       // rewritten every few seconds and the readers always busy was never true: no TRUNCATE ran after fix269 took the
       // other checkpoints away, the WAL never started over and "database" grew 2.97 → 7.88 GB in 5 h (28–29 Oct)
       db.exec('PRAGMA busy_timeout = 0');
+      const catchUp = Math.max(0, m.catchUp ?? 4096);
       let r: any = db.prepare(`PRAGMA wal_checkpoint(PASSIVE)`).get();
+      let left = Math.max(0, Number(r?.log ?? 0) - Number(r?.checkpointed ?? 0)), passes = 1;
+      // fix273: before a TRUNCATE, more PASSIVE passes while they gain (each copies what came in during the one before:
+      // on a 2 GB WAL the first pass is long, and what arrived meanwhile was more than the gate let TRUNCATE copy)
+      while (m.mode === 'TRUNCATE' && left > catchUp && passes < 4) {
+        const r2: any = db.prepare(`PRAGMA wal_checkpoint(PASSIVE)`).get();
+        const left2 = Math.max(0, Number(r2?.log ?? 0) - Number(r2?.checkpointed ?? 0));
+        passes++;
+        const gained = left2 < left * 0.9;
+        r = r2; left = left2;
+        if (!gained) break; // a reader on an old snapshot holds them: another pass copies nothing more
+      }
       let busy = Number(r?.busy ?? 0);
-      const left = Math.max(0, Number(r?.log ?? 0) - Number(r?.checkpointed ?? 0));
       let truncated = false;
       if (m.mode === 'TRUNCATE') {
-        if (left <= Math.max(0, m.catchUp ?? 4096)) {
+        if (left <= catchUp) {
           db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.min(5000, m.busyMs ?? 300))}`);
           r = db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
           busy = Number(r?.busy ?? 0);
@@ -42,7 +53,7 @@ parentPort!.on('message', (m: Msg) => {
         } else busy = 1; // a reader on an old snapshot keeps many frames: the WAL cannot start over yet
       }
       db.exec('PRAGMA busy_timeout = 1000');
-      out = { busy, log: Number(r?.log ?? 0), checkpointed: Number(r?.checkpointed ?? 0), left, truncated };
+      out = { busy, log: Number(r?.log ?? 0), checkpointed: Number(r?.checkpointed ?? 0), left, truncated, passes };
     } else if (m.op === 'report') {
       // bytes and rows per table / index (rows: leaf cells of a table; every cell of an index)
       const rows = db.prepare(`SELECT s.name AS name, m.type AS type, m.tbl_name AS tbl, SUM(s.pgsize) AS bytes,

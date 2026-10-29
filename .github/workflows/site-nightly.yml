@@ -1,15 +1,46 @@
 # fix260d: the FULL site matrix every night — every route × every language × 375 / 1280 px × visitor / free user /
 # admin (+ every Admin / CRM tab, console signed in and locked) and test:links. Not a deploy gate (the push gate is
 # site-check.yml in its default mode): a failure is emailed (RESEND_API_KEY + REPORT_EMAIL_TO secrets) and shown on the run.
+# fix273: GitHub's schedule is best effort — the first night's 01:17 UTC run only started at 07:05 UTC, and Yarin's
+# morning check saw 0 runs. A second time (04:43 UTC) runs the matrix when no run of today exists yet (the "due" job
+# looks), so a dropped or late first run still gives one full run before the morning; a hand run (Actions → "Site check
+# (nightly, full)" → Run workflow) always runs.
 name: Site check (nightly, full)
 
 on:
   schedule:
     - cron: '17 1 * * *' # 01:17 UTC = 03:17 Israel
+    - cron: '43 4 * * *' # 04:43 UTC: only when no run of today exists yet
   workflow_dispatch:
 
 jobs:
+  due:
+    name: Due tonight?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if [ "$EVENT" != "schedule" ] || [ "$SCHEDULE" = "17 1 * * *" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          today=$(date -u +%Y-%m-%d)
+          n=$(gh api "repos/$REPO/actions/workflows/site-nightly.yml/runs?created=$today&per_page=50" \
+            --jq "[.workflow_runs[] | select(.id != $RUN_ID and .conclusion != \"cancelled\")] | length")
+          echo "other runs today: $n"
+          if [ "${n:-0}" -gt 0 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+
   full:
+    needs: due
+    if: needs.due.outputs.run == 'true'
     uses: ./.github/workflows/site-check.yml
     with:
       mode: full

@@ -770,3 +770,41 @@ No production copy was in the session: the per-table sizes come from the server 
   pages in the file are given back by the incremental vacuum (fix249) once auto_vacuum is INCREMENTAL.
 - Test: `npm run test:fix272` (a real SQLite file with a reader on an old snapshot: the fix249 rule stays busy, the
   new one truncates the WAL to 0).
+
+## fix273 — an admin tab froze the site; the WAL still did not start over (29 Oct)
+
+perf topStalls 29 Oct 04:38–05:21 UTC: 22,858 / 17,738 / 14,105 / 13,680 / 12,819 ms, each with `/api/admin/visitors`
+in flight: 59 stalls an hour, 1,810 public requests over 1 s, language pages up to 38 s. The route was one of the three
+the web answers itself (WEB_ONLY_API) and ran `visitorStats()` on the web thread — COUNT(DISTINCT) over 30 days of
+visits and a "by country" query with a sub-query per visitor (no index on vid: each visitor scanned the table) — and
+the Visitors card polled it every 30 s.
+
+- **Visitors** (services/visitors.ts, services/visitorSummary.ts): the worker builds the summary every 5 min in a job
+  thread ('visitors summary': the database part; the day's "Who" from who_day and the search-engine numbers from
+  crawler_day on the worker), publishes it as one string (`visitors:summary`); the web sends it with its live part
+  spliced in (online now: its memory; the country / network lists it loaded). Before the first build: `pending`.
+  "By country" is one pass (latest country = MAX(day || country)), the same rows as the old query.
+- **The 50 ms rule** (scripts/fix273.test.mjs): every `/api/admin/*` route of app.ts, opened in a web process on a
+  450,000-row visits copy — passed to the worker (503 there, no worker) in ≤ 50 ms, or, for the routes the web answers
+  itself, its own handler timed ≤ 50 ms. A new admin route the web answers itself fails it unless it only sends a
+  stored string.
+- **Admin polling** (frontend lib/poll.ts): every 5 min (summary + data health, Visitors, API-Football usage), paused
+  while the tab is hidden, one load on return when a tick was missed; the job-progress polls (3–4 s while a backup /
+  campaign runs) pause too.
+- **WAL** (Disk at the check: file 2.83 GB, WAL 2,350 MB, "Last WAL truncate: blocked by a reader (8 in a row)").
+  The reader threads' reads do not hold snapshots (node:sqlite `get` / `all` reset the statement — checked in the test;
+  only a half-read `iterate` would; none in the code; each thread now also ends any read transaction after each read).
+  What does: the backup's VACUUM INTO (one snapshot for the whole copy of a 2.8 GB file on the slow volume) and the
+  job threads' builds. And fix272's gate: on a 2 GB WAL the first PASSIVE is long, the frames written meanwhile were
+  over 16,384, so TRUNCATE was not even tried ("busy") — every time.
+  - before a TRUNCATE, PASSIVE passes while they gain (up to 4; each copies what came in during the one before);
+  - after 2 blocked tries, up to 65,536 frames (256 MB) may be copied under the writer lock (`truncatePlan`);
+  - long reads register (services/longReads.ts: the backup, every job thread); a blocked TRUNCATE records who was
+    reading (Disk: "Blocked truncate: … reading then: backup (VACUUM INTO) since …"); when the last long read (≥ 1 min)
+    ends, TRUNCATE runs 5 s later instead of at the next tick;
+  - Disk is red when the WAL is over 256 MB or no TRUNCATE succeeded for an hour (yellow over 64 MB); "WAL 1 h after
+    the start" is kept (meta wal_1h) and logged.
+- **Names**: the map is built from the stored names a minute after the worker starts (it waited for the first run's
+  collect — on the slow volume, hours); the 30-min runs are scheduled at once; an unbuilt map answers 202 pending, no-store
+  (an empty `{names:{}}` was kept by the web, cached 30 min by browsers and saved by the app as "the names"; the app
+  now ignores an empty map). At the check the live map had 9,672 names each in he and ar (built 10:17 UTC).

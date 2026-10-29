@@ -18,8 +18,9 @@ import { heapShareMb } from '../utils/memLimit';
 import { isWeb } from './role';
 import { applyState } from './shared';
 import { yieldLoop, track } from './perf';
+import { longRead } from './longReads';
 
-export type ThreadJob = 'bb model' | 'bb tune' | 'bb league tune' | 'bb miss fit' | 'bb impact fit' | 'bb calib' | 'national elo' | 'more backtest' | 'sitemap' | 'photo crop' | 'season sim';
+export type ThreadJob = 'bb model' | 'bb tune' | 'bb league tune' | 'bb miss fit' | 'bb impact fit' | 'bb calib' | 'national elo' | 'more backtest' | 'sitemap' | 'photo crop' | 'season sim' | 'visitors summary';
 
 function threadFile(): { file: string; execArgv?: string[] } | null {
   const js = path.join(__dirname, '../workers/jobThread.js');
@@ -45,6 +46,7 @@ export function inThread<T>(job: ThreadJob, args: unknown[] = [], timeoutMs = 0)
   const f = threadFile();
   if (!f) return Promise.reject(new Error('no job thread file'));
   const t0 = Date.now();
+  const endRead = longRead(`thread: ${job}`); // fix273: its reads hold snapshots (data health "Disk" names it)
   return new Promise<T>((resolve, reject) => {
     const w = new Worker(f.file, {
       workerData: { jobThread: true, job, args },
@@ -61,6 +63,7 @@ export function inThread<T>(job: ThreadJob, args: unknown[] = [], timeoutMs = 0)
       settled = true;
       if (timer) clearTimeout(timer);
       last.set(job, { at: new Date().toISOString(), ms: Date.now() - t0, ok: !err, error: err?.message, states });
+      endRead();
       void w.terminate();
       if (err) reject(err); else resolve(result as T);
     };

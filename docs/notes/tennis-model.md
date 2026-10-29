@@ -227,3 +227,17 @@ fitted ("fewer than 300 games … before the previous 60 days": it wanted 300 ga
   fitted 2026-10-29 on … games" / "season layer (fix222), fitted …" / "none").
 - Smoke run on the 10 Oct copy: football 410 games, cross-fit, kept (better in 69% of resamples, 90% needed);
   basketball / tennis had no p_raw then. The 28 Oct numbers are the server's first run after the deploy. test:fix270.
+
+## fix273 — the young-sport rule for the recent layer (29 Oct 2026)
+
+Data health stayed red after fix270 (basketball 50–60% said 54.9 happened 46.9 on 64 games, 60–70% said 65.1 happened
+59.3 on 81; tennis 60–70% said 64.9 happened 75.8 on 95): the refit kept no layer — fix251's bar (better in 90% of
+2,000 resamples, +0.0005 a game, one promotion a week) is too high for a few hundred games. While basketball / tennis
+have 150–999 settled games with the raw chance saved (`utils/recentCalib.ts` judgeYoung, `decideRecent(…, { young })`):
+isotonic and Platt (both shrunk toward no change) are each scored out of fold on every settled game (5 time blocks),
+the better one is fitted on all of them and goes live when it is better on log loss overall and in each half
+(earlier / later games), better in ≥ 75% of the paired resamples, hit rate not down by > 0.5 pp; re-tested every
+night (one promotion a day). Rollback as before. On synthetic rows (test:fix273): over-confident like basketball →
+promoted on 17+ of 20 samples of 400 games; an honest model → a layer on ≤ 5 of 20 (a shrunk layer near no change: the
+price of the lower bar, the rollback guard catches a bad one). From 1,000 games fix270's rule applies again. The rule
+version is 'fix273': the first tick after the deploy re-runs today's decision.

@@ -288,11 +288,15 @@ export async function buildMaps(step: () => Promise<void> = async () => {}) {
   }
   mapsAt = Date.now();
 }
-/** `/api/names/:lang` (the worker answers it): the map as JSON text */
+/**
+ * `/api/names/:lang` (the worker answers it): the map as JSON text; '' = not built yet (fix273: the route answers 202 pending,
+ * never an empty map — the web kept it, browsers cached it 30 min and the app saved it as "the names")
+ */
 export function namesJson(lang: string): string | null {
   if (!isNameLang(lang)) return null;
   if (!maps.size && !DB_READ_ONLY) { void buildMaps(); }
-  return maps.get(lang)?.json ?? JSON.stringify({ lang, builtAt: null, names: {} });
+  const m = maps.get(lang);
+  return m && m.map.size ? m.json : '';
 }
 
 /** the server's own texts (titles, emails, push, calendar): a name in `lang`, else as given */

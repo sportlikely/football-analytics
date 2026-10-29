@@ -26,6 +26,7 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { sendAdminMail, adminUrl } from './adminMail';
 import { after } from './perf';
+import { longRead } from './longReads';
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
 export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
@@ -196,13 +197,16 @@ function vacuumInto(src: string, dst: string): Promise<void> {
       db.exec("VACUUM INTO '" + workerData.dst.replace(/'/g, "''") + "'");
     } finally { db.close(); }
     parentPort.postMessage('ok');`;
-  return new Promise((resolve, reject) => {
+  // fix273: one read snapshot for the whole copy — the WAL can't start over meanwhile (named in data health "Disk";
+  // the WAL is asked to start over as soon as it ends)
+  const end = longRead('backup (VACUUM INTO)');
+  return new Promise<void>((resolve, reject) => {
     const w = new Worker(code, { eval: true, workerData: { src, dst } });
     let done = false;
     w.once('message', () => { done = true; resolve(); });
     w.once('error', e => { done = true; reject(e); });
     w.once('exit', c => { if (!done) reject(new Error(`backup worker stopped (${c})`)); });
-  });
+  }).finally(end);
 }
 
 async function doBackup(trigger: string) {

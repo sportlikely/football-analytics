@@ -33,6 +33,8 @@ const sizeOf = (v: unknown): number => typeof v === 'string' ? v.length : v inst
 const rowBytes = (r: any) => { let n = 0; if (r) for (const k in r) n += sizeOf(r[k]); return n; };
 
 type Msg = { id: number; key: string; builtAt: number; sql?: undefined } | { id: number; sql: string; args: (string | number | null)[]; all?: boolean };
+// fix273: no read transaction outlives its read — a snapshot left open here would keep the WAL from starting over
+const release = () => { try { if ((db as any).isTransaction) db.exec('ROLLBACK'); } catch { /* none open */ } };
 parentPort!.on('message', (m: Msg) => {
   const t0 = performance.now();
   try {
@@ -40,14 +42,17 @@ parentPort!.on('message', (m: Msg) => {
       const s = stmt(m.sql);
       const out = m.all ? s.all(...m.args) : (s.get(...m.args) ?? null);
       const bytes = Array.isArray(out) ? out.reduce((n: number, r: any) => n + rowBytes(r), 0) : rowBytes(out);
+      release();
       parentPort!.postMessage({ id: m.id, out, ms: performance.now() - t0, bytes });
       return;
     }
     const r: any = one().get(m.key, m.builtAt);
+    release();
     parentPort!.postMessage({ id: m.id, row: r ? { text: r.json, etag: r.etag ?? null, gz: r.gz ?? null } : null, ms: performance.now() - t0, bytes: rowBytes(r) });
   } catch (e: any) {
     // a table the web reads may not exist yet on a fresh database: the statement is prepared again next time
     if (m.sql !== undefined) stmts.delete(m.sql);
+    release();
     parentPort!.postMessage({ id: m.id, error: String(e?.message || e) });
   }
 });

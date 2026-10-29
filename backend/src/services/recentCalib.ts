@@ -7,7 +7,8 @@
  * predictions made with the live layer and names the layer in use and its fit date.
  * fix270: basketball's rows are the saved p_raw (the model's own chance) of settled games; the "before" it has to beat
  * is what was shown (fix222's season layer). A run made before fix270 doesn't count as today's: the new rule runs once
- * on the first tick after the deploy.
+ * on the first tick after the deploy. fix273: basketball and tennis under the young-sport rule (utils/recentCalib.ts
+ * judgeYoung); a run of an older rule again doesn't count as today's.
  */
 import { db } from '../db';
 import logger from '../utils/logger';
@@ -24,7 +25,7 @@ import { readRecentState, setRecentCache, recentState, type RecentSport, type Re
 const DAY = 86400000;
 export const RECENT_SPORTS: RecentSport[] = ['football', 'basketball', 'tennis'];
 /** the rule version stored with each run (a run of an older rule doesn't count as today's) */
-export const RECENT_RULE = 'fix270';
+export const RECENT_RULE = 'fix273';
 /** the report's bands (said vs happened, before → after); football's pick can be under 50% */
 export const RECENT_EDGES: Record<RecentSport, number[]> = { football: [0, 50, 60, 70], basketball: [50, 60, 70, 80], tennis: [50, 60, 70, 80] };
 const horizon = (now: number) => new Date(Math.floor(now / DAY) * DAY - HORIZON_DAYS * DAY).toISOString();
@@ -98,7 +99,8 @@ export async function runRecentCalibration(sport: RecentSport, now = Date.now())
   const rows = rowsOf(sport, now);
   await yieldLoop();
   const st = readRecentState(sport);
-  const d = decideRecent(rows, st?.layer ?? null, st?.since ?? null, lastPromotion(sport, today), now, undefined, undefined, RECENT_EDGES[sport]);
+  // fix273: basketball and tennis (raw chances saved only since 25 Oct) under the young-sport rule while their sample is small
+  const d = decideRecent(rows, st?.layer ?? null, st?.since ?? null, lastPromotion(sport, today), now, undefined, undefined, RECENT_EDGES[sport], { young: sport !== 'football' });
   await yieldLoop();
   if (d.decision === 'promote' || d.decision === 'rollback') {
     const next: RecentState = { at: new Date(now).toISOString(), layer: d.decision === 'promote' ? d.live : null, since: today, prev: st ? { layer: st.layer, since: st.since } : null };

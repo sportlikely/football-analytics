@@ -25,6 +25,7 @@ import { readerHourRows, perfHours } from './perfHistory';
 import type { Check } from './dataHealth';
 import { volumeLatency, volumeLine, volumeTick, volumeHealth } from './volumeProbe';
 import { cachePlan } from '../utils/dbTune';
+import { longReadsNow, onLongReadsEnded } from './longReads';
 
 if (runsJobs) {
   db.exec(`CREATE TABLE IF NOT EXISTS db_size_days (day TEXT PRIMARY KEY, db_bytes INTEGER NOT NULL, wal_bytes INTEGER NOT NULL,
@@ -105,7 +106,7 @@ function autoCheckpoint(on: boolean) {
 }
 export const autoCheckpointPages = () => autoCkpt;
 
-type Ckpt = { at: string; mode: string; busy: number; log: number; checkpointed: number; left?: number; truncated?: boolean; busyMs?: number; ms: number; walBefore?: number; walAfter: number };
+type Ckpt = { at: string; mode: string; busy: number; log: number; checkpointed: number; left?: number; truncated?: boolean; busyMs?: number; ms: number; walBefore?: number; walAfter: number; passes?: number; readers?: ReturnType<typeof longReadsNow> };
 const ckpt: { last: Ckpt | null; lastTruncate: Ckpt | null; lastDone: Ckpt | null; busyStreak: number; errors: number } = { last: null, lastTruncate: null, lastDone: null, busyStreak: 0, errors: 0 };
 let ckptRunning = false;
 export async function checkpoint(mode: 'PASSIVE' | 'TRUNCATE'): Promise<Ckpt | null> {
@@ -118,17 +119,25 @@ export async function checkpoint(mode: 'PASSIVE' | 'TRUNCATE'): Promise<Ckpt | n
     const r = await maint<{ busy: number; log: number; checkpointed: number; left: number; truncated: boolean; ms: number }>(
       { op: 'checkpoint', mode, busyMs: mode === 'TRUNCATE' ? plan.busyMs : 0, catchUp: plan.catchUp }, 10 * 60 * 1000);
     const c: Ckpt = { at: new Date().toISOString(), mode, ...r, busyMs: mode === 'TRUNCATE' ? plan.busyMs : 0, walBefore, walAfter: files().wal };
+    // fix273: who was reading when it could not start over (the backup, a job thread …: services/longReads.ts)
+    if (mode === 'TRUNCATE' && c.busy) c.readers = longReadsNow();
     ckpt.last = c;
     if (mode === 'TRUNCATE') {
       ckpt.lastTruncate = c;
       if (!c.busy) ckpt.lastDone = c;
       // busy = a reader on an old snapshot (or a writer) kept the WAL from starting over
       ckpt.busyStreak = c.busy ? ckpt.busyStreak + 1 : 0;
+      if (ckpt.busyStreak === 3 || ckpt.busyStreak === 12) logger.warn(`db checkpoint: TRUNCATE busy ${ckpt.busyStreak} times in a row, ${c.left ?? '?'} frames left after ${c.passes ?? 1} PASSIVE pass(es)${c.readers?.length ? `; reading: ${c.readers.map(x => `${x.name} for ${x.forMin} min`).join(', ')}` : '; no long read open in the worker'}`);
       if (ckpt.busyStreak === 12) logger.warn(`db checkpoint: TRUNCATE busy 12 times in a row (1 h), WAL ${MB(c.walAfter)}, ${c.checkpointed}/${c.log} frames written back`);
       if (!c.busy && walBefore > 256 * 1048576) logger.info(`db checkpoint: WAL ${GB(walBefore)} → ${MB(c.walAfter)} (TRUNCATE, ${c.ms} ms, waited up to ${plan.busyMs} ms for readers)`);
     }
     return c;
   } catch (e: any) { ckpt.errors++; logger.warn(`db checkpoint ${mode}: ${e?.message || e}`); return null; } finally { ckptRunning = false; }
+}
+/** fix273: how long since the WAL last started over (null in the first hour after a start: not known yet) */
+export function truncateAge(now = Date.now()): number | null {
+  if (ckpt.lastDone) return now - Date.parse(ckpt.lastDone.at);
+  return process.uptime() > 3600 ? process.uptime() * 1000 : null;
 }
 /** fix272 (every 5 min): TRUNCATE when the WAL is over its 64 MB limit or the last one is 30 min old; else PASSIVE */
 async function checkpointTick() {
@@ -309,7 +318,7 @@ export function dbSpaceStatus() {
   try { convert = JSON.parse(meta('convert_result') || 'null'); } catch { /* none */ }
   return {
     files: f, volume: v, perDay, growth7d: perDay != null ? perDay * 7 : null, growth6h: g6,
-    verdict: diskVerdict({ volFree: v?.free ?? null, volTotal: v?.total ?? null, dbBytes: f.db, walBytes: f.wal, growth7d: perDay != null ? perDay * 7 : null, perDay6h: g6?.perDay ?? null }),
+    verdict: diskVerdict({ volFree: v?.free ?? null, volTotal: v?.total ?? null, dbBytes: f.db, walBytes: f.wal, growth7d: perDay != null ? perDay * 7 : null, perDay6h: g6?.perDay ?? null, truncateAgeMs: truncateAge() }),
     report: rep ? {
       at: rep.at, ms: rep.ms, pageSize: rep.pageSize, pages: rep.pages, freePages: rep.freePages, autoVacuum: rep.autoVacuum, wal: rep.wal ?? null, file: rep.file ?? null,
       prev: prev ? { at: prev.at, wal: prev.wal, file: prev.file, freePages: prev.freePages } : null,
@@ -329,8 +338,12 @@ export function diskHealth(): Check[] {
     const t = s.checkpoint.lastTruncate;
     items.push(`Last WAL truncate ${t.at.slice(11, 16)} UTC: ${t.busy ? `blocked by a reader (${s.checkpoint.busyStreak} in a row${t.left ? `, ${t.left.toLocaleString('en-US')} frames left` : ''})` : 'done'}, WAL ${MB(t.walAfter)}${t.busyMs ? ` · waited up to ${t.busyMs} ms` : ''}`);
     if (t.busy && s.checkpoint.lastDone) items.push(`Last WAL start-over that worked: ${s.checkpoint.lastDone.at.slice(0, 16).replace('T', ' ')} UTC`);
+    // fix273: who held it, and how far the PASSIVE passes got
+    if (t.busy) items.push(`Blocked truncate: ${t.passes ?? 1} PASSIVE pass(es) first; reading then: ${t.readers?.length ? t.readers.map(x => `${x.name} (since ${x.since.slice(11, 16)} UTC, ${x.forMin} min)`).join(', ') : 'no long read in the worker (the web\'s reader threads: see "Slow reads (3 h)")'}`);
   }
   if (s.growth6h) items.push(`Last ${s.growth6h.hours.toFixed(1)} h: ${s.growth6h.bytes >= 0 ? '+' : ''}${GB(s.growth6h.bytes)} (${s.growth6h.perDay >= 0 ? '+' : ''}${GB(s.growth6h.perDay)} a day at that rate)${v.daysToFull6h != null ? ` · volume full in ${v.daysToFull6h < 1 ? `${Math.max(1, Math.floor(v.daysToFull6h * 24))} h` : `${Math.floor(v.daysToFull6h)} days`} at that rate` : ''}`);
+  // fix273: the WAL an hour after the start (the reply after a deploy)
+  try { const w = JSON.parse(meta('wal_1h') || 'null'); if (w) items.push(`WAL 1 h after the start of ${String(w.start).slice(0, 16).replace('T', ' ')} UTC: ${MB(w.wal)} (${w.at.slice(11, 16)} UTC)${w.done ? `, last start-over ${String(w.done).slice(11, 16)} UTC` : ''}`); } catch { /* none */ }
   items.push(volumeLine()); // fix254
   if (s.retention) items.push(`Retention ${s.retention.at.slice(11, 16)} UTC: ${s.retention.deleted.toLocaleString('en-US')} old rows deleted${s.retention.results.length ? ` (${s.retention.results.map(r => `${r.table} ${r.deleted}${r.error ? ' error' : ''}`).join(', ')})` : ''}`);
   if (s.vacuum) items.push(`Vacuum ${s.vacuum.at.slice(11, 16)} UTC: ${MB(s.vacuum.freedPages * s.vacuum.pageSize)} given back, file ${GB(s.vacuum.fileBefore)} → ${GB(s.vacuum.fileAfter)}`);
@@ -393,6 +406,10 @@ export function startDbSpaceScheduler() {
   every('db checkpoint', () => checkpoint('PASSIVE'), 60 * 1000).unref();
   after('db checkpoint', () => checkpoint('TRUNCATE'), 2 * 60 * 1000).unref();
   every('db checkpoint', () => checkpointTick(), 5 * 60 * 1000).unref();
+  // fix273: the WAL starts over as soon as a long read (the backup, a job thread) ends
+  onLongReadsEnded(() => { setTimeout(() => { void checkpoint('TRUNCATE'); }, 5000).unref(); });
+  // fix273: the WAL size 1 h after the start, kept for the reply / data health
+  after('db wal 1h', () => { try { setMeta('wal_1h', JSON.stringify({ at: new Date().toISOString(), start: new Date(Date.now() - process.uptime() * 1000).toISOString(), wal: files().wal, done: ckpt.lastDone?.at ?? null })); logger.info(`db: WAL 1 h after the start ${MB(files().wal)}`); } catch { /* read-only */ } }, 3600 * 1000).unref();
   after('db size', () => recordSize(), 3 * 60 * 1000).unref();
   every('db size', () => recordSize(), 3600 * 1000).unref();
   // fix272: the size every 10 minutes (6-hour growth) and a size report of its own when 1 GB+ grew in 6 h

@@ -112,10 +112,10 @@ import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from '
 import { archivedAsset } from './services/assetArchive';
 import { definePage, getPage, fallbackQuery, refreshPages, rebuildPage, pageCacheStatus, pageMemStatus, pageHotStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { appPageFor, copyLooksRight } from './utils/pageLang';
-import { trackVisit, visitorStats, visitSeen } from './services/visitors';
+import { trackVisit, visitorsAnswer, visitSeen } from './services/visitors';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions, viewIdOf, makePass, readPass, PASS_COOKIE, PASS_MS } from './services/proxyGuard';
-import { noteNetworkRequest, noteWho, whoToday, notePassed } from './services/proxyScrapers';
+import { noteNetworkRequest, noteWho, notePassed } from './services/proxyScrapers';
 import { quickCheckPage, qcLangOf } from './utils/quickCheck';
 import { shortName } from './utils/tennisNames';
 import { tennisProbe, tennisStatus, tennisSample, tennisDataCheck, tennisMovedId } from './services/tennis';
@@ -183,7 +183,7 @@ import { resolveUnsettled, resolveUnsettledOnce, voidedGames, pendingLookups, Pr
 import { afStatus, afTick, rebuildAfFeaturesAsync, afGet, afRemaining, xgCoverage, afQuota } from './services/apiFootball';
 import { afSource, uaKey, notePageRequest, noteBlocked, afUsageToday, isCrawlerRequest, noProviderCalls, claimsCrawler, crawlerVerdict, crawlerCheck, costCapped } from './services/afUsage';
 import { clientIpMiddleware } from './services/edgeHops';
-import { noteCrawlerResponse, inGoogleRanges, crawlerReport, noteGooglebotSample, noteEdgeAsnVerified } from './services/crawlerIps';
+import { noteCrawlerResponse, inGoogleRanges, noteGooglebotSample, noteEdgeAsnVerified } from './services/crawlerIps';
 import { makeTrustProxy } from './utils/clientIp';
 import { engineOfUa } from './utils/crawlerRanges';
 import { botGate, isBotUa } from './services/botGate';
@@ -1814,7 +1814,8 @@ app.post('/api/admin/db-space/vacuum', async (req, res) => {
   res.json({ data: { started: true } });
 });
 app.get('/api/admin/waitlist', (_req, res) => res.json({ data: waitlistStats() }));
-app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store'); res.json({ data: { ...visitorStats(), who: whoToday(), crawlers: crawlerReport() } }); }); // fix245: + search engines // fix199: + who is calling today
+// fix273: a stored string the worker builds every 5 min (services/visitors.ts) + the web's live numbers — no query here
+app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store').type('application/json').send(visitorsAnswer()); });
 app.get('/api/admin/news', (_req, res) => res.json({ data: newsStatus() }));
 
 app.post('/api/auth/login', jsonOnly, async (req, res) => {
@@ -2974,7 +2975,9 @@ app.get('/api/extras/:sport(football|basketball|nfl|tennis)/team/:id(\\d+)', (re
 // fix261: names in the local script (Latin → he / ar) for the app's he / ar pages; the worker answers (WORKER_ROUTES)
 app.get('/api/names/:lang(he|ar)', (req, res) => {
   const j = namesJson(req.params.lang);
-  if (!j) return res.status(404).json({ error: 'Not found' });
+  if (j === null) return res.status(404).json({ error: 'Not found' });
+  // fix273: not built yet = 202 pending, no-store — never an empty map (kept by the web and cached by browsers as the names)
+  if (!j) return res.status(202).set('Cache-Control', 'no-store').json({ pending: true });
   res.set('Cache-Control', 'public, max-age=1800').type('application/json').send(j);
 });
 // fix261 (admin): Data & feeds → "Names in Hebrew / Arabic": the most opened names, their spelling and source; edit one

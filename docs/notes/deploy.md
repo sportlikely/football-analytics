@@ -34,7 +34,8 @@ the run's summary page lists the pages in plain words.
    a basketball match, premium, search, the 404) in every other language at 375 px as a visitor (the admin-only
    languages ar / he as the admin) — about 620 page opens. The **full matrix** (every route × every language × both
    widths × visitor / free user / admin, ~7,400 opens) runs **nightly** (`site-nightly.yml`, 01:17 UTC, mode `full`,
-   90 min cap per part) and emails its failures; it is not a gate. Pass = no console / page error, no first-party
+   90 min cap per part; fix273: GitHub's schedule is best effort — the first night's run started at 07:05 — so a 04:43
+   UTC run goes ahead when no run of today exists yet; Actions → "Site check (nightly, full)" → Run workflow by hand) and emails its failures; it is not a gate. Pass = no console / page error, no first-party
    4xx / 5xx (except the intended 401 / 423 of a locked console and the 404 page's own 404), no "Something went wrong" /
    card error, no "Updating…" or skeleton still there 3 s after the page loaded, content painted. Outside addresses are
    blocked (hermetic). A warm-up round opens each route once first (one page per worker, reused); a route whose

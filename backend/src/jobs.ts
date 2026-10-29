@@ -64,7 +64,8 @@ import { startKeyPlayersScheduler } from './services/keyPlayers';
 import { picksEmailTick, migrateMarketingOptIn } from './services/pickEmails';
 import { pushAlertsTick } from './services/pushAlerts';
 import { buildSlugs } from './services/slugs';
-import { namesTick } from './services/names';
+import { namesTick, buildMaps } from './services/names';
+import { refreshVisitorSummary } from './services/visitors';
 import { startGameExtrasScheduler } from './services/gameExtras';
 import { fillFromFinals } from './services/history';
 import { checkOtherResults, voidStaleReviews } from './services/resultChecks';
@@ -127,7 +128,16 @@ export function startJobs() {
   after('slugs', () => buildSlugs().then(() => every('slugs', () => buildSlugs(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();
   // fix261: names in Hebrew / Arabic (press spelling, Wikidata labels, letter rules), then the maps the he / ar pages load
   // fix266: after the first round of stored pages (a restart serves the lists first, the names load after)
-  after('names', () => pagesFirst().then(() => namesTick({ collect: true })).then(() => every('names', () => namesTick(), 30 * 60 * 1000).unref()), 6 * 60 * 1000).unref();
+  // fix273: the map from the stored names one minute after a start (a restart served an empty map — cached by browsers
+  // for 30 min — until the first run's collect finished on the slow volume), and the 30-min runs scheduled at once (they
+  // were only scheduled after the first run returned)
+  after('names map', () => buildMaps(yieldEvery(50, 100)), 60 * 1000).unref();
+  after('names', () => pagesFirst().then(() => namesTick({ collect: true })), 6 * 60 * 1000).unref();
+  every('names', () => namesTick(), 30 * 60 * 1000).unref();
+  // fix273: Admin → Visitors, built here every 5 min (job thread) and sent by the web as a stored string
+  const visitorsSummary = () => { refreshVisitorSummary().catch(e => logger.warn(`visitors summary: ${e?.message || e}`)); };
+  after('visitors summary', visitorsSummary, 30 * 1000).unref();
+  every('visitors summary', visitorsSummary, 5 * 60 * 1000).unref();
   // fix169: the weekly prediction hubs are rebuilt in the background (visitors and crawlers get the cached copy)
   every('hub warm', () => warmHubs(), 15 * 60 * 1000).unref();
   // fix175: indexes for the crawler pages, built off the main thread

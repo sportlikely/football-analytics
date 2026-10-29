@@ -26,6 +26,8 @@ async function run(): Promise<unknown> {
   // fix215: season forecast — a batch of league simulations, or one past season's replay (pure, no database)
   // fix218: + the noise fit of one past season (args[2] === 'fit')
   if (job === 'season sim') { const f = await import('../utils/seasonFit'); return args[0] ? f.simulateHere(args[0] as any) : args[2] === 'fit' ? f.fitNoiseHere(args[1] as any) : f.replayHere(args[1] as any); }
+  // fix273: Admin → Visitors' database part (the web only sends the stored string)
+  if (job === 'visitors summary') return (await import('../services/visitorSummary')).visitorDbSummary();
   throw new Error(`unknown thread job ${job}`);
 }
 

@@ -5,6 +5,7 @@ import { API_URL } from '../lib/socket'
 import { errorText, useAuth } from '../lib/auth'
 import { useConsole } from '../components/ConsoleGate'
 import CopyForClaude from '../components/admin/CopyForClaude'
+import { poll } from '../lib/poll'
 
 /*
  * CRM (staff only, English): support inbox (admin + support staff), email campaigns and revenue (admin only).
@@ -294,8 +295,7 @@ function Campaigns() {
   }, [segment])
   useEffect(() => {
     if (!list.some(c => c.status === 'sending')) return
-    const t = setInterval(loadList, 3000)
-    return () => clearInterval(t)
+    return poll(loadList, 3000) // (while a campaign sends; paused while the tab is hidden)
   }, [list])
 
   const run = async (fn: () => Promise<void>) => {

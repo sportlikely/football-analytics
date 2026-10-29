@@ -38,11 +38,13 @@ export async function loadNames(): Promise<void> {
   if (!namesOn) return
   let kept: { at: number; names: Record<string, string> } | null = null
   try { kept = JSON.parse(localStorage.getItem(LS_KEY) || 'null') } catch { /* private mode */ }
+  // fix273: an empty map kept from before the names were built counts as none (it hid the names for good)
+  if (kept?.names && !Object.keys(kept.names).length) kept = null
   if (kept?.names) use(kept.names)
   const fresh = fetch(`/api/names/${lang}`, { credentials: 'same-origin' })
     .then(r => (r.ok ? r.json() : null))
     .then((j: { names?: Record<string, string> } | null) => {
-      if (!j?.names) return
+      if (!j?.names || !Object.keys(j.names).length) return
       try { localStorage.setItem(LS_KEY, JSON.stringify({ at: Date.now(), names: j.names })) } catch { /* full / private */ }
       if (!kept?.names) use(j.names)
     })
