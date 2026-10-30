@@ -40,6 +40,10 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
   const moveTo = tail0?.inner ?? (tail0 && (kind === 'team' || kind === 'player') ? tail0.base : null)
   useEffect(() => { if (moveTo) nav(`${moveTo}${loc.search}`, { replace: true }) }, [moveTo, loc.search, nav])
   const tail = useRef('')
+  // fix284b: react-router gives a new navigate() on every address change — a tab click (…/stats) re-ran the lookup below,
+  // dropped the id (the spinner) and re-mounted the whole page (scroll back to the top, a revealed prediction hidden again)
+  const navRef = useRef(nav)
+  navRef.current = nav
   tail.current = `${tab0 && !moveTo ? `/${tab0.replace(/\/+$/, '')}` : ''}${loc.search}${loc.hash}`
   // a number (an old id) or a code with capitals (an old basketball league code: NBA, BB123) where the slug belongs
   const numeric = /^-?\d+$/.test(slug) || /[A-Z]/.test(slug)
@@ -56,7 +60,7 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
       // the link drew this slug from the name it had: the address bar gets the item's own slug if that differs
       axios.get(`${API_URL}/slug-of/${sport}/${kind}/${encodeURIComponent(clicked)}`).then(r => {
         const s = r.data?.data?.slug
-        if (!off && s && s !== slug) { rememberSlug(sport, kind, s, clicked); nav(`/${sport}/${kind}/${s}${tail.current}`, { replace: true }) }
+        if (!off && s && s !== slug) { rememberSlug(sport, kind, s, clicked); navRef.current(`/${sport}/${kind}/${s}${tail.current}`, { replace: true }) }
       }).catch(() => undefined)
     }
     if (now) return () => { off = true }
@@ -66,15 +70,15 @@ export function SlugRoute({ sport, kind, children }: { sport: LinkSport; kind: L
       const d = r.data?.data || {}
       if (d.slug && d.slug !== slug) {
         if (d.id) rememberSlug(sport, kind, d.slug, d.id)
-        nav(`/${sport}/${kind}/${d.slug}${tail.current}`, { replace: true })
+        navRef.current(`/${sport}/${kind}/${d.slug}${tail.current}`, { replace: true })
       } else if (d.id) setId(String(d.id))
     }).catch(e => {
       if (off) return
       if (e?.response?.status === 410) { setGone(true); return }
-      nav(numeric ? `/${sport}` : searchOf(slug), { replace: true })
+      navRef.current(numeric ? `/${sport}` : searchOf(slug), { replace: true })
     })
     return () => { off = true }
-  }, [sport, kind, slug, numeric, nav])
+  }, [sport, kind, slug, numeric])
   if (gone) return <PastSeason sport={sport} />
   if (!id) return <div className="min-h-[70vh] grid place-items-center"><span className="w-8 h-8 rounded-full border-2 border-line border-t-accent animate-spin" aria-label={t('Loading…')} /></div>
   return <EntityId.Provider value={id}><Fragment key={id}>{children}</Fragment></EntityId.Provider>

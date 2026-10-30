@@ -791,6 +791,7 @@ function MatchDetail() {
                         <div className={justRevealed(matchId) ? 'animate-pop' : ''}>
                           <PredictionPanel
                             sport="football" moreId={m.id} rid={m.id} status={m.status} names={{ home: hn, away: an }} topic={topic} onTopic={pickTopic}
+                            onHide={guessFirstOn() && ['SCHEDULED', 'TIMED'].includes(m.status) ? () => hideMatch(matchId) : undefined}
                             main={{
                               cells: (['H', 'D', 'A'] as const).map(k => ({ key: k, pct: v(k), on: sides.includes(k) })),
                               pick: { words: dc ? dcLabel(dc.code, hn, an) : win(top), pct: dc?.pct ?? Math.round(v(top)), help: !!dc },
@@ -821,11 +822,6 @@ function MatchDetail() {
                     )}
 
                     {p.beforeLineups && <LineupChange p={p} home={home} away={away} />}
-                    {guessFirstOn() && ['SCHEDULED', 'TIMED'].includes(m.status) && (
-                      <div className="mt-2 text-end">
-                        <button type="button" onClick={() => hideMatch(matchId)} className="text-xs text-faint hover:text-ink underline underline-offset-4">{tt("Hide prediction again")}</button>
-                      </div>
-                    )}
 
                               </>
                             )}

@@ -6,6 +6,8 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
  * is the page itself (no sub-path, no "#…"). The page's route ends in `/*`, so the page stays mounted when the tab
  * changes. An old #tab link (#stats, #prediction …) opens its tab and the address becomes the sub-path; a sub-path that
  * is not a tab of this page moves to the page itself (the server does the same for a page load).
+ * fix284b: a tab click is a history step (back / forward move between the tabs); the page is not re-mounted (App's
+ * PageGuard keys on the item, not the sub-path), so the scroll position stays where it was.
  */
 export function useTabPath(ids: readonly string[], aliases: Record<string, string> = {}): [string, (id: string) => void] {
   const sub = (useParams()['*'] || '').replace(/\/+$/, '')
@@ -21,7 +23,7 @@ export function useTabPath(ids: readonly string[], aliases: Record<string, strin
   useEffect(() => {
     if (fromHash || `${loc.pathname}${loc.search}` !== want) nav(want, { replace: true, state: loc.state })
   }, [want, fromHash, loc.pathname, loc.search, loc.state, nav])
-  return [tab, (id: string) => { if (id !== tab) nav(to(id), { replace: true, state: loc.state }) }]
+  return [tab, (id: string) => { if (id !== tab) nav(to(id), { state: loc.state }) }]
 }
 
 /**

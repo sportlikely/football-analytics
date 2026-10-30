@@ -143,6 +143,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
           <div className={roll ? 'animate-pop' : ''}>
             <PredictionPanel
               sport={x.more.sport} moreId={x.more.id} rid={x.rid} status={x.status} names={{ home: hn, away: an }} topic={x.topic} onTopic={x.onTopic}
+              onHide={guessFirstOn() && x.upcoming ? () => hideMatch(x.rid) : undefined}
               main={{
                 cells: [{ key: 'H', pct: pH, on: pick === 'H' }, { key: 'A', pct: pA, on: pick === 'A' }],
                 pick: { words: pick === 'H' ? x.home.name : x.away.name, pct: Math.round(topV) },
@@ -168,11 +169,6 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
                   <div className="mt-4 grid grid-cols-3 gap-2">
                     {[...(x.middle ? [x.middle] : []), ...x.stats].slice(0, 3).map(s => <Stat key={s.label} label={s.label} value={s.value} />)}
                   </div>
-                  {guessFirstOn() && x.upcoming && (
-                    <div className="mt-2 text-end">
-                      <button type="button" onClick={() => hideMatch(x.rid)} className="text-xs text-faint hover:text-ink underline underline-offset-4">{t('Hide prediction again')}</button>
-                    </div>
-                  )}
                 </>
               )}
               why={whyBlock}

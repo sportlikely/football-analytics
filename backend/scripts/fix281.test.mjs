@@ -229,6 +229,7 @@ siteTest('fix281: the prediction tab — big bar, "Most sure first" sorted high 
       big: !!document.querySelector('[data-testid="prediction-panel"] [data-testid="split-bar"]'),
       pick: document.querySelector('[data-testid="prediction-panel"] [data-testid="pick-line"]')?.getAttribute('data-band'),
       pcts: [...document.querySelectorAll('[data-testid="sure-row"]')].map(e => Number(e.getAttribute('data-pct'))),
+      rest: [...document.querySelectorAll('[data-testid="sure-row"]:not([data-main])')].map(e => Number(e.getAttribute('data-pct'))),
       groups: [...document.querySelectorAll('[data-testid="sure-group"]')].map(e => e.getAttribute('data-band')),
       bandsOk: [...document.querySelectorAll('[data-testid="sure-row"]')].every(e => { const p = Number(e.getAttribute('data-pct')); return e.getAttribute('data-band') === (p >= 80 ? 'very' : p >= 60 ? 'likely' : 'close'); }),
       topics: [...document.querySelectorAll('[data-testid="topic-tab"]')].map(e => e.getAttribute('data-topic')),
@@ -237,8 +238,10 @@ siteTest('fix281: the prediction tab — big bar, "Most sure first" sorted high 
       scroll: document.documentElement.scrollWidth - window.innerWidth
     }));
     assert.ok(r.big && r.pick, `${sport}: the big bar with "Our pick"`);
-    assert.ok(r.pcts.length >= 2 && r.pcts.length <= 8, `${sport}: 2–8 sure rows shown (${r.pcts.length})`);
-    assert.deepEqual(r.pcts, [...r.pcts].sort((a, b) => b - a), `${sport}: highest first`);
+    // fix284b: one line per question (a winner game with no public extras: just the side we call)
+    assert.ok(r.pcts.length >= 1 && r.pcts.length <= 8, `${sport}: 1–8 sure rows shown (${r.pcts.length})`);
+    // fix284b: highest first, but our main pick leads its band (asserted in test:fix284b)
+    assert.deepEqual(r.rest, [...r.rest].sort((a, b) => b - a), `${sport}: highest first`);
     const order = ['very', 'likely', 'close'];
     assert.deepEqual(r.groups, [...r.groups].sort((a, b) => order.indexOf(a) - order.indexOf(b)), `${sport}: groups Very likely → Likely → Possible`);
     assert.ok(r.bandsOk, `${sport}: each row in its band`);

@@ -158,13 +158,8 @@ export function previewText(x: PreviewInput): string {
   // 7. line-ups
   if (x.lineups && !past) add('xi', 4, pick(id, 'xi', [`Both starting line-ups are in.`, `The official line-ups have been published.`]));
 
-  // 8. what our model weighs most (names only: no side, no numbers)
-  const why = x.why.map(k => FACTOR[k]).filter(Boolean).slice(0, 3);
-  if (why.length >= 2) add('why', 1, pick(id, 'why', [
-    `For this game our model weighs ${list(why)} most.`,
-    `The factors that count most in our model here are ${list(why)}.`,
-    `Our model's biggest factors for this match are ${list(why)}.`
-  ]));
+  // fix284b: no "what our model weighs most" line — the preview describes the game; the why is in "Why we think so" only
+  // (fix282b: no single factor as the reason, no factor counts)
 
   // fill up to ~120 words with plain context, trim to ≤ 200 by dropping the least important lines
   const fillers = [

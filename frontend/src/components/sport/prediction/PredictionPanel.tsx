@@ -4,13 +4,14 @@ import { bandOf, bandWord, bandGroup, BAND_TEXT, BAND_FILL, BAND_ORDER, BAND_RAN
 import UnlockPrompt from '../../UnlockPrompt'
 import { SplitBar, PickLine, type BarCell, type BarPick } from './SplitBar'
 import { useMore, type MoreSport } from './more'
-import { fromMore, sortSure, topicLabel, TOPIC_IDS, OUTPUT_TOPIC, type QCard, type SureItem, type TopicId, type Names, type Hit } from './questions'
+import { fromMore, sureLines, topicLabel, TOPIC_IDS, OUTPUT_TOPIC, type QCard, type SureItem, type TopicId, type Names, type Hit } from './questions'
 
 /**
  * fix281 — the prediction tab of every sport (Yarin, 29 Oct: "B split bar", "Every prediction as a question", "Most
  * sure first", "One topic at a time"). Drawn once the page's own gates (locked / guess first / reveal) are open:
  *  a. the split bar, big, with "Our pick" + % + band word;
- *  b. "Most sure first": every public prediction of the game as a sentence + bar + %, highest first, grouped Very
+ *  b. "Most sure first": every public prediction of the game as a sentence + bar + %, highest first (one line per
+ *     question, no near-certain "no" side, our pick first in its band: sureLines, fix284b), grouped Very
  *     likely 80%+ / Likely 60–79% / Possible under 60%; 8 shown, "Show all" opens the rest;
  *  c. "One topic at a time": the topics as sub-paths (football Result · Goals · Score · Half-time …), question cards
  *     inside; a topic without a public output is not shown (admins: shown with the admin badge);
@@ -40,6 +41,8 @@ export interface PredictionPanelProps {
   under?: ReactNode
   /** "Why we think so" (fix282 builds the new one): opened by the button under the list */
   why?: ReactNode
+  /** fix284b: "Hide prediction again" (guess first, before the start) — drawn under the "Our pick" line */
+  onHide?: () => void
 }
 
 export const SURE_SHOWN = 8
@@ -56,7 +59,7 @@ function AdminBadge() {
 function SureRow({ x }: { x: SureItem }) {
   const b = bandOf(x.pct)
   return (
-    <li data-testid="sure-row" data-pct={Math.round(x.pct)} data-band={b} className="py-2">
+    <li data-testid="sure-row" data-id={x.id} data-pct={Math.round(x.pct)} data-band={b} data-main={x.main ? '1' : undefined} className="py-2">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-sm text-ink leading-snug min-w-0">{x.text}{x.admin && <span className="ms-2"><AdminBadge /></span>}</span>
         <span className={`num text-sm font-extrabold whitespace-nowrap ${BAND_TEXT[b]}`}>{Math.round(x.pct)}%</span>
@@ -69,7 +72,7 @@ function SureRow({ x }: { x: SureItem }) {
 
 export function SureList({ items }: { items: SureItem[] }) {
   const [all, setAll] = useState(false)
-  const sorted = sortSure(items)
+  const sorted = sureLines(items)
   const shown = all ? sorted : sorted.slice(0, SURE_SHOWN)
   return (
     <div data-testid="sure-list">
@@ -203,6 +206,9 @@ export default function PredictionPanel(x: PredictionPanelProps) {
       </div>
       <SplitBar cells={x.main.cells} size="lg" />
       <div className="mt-3"><PickLine pick={x.main.pick} size="lg" /></div>
+      {x.onHide && (
+        <button type="button" onClick={x.onHide} data-testid="hide-again" className="mt-1 text-xs text-faint hover:text-ink underline underline-offset-4">{t("Hide prediction again")}</button>
+      )}
       {x.under}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2 lg:gap-8 min-w-0">

@@ -90,6 +90,7 @@
     "test:fix260": "tsc && node --no-warnings --test --test-force-exit scripts/fix260.test.mjs",
     "test:fix283": "tsc && node --no-warnings --test --test-force-exit scripts/fix283.test.mjs",
     "test:fix284": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings --test --test-force-exit --test-concurrency=1 scripts/fix284.test.mjs",
+    "test:fix284b": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings --test --test-force-exit --test-concurrency=1 scripts/fix284b.test.mjs",
     "test:site": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings scripts/site-test.mjs",
     "test:links": "tsc && cd ../frontend && npx vite build --logLevel warn && cd ../backend && node --no-warnings scripts/links-test.mjs",
     "test:load": "tsc && node --no-warnings scripts/load-test.mjs",

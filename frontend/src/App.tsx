@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
-import { BrowserRouter as Router, Routes, Route, Link, NavLink, Navigate, matchPath, useLocation } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, NavLink, Navigate, matchPath, useLocation, useNavigationType } from 'react-router-dom'
 import Home from './pages/Home'
 import SearchBox from './components/SearchBox'
 import PremiumGate from './components/PremiumGate'
@@ -29,6 +29,7 @@ import { SOCIAL, type SocialId } from './lib/social'
 import { t as tt, basename, applyHeadLang, LANGS, lang, setLang, type Lang } from './lib/i18n'
 import { SlugRoute, OldLink, MovedPage } from './components/SlugRoute'
 import { useSlugVersion } from './lib/links'
+import { LINK_SPORTS, LINK_KINDS } from './lib/slugRules'
 
 /**
  * Speed (Oct 2026): every page is its own small file, loaded when it is first opened, so the home page no longer
@@ -140,9 +141,21 @@ class PageBoundary extends Component<{ children?: ReactNode }, { failed: boolean
     return <div className="min-h-[60vh]"><ErrorFallback home={basename + '/'} /></div>
   }
 }
+/** fix284b: one page = one item (/<sport>/<kind>/<slug>): its tabs and topics (…/stats, …/score) are the same page — the
+ *  boundary (and so the page, its scroll position and a revealed prediction) is kept; another page starts afresh. */
+const ITEM_PAGE = new RegExp(`^/(${LINK_SPORTS.join('|')})/(${LINK_KINDS.join('|')})/[^/]+`)
+const pageKey = (pathname: string) => pathname.match(ITEM_PAGE)?.[0] ?? pathname
 function PageGuard({ children }: { children: ReactNode }) {
   const loc = useLocation()
-  return <PageBoundary key={loc.pathname}>{children}</PageBoundary>
+  const key = pageKey(loc.pathname)
+  const navType = useNavigationType()
+  const last = useRef(key)
+  // another page opens at the top (back / forward: the browser puts the position back); a tab of the same page does not move
+  useLayoutEffect(() => {
+    if (last.current !== key && navType !== 'POP') window.scrollTo(0, 0)
+    last.current = key
+  }, [key, navType])
+  return <PageBoundary key={key}>{children}</PageBoundary>
 }
 
 // fix250: the shape of a page while its code loads (never an empty screen under the header)

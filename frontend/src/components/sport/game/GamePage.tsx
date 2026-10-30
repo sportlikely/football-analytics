@@ -1,5 +1,5 @@
-import { type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { t, LOCALE } from '../../../lib/i18n'
 import { useTabPath } from '../../../lib/tabPath'
 import StickyBar from '../../StickyBar'
@@ -112,6 +112,7 @@ export default function GamePage(p: GamePageProps) {
   const live = st.kind === 'live'
   const current = p.tabs.find(x => x.id === p.tab) || p.tabs[0]
   const cols = useGameCols()
+  const tabBox = useKeepScroll()
   const wide = cols === 3 && !!p.preview ? 'max-w-[1672px]' : cols > 1 ? 'max-w-[1348px]' : 'max-w-5xl'
   return (
     <div className={`${wide} mx-auto px-4 sm:px-6 py-6 pb-28 xl:pb-10`}>
@@ -179,7 +180,7 @@ export default function GamePage(p: GamePageProps) {
 
       {/* ---------- Tabs ---------- */}
       <StickyBar className="top-16 sm:top-[72px] -mx-4 sm:mx-0 mt-6 px-4 sm:px-0 py-2">
-        <nav className="flex gap-1 p-1 rounded-full bg-surface2/60 border border-line/60 overflow-x-auto no-scrollbar" aria-label={t('Game sections')}>
+        <nav className="flex gap-1 p-1 rounded-full bg-surface2/60 border border-line/60 overflow-x-auto no-scrollbar" aria-label={t('Game sections')} data-testid="game-tabs">
           {p.tabs.map(x => (
             <button key={x.id} type="button" onClick={() => p.onTab(x.id)} aria-current={current.id === x.id ? 'page' : undefined}
               className={`flex-1 min-w-max inline-flex items-center justify-center gap-1.5 px-2.5 sm:px-4 py-2 rounded-full text-[13px] sm:text-sm font-semibold transition-colors ${current.id === x.id ? 'bg-accent text-bg shadow' : 'text-muted hover:text-ink'}`}>
@@ -190,7 +191,7 @@ export default function GamePage(p: GamePageProps) {
         </nav>
       </StickyBar>
 
-      <div className="mt-4 space-y-6 min-w-0">
+      <div ref={tabBox} className="mt-4 space-y-6 min-w-0" data-game-tab>
         {current.render()}
         {current.id === p.tabs[0].id && p.tabs.length > 1 && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -206,6 +207,37 @@ export default function GamePage(p: GamePageProps) {
       </GameLayout>
     </div>
   )
+}
+
+/**
+ * fix284b: a move between the game's own sub-paths (a tab, a topic, back / forward) keeps the scroll position: the tab
+ * area keeps at least the height it had (a shorter tab would make the browser pull the page up) and the position is put
+ * back before the frame is painted. Another page is a new GamePage (App's PageGuard keys on the item).
+ */
+function useKeepScroll() {
+  const box = useRef<HTMLDivElement>(null)
+  const keep = useRef({ h: 0, y: 0, path: '' })
+  const { pathname } = useLocation()
+  useEffect(() => {
+    const el = box.current
+    const note = () => { keep.current.y = window.scrollY; if (el) keep.current.h = el.offsetHeight }
+    note()
+    window.addEventListener('scroll', note, { passive: true })
+    const ro = el && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { if (el) keep.current.h = el.offsetHeight }) : null
+    if (el) ro?.observe(el)
+    return () => { window.removeEventListener('scroll', note); ro?.disconnect() }
+  }, [])
+  useLayoutEffect(() => {
+    const k = keep.current, el = box.current
+    if (k.path && k.path !== pathname && el) {
+      const y = k.y
+      el.style.minHeight = `${k.h}px`
+      if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y)
+      k.y = y
+    }
+    k.path = pathname
+  }, [pathname])
+  return box
 }
 
 /** fix175: half-time score from quarter scores (basketball, NFL), shown under the score like football's "HT 1–0". */

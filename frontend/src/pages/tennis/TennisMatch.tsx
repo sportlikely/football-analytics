@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEntityId } from '../../components/SlugRoute'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
@@ -51,6 +51,9 @@ const TABS = ['prediction', 'stats', 'form', 'rest', 'h2h', 'draw', 'highlights'
 export default function TennisMatch() {
   const id = useEntityId()
   const navigate = useNavigate()
+  // fix284b: navigate() is new on every address change — in the deps it reloaded the match on each tab / topic click
+  const navRef = useRef(navigate)
+  navRef.current = navigate
   const [d, setD] = useState<Data | null>(null)
   const [missing, setMissing] = useState(false)
   const { tab, pickTab, topic, pickTopic } = useGameTopics('tennis', TABS, { standings: 'draw', table: 'draw', players: 'stats' })
@@ -60,14 +63,14 @@ export default function TennisMatch() {
     // fix195: an old fixture id merged into its match → that match's page
     const load = () => axios.get(`${API_URL}/tennis/match/${id}`).then(r => setD(r.data.data)).catch(e => {
       const to = e?.response?.data?.movedTo
-      if (to) navigate(tennisHref.match(to), { replace: true })
+      if (to) navRef.current(tennisHref.match(to), { replace: true })
       else if (e?.response?.status === 404) setMissing(true)
     })
     load()
     const iv = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30 * 1000)
     window.addEventListener(GAME_RELOAD, load) // a free pick opened this match
     return () => { clearInterval(iv); window.removeEventListener(GAME_RELOAD, load) }
-  }, [id, navigate])
+  }, [id])
   useEffect(() => {
     if (d) document.title = `${surname(d.match.home)} vs ${surname(d.match.away)} · ${d.match.tournament.name} | SportLikely`
   }, [d?.match.id])

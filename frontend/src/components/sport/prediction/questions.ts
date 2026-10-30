@@ -1,4 +1,5 @@
 import { t } from '../../../lib/i18n'
+import { bandOf, BAND_ORDER } from '../../../lib/confidence'
 import type { MoreData, MoreSport, MSet } from './more'
 
 /**
@@ -29,7 +30,7 @@ export const OUTPUT_TOPIC: Record<MoreSport, Record<string, TopicId>> = {
 /** what happened, once the game is checked */
 export interface Hit { text: string; ok: boolean }
 /** one row of "Most sure first" */
-export interface SureItem { id: string; text: string; pct: number; admin?: boolean; hit?: Hit | null }
+export interface SureItem { id: string; text: string; pct: number; admin?: boolean; hit?: Hit | null; main?: boolean }
 export interface CardCell { key: 'H' | 'D' | 'A'; label: string; pct: number; on: boolean }
 export type QCard =
   | { kind: 'split'; id: string; q: string; cells: CardCell[]; call: { words: string; pct: number }; admin?: boolean; hit?: Hit | null }
@@ -170,5 +171,22 @@ export function fromMore(sport: MoreSport, d: MoreData | null, n: Names): { item
   return { items, cards, topics }
 }
 
-/** "Most sure first": highest chance first */
-export const sortSure = (xs: SureItem[]) => [...xs].sort((a, b) => b.pct - a.pct || a.id.localeCompare(b.id))
+/**
+ * "Most sure first" (fix284b, Yarin 30 Oct: "Alavés don't win by 2+ goals 97%" on top, then the same question twice more):
+ *  - one line per question, the side we call (the main result's res-H / res-D / res-A and win-H / win-A → the likelier one);
+ *  - no line whose other side is under 10% (the "no" side of a rare event), except the main pick;
+ *  - the main pick (football: our double chance, else the result we call) first in its band, then highest first.
+ */
+const RARE = 10
+const questionOf = (id: string) => (/^(res|win)-/.test(id) ? id.split('-')[0] : id)
+export function sureLines(xs: SureItem[]): SureItem[] {
+  const best = new Map<string, SureItem>()
+  for (const x of xs) { const q = questionOf(x.id), b = best.get(q); if (!b || x.pct > b.pct) best.set(q, x) }
+  const lines = [...best.values()]
+  const main = lines.find(x => x.id === 'dc') ?? lines.find(x => /^(res|win)-/.test(x.id)) ?? null
+  const band = (x: SureItem) => BAND_ORDER.indexOf(bandOf(x.pct))
+  return lines
+    .filter(x => x === main || 100 - x.pct >= RARE)
+    .sort((a, b) => band(a) - band(b) || Number(b === main) - Number(a === main) || b.pct - a.pct || a.id.localeCompare(b.id))
+    .map(x => (x === main ? { ...x, main: true } : x))
+}

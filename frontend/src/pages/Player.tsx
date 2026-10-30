@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEntityId } from '../components/SlugRoute'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
@@ -127,6 +127,9 @@ export default function Player() {
   const [si, setSi] = useState(0)
   const [slow, setSlow] = useState(false)
 
+  // fix284b: nav() is new on every address change — in the deps it reloaded the player on each tab click
+  const navRef = useRef(nav)
+  navRef.current = nav
   useEffect(() => {
     let cancelled = false
     setData(null)
@@ -137,7 +140,7 @@ export default function Player() {
     if (id === 'find') {
       axios
         .get(`${API_URL}/player-page/find`, { params: Object.fromEntries(params.entries()) })
-        .then(r => !cancelled && (r.data.pending ? setError(tt("More details soon. This page is being prepared — please check back a little later.")) : nav(playerHref('football', r.data.data.id, params.get('name'))!, { replace: true })))
+        .then(r => !cancelled && (r.data.pending ? setError(tt("More details soon. This page is being prepared — please check back a little later.")) : navRef.current(playerHref('football', r.data.data.id, params.get('name'))!, { replace: true })))
         .catch(() => !cancelled && setError(tt("We couldn't find {0}'s page yet.", { 0: params.get('name') || 'this player' })))
     } else {
       axios
@@ -149,7 +152,7 @@ export default function Player() {
       cancelled = true
       clearTimeout(slowTimer)
     }
-  }, [id, params, nav])
+  }, [id, params])
 
   useEffect(() => {
     if (data?.player.name) document.title = tt("{0} · SportLikely", { 0: data.player.name })
