@@ -227,7 +227,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   still decided, not built), `userPicks.ts`
   (users' own picks + personal record), `favorites.ts`, `testers.ts`, `backup.ts`, `clientErrors.ts`, `dataHealth.ts`,
   `dataAudit.ts`, `seo.ts`, `proxyGuard.ts` + `proxyScrapers.ts` (fix199: data-centre / proxy scrapers, rules in docs/notes/security.md),
-  `swarmGuard.ts` + `utils/swarmRules.ts` (fix277: scraper swarms — many addresses, one script — get the Quick check as a group).
+  `swarmGuard.ts` + `utils/swarmRules.ts` (fix277: scraper swarms — many addresses, one script — get the Quick check as a group),
+  `goodBots.ts` + `utils/goodBots.ts` (fix285: link previews verified by published ranges / DNS never challenged, AI crawlers' Trust /
+  Challenge switch, the Visitors headline split).
 - Player photos (fix211, OFF since fix241): `playerPhotos.ts` keeps the Wikidata / Commons matcher behind `photosOn()` (false:
   Wikimedia is not an official source); `purgeUnofficialPhotos()` at worker start, data-health "Photo sources: official only".
 - Player careers (fix267): `services/playerCareers.ts` (providers' seasons → `player_seasons`, `player_careers`, queue + worker job

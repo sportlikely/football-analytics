@@ -114,7 +114,9 @@ import { LINK_SPORTS, LINK_KINDS, isSlug, type LinkSport, type LinkKind } from '
 import { archivedAsset } from './services/assetArchive';
 import { definePage, getPage, fallbackQuery, refreshPages, rebuildPage, pageCacheStatus, pageMemStatus, pageHotStatus, joinRows, etagOf, type Query, type Rows, type View } from './services/pageCache';
 import { appPageFor, copyLooksRight } from './utils/pageLang';
-import { trackVisit, visitorsAnswer, visitSeen, markSwarmVisit } from './services/visitors';
+import { trackVisit, visitorsAnswer, visitSeen, markSwarmVisit, markBotVisit } from './services/visitors';
+import { goodBotCheck, noteGoodBot, visitReasonOf, goodBotRows, goodBotModes, setGoodBotMode, type GoodBotCheck } from './services/goodBots';
+import { ogCard } from './utils/goodBots';
 import { swarmHitOf, swarmCheck, swarmRefused, swarmTrusted, swarmSeen, swarmPassed, swarmRows, setSwarmOverride, swarmOverrides, swarmVerdictOf } from './services/swarmGuard';
 import { networkOf } from './services/asn';
 import { ProxyLimiter, proxyApplies, countedRead, lockAllPredictions, viewIdOf, makePass, readPass, PASS_COOKIE, PASS_MS } from './services/proxyGuard';
@@ -248,6 +250,7 @@ app.use((req, res, next) => {
   const ua = req.get('user-agent') || '';
   if (!BAD_BOTS.test(ua)) return next();
   noteBlocked(uaKey(ua));
+  if (!isWorker) markBotVisit(req, 'blocked'); // fix285: Visitors → "Blocked bots"
   res.status(403).type('text/plain').send('Forbidden');
 });
 // fix245: a search engine is verified once per request, first by its published address list (services/crawlerIps.ts:
@@ -266,12 +269,25 @@ if (!isWorker) app.use((req, res, next) => {
     (req as any).slCrawler = { ok: true, how: 'list' };
     (req as any).verifiedCrawler = true;
   }
+  // fix285: a link preview / AI crawler that names itself (services/goodBots.ts): a verified preview or a trusted AI bot
+  // is treated like a verified search engine (stored pages, no provider calls, never a swarm / proxy / Quick check)
+  if (!(req as any).verifiedCrawler) {
+    const gb = goodBotCheck(req.ip, ua);
+    if (gb) {
+      (req as any).slGoodBot = gb;
+      (req as any).slGoodBotReason = visitReasonOf(gb);
+      if (gb.act === 'trusted') (req as any).verifiedCrawler = true;
+      noteGoodBot(gb, req.ip, !req.path.startsWith('/api/'));
+    }
+  }
   if (engineOfUa(ua) === 'google') noteGooglebotSample(req);
   if (claimsCrawler(ua) || inGoogleRanges(req.ip)) res.once('finish', () => noteCrawlerResponse(uaKey(ua), req.ip, (req as any).slCrawler?.ok ? (req as any).slCrawler.how : null, res.statusCode, req.path));
   next();
 });
 /** fix245: this request is a search engine verified by its list or DNS (set by the middleware above) */
 const isVerifiedCrawler = (req: express.Request) => !!(req as any).verifiedCrawler;
+/** fix285: the link preview / AI crawler this request names (null = none), set by the middleware above */
+const goodBotOf = (req: express.Request): GoodBotCheck | null => (req as any).slGoodBot ?? null;
 // fix202: with the worker on, admin / staff / maintenance requests (outside the public API) go to the worker, which
 // holds the job state and runs the rebuilds; the web process keeps the public API, the pages and /api/perf
 const WEB_ONLY_API = /^\/api\/(perf|draw-alerts|admin\/visitors)$/;
@@ -556,6 +572,11 @@ app.use('/api', (req, _res, next) => {
     // check: the app opens the Quick check (a pass that reached its own limit: the plain message)
     return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.', proxy: true, check: !!passKey() && refused.scope !== 'pass-hour' });
   }
+  // fix285: an AI crawler on Challenge (Admin → Visitors → Swarms): every read gets the Quick check, never a visit
+  if (!isWorker && goodBotOf(req)?.act === 'challenge' && !req.user) {
+    _res.set('Retry-After', '3600');
+    return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.', proxy: true, swarm: true, check: !!passKey() });
+  }
   // fix277: a scraper swarm (many addresses, one script: services/swarmGuard.ts) — signed out, every read gets the Quick check
   const swHit = !isWorker ? swarmHitOf(req.ip, ua) : null;
   const sw = swarmCheck(swHit, { admin: false, verifiedCrawler: crawler, verifiedAccount: !!req.user?.emailVerified, signedIn: !!req.user, pass: !!pass?.ok, counted });
@@ -563,7 +584,7 @@ app.use('/api', (req, _res, next) => {
     (req as any).slSwarm = true;
     if (sw.act !== 'pass') markSwarmVisit(req);
     if (sw.act === 'challenge') {
-      swarmRefused(swHit!, swarmTrusted(ua) || !!crawlerByList(ua, req.ip));
+      swarmRefused(swHit!, swarmTrusted(ua) || !!crawlerByList(ua, req.ip) || goodBotOf(req)?.act === 'trusted');
       _res.set('Retry-After', '3600');
       return _res.status(429).json({ error: 'Too many pages opened from this network. Please try again later, or sign in.', proxy: true, swarm: true, check: !!passKey() });
     }
@@ -1545,6 +1566,13 @@ app.post('/api/admin/swarms/:ua([a-f0-9]{16})', jsonOnly, (req, res) => {
   const mode = req.body?.mode === 'trust' || req.body?.mode === 'challenge' ? req.body.mode : null;
   try { res.json({ data: setSwarmOverride(req.params.ua, mode, req.user?.email || null) }); } catch (e) { sendError(res, e, 'Could not save'); }
 });
+// fix285: Admin → Visitors → Swarms: Trust / Challenge one AI crawler (services/goodBots.ts); the web process applies it at once
+app.post('/api/admin/good-bots/:id([a-z0-9-]{2,40})', jsonOnly, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const mode = req.body?.mode === 'trust' ? 'trust' : req.body?.mode === 'challenge' ? 'challenge' : null;
+  if (!mode) return res.status(400).json({ error: 'mode must be trust or challenge' });
+  try { res.json({ data: setGoodBotMode(req.params.id, mode, req.user?.email || null) }); } catch (e) { sendError(res, e, 'Could not save'); }
+});
 app.post('/api/admin/client-errors/:sig([a-f0-9]{16})', jsonOnly, (req, res) => {
   resolveClientError(req.params.sig, !!req.body?.resolved);
   res.json({ data: { ok: true } });
@@ -1847,7 +1875,7 @@ app.post('/api/admin/db-space/vacuum', async (req, res) => {
 });
 app.get('/api/admin/waitlist', (_req, res) => res.json({ data: waitlistStats() }));
 // fix273: a stored string the worker builds every 5 min (services/visitors.ts) + the web's live numbers — no query here
-app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store').type('application/json').send(visitorsAnswer({ swarms: swarmRows(), swarmOverrides: swarmOverrides() })); });
+app.get('/api/admin/visitors', (_req, res) => { res.set('Cache-Control', 'no-store').type('application/json').send(visitorsAnswer({ swarms: swarmRows(), swarmOverrides: swarmOverrides(), goodBots: goodBotRows(), goodBotModes: goodBotModes() })); });
 app.get('/api/admin/news', (_req, res) => res.json({ data: newsStatus() }));
 
 app.post('/api/auth/login', jsonOnly, async (req, res) => {
@@ -4829,7 +4857,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     // fix243: a bot's page takes a slot (services/botGate.ts): over the limit 503 + Retry-After; browsers never wait here
     if (req.access !== 'admin' && !req.user && isBotUa(req.get('user-agent'))) {
       // fix245: a verified search engine waits for a slot instead (never this 503); after a long wait it goes on without one
-      const release = await botGate.enter(isVerifiedCrawler(req));
+      const release = await botGate.enter(isVerifiedCrawler(req) || goodBotOf(req)?.act === 'card');
       if (!release) return res.status(503).set({ 'Retry-After': '30', 'Cache-Control': 'no-store' }).type('text/plain').send('Busy, please retry later');
       res.once('finish', release); res.once('close', release);
     }
@@ -4864,8 +4892,21 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
     // fix199: a page read from a data-centre / proxy address counts towards its limits (sign-in / sign-up pages never)
     const nw = req.access !== 'admin' && !req.user?.emailVerified && req.ip ? networkOf(req.ip) : null;
     const authPage = /^(\/[a-z]{2})?\/(login|signup|join|forgot|verify|account|reset|privacy|terms|contact)(\/|$)/.test(req.path);
+    // fix285: link previews / AI crawlers (services/goodBots.ts) — an AI bot on Challenge gets the Quick check; a preview
+    // made where nothing is published (phones, Slack, Discord) the Open Graph card only, never challenged; the visit's reason
+    const gb = req.access !== 'admin' && !req.user ? goodBotOf(req) : null;
+    const cardOnly = gb?.act === 'card';
+    if (req.access !== 'admin' && !req.user) {
+      const reason = visitReasonOf(gb) ?? (isVerifiedCrawler(req) ? 'crawler' : isBotUa(req.get('user-agent')) ? 'ua' : null);
+      if (reason) markBotVisit(req, reason);
+    }
+    if (gb?.act === 'challenge') {
+      noteHtml(req, false, true);
+      return res.status(429).set({ 'Retry-After': '3600', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html')
+        .send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey(), 'swarm'));
+    }
     // fix277: a scraper swarm signed out gets the Quick check instead of the page (no crawler HTML); a pass its own limit
-    if (req.access !== 'admin' && !authPage) {
+    if (req.access !== 'admin' && !authPage && !cardOnly) {
       const ua = uaKey(req.get('user-agent'));
       const verified = isVerifiedCrawler(req) || (claimsCrawler(ua) && crawlerVerdict(req.ip, ua) === true);
       const pass = verified ? null : passOf(req, ua);
@@ -4873,6 +4914,7 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       const sw = swarmCheck(hit, { admin: false, verifiedCrawler: verified, verifiedAccount: !!req.user?.emailVerified, signedIn: !!req.user, pass: !!pass?.ok, counted: true, page: true });
       if (sw.act === 'challenge') {
         swarmRefused(hit!, swarmTrusted(ua) || !!crawlerByList(ua, req.ip));
+        markSwarmVisit(req); // fix285: "Blocked bots" in Visitors
         noteHtml(req, false, true);
         return res.status(429).set({ 'Retry-After': '3600', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html')
           .send(quickCheckPage(qcLangOf(req.path), turnstileSiteKey(), 'swarm'));
@@ -4881,7 +4923,8 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       if (passRefused) return res.status(429).set({ 'Retry-After': String(passRefused.retryAfter), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }).type('html')
         .send(quickCheckPage(qcLangOf(req.path), null, 'swarm'));
     }
-    if (nw && !authPage) {
+    if (cardOnly) noteHtml(req, true);
+    else if (nw && !authPage) {
       const ua = uaKey(req.get('user-agent')), ipH = ipKey(req);
       const verified = isVerifiedCrawler(req) || (claimsCrawler(ua) && crawlerVerdict(req.ip, ua) === true);
       // fix244: a page load counts once (the app's first view after it is free); over a limit: the Quick check
@@ -4923,10 +4966,12 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
       // left on screen) — the plain app page until the worker has made the new copy
       const main = currentMainScript();
       const missKind = bbg ? 'bb-game-seo' : home ? 'seo' : 'seo-page';
-      const plain = () => res.type('html').send(appPageOf(req.path));
+      const plain = () => res.type('html').send(cardOnly ? ogCard(appPageOf(req.path)) : appPageOf(req.path));
       if (html?.text && main && !html.text.includes(main)) { noteSeoMiss(missKind, 'old build', req.path, lang0); rebuildSeo(); return plain(); }
       // fix258: a copy without this page's lang / hreflang set (made before fix256, or for another language) is never sent
       if (html?.text && !copyLooksRight(html.text, lang0)) { noteSeoMiss(missKind, 'wrong lang', req.path, lang0); rebuildSeo(); return plain(); }
+      // fix285: a preview made where nothing is published: the page's Open Graph card (head only), never the body
+      if (html?.text && cardOnly) return res.type('html').send(ogCard(html.text));
       if (html?.text) {
         res.set('ETag', html.etag).vary('Accept-Encoding').type('html');
         if (req.fresh) return res.status(304).end();

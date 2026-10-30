@@ -38,6 +38,11 @@ export function parseRangeFile(json: unknown): string[] {
   return out;
 }
 
+/** fix285: a plain-text list, one prefix a line (Telegram's cidr.txt); anything else ignored */
+export function parseCidrText(text: unknown): string[] {
+  return String(text ?? '').split(/\s+/).map(x => x.trim()).filter(x => x && !!cidrOf(x));
+}
+
 /** "::ffff:66.249.66.1" → "66.249.66.1"; trimmed; '' when not an address */
 export function plainIp(ip: string | undefined | null): string {
   let s = String(ip || '').trim();
@@ -72,12 +77,12 @@ function cidrOf(s: string): Cidr | null {
   return null;
 }
 
-/** The published ranges of every engine, looked up by address. */
-export class CrawlerRanges {
-  private v4: { start: number; end: number; engine: Engine }[] = [];
-  private v6: { start: bigint; end: bigint; engine: Engine }[] = [];
-  constructor(lists: Partial<Record<Engine, string[]>>) {
-    for (const [engine, prefixes] of Object.entries(lists) as [Engine, string[]][]) {
+/** The published ranges of every engine, looked up by address (fix285: any key — link-preview / AI bots too). */
+export class CrawlerRanges<E extends string = Engine> {
+  private v4: { start: number; end: number; engine: E }[] = [];
+  private v6: { start: bigint; end: bigint; engine: E }[] = [];
+  constructor(lists: Partial<Record<E, string[]>>) {
+    for (const [engine, prefixes] of Object.entries(lists) as [E, string[]][]) {
       for (const p of prefixes || []) {
         const c = cidrOf(p);
         if (!c) continue;
@@ -89,7 +94,7 @@ export class CrawlerRanges {
   }
   get size() { return this.v4.length + this.v6.length; }
   /** the engine whose published list holds this address, or null */
-  engineOf(ipIn: string | undefined | null): Engine | null {
+  engineOf(ipIn: string | undefined | null): E | null {
     const ip = plainIp(ipIn);
     if (!ip) return null;
     // ranges may nest (17/8 seed + Apple's own /24s): any range holding the address counts

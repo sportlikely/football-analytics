@@ -108,7 +108,9 @@ export function trackVisit(req: express.Request, _res: express.Response, next: e
       const sl = (req as any).slCrawler;
       const fake = isFakeCrawler(ua, ip, sl?.ok ? sl.how : null);
       // fix277: a verified search engine is 'crawler' (Visitors splits the bots: crawlers / swarms / other)
-      upsert.run(day, vid, signedIn ? 1 : 0, iso, iso, countryOf(ip), signedIn ? 1 : 0, fake ? 'fake-crawler' : sl?.ok ? 'crawler' : uaBot ? 'ua' : dc ? 'datacentre' : null, uaBot ? 1 : 0);
+      // fix285: a link preview 'preview', an AI crawler 'ai-trusted' / 'ai-blocked' (services/goodBots.ts)
+      const gb: string | null = (req as any).slGoodBotReason ?? null;
+      upsert.run(day, vid, signedIn ? 1 : 0, iso, iso, countryOf(ip), signedIn ? 1 : 0, gb && !signedIn ? gb : fake ? 'fake-crawler' : sl?.ok ? 'crawler' : uaBot ? 'ua' : dc ? 'datacentre' : null, uaBot || gb ? 1 : 0);
     }
     const lp = uaBot ? null : leaguePageOf(req.path);
     if (lp) {
@@ -168,6 +170,26 @@ export function markSwarmVisit(req: express.Request) {
     if (swarmMarked.size > 200000) swarmMarked.clear();
     swarmMarked.set(k, Date.now());
     markBot.run('swarm', day, vid);
+    const o = online.get(vid);
+    if (o && !o.signedIn) o.human = false;
+  } catch { /* counting never breaks a request */ }
+}
+
+/**
+ * fix285: a bot's HTML page (search engine, link preview, AI crawler, a challenged swarm member, any other bot user-agent)
+ * — the page route never passed through trackVisit (it counts /api only), so link previews were never in Visitors.
+ * Written once per caller and minute; the reason overrides an earlier one of the day unless the caller is a person.
+ */
+export function markBotVisit(req: express.Request, reason: string) {
+  try {
+    const ip = req.ip || '';
+    if (!ip || req.access === 'admin' || req.user) return;
+    const vid = hash(ip), now = Date.now(), day = visitDay(now), k = `${vid}|${day}|${reason}`;
+    if ((written.get(k) || 0) >= now - 60000) return;
+    written.set(k, now);
+    const iso = new Date(now).toISOString();
+    upsert.run(day, vid, 0, iso, iso, countryOf(ip), 0, reason, 1);
+    markBot.run(reason, day, vid);
     const o = online.get(vid);
     if (o && !o.signedIn) o.human = false;
   } catch { /* counting never breaks a request */ }

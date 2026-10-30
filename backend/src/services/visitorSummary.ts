@@ -8,6 +8,7 @@
  * Only the database is imported: the job thread loads this file alone.
  */
 import { db } from '../db';
+import { KIND_RANK_SQL, RANK_KIND, type VisitorKind } from '../utils/goodBots';
 
 const PEOPLE = `(human = 1 OR signed_in = 1)`;
 /*
@@ -44,11 +45,29 @@ export function visitorDbSummary(now = Date.now()) {
     return { all: r.n as number, people: r.people as number, bots: (r.n - r.people) as number };
   };
   const [w1, w7, w30] = [callers(1), callers(7), callers(30)];
+  /*
+   * fix285: the headline — People · Search engines · Link previews · Blocked bots · Other bots: each caller once, in its
+   * strongest category over the window (utils/goodBots.ts KIND_RANK_SQL), so the five add up to all callers
+   */
+  const blank = (): Record<VisitorKind, number> => ({ people: 0, search: 0, previews: 0, blocked: 0, other: 0 });
+  const split = (days: number) => {
+    const out = blank();
+    for (const r of db.prepare(`SELECT k, COUNT(*) AS n FROM (SELECT vid, ${KIND_RANK_SQL} AS k FROM visits WHERE day >= ? GROUP BY vid) GROUP BY k`).all(since(days, now)) as { k: number; n: number }[]) out[RANK_KIND[r.k] || 'other'] += r.n;
+    return out;
+  };
+  const kinds = { today: split(1), last7: split(7), last30: split(30) };
+  const dailyKinds = new Map<string, Record<VisitorKind, number>>();
+  for (const r of db.prepare(`SELECT day, ${KIND_RANK_SQL.replace('MAX(', '(')} AS k, COUNT(*) AS n FROM visits WHERE day >= ? GROUP BY day, k`).all(since(30, now)) as { day: string; k: number; n: number }[]) {
+    const d = dailyKinds.get(r.day) || blank();
+    d[RANK_KIND[r.k] || 'other'] += r.n;
+    dailyKinds.set(r.day, d);
+  }
   const daily = db.prepare(`
     SELECT day, SUM(CASE WHEN ${PEOPLE} THEN 1 ELSE 0 END) AS visitors, SUM(signed_in) AS signedIn, SUM(hits) AS hits,
       SUM(CASE WHEN ${PEOPLE} THEN 0 ELSE 1 END) AS bots, COUNT(*) AS allCallers
     FROM visits WHERE day >= ? GROUP BY day ORDER BY day
   `).all(since(30, now)) as { day: string; visitors: number; signedIn: number; hits: number; bots: number; allCallers: number }[];
+  const dailySplit = daily.map(d => ({ ...d, kinds: dailyKinds.get(d.day) || blank() }));
   const returning = (db.prepare(`SELECT COUNT(*) AS n FROM (SELECT vid FROM visits WHERE day >= ? AND ${PEOPLE} GROUP BY vid HAVING COUNT(*) > 1)`).get(since(30, now)) as any).n as number;
   const first = (db.prepare('SELECT MIN(day) AS d FROM visits').get() as any)?.d || null;
   const botReasons = db.prepare(`SELECT COALESCE(bot, 'no-signs') AS reason, COUNT(*) AS n FROM visits WHERE day = ? AND NOT ${PEOPLE} GROUP BY COALESCE(bot, 'no-signs') ORDER BY n DESC`).all(since(1, now)) as { reason: string; n: number }[];
@@ -61,8 +80,8 @@ export function visitorDbSummary(now = Date.now()) {
   return {
     today: w1.people, last7: w7.people, last30: w30.people, returning30: returning,
     // fix274: all = people + bots (every caller, bot user-agents included), each window
-    todayBots: w1.bots, todayAll: w1.all, last7Bots: w7.bots, last7All: w7.all, last30Bots: w30.bots, last30All: w30.all, botReasons, botSplit,
-    peopleSince, daily, countingSince: first, dayZone: 'Asia/Jerusalem',
+    todayBots: w1.bots, todayAll: w1.all, last7Bots: w7.bots, last7All: w7.all, last30Bots: w30.bots, last30All: w30.all, botReasons, botSplit, kinds,
+    peopleSince, daily: dailySplit, countingSince: first, dayZone: 'Asia/Jerusalem',
     windowFrom: { today: since(1, now), last7: since(7, now), last30: since(30, now) },
     countries: { last7: byCountry(7), last30: byCountry(30), since: countriesSince }
   };

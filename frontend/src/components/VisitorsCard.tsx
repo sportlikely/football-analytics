@@ -12,7 +12,10 @@ interface Visitors {
   // fix183: people only; what was filtered, and the old number (every API caller) kept for a week to compare
   todayBots?: number; todayAll?: number; last7All?: number; last30All?: number; last7Bots?: number; last30Bots?: number; dayZone?: string; botReasons?: { reason: string; n: number }[]
   peopleSince?: string; datacentre?: { loaded: boolean; status: string }
-  daily: { day: string; visitors: number; signedIn: number; hits: number; bots?: number; allCallers?: number }[]
+  daily: { day: string; visitors: number; signedIn: number; hits: number; bots?: number; allCallers?: number; kinds?: Kinds }[]
+  // fix285: each caller once — people / search engines / link previews / blocked bots / other bots (they add up to all callers)
+  kinds?: { today: Kinds; last7: Kinds; last30: Kinds }
+  goodBots?: GoodBotRow[]
   countingSince: string | null
   countries?: { last7: CountryRow[]; last30: CountryRow[]; since: string | null; geo?: Geo }
   // fix273: the stored summary's time (the worker builds it every 5 min); the country list in use (live); not built yet
@@ -28,6 +31,17 @@ interface SwarmRow {
   countries: { cc: string; addresses: number }[]; networks: { name: string; addresses: number }[]; otherNetworks: number
   addressesHour: number; addresses: number; requests: number; views: number; human: number; humanShare: number; headless: number
   refused: number; refused24h: number; wrong: number; groupsHeld: number; since: string | null; until: string | null
+}
+type Kind = 'people' | 'search' | 'previews' | 'blocked' | 'other'
+type Kinds = Record<Kind, number>
+const KINDS: { k: Kind; label: string; cls: string }[] = [
+  { k: 'people', label: 'People', cls: 'bg-accent/80' }, { k: 'search', label: 'Search engines', cls: 'bg-home/80' },
+  { k: 'previews', label: 'Link previews', cls: 'bg-draw/80' }, { k: 'blocked', label: 'Blocked bots', cls: 'bg-loss/70' }, { k: 'other', label: 'Other bots', cls: 'bg-faint/50' }
+]
+// fix285: link previews and AI crawlers that name themselves (live counts today; AI bots carry Yarin's Trust / Challenge switch)
+interface GoodBotRow {
+  id: string; name: string; kind: 'preview' | 'ai'; owner: string; checked: 'ranges' | 'dns' | 'card' | 'name'; mode: 'trust' | 'challenge' | null; modeBy: string | null
+  requests: number; pages: number; addresses: number; verified: number; card: number; fake: number; challenged: number
 }
 interface SwarmOverride { ua: string; mode: 'trust' | 'challenge'; text: string | null; by: string | null; at: string }
 // fix245: search engines today — verified by their published address lists or DNS, refused (429 / 503), the day's DNS sample
@@ -278,6 +292,58 @@ function SwarmsCard({ rows, overrides, reload }: { rows: SwarmRow[]; overrides: 
   )
 }
 
+const CHECKED: Record<GoodBotRow['checked'], string> = { ranges: 'published addresses', dns: 'reverse DNS', card: 'nothing published: Open Graph card only', name: 'name only (nothing published)' }
+const botText = (r: GoodBotRow) => `${r.name} (${r.owner}) · ${r.kind === 'ai' ? `AI crawler, ${r.mode === 'trust' ? 'trusted' : 'challenged'}` : 'link preview, never challenged'} · checked by ${CHECKED[r.checked]} · today ${r.requests} requests, ${r.pages} pages, ${r.addresses} addresses, ${r.verified} verified${r.card ? `, ${r.card} card only` : ''}${r.fake ? `, ${r.fake} fakes (treated as unknown callers)` : ''}${r.challenged ? `, ${r.challenged} challenged` : ''}`
+
+/** fix285: link previews (never challenged when verified) and AI crawlers that name themselves (a switch each) */
+function GoodBotsCard({ rows, reload }: { rows: GoodBotRow[]; reload: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const set = (id: string, mode: 'trust' | 'challenge') => {
+    setBusy(id)
+    axios.post(`${API_URL}/admin/good-bots/${id}`, { mode }).then(reload).catch(() => {}).finally(() => setBusy(null))
+  }
+  const ai = rows.filter(r => r.kind === 'ai'), previews = rows.filter(r => r.kind === 'preview')
+  const line = (r: GoodBotRow) => (
+    <p className="text-[11px] text-faint num">
+      {n0(r.requests)} requests · {n0(r.pages)} pages · {n0(r.addresses)} addresses today · {n0(r.verified)} verified{r.card ? ` · ${n0(r.card)} card only` : ''}{r.fake ? ` · ${n0(r.fake)} fakes` : ''}{r.challenged ? ` · ${n0(r.challenged)} challenged` : ''} · {CHECKED[r.checked]}
+    </p>
+  )
+  return (
+    <div className="mt-6 pt-5 border-t border-line/60" data-copy-block="good-bots">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h3 className="font-display font-bold text-ink">AI crawlers and link previews</h3>
+        <CopyForClaude size="sm" req={() => ({ place: 'Admin → Visitors & users → Visitors → AI crawlers and link previews', scope: 'item', shown: [{ title: 'AI crawlers and link previews', text: rows.map(botText).join('\n') }] })} />
+      </div>
+      <ul className="space-y-2 text-sm">
+        {ai.map(r => (
+          <li key={r.id} className="rounded-xl border border-line/60 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-xs text-ink">{r.name} <span className="text-faint">· {r.owner}</span></span>
+              <div className="seg text-[11px]">
+                {(['trust', 'challenge'] as const).map(m => (
+                  <button key={m} type="button" disabled={busy === r.id} onClick={() => set(r.id, m)} className={`seg-btn ${r.mode === m ? 'seg-btn-active' : ''}`}>{m === 'trust' ? 'Trust' : 'Challenge'}</button>
+                ))}
+              </div>
+            </div>
+            {line(r)}
+          </li>
+        ))}
+      </ul>
+      <ul className="mt-3 space-y-1.5">
+        {previews.map(r => (
+          <li key={r.id} className="text-xs text-ink">
+            {r.name} <span className="text-faint">· {r.owner} · never challenged</span>
+            {line(r)}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-[10px] text-faint">
+        Link previews are checked by the addresses their company publishes (or reverse DNS): a real one gets the stored page with its title and picture, never the Quick check; one made on a phone or a server that publishes nothing gets the title and picture only. A copy of a known name from another network is treated like any unknown caller. AI crawlers: Trust = like a search engine (stored pages only); Challenge = the Quick check on every page. Their pages never count as visits.
+      </p>
+    </div>
+  )
+}
+
 /** Admin: people on the site now, and unique visitors (one per IP) today / 7 / 30 days, with a 30-day bar chart. */
 export default function VisitorsCard() {
   const [v, setV] = useState<Visitors | null>(null)
@@ -301,6 +367,9 @@ export default function VisitorsCard() {
     days.push({ day: d, visitors: r?.visitors || 0, signedIn: r?.signedIn || 0, bots: r?.bots || 0 })
   }
   const old = showOld(v?.peopleSince)
+  const split = (k: Kinds) => KINDS.map(x => `${x.label} ${n0(k[x.k])}`).join(' · ')
+  const kindDays = days.map(d => ({ day: d.day, k: v?.daily?.find(x => x.day === d.day)?.kinds }))
+  const maxAll = Math.max(1, ...kindDays.map(d => (d.k ? KINDS.reduce((t, x) => t + d.k![x.k], 0) : 0)))
   const max = Math.max(1, ...days.map(d => d.visitors))
   const tile = (label: string, value: number | string | undefined, sub?: string, live = false) => (
     <div className={`rounded-xl border px-4 py-3 ${live ? 'border-live/40 bg-live/[0.07]' : 'border-line/60 bg-surface2/50'}`}>
@@ -331,6 +400,12 @@ export default function VisitorsCard() {
         {tile('Last 7 days', v?.last7, old && v?.last7All != null ? `people · old count ${v.last7All} callers` : 'people')}
         {tile('Last 30 days', v?.last30, v?.returning30 != null ? `${v.returning30} came back on another day${old && v.last30All != null ? ` · old count ${v.last30All}` : ''}` : undefined)}
       </div>
+      {v?.kinds && (
+        <p className="mt-3 text-sm text-ink num" data-copy-block="visitor-split">
+          <span className="font-semibold">Today:</span> {split(v.kinds.today)}
+          <span className="block text-[11px] text-faint">7 days: {split(v.kinds.last7)} · 30 days: {split(v.kinds.last30)} — each caller counted once</span>
+        </p>
+      )}
       {v?.botReasons && v.botReasons.length > 0 && (
         <p className="mt-2 text-[11px] text-faint">{v.botSplit ? `Bots today: ${n0(v.botSplit.crawlers)} crawlers (verified) · ${n0(v.botSplit.swarms)} swarms · ${n0(v.botSplit.other)} other — ` : ''}Filtered today: {v.botReasons.map(r => `${r.n} ${REASON[r.reason] || r.reason}`).join(' · ')}{v.datacentre && !v.datacentre.loaded ? ` · data-centre list: ${v.datacentre.status}` : ''}{old && v.onlineAll != null ? ` · online now, all callers: ${v.onlineAll}` : ''}</p>
       )}
@@ -353,9 +428,30 @@ export default function VisitorsCard() {
           <span>Today</span>
         </div>
       </div>
+      {kindDays.some(d => d.k) && (
+        <div className="mt-5">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-faint mb-1.5">All callers per day</div>
+          <div className="flex items-end gap-[3px] h-20">
+            {kindDays.map(d => {
+              const tot = d.k ? KINDS.reduce((t, x) => t + d.k![x.k], 0) : 0
+              return (
+                <div key={d.day} className="flex-1 h-full flex flex-col justify-end" title={d.k ? `${d.day}: ${split(d.k)}` : `${d.day}: –`}>
+                  <div className="w-full rounded-t-[3px] overflow-hidden flex flex-col-reverse" style={{ height: `${(tot / maxAll) * 100}%`, minHeight: tot ? 2 : 0 }}>
+                    {d.k && KINDS.map(x => <div key={x.k} className={x.cls} style={{ height: tot ? `${(d.k![x.k] / tot) * 100}%` : 0 }} />)}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap gap-3 text-[10px] text-faint mt-1.5">
+            {KINDS.map(x => <span key={x.k} className="flex items-center gap-1"><span className={`w-2 h-2 rounded-sm ${x.cls}`} />{x.label}</span>)}
+          </div>
+        </div>
+      )}
       {v?.countries && <Countries c={v.countries} geo={v.geo ?? v.countries.geo} />}
       {v?.crawlers && <CrawlersCard c={v.crawlers} />}
       {v?.swarms && <SwarmsCard rows={v.swarms} overrides={v.swarmOverrides || []} reload={() => reloadRef.current()} />}
+      {v?.goodBots && <GoodBotsCard rows={v.goodBots} reload={() => reloadRef.current()} />}
       {v?.who && <WhoCard w={v.who} />}
     </section>
   )

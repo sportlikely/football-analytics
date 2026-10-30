@@ -107,3 +107,31 @@ opened a few pages, sent no seen beacon, and the next one took over.
 
 Code: `utils/swarmRules.ts` (rules, unit-tested by `npm run test:fix277`), `services/swarmGuard.ts` (server side).
 
+## Link previews and AI crawlers (fix285, 30 Oct 2026)
+
+30 Oct: facebookexternalhit sat in Admin → Visitors → Swarms as "watching" with 148 addresses. Yarin: link previews and
+verified crawlers are never challenged; AI crawlers get a switch each; the Visitors headline separates good bots.
+
+- **Link previews** (Meta facebookexternalhit / meta-externalfetcher, Twitterbot, WhatsApp, TelegramBot, LinkedInBot,
+  Slackbot, Discordbot, Pinterestbot; Applebot = search engine, fix245): checked by the addresses the company publishes
+  (Meta = its network AS32934, X = AS13414, LinkedIn = AS14413 as seed prefixes; Telegram's cidr.txt downloaded daily) or
+  reverse DNS where that is what it publishes (Pinterest `*.pinterest.com`). Verified = treated like a verified search
+  engine: stored page with its Open Graph tags, no provider calls, never a swarm / proxy / Quick check.
+- Previews made where nothing is published — the sender's phone (WhatsApp from a phone, iMessage) or changing cloud
+  servers (Slack, Discord): never challenged, but **the Open Graph card only** (the page's head, no body, no scripts).
+- A name of a company that publishes its addresses, from another network = a fake: a normal unknown caller (unknown-bot
+  limits, proxy rules, swarm rules).
+- **AI crawlers that name themselves** (OAI-SearchBot, ChatGPT-User, GPTBot, PerplexityBot, Perplexity-User,
+  Claude-SearchBot / Claude-User / ClaudeBot, ExaBot / ExaUser, Amazonbot, meta-externalagent, DuckAssistBot,
+  MistralAI-User, YouBot, CCBot): one switch each in Admin → Visitors → "AI crawlers and link previews" (under Swarms):
+  **Challenge (default)** = the Quick check on every page / API read; **Trust** = like a search engine. Where the company
+  publishes addresses (OpenAI, Perplexity: JSON lists downloaded daily; Amazon: reverse DNS), Trust needs them. Their
+  pages never count as visits (visits.bot 'ai-trusted' / 'ai-blocked').
+- **Visitors headline**: People · Search engines · Link previews · Blocked bots · Other bots, each caller counted once in
+  its strongest category (people > search engines incl. trusted AI > previews > blocked: swarms, AI on Challenge, the
+  403 bad bots > other), so the five add up to all callers; the daily chart has the same split. Bot page loads are now
+  recorded too (the page route never went through the /api visit counter, so previews were never in Visitors).
+
+Code: `utils/goodBots.ts` (rules + the headline categories), `services/goodBots.ts` (lists, DNS, switches in
+`good_bot_modes` → state 'goodbots:modes', live counts), app.ts crawler middleware / API middleware / page route,
+`services/visitors.ts` `markBotVisit`, `services/visitorSummary.ts` `kinds`. Tests: `npm run test:fix285`.

@@ -31,6 +31,7 @@ import { startBackups, localList, localPath } from './services/backup';
 import { restoreFromKeep, restoreFromBackups } from './services/staffConsole';
 import { startAsn } from './services/asn';
 import { startCrawlerRanges } from './services/crawlerIps';
+import { startGoodBotRanges } from './services/goodBots';
 import { startTennisScheduler } from './services/tennis';
 import { startTennisModelScheduler } from './services/tennisModel';
 import { startGeo } from './services/geo';
@@ -322,6 +323,8 @@ export function startJobs() {
     ['asn', () => startAsn()],
     // fix245: Google / Bing / Apple crawler address lists, daily (search engines verified even when DNS fails)
     ['crawler ranges', () => startCrawlerRanges()],
+    // fix285: link-preview / AI-crawler address lists (Telegram, OpenAI, Perplexity), daily
+    ['good-bot ranges', () => startGoodBotRanges()],
     // fix184: tennis data (Live Tennis API Pro, admin only)
     ['tennis', () => startTennisScheduler()],
     // fix190: tennis-v1 (admin only): report once the backfill reached 2023-01, weekly re-tune, predictions every 30 min
