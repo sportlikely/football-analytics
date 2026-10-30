@@ -86,7 +86,8 @@ const NOT_TEXT = /^(#\w+|[+~€%x\- ]*|\u0000*|en-GB|long|plus|minus|note|draw|t
 test('every sentence a generator writes has its template in lib/genText.ts', () => {
   const missing = [];
   for (const [file, part] of SOURCES) {
-    const src = fs.readFileSync(path.join(SRC, file), 'utf8');
+    // fix286b: a Windows checkout has CRLF (git autocrlf) — the parts' patterns are written for LF, as in the repo
+    const src = fs.readFileSync(path.join(SRC, file), 'utf8').replace(/\r\n/g, '\n');
     const m = part.exec(src);
     assert.ok(m, `${file}: the generator part was not found (moved? update SOURCES)`);
     for (const lit of literals(m[0].replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''))) {
