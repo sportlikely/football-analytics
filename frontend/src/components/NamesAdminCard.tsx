@@ -6,7 +6,8 @@ import { errorText } from '../lib/auth'
 /**
  * fix283: the 300 most opened names; per spelling its source, what visitors see (letter rules, a flagged spelling and an
  * unsure AI spelling are never shown: the page keeps the Latin name), the checks' flags and "Approve"; counts per shown
- * source; the AI's spend today against its cap.
+ * source; the AI's spend today against its cap. fix286: names left for the AI and their estimated cost at the current
+ * price (usage per name of the last 30 days), players waiting for a view.
  *
  * fix261 (admin): Data & feeds → "Names in Hebrew / Arabic" — the 200 most opened names (team / player page opens, then
  * how often they play) with their Hebrew and Arabic spelling and where it came from (admin > press > Wikidata > letter
@@ -21,7 +22,8 @@ interface Data {
   rows: Row[]
   counts: { byLang: Record<string, Record<string, Record<string, number>>>; items: Record<string, number>; shown: Record<string, Record<string, number>>; flagged: Record<string, number> }
   top: Record<string, Record<string, number>>
-  ai: { configured: boolean; model: string; capUsd: number; today: { calls: number; usd: number; names: number; errors: number }; last30d: { calls: number; usd: number; names: number }; asked: number }
+  ai: { configured: boolean; model: string; capUsd: number; today: { calls: number; usd: number; names: number; errors: number }; last30d: { calls: number; usd: number; names: number }; asked: number
+    perName: { inTok: number; outTok: number; usd: number; measured: boolean }; left: { names: number; waiting: number; estUsd: number } }
   flagText: Record<string, string>
   lastRun: { at: string | null; items: number; written: number; wdTried: number; wdFound: number; error: string | null }
   mapSize: Record<string, number>
@@ -71,6 +73,7 @@ export default function NamesAdminCard() {
             <div key={l}>{l}: {d.mapSize[l] ?? 0} names in the map · shown by source: {counts(d.counts.shown?.[l])} · flagged {d.counts.flagged?.[l] ?? 0} · this list: {counts(d.top?.[l])}</div>
           ))}
           <div>AI spelling: {d.ai.configured ? `on (${d.ai.model}) · today $${d.ai.today.usd.toFixed(2)} of $${d.ai.capUsd} · ${d.ai.today.calls} calls, ${d.ai.today.names} names${d.ai.today.errors ? `, ${d.ai.today.errors} errors` : ''} · 30 days $${d.ai.last30d.usd.toFixed(2)} · ${d.ai.asked} names asked` : 'off — add ANTHROPIC_API_KEY in Railway to turn it on'}</div>
+          {d.ai.left && <div>AI names left to do: {d.ai.left.names.toLocaleString('en-US')} · about ${d.ai.left.estUsd.toFixed(2)} at the current price (${d.ai.perName.usd.toFixed(5)} a name: {d.ai.perName.inTok} tokens in, {d.ai.perName.outTok} out{d.ai.perName.measured ? ', last 30 days' : ', first guess'}) · {d.ai.left.waiting.toLocaleString('en-US')} players stay Latin until someone opens their page</div>}
           <div>Names collected: {Object.entries(d.counts.items).map(([k, n]) => `${k} ${n}`).join(', ') || '–'}</div>
           <div>Last run {d.lastRun.at ? when(d.lastRun.at) : 'not yet'}: {d.lastRun.written} written · Wikidata tried {d.lastRun.wdTried}, found {d.lastRun.wdFound}{d.lastRun.error ? ` · error: ${d.lastRun.error}` : ''}</div>
         </div>

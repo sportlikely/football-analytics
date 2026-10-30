@@ -439,13 +439,14 @@ function dict(lang: NameLang): Map<string, Set<string>> {
   return dictCache[lang];
 }
 
-export type NameFlag = 'dictionary' | 'final-inside' | 'triple' | 'initials-lost' | 'latin-left' | 'empty';
+export type NameFlag = 'dictionary' | 'final-inside' | 'triple' | 'initials-lost' | 'latin-left' | 'other-script' | 'empty';
 export const FLAG_TEXT: Record<NameFlag, string> = {
   dictionary: 'a dictionary / place word that is not this name',
   'final-inside': 'a final letter (ך ם ן ף ץ) inside a word',
   triple: 'the same letter three times in a row',
   'initials-lost': 'an initial of the Latin name is missing',
   'latin-left': 'Latin letters left inside the name',
+  'other-script': 'letters of another alphabet (Cyrillic, Greek, Arabic in Hebrew, Hebrew in Arabic …)',
   empty: 'no letters of the language'
 };
 const INITIAL_RX = /(?<=^|[\s.])\p{L}\.(?=\s|\p{L}\.|$)/gu;
@@ -475,7 +476,15 @@ export function spellingFlags(latin: string, local: string, lang: NameLang, kind
   // Latin letters next to local ones: only Latin initials ("N.") and an acronym the Latin name has ("NBA") may stay
   const rest = s.replace(LATIN_INITIAL_RX, '').split(/\s+/).filter(w => !(/^[A-Z0-9]{2,6}$/.test(w) && String(latin).split(/\s+/).includes(w))).join(' ');
   if (/[A-Za-z]/.test(rest)) out.push('latin-left');
+  // fix286: "Brayden" came back "ברייдן" — a letter of any other alphabet (Latin is the check above)
+  if (otherScript(s, lang)) out.push('other-script');
   return out;
+}
+const OWN_SCRIPT: Record<NameLang, RegExp> = { he: /\p{Script=Hebrew}|\p{Script=Latin}/u, ar: /\p{Script=Arabic}|\p{Script=Latin}/u };
+/** fix286: a letter that is neither the language's own nor Latin (Cyrillic, Greek, Arabic in Hebrew, Hebrew in Arabic …) */
+export function otherScript(s: string, lang: NameLang): boolean {
+  for (const ch of String(s || '')) if (/\p{L}/u.test(ch) && !OWN_SCRIPT[lang].test(ch)) return true;
+  return false;
 }
 
 /** the sources, most trusted first ('translit' = letter rules; 'latin' = nothing shown, the provider's name stays) */
@@ -503,27 +512,52 @@ Rules:
 - Teams and leagues: the established press name (city names as the press writes them; club-form letters like FC dropped).
 - Hebrew: final letters (ך ם ן ף ץ) only at the end of a word; use ג' צ' ז' ת' for j / ch / zh / th sounds.
 - confidence: 0.0–1.0, how sure you are this is the spelling the press uses (≥ 0.9 only when you have seen it written that way).
-Answer with JSON only: [{"i": <index>, "he": "...", "he_conf": 0.0, "ar": "...", "ar_conf": 0.0}, ...] — one entry per input line, same index.`;
+Answer with one line per input line and nothing else (no JSON, no notes): index|hebrew|confidence|arabic|confidence
+e.g. 0|ברנדון נייט|0.9|براندون نايت|0.85 — leave a spelling empty when you do not know it (0|||براندون نايت|0.6).`;
+/** fix286: asked again once when a spelling had letters of another alphabet */
+export const AI_RETRY_NOTE = 'Your last answer for these names had letters of another alphabet (Cyrillic, Greek …) inside a name. Hebrew spellings use Hebrew letters only, Arabic spellings Arabic letters only (Latin initials / acronyms as given may stay).';
 export function aiPrompt(items: AiItem[]): string {
   return items.map((it, i) => `${i}\t${it.sport || '-'}\t${it.kind}\t${it.name}${it.country ? `\tcountry: ${it.country}` : ''}${it.team ? `\tteam: ${it.team}` : ''}`).join('\n');
 }
-/** the AI's answer → per index { he, he_conf, ar, ar_conf } (anything malformed is left out) */
+/** fix286: the AI's compact answer ("i|he|conf|ar|conf" per line) → per index { he, ar } (anything malformed is left out) */
 export function parseAi(text: string, n: number): Map<number, Partial<Record<NameLang, { name: string; conf: number }>>> {
   const out = new Map<number, Partial<Record<NameLang, { name: string; conf: number }>>>();
-  const m = /\[[\s\S]*\]/.exec(String(text || ''));
-  if (!m) return out;
-  let arr: any[] = [];
-  try { arr = JSON.parse(m[0]); } catch { return out; }
-  if (!Array.isArray(arr)) return out;
-  for (const x of arr) {
-    const i = Number(x?.i);
-    if (!Number.isInteger(i) || i < 0 || i >= n) continue;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const f = line.replace(/^[\s`*-]+|[\s`]+$/g, '').split('|').map(x => x.trim());
+    if (f.length < 3 || !/^\d+$/.test(f[0])) continue;
+    const i = Number(f[0]);
+    if (i >= n || out.has(i)) continue;
     const e: Partial<Record<NameLang, { name: string; conf: number }>> = {};
-    for (const lang of NAME_LANGS) {
-      const name = String(x?.[lang] ?? '').trim().slice(0, 80), conf = Math.max(0, Math.min(1, Number(x?.[`${lang}_conf`]) || 0));
+    NAME_LANGS.forEach((lang, k) => {
+      const name = String(f[1 + 2 * k] ?? '').slice(0, 80), conf = Math.max(0, Math.min(1, Number(f[2 + 2 * k]) || 0));
       if (name && LOCAL_SCRIPT.test(name)) e[lang] = { name, conf };
-    }
+    });
     out.set(i, e);
   }
   return out;
+}
+
+/* ---------- fix286: whose names the AI is asked for ---------- */
+/** a player viewed this many days back is asked (a view queues the name for the next run) */
+export const AI_VIEW_DAYS = 60;
+/**
+ * API-Football league ids of the top 2 divisions of the 10 biggest football countries: England, Spain, Germany, Italy,
+ * France, Portugal, Netherlands, Brazil, Argentina, Turkey
+ */
+export const AI_TOP_FOOTBALL = [39, 40, 140, 141, 78, 79, 135, 136, 61, 62, 94, 95, 88, 89, 71, 72, 128, 129, 203, 204];
+/** basketball leagues whose every player is asked */
+export const AI_TOP_BASKETBALL = ['NBA', 'EL'];
+/** tennis: every player ranked this high or better (ATP / WTA) */
+export const AI_TENNIS_RANK = 200;
+/** players per league and stat that make its leaders / top-scorer list */
+export const AI_LEADERS = 20;
+/**
+ * fix286: is the AI asked for this name? Every team / league / country / city; a player only when the collector picked
+ * them (name_items.ai_pick: top divisions, NBA / EuroLeague, NFL, tennis top 200, a leaders list) or they were viewed in
+ * the last AI_VIEW_DAYS days. Everyone else stays Latin until viewed.
+ */
+export function aiWanted(r: { kind: string; ai_pick?: string | null; viewed_at?: string | null }, now = Date.now()): boolean {
+  if (r.kind !== 'player') return true;
+  if (r.ai_pick) return true;
+  return !!r.viewed_at && Date.parse(r.viewed_at) >= now - AI_VIEW_DAYS * 86400000;
 }

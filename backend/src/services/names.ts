@@ -20,7 +20,7 @@
 import { db, DB_READ_ONLY } from '../db';
 import logger from '../utils/logger';
 import { yieldEvery } from './perf';
-import { NAME_LANGS, type NameLang, isNameLang, fallbackName, nameKey, LOCAL_SCRIPT, personOrder, spellingFlags, visibleName, FLAG_TEXT, type NameFlag } from '../utils/nameScript';
+import { NAME_LANGS, type NameLang, isNameLang, fallbackName, nameKey, LOCAL_SCRIPT, personOrder, spellingFlags, visibleName, FLAG_TEXT, type NameFlag, AI_TOP_FOOTBALL, AI_TOP_BASKETBALL, AI_TENNIS_RANK, AI_LEADERS } from '../utils/nameScript';
 import { namesAiTick, namesAiStatus } from './namesAi';
 
 /*
@@ -61,6 +61,10 @@ if (!DB_READ_ONLY) {
   for (const col of ['display TEXT', 'first TEXT', 'last TEXT', 'dob TEXT', 'team TEXT', 'ext TEXT']) { try { db.exec(`ALTER TABLE name_items ADD COLUMN ${col}`); } catch { /* there */ } }
   for (const col of ['conf REAL', 'flags TEXT', 'approved INTEGER NOT NULL DEFAULT 0', 'basis TEXT']) { try { db.exec(`ALTER TABLE names ADD COLUMN ${col}`); } catch { /* there */ } }
   db.exec(`CREATE TABLE IF NOT EXISTS names_meta (key TEXT PRIMARY KEY, value TEXT, at TEXT NOT NULL)`);
+  // fix286: why the AI is asked for a player (null = only once viewed) and the last page open; the views counted before
+  // fix286 are all from the last few weeks (fix261) — their last open is taken as the last collect
+  try { db.exec(`ALTER TABLE name_items ADD COLUMN ai_pick TEXT`); } catch { /* there */ }
+  try { db.exec(`ALTER TABLE name_items ADD COLUMN viewed_at TEXT`); db.exec(`UPDATE name_items SET viewed_at = seen_at WHERE views > 0`); } catch { /* there */ }
 }
 /** the name the spelling is built from: first-last order */
 const basisOf = (it: { sport: string; kind: string; latin: string; display?: string | null }) => it.display || personOrder(it.latin, { sport: it.sport, kind: it.kind });
@@ -79,24 +83,28 @@ const all = (sql: string, ...a: any[]): any[] => { try { return db.prepare(sql).
 const daysAgo = (d: number) => new Date(Date.now() - d * DAY).toISOString();
 
 /* ---------- what the site shows ---------- */
-type Item = { sport: string; kind: NameKind; latin: string; id: string | null; country: string | null; weight: number; display?: string | null; dob?: string | null; team?: string | null };
-/** every team / league / country / city / player name of the last ~13 months, with how often it was played */
+type Item = { sport: string; kind: NameKind; latin: string; id: string | null; country: string | null; weight: number; display?: string | null; dob?: string | null; team?: string | null; pick?: string | null };
+/**
+ * every team / league / country / city / player name of the last ~13 months, with how often it was played; fix286: a
+ * player's `pick` = why the AI spells them without a view (nameScript.aiWanted)
+ */
 export function collectItems(): Item[] {
   const out = new Map<string, Item>();
-  const add = (sport: string, kind: NameKind, latin: unknown, id: unknown, weight = 1, country: unknown = null, more: { first?: string | null; last?: string | null; dob?: string | null; team?: string | null } = {}) => {
+  const add = (sport: string, kind: NameKind, latin: unknown, id: unknown, weight = 1, country: unknown = null, more: { first?: string | null; last?: string | null; dob?: string | null; team?: string | null; pick?: string | null } = {}) => {
     const n = String(latin ?? '').trim();
     if (!n || n.length > 80 || LOCAL_SCRIPT.test(n)) return;
     const k = `${sport}|${kind}|${n}`;
     const x = out.get(k);
     if (x) {
       x.weight += weight;
+      x.pick ||= more.pick || null;
       // a league name of two countries ("Premier League": England, Ukraine …): '*' = no country's press spelling fits both
       if (kind === 'league' && x.country && country && x.country !== String(country)) x.country = '*';
       else if (!x.country && country) x.country = String(country);
       return;
     }
     const display = kind === 'player' ? personOrder(n, { sport, kind, first: more.first, last: more.last }) : null;
-    out.set(k, { sport, kind, latin: n, id: id == null ? null : String(id), country: country ? String(country) : null, weight, display: display && display !== n ? display : null, dob: more.dob || null, team: more.team || null });
+    out.set(k, { sport, kind, latin: n, id: id == null ? null : String(id), country: country ? String(country) : null, weight, display: display && display !== n ? display : null, dob: more.dob || null, team: more.team || null, pick: more.pick || null });
   };
   const since = daysAgo(400), sinceDay = since.slice(0, 10);
   // football: API-Football fixtures (+ league country), Football-Data.org predictions, national teams, players
@@ -119,7 +127,13 @@ export function collectItems(): Item[] {
   }
   const afTeam = new Map<number, string>();
   for (const r of all(`SELECT home_id AS id, MAX(home_name) AS n FROM af_fixtures WHERE date >= ? GROUP BY home_id`, sinceDay)) afTeam.set(r.id, r.n);
-  for (const r of all(`SELECT player_id AS id, name, SUM(COALESCE(apps, 0)) AS a, MAX(team_id) AS t FROM af_player_season WHERE season >= (SELECT MAX(season) - 1 FROM af_player_season) GROUP BY player_id, name`)) add('football', 'player', r.name, r.id, Math.max(1, r.a || 0), null, { team: afTeam.get(r.t) || null });
+  // fix286: the leagues' top scorers / assist leaders (latest season) and the top 2 divisions of the 10 biggest countries
+  const afLeaders = new Set<number>();
+  for (const stat of ['goals', 'assists'])
+    for (const r of all(`SELECT player_id AS id FROM (SELECT player_id, ROW_NUMBER() OVER (PARTITION BY league_id ORDER BY ${stat} DESC) AS rk FROM af_player_season
+        WHERE season = (SELECT MAX(season) FROM af_player_season) AND COALESCE(${stat}, 0) > 0) WHERE rk <= ?`, AI_LEADERS)) afLeaders.add(r.id);
+  for (const r of all(`SELECT player_id AS id, name, SUM(COALESCE(apps, 0)) AS a, MAX(team_id) AS t, MAX(league_id IN (${AI_TOP_FOOTBALL.join(',')})) AS top FROM af_player_season WHERE season >= (SELECT MAX(season) - 1 FROM af_player_season) GROUP BY player_id, name`))
+    add('football', 'player', r.name, r.id, Math.max(1, r.a || 0), null, { team: afTeam.get(r.t) || null, pick: afLeaders.has(r.id) ? 'leaders' : r.top ? 'top division' : null });
   // basketball
   for (const r of all(`SELECT code, name, country FROM bb_leagues`)) { add('basketball', 'league', r.name, r.code, 20, r.country); if (r.country) add('', 'country', r.country, null, 5); }
   for (const r of all(`SELECT home_id AS id, home_name AS n, COUNT(*) AS c FROM bb_games WHERE kickoff >= ? GROUP BY home_id, home_name UNION ALL SELECT away_id, away_name, COUNT(*) FROM bb_games WHERE kickoff >= ?1 GROUP BY away_id, away_name`, since)) add('basketball', 'team', r.n, r.id, r.c);
@@ -129,19 +143,28 @@ export function collectItems(): Item[] {
   for (const r of all(`SELECT home_id AS id, MAX(home_name) AS n FROM bb_games WHERE kickoff >= ? GROUP BY home_id`, since)) bbTeam.set(r.id, r.n);
   const bdl = new Map<string, { first: string; last: string; country: string | null }[]>();
   for (const r of all(`SELECT first, last, country FROM bdl_players WHERE active = 1`)) { const k = nameKey(`${r.last} ${r.first}`); bdl.set(k, [...(bdl.get(k) || []), r]); }
-  for (const r of all(`SELECT ps.player_id AS id, ps.name AS name, COUNT(*) AS c, MAX(ps.team_id) AS t FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff >= ? GROUP BY ps.player_id, ps.name`, since)) {
+  // fix286: each league's points / rebounds / assists leaders of the last ~7 months (5 games or more)
+  const bbLeaders = new Set<number>();
+  const avgs = all(`SELECT g.code, ps.player_id AS id, AVG(ps.pts) AS pts, AVG(ps.reb) AS reb, AVG(ps.ast) AS ast FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id
+    WHERE g.kickoff >= ? GROUP BY g.code, ps.player_id HAVING COUNT(*) >= 5`, daysAgo(210));
+  const byCode = new Map<string, any[]>();
+  for (const r of avgs) byCode.set(r.code, [...(byCode.get(r.code) || []), r]);
+  for (const rows of byCode.values()) for (const st of ['pts', 'reb', 'ast']) for (const r of [...rows].sort((a, b) => (b[st] || 0) - (a[st] || 0)).slice(0, AI_LEADERS)) bbLeaders.add(r.id);
+  const bbTop = AI_TOP_BASKETBALL.map(c => `'${c}'`).join(',');
+  for (const r of all(`SELECT ps.player_id AS id, ps.name AS name, COUNT(*) AS c, MAX(ps.team_id) AS t, MAX(g.code IN (${bbTop})) AS top FROM bb_player_stats ps JOIN bb_games g ON g.game_id = ps.game_id WHERE g.kickoff >= ? GROUP BY ps.player_id, ps.name`, since)) {
     const b = bdl.get(nameKey(r.name || ''));
     const one = b && b.length === 1 ? b[0] : null;
-    add('basketball', 'player', r.name, r.id, r.c, one?.country || null, { first: one?.first, last: one?.last, team: bbTeam.get(r.t) || null });
+    add('basketball', 'player', r.name, r.id, r.c, one?.country || null, { first: one?.first, last: one?.last, team: bbTeam.get(r.t) || null, pick: r.top ? 'NBA / EuroLeague' : bbLeaders.has(r.id) ? 'leaders' : null });
   }
   // American football
   for (const r of all(`SELECT team_id, name, city FROM nfl_teams`)) { add('nfl', 'team', r.name, r.team_id, 30); if (r.city) add('', 'city', r.city, null, 3); }
   const nflTeam = new Map<number, string>(all(`SELECT team_id, name FROM nfl_teams`).map(r => [r.team_id, r.name]));
-  for (const r of all(`SELECT player_id, name, team_id FROM nfl_players`)) add('nfl', 'player', r.name, r.player_id, 2, null, { team: nflTeam.get(r.team_id) || null });
+  const nflPro = new Set<number>(all(`SELECT team_id FROM nfl_teams WHERE COALESCE(league, 1) = 1`).map(r => r.team_id));
+  for (const r of all(`SELECT player_id, name, team_id FROM nfl_players`)) add('nfl', 'player', r.name, r.player_id, 2, null, { team: nflTeam.get(r.team_id) || null, pick: nflPro.has(r.team_id) ? 'NFL' : null });
   // tennis
   const tp = all(`SELECT id, name, country, ranking, dob, first_name, last_name FROM tennis_players`);
   for (const r of tp.length ? tp : all(`SELECT id, name, country, ranking FROM tennis_players`)) {
-    add('tennis', 'player', r.name, r.id, r.ranking ? Math.max(1, 600 - r.ranking) : 1, r.country && String(r.country).length > 3 ? r.country : null, { first: r.first_name, last: r.last_name, dob: r.dob });
+    add('tennis', 'player', r.name, r.id, r.ranking ? Math.max(1, 600 - r.ranking) : 1, r.country && String(r.country).length > 3 ? r.country : null, { first: r.first_name, last: r.last_name, dob: r.dob, pick: r.ranking && r.ranking <= AI_TENNIS_RANK ? `top ${AI_TENNIS_RANK}` : null });
     if (r.country && String(r.country).length > 3) add('', 'country', r.country, null, 1);
   }
   // cities of the venues (weather card)
@@ -363,15 +386,22 @@ export async function namesTick(opts: { collect?: boolean; wd?: number; ai?: boo
     if (opts.collect || Date.now() - lastCollect > 6 * 3600 * 1000) {
       const items = collectItems();
       const now = new Date().toISOString();
-      const up = db.prepare(`INSERT INTO name_items (sport, kind, latin, id, country, weight, seen_at, display, dob, team) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      const up = db.prepare(`INSERT INTO name_items (sport, kind, latin, id, country, weight, seen_at, display, dob, team, ai_pick) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(sport, kind, latin) DO UPDATE SET id = COALESCE(excluded.id, name_items.id), country = COALESCE(excluded.country, name_items.country), weight = excluded.weight, seen_at = excluded.seen_at,
-          display = excluded.display, dob = COALESCE(excluded.dob, name_items.dob), team = COALESCE(excluded.team, name_items.team)`);
-      await inSlices(items, it => { up.run(it.sport, it.kind, it.latin, it.id, it.country, it.weight, now, it.display ?? null, it.dob ?? null, it.team ?? null); }, step);
+          display = excluded.display, dob = COALESCE(excluded.dob, name_items.dob), team = COALESCE(excluded.team, name_items.team), ai_pick = excluded.ai_pick`);
+      await inSlices(items, it => { up.run(it.sport, it.kind, it.latin, it.id, it.country, it.weight, now, it.display ?? null, it.dob ?? null, it.team ?? null, it.pick ?? null); }, step);
       lastCollect = Date.now();
       lastRun.items = items.length;
     }
     // fix283: once — every existing name again through the new steps (order, checks, Wikidata by ids, AI)
     if (!meta('fix283')) await rerunAll(step);
+    // fix286: once — the spellings stored before the other-alphabet check ("ברייдן") get their flags again
+    if (!meta('fix286')) {
+      const rows = all(`SELECT n.sport, n.kind, n.latin, n.lang, n.name, i.display FROM names n LEFT JOIN name_items i ON i.sport = n.sport AND i.kind = n.kind AND i.latin = n.latin WHERE n.source != 'admin'`);
+      const upd = db.prepare(`UPDATE names SET flags = ? WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`);
+      await inSlices(rows, r => { if (isNameLang(r.lang)) upd.run(spellingFlags(basisOf(r), r.name, r.lang, r.kind).join(',') || null, r.sport, r.kind, r.latin, r.lang); }, step);
+      db.prepare(`INSERT OR REPLACE INTO names_meta (key, value, at) VALUES ('fix286', ?, ?)`).run(String(rows.length), new Date().toISOString());
+    }
     // 2. press spelling / transliteration for names without a row (built from the first-last name)
     const st = upsertName();
     for (const lang of NAME_LANGS) {
@@ -522,7 +552,7 @@ export function viewOf(path: string): { sport: string; kind: NameKind; id: strin
   }
   return null;
 }
-export const VIEW_SQL = `UPDATE name_items SET views = views + 1 WHERE sport = ? AND kind = ? AND id = ?`;
+export const VIEW_SQL = `UPDATE name_items SET views = views + 1, viewed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE sport = ? AND kind = ? AND id = ?`;
 
 /* ---------- admin: Data & feeds → "Names in Hebrew / Arabic" ---------- */
 /** the source a visitor sees for a row ('latin' = the provider's name stays) */
@@ -590,7 +620,7 @@ export function namesForClaude(): string {
   const a = namesAdmin({ limit: 80 });
   const lines = [`Names in Hebrew / Arabic (fix261, fix283). Last run: ${a.lastRun.at || 'not yet'}; items ${JSON.stringify(a.counts.items)}; Wikidata tried ${a.lastRun.wdTried}, found ${a.lastRun.wdFound}${a.lastRun.error ? `; error: ${a.lastRun.error}` : ''}.`,
     `Shown per source (all names): ${JSON.stringify(a.counts.shown)}; flagged: ${JSON.stringify(a.counts.flagged)}; top ${a.rows.length}: ${JSON.stringify(a.top)}`,
-    `AI: ${a.ai.configured ? `on (${a.ai.model}), today $${a.ai.today.usd.toFixed(2)} of $${a.ai.capUsd}, ${a.ai.today.names} names` : 'off (no ANTHROPIC_API_KEY)'}`,
+    `AI: ${a.ai.configured ? `on (${a.ai.model}), today $${a.ai.today.usd.toFixed(2)} of $${a.ai.capUsd}, ${a.ai.today.names} names` : 'off (no ANTHROPIC_API_KEY)'}; left to do ${a.ai.left.names} names ≈ $${a.ai.left.estUsd} ($${a.ai.perName.usd} a name, ${a.ai.perName.inTok} in / ${a.ai.perName.outTok} out tokens${a.ai.perName.measured ? '' : ', first guess'}), ${a.ai.left.waiting} players wait for a view`,
     'Most opened names (latin | he shown/source conf flags | ar shown/source conf flags):'];
   const cell = (x: any) => (x ? `${x.name} (${x.shown}${x.shown !== x.source ? `/${x.source}` : ''}${x.conf != null ? ` ${x.conf}` : ''}${x.flags.length ? ` ⚑${x.flags.join('+')}` : ''})` : '—');
   for (const r of a.rows) lines.push(`${r.sport || '-'} ${r.kind} | ${r.latin}${r.display ? ` (${r.display})` : ''} | ${cell(r.names.he)} | ${cell(r.names.ar)}`);

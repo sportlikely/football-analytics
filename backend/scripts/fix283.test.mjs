@@ -29,8 +29,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS bb_games (game_id INTEGER PRIMARY KEY, kicko
   CREATE TABLE IF NOT EXISTS bb_player_stats (game_id INTEGER NOT NULL, team_id INTEGER NOT NULL, player_id INTEGER NOT NULL, name TEXT, PRIMARY KEY (game_id, player_id));`);
 
 const now = new Date().toISOString();
-const item = (sport, kind, latin, id, extra = {}) => db.prepare(`INSERT OR REPLACE INTO name_items (sport, kind, latin, id, country, weight, views, seen_at, display, dob, team, ext)
-  VALUES (?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?)`).run(sport, kind, latin, String(id), extra.country ?? null, extra.views ?? 0, now, extra.display ?? null, extra.dob ?? null, extra.team ?? null, extra.ext ? JSON.stringify(extra.ext) : null);
+const item = (sport, kind, latin, id, extra = {}) => db.prepare(`INSERT OR REPLACE INTO name_items (sport, kind, latin, id, country, weight, views, viewed_at, seen_at, display, dob, team, ext)
+  VALUES (?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?)`).run(sport, kind, latin, String(id), extra.country ?? null, extra.views ?? 0, extra.views ? now : null, now, extra.display ?? null, extra.dob ?? null, extra.team ?? null, extra.ext ? JSON.stringify(extra.ext) : null);
 const row = (latin, lang = 'he') => db.prepare(`SELECT name, source, flags, conf, approved FROM names WHERE latin = ? AND lang = ?`).get(latin, lang);
 const map = lang => JSON.parse(names.namesJson(lang) || '{"names":{}}').names;
 // a fake Wikidata: nothing found unless a test says so
@@ -43,7 +43,7 @@ names.setNamesFetcher(async url => {
 });
 // a fake AI that counts its calls
 const aiCalls = [];
-let aiAnswer = () => '[]';
+let aiAnswer = () => '';
 ai.setNamesAiFetcher(async (url, init) => {
   aiCalls.push({ url, body: JSON.parse(init.body), headers: init.headers });
   return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: aiAnswer(JSON.parse(init.body)) }], usage: { input_tokens: 3000, output_tokens: 6000 }, stop_reason: 'end_turn' }) };
@@ -157,9 +157,10 @@ test('nothing calls the AI without the key; with it: batches, confidence bar, as
   process.env.NAMES_AI_DAILY_USD = '2';
   aiAnswer = body => {
     const lines = body.messages[0].content.split('\n').slice(1).map(l => l.split('\t'));
-    return JSON.stringify(lines.map(([i, , , name]) => name === 'Brandon Knight' ? { i: Number(i), he: 'ברנדון נייט', he_conf: 0.95, ar: 'براندون نايت', ar_conf: 0.9 }
-      : name === 'D.J. Reed' ? { i: Number(i), he: 'D.J. ריד', he_conf: 0.9, ar: 'D.J. ريد', ar_conf: 0.4 }
-      : name === 'Bowling Green' ? { i: Number(i), he: 'בווולינג גרין', he_conf: 0.9 } : { i: Number(i) }));
+    // fix286: the compact answer, one line per name (i|he|conf|ar|conf)
+    return lines.map(([i, , , name]) => name === 'Brandon Knight' ? `${i}|ברנדון נייט|0.95|براندون نايت|0.9`
+      : name === 'D.J. Reed' ? `${i}|D.J. ריד|0.9|D.J. ريد|0.4`
+      : name === 'Bowling Green' ? `${i}|בווולינג גרין|0.9||` : `${i}|||`).join('\n');
   };
   const r = await ai.namesAiTick({ batches: 2 });
   assert.equal(aiCalls.length, 1, `one batch holds every name (${JSON.stringify(r)})`);
