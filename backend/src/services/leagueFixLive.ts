@@ -6,6 +6,7 @@
  */
 import { getConfig, FEAT_MODEL } from './featureModel';
 import { applySetting, groupOf, type LeagueSetting, type LGroup } from '../utils/leagueFix';
+import { applyLab } from './footballLabLive';
 
 export const LIVE_KEY = 'league_fix_live';
 export interface LiveLayer {
@@ -38,7 +39,10 @@ export function settingFor(code: string, name?: string | null): LeagueSetting | 
  * numbers ride along as `league.raw` (saved in predictions.layer_raw, so the nightly test always starts from what the
  * model said). Competitions without a setting come back unchanged.
  */
-export function applyLeagueFix<T extends { model: string; home: number; draw: number; away: number }>(match: any, preds: T[]): T[] {
+export function applyLeagueFix<T extends { model: string; home: number; draw: number; away: number }>(match: any, predsIn: T[]): T[] {
+  // fix291: the football lab's promoted layer first (nothing until a candidate passed), then the per-league layer
+  let preds = predsIn;
+  try { preds = applyLab(match, predsIn); } catch { preds = predsIn; }
   const code = match?.competition?.code;
   const s = code && preds.length ? settingFor(code, match?.competition?.name) : null;
   if (!s) return preds;

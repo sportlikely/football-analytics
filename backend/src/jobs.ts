@@ -78,6 +78,7 @@ import { dailySummaryTick } from './services/adminMail';
 import { diffViewFreezeTick } from './services/diffView';
 import { startDbSpaceScheduler } from './services/dbSpace';
 import { runLeagueFix, leagueFixDue } from './services/leagueFix';
+import { runFootballLab, footballLabDue } from './services/footballLab';
 import { marketTick, runMarketFits, marketFitDue } from './services/marketLines';
 
 let started = false;
@@ -124,6 +125,10 @@ export function startJobs() {
   const leagueFix = () => { if (leagueFixDue() && process.env.LEAGUE_FIX !== 'off') heavy('league fix', () => timed('league fix', () => runLeagueFix())).catch(e => logger.warn(`league fix: ${e?.message || e}`)); };
   after('league fix', leagueFix, 25 * 60 * 1000).unref();
   every('league fix', leagueFix, 10 * 60 * 1000).unref();
+  // fix291: the football lab (six candidates, walk-forward, fix251's bootstrap rule) — 05:10 UTC, after the daily job and the league fix
+  const footballLab = () => { if (footballLabDue() && process.env.FOOTBALL_LAB !== 'off') heavy('football lab', () => timed('football lab', () => runFootballLab())).catch(e => logger.warn(`football lab: ${e?.message || e}`)); };
+  after('football lab', footballLab, 40 * 60 * 1000).unref();
+  every('football lab', footballLab, 10 * 60 * 1000).unref();
   // fix278: market lines (admin-only data) — games of the next 48 h every 2 h + a closing snapshot in the last 35 min
   // (ticks every 10 min, each call inside the day's quota); the anchor fits + scoring levels + market gates once a day
   after('market lines', () => marketTick().catch(e => logger.warn(`market lines: ${e?.message || e}`)), 6 * 60 * 1000).unref();

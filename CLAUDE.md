@@ -181,6 +181,9 @@ Backend (`backend/src`, Express + TypeScript, `app.ts` holds every route):
   `v3Tuner.ts` = full tune, `tracking.ts` = saved predictions + public record (every competition counts, fix203)
   `liveChance.ts` = live win chance. `featureModel.ts` = feature model (feat-v1) + v3-mix
   (shadow until published), `modelDaily.ts` = daily champion / challenger (04:00 UTC) + 07:00 Israel-time report.
+  fix291: `footballLab.ts` (+ `utils/footballLab.ts`, `footballLabLive.ts`) = the football lab: six candidates for a surer
+  double-chance pick tested walk-forward every night (05:10 UTC), promoted by fix251's rule as a live layer before the
+  league layer (Admin → Football lab; notes docs/notes/model-lab.md).
 - Basketball: `basketball.ts` (API-Basketball games/box scores, `BB_LEAGUES`), `bbModel.ts` (**bb-v3**: v1 ratings +
   v2 possession ratings, 50/50 blend, player talent), NBA on top: `nbaV4.ts` + `utils/nbaImpact.ts` (**bb-v4**, fix217: player
   impact ratings, injuries / line-ups re-priced 90 / 30 / 10 min before tip-off, gate → full or re-pricing only, admin "NBA

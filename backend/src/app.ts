@@ -86,6 +86,7 @@ import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
 import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit, storedLeagues, storedMiss, storedImpact, regateImpact, check30 } from './services/bbTuner';
 import { startAdminJob, adminJobAnswer } from './services/adminJobs';
 import { runLeagueFix, lastLeagueFix } from './services/leagueFix';
+import { runFootballLab, lastFootballLab } from './services/footballLab';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
 import { bbLiveQuarterTest } from './services/bbLive';
 import { highlightsFor, highlightsStatus, lastCandidates } from './services/highlights';
@@ -4139,6 +4140,17 @@ app.get('/api/admin/league-fix', (req, res) => {
     if (req.query.run === '1') startAdminJob('league fix', null, () => runLeagueFix());
     res.json({ data: adminJobAnswer('league fix', lastLeagueFix(), () => lastLeagueFix()) });
   } catch (e) { sendError(res, e, 'League test failed'); }
+});
+// fix291 (admin only, not in OPEN_API): "Football lab" — six candidates to make the double-chance pick surer, each
+// tested walk-forward (2024-25, 2025-26, this season, the record's 60 days), the table per candidate, before → after per
+// band, the pick rule per league and the fix251 verdict. ?run=1 runs it now (heavy queue); the worker runs it at 05:10
+// UTC. Market numbers stay admin-only.
+app.get('/api/admin/football-lab', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (req.query.run === '1') startAdminJob('football lab', null, () => runFootballLab());
+    res.json({ data: adminJobAnswer('football lab', lastFootballLab(), () => lastFootballLab()) });
+  } catch (e) { sendError(res, e, 'Football lab failed'); }
 });
 // fix278 (admin only, not in OPEN_API): "Our lines vs the market" — the gap report per sport × market (30 / 90 days,
 // per league, who was closer, the 10 biggest gaps today), the feed's status and the anchor fits. ?fresh=1 rebuilds,

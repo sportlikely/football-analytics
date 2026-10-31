@@ -105,7 +105,7 @@ export function setMixLive(on: boolean) {
 /* Features, walk-forward                                                */
 /* ------------------------------------------------------------------ */
 
-interface Fx { fid: number; grp: string; div: string; season: number; kickoff: string; home: number; away: number; status: string; hg: number | null; ag: number | null; xh: number | null; xa: number | null; sh: number | null; sa: number | null }
+export interface Fx { fid: number; grp: string; div: string; season: number; kickoff: string; home: number; away: number; status: string; hg: number | null; ag: number | null; xh: number | null; xa: number | null; sh: number | null; sa: number | null }
 export interface FeatRow { fid: number; grp: string; div: string; kickoff: string; x: Float64Array; y: number | null; ok: boolean }
 interface TeamSt {
   elo: number; gf: number; ga: number; xgf: number; xga: number; sotf: number; sota: number; luck: number[];
@@ -707,6 +707,24 @@ function newcomerTeam(st: FeatState, grp: string, div: string, season: number): 
 /** Feature-model probabilities (%) for a match about to be played, or null. */
 export function featureProbs(match: any): [number, number, number] | null {
   return featureProbsAt(match)?.p ?? null;
+}
+/**
+ * fix291: the feature vector of a match about to be played (the same inputs the feature model gets: newcomers played as
+ * the division's bottom 3), with its fixture and the state — the football lab's live layer reads it too. null = unknown.
+ */
+export function featureInputsFor(match: any): { x: Float64Array; fx: Fx; st: FeatState } | null {
+  const st = liveFeatureState();
+  if (!st) return null;
+  const f = afFixtureFor(match, st);
+  if (!f) return null;
+  if (!UPCOMING.has(String(f.status)) && Date.parse(f.kickoff) < Date.now()) return null;
+  const over: { home?: TeamSt; away?: TeamSt } = {};
+  for (const side of ['home', 'away'] as const) {
+    const t = st.teams.get(`${f.grp}|${f[side]}`);
+    if (!t || t.games < FEAT_CONF.warmup) { const n = newcomerTeam(st, f.grp, f.div, f.season); if (n) over[side] = { ...n, lastXi: t?.lastXi ?? null }; }
+  }
+  const { x, ok } = featuresFor(st, f, over);
+  return ok ? { x, fx: f, st } : null;
 }
 function featureProbsAt(match: any): { p: [number, number, number]; div: string } | null {
   const act = activeFeatureModel();

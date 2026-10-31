@@ -17,6 +17,7 @@ import DiffViewCard from '../components/DiffViewCard'
 import MarketGapCard from '../components/MarketGapCard'
 import TennisLabCard from '../components/admin/TennisLabCard'
 import LeagueFixCard from '../components/LeagueFixCard'
+import FootballLabCard from '../components/FootballLabCard'
 import { ChecksCard, DoneForYouCard, Explained, ForClaudeCard, NeedsYouCard, ResultsToCheck, SpeedCard, TabChecks, Tiles, type Ctx, type TileDef } from '../components/admin/AdminParts'
 import CopyForClaude from '../components/admin/CopyForClaude'
 import { tabReq, type ForClaudeReq } from '../lib/forClaude'
@@ -169,6 +170,7 @@ export default function Admin() {
           <Explained ctx={ctx} id="bb-engine"><BbGridCard /></Explained>
           <Explained ctx={ctx} id="nba-check"><NbaModelCheckCard /></Explained>
           <Explained ctx={ctx} id="league-fix"><LeagueFixCard /></Explained>
+          <Explained ctx={ctx} id="football-lab"><FootballLabCard /></Explained>
           <Explained ctx={ctx} id="diff-view"><DiffViewCard /></Explained>
           <Explained ctx={ctx} id="market-gap"><MarketGapCard /></Explained>
           <Explained ctx={ctx} id="tennis-lab"><TennisLabCard /></Explained>

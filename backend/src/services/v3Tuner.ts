@@ -445,6 +445,7 @@ export interface WindowRun {
   live: [number, number, number][];          // the live setting's probabilities for those games
   fits: Record<string, { probs: [number, number, number][]; x: number[]; setting: { rel: any; conv: any }; train: number }>;
   vectors: Record<string, [number, number, number][]>; // probabilities from stored vectors (previous champions)
+  rows?: number[][]; rowNames?: string[];      // fix291: with opt.rows
 }
 
 /**
@@ -452,7 +453,7 @@ export interface WindowRun {
  * refit per entry of `fits` trained only on games before its `trainBefore` date (so the games it is scored on were
  * never seen). `vectors`: probabilities from stored parameter vectors (a previous champion, for the guardrail).
  */
-export async function v3WindowRun(opt: { seasons: string[]; scoreFrom: string; fits: { label: string; trainBefore: string; trainFrom?: string }[]; vectors?: Record<string, number[]>; rounds?: number }): Promise<WindowRun> {
+export async function v3WindowRun(opt: { seasons: string[]; scoreFrom: string; fits: { label: string; trainBefore: string; trainFrom?: string }[]; vectors?: Record<string, number[]>; rounds?: number; rows?: boolean }): Promise<WindowRun> {
   if (tuning) throw new Error('A tune is already running');
   tuning = true;
   try {
@@ -467,7 +468,9 @@ export async function v3WindowRun(opt: { seasons: string[]; scoreFrom: string; f
     const out: WindowRun = {
       items: scored.map(i => ({ div: i.div, date: i.date, home: i.home, away: i.away, o: i.o, mkt: i.mkt ? [i.mkt.H, i.mkt.D, i.mkt.A] : null })),
       live: await inBatches(scored, 200, b => b.map(i => probs(cLive, i, lcOf(i)))), // fix169: in slices
-      fits: {}, vectors: {}
+      fits: {}, vectors: {},
+      // fix291: the replayed v3 rows per game (team rows home − away, then the draw rows) for the football lab's combiner
+      ...(opt.rows ? { rows: scored.map(i => [...Array.from(i.d), ...Array.from(i.dv)]), rowNames: [...TEAM_ROW_IDS, ...DRAW_ROW_IDS] } : {})
     };
     for (const f of opt.fits) {
       const train = items.filter(i => i.date < f.trainBefore && (!f.trainFrom || i.date >= f.trainFrom));
