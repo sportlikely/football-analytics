@@ -371,6 +371,31 @@ Jokić ~+10. Bulls–Wizards: the on/off model had the Bulls by 6 (Trae Young �
   established players' range (`LeagueSnap.cap`); the stored training rows are unchanged.
 - Not tried: a softer rule (shrink instead of switch, a per-row threshold) — would be fitted on the test season; needs its own gate.
 
+## fix288 — the training range on the games where a row is in play, the gated clip (31 Oct 2026)
+
+- 31 Oct 03:27 card: 61 upcoming games, 11 values over 3 sd (#8 7.5–10.6 Olympiacos / Real Madrid / Fenerbahce / Buducnost, −9.6 Aris;
+  #13 −20.49 Warriors – Lakers; #4 4.45 / −6.53; #9 −3.72). Cause: the spread was measured on every training game, but #8 is 0 from
+  game 25 on (59% of the games), #4 when nobody is missing, #13 without meetings. 10 Oct copy: in-play sd = 1.9× the all-games sd for #8,
+  2.3× for #4, 1.09× for #13 → on the server ≈ 4.8 / 3.3 / 6.8: #8 and #4 inside 3 sd, #13 at the edge, #9 out either way.
+  `rangeStats` (utils/bbGridMath.ts) = the in-play range (30+ games, flags #6 / #11 never).
+- Clip: each row's home − away held at mean ± 3 sd of the in-play range before it enters the points (`GridParams.clip`, set in
+  `publishGridState`, kept by every tune / fit), only where clipping does not make the training games worse (`clipGate`, tolerance
+  2e-5): 10 Oct copy (NBA + EL + FEC, ×1e-4 log loss, train / test 2025-26) #4 +4.0 / +4.1, #3 +0.9 / +2.5, #1 +0.7 / +0.5 → not
+  clipped (a star out, a true mismatch); #9 −0.3 / −1.0, #2, #5, #7, #8, #10, #12, #13 → clipped. bb-v4 alone on the test season
+  0.5979 → 0.5977 (NBA 0.5898 → 0.5897, FEC 0.5769 → 0.5761, EL 0.6344 =). Data health "Basketball model rows": the clip line,
+  every clipped value (value → used), warn only for a value past the in-play range on a row that is not clipped.
+- The fix238 fallback (bb-v3 for a game with a row past 3 sd) keeps the all-games spread: measured on the in-play range the shown chances
+  got worse on the test season (all 0.5969 → 0.5974, games 1–25 0.6056 → 0.6081 — the wide flag sends unusual early-season games to
+  bb-v3, which is better there). With it the shown chances are unchanged on every set (the clip acts where a group shows bb-v4 anyway).
+- Tried, not live (neither beat today's rows on 2025-26): (1) a team's rotation from this season's players once it has played this
+  season — a real bug in games 2–3 of a season (summer leavers counted as missing in #4: EL 407 vs 48 really out, FEC 503 vs 22; and as
+  "stayed" in #8) but FEC 0.5745 → 0.5750, NBA / EL equal, games 1–25 tuned 0.6187 → 0.6197; by 31 Oct no leaver was left in the last
+  3 games' roster. (2) #13 with margins capped at ± 15, 0.5 per year of age, no pre-season meetings (sd 6.3 → 3.5): NBA 0.5913 →
+  0.5915, EL 0.6332 → 0.6329, FEC 0.5745 → 0.5747 (#13's weight is −0.05: −20 is one point of margin).
+- The NBA / FEC drop (57.6% over 125 vs 67.5% backtest; 61.4% vs 71.1%) is not these rows (#8 weight ≈ 0.03, #13 −0.05): `/api/bb/check30`
+  (admin) gives the last 30 days' saved chances vs this build's walk-forward rows (settings + clip) vs the market favourite on the same
+  games (market_lines 'ml', closing first) for NBA / FEC / all / each league.
+
 ## fix270 — calibration layers that actually refit (28 Oct 2026)
 
 Data health 28 Oct: football 50–60% said 54, happened 59.4 (325 games); basketball 50–60 said 54.5 happened 44.2 (43),

@@ -36,7 +36,7 @@ type Game = {
 };
 type Params = { k: number; r: number; b2b: number };
 type Team = { o: number; d: number; season: string; games: number; last: number; sg: number; ha: number };
-type Pred = { pHome: number; margin: number; neutral?: number; netH?: number; netA?: number; haH?: number; haA?: number; sig?: number; grid?: GridView; model?: string; pV3?: number; pRaw?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis; gridOff?: string[];
+type Pred = { pHome: number; margin: number; neutral?: number; netH?: number; netA?: number; haH?: number; haA?: number; sig?: number; grid?: GridView; model?: string; pV3?: number; pRaw?: number; total: number; home: number; away: number; hca: number; b2bHome: boolean; b2bAway: boolean; restHome: number | null; restAway: number | null; injHome?: number; injAway?: number; injPlayersHome?: string[]; injPlayersAway?: string[]; newHome?: NewBasis; newAway?: NewBasis; gridOff?: string[]; gridClip?: string[];
   /** fix278: the model's own numbers before the season's scoring level and the market anchor (pModel = the calibrated chance), and why the line is what it is */
   line?: { pModel: number; margin: number; total: number; shift: number; anchored: boolean; why: string } };
 /** fix192: how a team with no games in the league was rated ('other-league' = its rating there, moved to this league's level) */
@@ -884,6 +884,7 @@ function predictRaw(g: Game, phIn?: number, paIn?: number): Pred | null {
       const out = (s: NonNullable<typeof sd>['home']) => s.removed.filter(p => p.keep < 1).map(p => p.name);
       return {
         ...x, pHome: gv.pHome, margin: gv.margin, home: x.home + dm / 2, away: x.away - dm / 2, model: 'bb-v4', pV3: cur.pHome, grid: gv.view,
+        ...(gv.clipped ? { gridClip: gv.clipped } : {}), // fix288: rows held inside their training range (data health)
         ...(sd ? { injHome: pts(sd.home), injAway: pts(sd.away), injPlayersHome: out(sd.home), injPlayersAway: out(sd.away) } : {})
       };
     }

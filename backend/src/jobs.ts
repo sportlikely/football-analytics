@@ -49,7 +49,8 @@ import { resolveUnsettled, resolveUnsettledOnce, Providers as SettleProviders } 
 import { startApiFootballScheduler, rebuildAfFeaturesAsync, afGet, afRemaining } from './services/apiFootball';
 import { prepareModelV3Async } from './services/gridModel';
 import { writeLive, clearLive } from './services/liveState';
-import { startPageWarmer, refreshPages, storePage, storedAt, sweepCopies } from './services/pageCache';
+import { startPageWarmer, refreshPages, storePage, storedAt, sweepCopies, rebuildPage } from './services/pageCache';
+import { SITEMAP_FILES } from './services/seo';
 import { currentMainScript } from './services/earlyStatic';
 import { copyLooksRight, langOfPath, type PageLang } from './utils/pageLang';
 import { startBundleKeeper } from './services/gameBundle';
@@ -134,7 +135,9 @@ export function startJobs() {
   every('different view', () => { diffViewFreezeTick(); }, 5 * 60 * 1000).unref();
   // fix229: clean links — slugs for new teams / players / leagues / matches every 15 minutes (renames every 6 h); the
   // first run waits for the leagues and the team index to load (a league's country decides a shared name's slug)
-  after('slugs', () => buildSlugs().then(() => every('slugs', () => buildSlugs(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();
+  // fix288: every sitemap rebuilt after each run (new slugs reach the sitemaps within 15 min; the web only sends the copy)
+  const slugsAndSitemaps = () => buildSlugs().then(() => { for (const file of SITEMAP_FILES) rebuildPage('sitemap', { file }); });
+  after('slugs', () => slugsAndSitemaps().then(() => every('slugs', () => slugsAndSitemaps(), 15 * 60 * 1000).unref()), 4 * 60 * 1000).unref();
   // fix261: names in Hebrew / Arabic (press spelling, Wikidata labels, letter rules), then the maps the he / ar pages load
   // fix266: after the first round of stored pages (a restart serves the lists first, the names load after)
   // fix273: the map from the stored names one minute after a start (a restart served an empty map — cached by browsers

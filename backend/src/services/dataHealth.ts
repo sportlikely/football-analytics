@@ -39,7 +39,7 @@ import { createHealthStore, NOT_YET } from '../utils/healthStore';
 import { LATE_MS } from '../utils/liveBox';
 import { BB_MAJOR } from './basketball';
 import { bbLiveVsBacktest, predictGameCached } from './bbModel';
-import { rowSanityViews } from './bbTuner';
+import { rowSanityViews, clipSummary } from './bbTuner';
 import { scorersHealth } from './scorersCheck';
 import { perfChecks } from './perfChecks';
 import { photoSourceHealth } from './playerPhotos';
@@ -479,13 +479,16 @@ export async function dataHealth(): Promise<{ level: Level; at: string; checks: 
     // fix238: a game with a row out of range (or a short rotation) is shown with bb-v3 — handled, listed; still warn
     // when bb-v4 is shown with an out-of-range row (its group's test season said bb-v4 is better there)
     const off = preds.filter(x => x.p?.gridOff?.length);
+    // fix288: a row beyond 3 sd of its training range (measured on the games where the row is in play) is held at 3 sd
+    // before it enters the points (listed: value → the value used); warn only for such a value on a row the clip leaves
+    const clipped = preds.filter(x => x.p?.gridClip?.length);
     const r = rowSanityViews(views);
     checks.push({
-      id: 'bb-grid-rows', label: 'Basketball model rows (bb-v4) within their usual range', level: r.bad.length ? 'warn' : 'ok',
+      id: 'bb-grid-rows', label: 'Basketball model rows (bb-v4) within their usual range', level: r.loose.length ? 'warn' : 'ok',
       detail: views.length || off.length
-        ? `${r.checked + off.length} upcoming game(s) · ${r.bad.length ? `${r.bad.length} row value(s) more than 3 sd from training shown with bb-v4` : 'every row shown with bb-v4 inside 3 sd of training'}${off.length ? ` · ${off.length} game(s) shown with bb-v3 (a row out of range or a short rotation)` : ''}`
+        ? `${r.checked + off.length} upcoming game(s) · ${r.bad.length ? `${r.bad.length} row value(s) beyond 3 sd of all training games shown with bb-v4` : 'every row shown with bb-v4 inside 3 sd of training'}${clipped.length ? ` · ${clipped.length} game(s) with a row held at 3 sd of its in-play range (clipped before the points)` : ''}${r.loose.length ? ` · ${r.loose.length} value(s) beyond it on a row that is not clipped` : ''}${off.length ? ` · ${off.length} game(s) shown with bb-v3 (a row out of range or a short rotation)` : ''}`
         : 'no upcoming bb-v4 game in 48 h',
-      items: [...off.map(x => `${x.label}: shown with bb-v3 — ${x.p!.gridOff!.join('; ')}`), ...r.bad].slice(0, 30)
+      items: [...((c = clipSummary()) => (c ? [c] : []))(), ...r.loose, ...clipped.map(x => `${x.label}: clipped — ${x.p!.gridClip!.join('; ')}`), ...off.map(x => `${x.label}: shown with bb-v3 — ${x.p!.gridOff!.join('; ')}`), ...r.bad].slice(0, 40)
     });
   } catch (e: any) { logger.warn(`bb grid rows: ${e?.message || e}`); }
   // fix220: calibration, every sport — said vs happened per band of the last 30 days' picks (error: a band of 50+

@@ -56,7 +56,11 @@ export type GridParams = {
   miss?: MissSet;
   /** fix225: player impact = box-score value blended with on/off (services/bbTuner.ts runImpactFit); absent = on/off only */
   impact?: ImpactSet;
+  /** fix288: each row's home − away held inside ± 3 sd of its training values (clipOf); set when the state is published */
+  clip?: Clip;
 };
+/** fix288: per row the lowest / highest difference that enters the points (null = not clipped: flags, no spread) */
+export type Clip = { lo: (number | null)[]; hi: (number | null)[] };
 /**
  * fix225 — the player impact the rows #1 / #4 / #8 read: wb × box-score value + (1 − wb) × on/off rating (the on/off
  * shrink scaled by minutes). box = the formula the values were made with (utils/boxValue.ts).
@@ -172,15 +176,19 @@ export function gridEval(p: GridParams, code: string, it: { hv: number[]; av: nu
   let m = 0;
   const star = p.miss && usesOracle(code) ? p.miss.star : 0;
   const top = p.miss?.top && usesOracle(code) ? clampTop(p.miss.top) : 0;
+  const c = p.clip;
   for (let i = 0; i < N_ROWS; i++) {
     if (i === VOL) continue;
+    // fix288: the difference held inside its training range first (the top-3 part of #4 inside the same range)
+    const di = c ? clipTo(diff(it, i), c, i) : diff(it, i);
     // fix225: the top-3 part of the NBA's #4 counted `top` times (the fix228 star form only without it)
-    const d = i !== MISS ? diff(it, i) : top ? diff(it, i) + (top - 1) * (it.t4 || 0) : star ? starOf(diff(it, i), star) : diff(it, i);
+    const d = i !== MISS ? di : top ? di + (top - 1) * (c ? clipTo(it.t4 || 0, c, i) : it.t4 || 0) : star ? starOf(di, star) : di;
     parts[i] = w[i] * d; m += parts[i];
   }
   const ls = p.league?.[code];
   if (ls?.home && !neutralOf(it)) { parts[6] += ls.home; m += ls.home; }
-  const sig = it.sig * (ls?.sig ?? 1) * Math.min(1.5, Math.max(0.7, 1 + w[VOL] * volOf(it)));
+  const vol = c ? clipTo(volOf(it), c, VOL) : volOf(it);
+  const sig = it.sig * (ls?.sig ?? 1) * Math.min(1.5, Math.max(0.7, 1 + w[VOL] * vol));
   const pHome = clampP(phi(((p.stretch[code] ?? 1) * (ls?.str ?? 1) * m) / sig));
   return { margin: m, parts, sigma: sig, pHome };
 }
@@ -245,6 +253,91 @@ export function rowsOutOfRange(it: { hv: number[]; av: number[] }, stats: { mean
   }
   return out;
 }
+/*
+ * fix288 — a row's training range is measured on the games where it is in play (difference ≠ 0). #8 carry-over is 0
+ * from game 25 on (59% of the training games), #4 is 0 when nobody is missing, #13 when the teams have not met: with
+ * those zeros the spread was 2–3 times too small (#8: train 0.01 ± 2.47 on the server, ± 3.2 on games 1–5 of the 10 Oct
+ * copy), so an ordinary early-season value read as "more than 3 sd". #6 rest and #11 motivation are flags (never judged,
+ * never clipped).
+ */
+export const FLAG_ROWS = [5, 10];
+export function rangeStats(items: { hv: number[]; av: number[] }[]): { mean: number[]; sd: number[]; n: number[] } {
+  const mean = new Array<number>(N_ROWS).fill(0), sd = new Array<number>(N_ROWS).fill(0), n = new Array<number>(N_ROWS).fill(0);
+  const val = (it: { hv: number[]; av: number[] }, i: number) => (i === VOL ? volOf(it) : diff(it, i));
+  for (const it of items) for (let i = 0; i < N_ROWS; i++) { const d = val(it, i); if (d !== 0 && Number.isFinite(d)) { mean[i] += d; n[i]++; } }
+  for (let i = 0; i < N_ROWS; i++) mean[i] = n[i] ? mean[i] / n[i] : 0;
+  for (const it of items) for (let i = 0; i < N_ROWS; i++) { const d = val(it, i); if (d !== 0 && Number.isFinite(d)) sd[i] += (d - mean[i]) ** 2; }
+  const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+  // under 30 games in play: no range (never judged, never clipped)
+  return { mean: mean.map(r4), sd: sd.map((s, i) => (n[i] >= 30 && !FLAG_ROWS.includes(i) ? r4(Math.sqrt(s / n[i])) : 0)), n };
+}
+/** fix288: the clip of every judged row: mean ± 3 sd of its training range (0 always inside: a row that is off stays off) */
+export function clipOf(range: { mean: number[]; sd: number[] }): Clip {
+  const lo: (number | null)[] = [], hi: (number | null)[] = [];
+  for (let i = 0; i < N_ROWS; i++) {
+    const ok = range.sd[i] > 1e-6 && !FLAG_ROWS.includes(i);
+    lo.push(ok ? Math.min(0, Math.round((range.mean[i] - RANGE_SD * range.sd[i]) * 1e3) / 1e3) : null);
+    hi.push(ok ? Math.max(0, Math.round((range.mean[i] + RANGE_SD * range.sd[i]) * 1e3) / 1e3) : null);
+  }
+  return { lo, hi };
+}
+export const clipTo = (d: number, c: Clip, i: number) => {
+  const lo = c.lo[i], hi = c.hi[i];
+  return lo === null || hi === null || lo === undefined || hi === undefined ? d : Math.min(hi, Math.max(lo, d));
+};
+/** the settings with the clip of these training rows (every judged row) */
+export const withClip = (p: GridParams, range: { mean: number[]; sd: number[] }): GridParams => ({ ...p, clip: clipOf(range) });
+/**
+ * fix288 — which rows the clip holds. Each row's clip alone against no clip, on the training games (the decision) and
+ * the test season (reported): a row whose clip raises the training log loss by more than CLIP_TOL (noise) is left as it
+ * is (its big values carry real information). 10 Oct copy (NBA + EL + FEC, test 2025-26, ×1e-4 log loss): #4 +4.0 train /
+ * +4.1 test (a star out is a big number on purpose), #3 +0.9 / +2.5, #1 +0.7 / +0.5 → not clipped; #9 −0.3 / −1.0, #2,
+ * #5, #7, #8, #10, #12, #13 (±0.1) → clipped. Re-tuned with the clip: NBA 0.5898 → 0.5897, FEC 0.5769 → 0.5761, EL 0.6344.
+ */
+export const CLIP_TOL = 2e-5;
+export type ClipRow = { id: string; on: boolean; games: number; train: number; test: number | null };
+export function clipGate(p: GridParams, train: GridItem[], test: GridItem[], range: { mean: number[]; sd: number[] }): { clip: Clip; rows: ClipRow[] } {
+  const all = clipOf(range), none: Clip = { lo: all.lo.map(() => null), hi: all.hi.map(() => null) };
+  const base: GridParams = { ...p, clip: none };
+  const tr0 = logLoss(base, train), te0 = test.length ? logLoss(base, test) : 0;
+  const clip: Clip = { lo: [...none.lo], hi: [...none.hi] }, rows: ClipRow[] = [];
+  for (let i = 0; i < N_ROWS; i++) {
+    if (all.lo[i] === null) continue;
+    const one: Clip = { lo: none.lo.map((v, j) => (j === i ? all.lo[i] : v)), hi: none.hi.map((v, j) => (j === i ? all.hi[i] : v)) };
+    const q = { ...p, clip: one };
+    const dTr = logLoss(q, train) - tr0, dTe = test.length ? logLoss(q, test) - te0 : null;
+    const on = dTr <= CLIP_TOL;
+    if (on) { clip.lo[i] = all.lo[i]; clip.hi[i] = all.hi[i]; }
+    rows.push({ id: GRID_ROWS[i].id, on, games: train.filter(x => clippedLabels(x, one).length).length, train: Math.round(dTr * 1e6) / 1e6, test: dTe === null ? null : Math.round(dTe * 1e6) / 1e6 });
+  }
+  return { clip, rows };
+}
+/** "#13 Head-to-head −20.49 → −18.81" for each row the clip moved (the data-health card) */
+export function clippedLabels(it: { hv: number[]; av: number[] }, c: Clip | null | undefined): string[] {
+  if (!c) return [];
+  const out: string[] = [];
+  for (let i = 0; i < N_ROWS; i++) {
+    const d = i === VOL ? volOf(it) : diff(it, i), x = clipTo(d, c, i);
+    if (Math.abs(x - d) > 1e-9) out.push(`${GRID_ROWS[i].id} ${GRID_ROWS[i].name} ${Math.round(d * 100) / 100} → ${Math.round(x * 100) / 100}`);
+  }
+  return out;
+}
+
+/*
+ * fix288 research (10 Oct copy, NBA + EL + FEC, test 2025-26 never tuned; weights at the code defaults / re-tuned on
+ * 2022–24), tried and NOT live — neither beat today's rows on the test season:
+ *  - a team's rotation from this season's players once it has played this season (games 2–3 of a new season counted
+ *    players who had left in the summer as "missing" in #4: EL 407 such players against 48 really out, FEC 503 vs 22;
+ *    and as "stayed" in #8): NBA 0.5913 → 0.5913, EL 0.6332 → 0.6332, FEC 0.5745 → 0.5750; games 1–25 tuned 0.6187 → 0.6197.
+ *    By 31 Oct European teams were 5+ games in: no summer leaver was left in the last 3 games' roster.
+ *  - #13 with margins capped at ± 15, older meetings worth 0.5 a year, no pre-season meetings (sd 6.3 → 3.5): NBA
+ *    0.5913 → 0.5915, EL 0.6332 → 0.6329, FEC 0.5745 → 0.5747, games 1–25 0.6168 → 0.6175. (#13's weight is −0.05: a −20
+ *    is one point of margin.)
+ * The 31 Oct "far outside training" values were mostly the range measured with the zeros (above): on the 10 Oct copy the
+ * in-play sd is 1.9× the all-games sd for #8, 2.3× for #4, 1.09× for #13 — on the server's numbers ≈ 4.8 / 3.3 / 6.8, so
+ * #8 7.5–10.6 and #4 −6.5 sit inside 3 sd, #13 −20.5 at the edge. #9 −3.72 is out either way (held at 3 sd).
+ */
+
 /** "#1 Player impact … 19.38 (train 0.06 ± 5.4)" for each out-of-range row */
 export const rangeLabels = (it: { hv: number[]; av: number[] }, stats: { mean: number[]; sd: number[] }, rows = rowsOutOfRange(it, stats)) =>
   rows.map(i => `${GRID_ROWS[i].id} ${GRID_ROWS[i].name} ${Math.round((i === VOL ? volOf(it) : diff(it, i)) * 100) / 100} (train ${stats.mean[i]} ± ${stats.sd[i]})`);
@@ -309,7 +402,7 @@ async function patternSearch(p: GridParams, items: GridItem[], defs: { get: () =
  */
 export async function fitGrid(items: GridItem[], start: GridParams, opt: { rounds?: number; minOffsetGames?: number; offsetPenalty?: number; pause?: () => Promise<void> } = {}): Promise<{ params: GridParams; trainLL: number; startLL: number; offsetLeagues: string[] }> {
   const pause = opt.pause || (async () => undefined);
-  const p: GridParams = { w: [...start.w], stretch: { ...start.stretch }, offsets: {}, version: 'fit', fittedAt: new Date().toISOString(), train: null, ...(start.miss ? { miss: { ...start.miss } } : {}), ...(start.impact ? { impact: start.impact } : {}) };
+  const p: GridParams = { w: [...start.w], stretch: { ...start.stretch }, offsets: {}, version: 'fit', fittedAt: new Date().toISOString(), train: null, ...(start.miss ? { miss: { ...start.miss } } : {}), ...(start.impact ? { impact: start.impact } : {}), ...(start.clip ? { clip: start.clip } : {}) };
   const startLL = logLoss(start, items);
   // fix228: a frozen #4 is never moved (shared weight or league offset): the other rows are fitted around it
   const free = (i: number) => !(p.miss && i === MISS);
@@ -363,7 +456,7 @@ export async function fitMiss(items: GridItem[], start: GridParams, opt: { round
   const m0 = missFrom(start, code);
   // fix225 'top': the star factor on the top-3 players' part (1.0–1.6, start 1.2) in place of fix228's star form
   if (opt.form === 'top') { m0.star = 0; m0.top = clampTop(m0.top ?? 1.2); } else delete m0.top;
-  const p: GridParams = { w: [...weightsFor({ ...start, miss: undefined, league: undefined }, code)], stretch: { ...start.stretch }, offsets: {}, version: 'oracle fit', fittedAt: null, train: null, miss: { ...m0 } };
+  const p: GridParams = { w: [...weightsFor({ ...start, miss: undefined, league: undefined }, code)], stretch: { ...start.stretch }, offsets: {}, version: 'oracle fit', fittedAt: null, train: null, miss: { ...m0 }, ...(start.clip ? { clip: start.clip } : {}) };
   p.w[MISS] = m0.w;
   const startLL = logLoss(p, items);
   const R = GRID_ROWS[MISS];

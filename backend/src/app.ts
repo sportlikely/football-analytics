@@ -83,7 +83,7 @@ import { bdlStatus } from './services/bdl';
 import { bbBacktest, bbRecord, bbExport, bbExportPlayers, bbWalkForward } from './services/bbModel';
 import { nbaV4Check } from './services/nbaV4';
 import { newsInjuryList, reviewNewsInjury } from './services/keyPlayers';
-import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit, storedLeagues, storedMiss, storedImpact, regateImpact } from './services/bbTuner';
+import { runTune, tunedInfo, runLeagueTune, runMissFit, runImpactFit, storedLeagues, storedMiss, storedImpact, regateImpact, check30 } from './services/bbTuner';
 import { startAdminJob, adminJobAnswer } from './services/adminJobs';
 import { runLeagueFix, lastLeagueFix } from './services/leagueFix';
 import { buildBbCalibration, calibReport, inSeasonMode, setInSeasonMode } from './services/sportCalibration';
@@ -128,7 +128,7 @@ import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerMode
 import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch as tennisMatchB, tennisRecord, levelRank, tennisTournament as tennisTournamentB, tennisPlayer as tennisPlayerB, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { geoCredit, countryOf } from './services/geo';
 import { bbGameFacts as bbGameFactsB, bbGameSeo, bbGamePath, bbFactsFreshMs } from './services/seo';
-import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, todayGroups as todayGroupsB, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
+import { seoPage as seoPageB, renderIndex, sitemapXml, SITEMAPS, SITEMAP_FILES, todayGroups as todayGroupsB, hubRedirect, leagueRedirect, MERGED_LEAGUES } from './services/seo';
 import { listGuides, getGuide, guideSlugs } from './services/guides';
 import { howItWorks, hiwPublic, changelog, HIW_SPORTS, type HiwSport } from './services/howItWorks';
 import { hubBySlug, hubByOld, hubOpen, buildHub, HUBS } from './services/hubs';
@@ -4204,6 +4204,11 @@ app.get('/api/bb/tuned', (req, res) => {
   res.set('Cache-Control', 'no-store');
   try { res.json({ data: tunedInfo(req.query.clear === '1' ? 'clear' : req.query.reload === '1' ? 'reload' : undefined) }); } catch (e) { sendError(res, e, 'Failed'); }
 });
+// fix288 (admin): the last 30 days (?days=) — saved chances vs this build's walk-forward rows (settings + clip live) vs the market favourite
+app.get('/api/bb/check30', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ data: check30(Math.min(120, Math.max(1, Number(req.query.days) || 30))) }); } catch (e) { sendError(res, e, 'Failed'); }
+});
 // fix222 (admin): the calibration layer of basketball / tennis — the test season raw vs calibrated, per league kept or
 // not, the strong lines and the live season (never fitted); ?rebuild=1 builds it again in the background
 app.get('/api/admin/calibration', (req, res) => {
@@ -4752,16 +4757,27 @@ if (fs.existsSync(path.join(STATIC_DIR, 'index.html'))) {
   // fix202: the sitemaps are stored pages, built in the worker every hour
   // fix210b: the big ones (teams, players, leagues, basketball, NFL, tennis: season-long GROUP BYs, up to 4.8 s of blocked
   // worker) are built in a job thread; football reads the fixture window in this process's memory
-  definePage({ name: 'sitemap', freshMs: 3600 * 1000, warm: ['sitemap.xml', ...Object.keys(SITEMAPS)].map(file => ({ file })),
+  // fix288: the finished XML is a stored view (string + ETag + gzip, made by the worker; rebuilt after every slugs run,
+  // jobs.ts): the web process only sends it. It read the page's body (a synchronous read of the whole row + JSON.parse
+  // on the web thread: /sitemap-football.xml stalled it 1,377 ms on 31 Oct 02:43)
+  definePage({ name: 'sitemap', freshMs: 3600 * 1000, warm: SITEMAP_FILES.map(file => ({ file })), variants: { xml: (b: any) => (typeof b === 'string' ? b : null) },
     build: q => (q.file === 'sitemap.xml' ? sitemapXml() : !SITEMAPS[q.file] ? null : q.file !== 'sitemap-football.xml' && threadJobsOn() ? inThread<string | null>('sitemap', [q.file]) : SITEMAPS[q.file]()) });
-  const sitemapOf = async (file: string) => { const s = await getPage('sitemap', { file }); if (typeof s?.body !== 'string') throw new Error('not built yet'); return s.body; };
-  app.get('/sitemap.xml', async (_req, res) => {
-    try { res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(await sitemapOf('sitemap.xml')); }
-    catch (e: any) { logger.warn(`sitemap: ${e.message}`); res.sendFile(path.join(STATIC_DIR, 'sitemap.xml')); }
+  const sendSitemap = async (req: express.Request, res: express.Response, file: string) => {
+    const s = await getPage('sitemap', { file }, { views: ['xml'], etags: ['xml'] });
+    const v = s?.view('xml');
+    if (!v?.text) { if (s) rebuildPage('sitemap', { file }); return false; } // (a copy from before fix288: no view yet)
+    res.set('ETag', v.etag).set('Cache-Control', 'public, max-age=3600').vary('Accept-Encoding').type('application/xml');
+    if (req.fresh) { res.status(304).end(); return true; }
+    if (v.gz && req.acceptsEncodings('gzip') === 'gzip') res.set('Content-Encoding', 'gzip').send(v.gz); else res.send(v.text);
+    return true;
+  };
+  app.get('/sitemap.xml', async (req, res) => {
+    try { if (await sendSitemap(req, res, 'sitemap.xml')) return; } catch (e: any) { logger.warn(`sitemap: ${e.message}`); }
+    res.sendFile(path.join(STATIC_DIR, 'sitemap.xml'));
   });
-  for (const file of Object.keys(SITEMAPS)) app.get(`/${file}`, async (_req, res) => {
-    try { res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(await sitemapOf(file)); }
-    catch (e: any) { logger.warn(`${file}: ${e.message}`); res.status(503).send('Try again later'); }
+  for (const file of Object.keys(SITEMAPS)) app.get(`/${file}`, async (req, res) => {
+    try { if (await sendSitemap(req, res, file)) return; } catch (e: any) { logger.warn(`${file}: ${e.message}`); }
+    res.status(503).set('Retry-After', '60').send('Try again later');
   });
   // fix226: the push service worker is checked by the browser on every visit (a new version must reach everyone), the
   // web app manifest (iPhone: alerts need the site added to the Home Screen) keeps a day

@@ -906,6 +906,8 @@ export const SITEMAPS: Record<string, () => string> = {
   'sitemap-football.xml': sitemapFootball, 'sitemap-basketball.xml': sitemapBasketball, 'sitemap-nfl.xml': sitemapNfl, 'sitemap-tennis.xml': () => urlset([...tennisSitemapUrls(), ...(hiwPublic('tennis') ? [{ loc: HIW_PATH.tennis, freq: 'weekly', pri: '0.6', mod: isoDay() }] : [])]),
   'sitemap-teams.xml': sitemapTeams, 'sitemap-leagues.xml': sitemapLeagues, 'sitemap-players.xml': sitemapPlayers
 };
+/** fix288: every sitemap file (the stored page 'sitemap', one copy per file; rebuilt after each slugs run) */
+export const SITEMAP_FILES = ['sitemap.xml', ...Object.keys(SITEMAPS)];
 /** sitemap.xml: the index of the four sitemaps. */
 export function sitemapXml(): string {
   const mod = new Date().toISOString().slice(0, 10);

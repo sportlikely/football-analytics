@@ -18,7 +18,7 @@ import {
   GRID_ROWS, GRID_DEFAULT, GRID_TRAIN, GRID_TEST, GRID_LIVE_FROM, N_ROWS, VOL, assertTrainYears, fitGrid, compare, rowStats, fittedSplit,
   gridEval, split1000, groupOf, diff, volOf, weightsFor, logLoss, spreadOf, fitLeagueSet, regionGroup, LS_ROWS,
   MISS, missInputs, missSplit, fitMiss, fitProxy, missGate, missFrom, usesOracle, starOf, impactInputs, impactGate, altShare,
-  rowsOutOfRange, rangeLabels, fallbackCheck, type FallbackCheck, type GridItem, type GridParams, type GridView, type LeagueSet, type MissSet, type MissGate, type ImpactSet, type ImpactGate
+  rowsOutOfRange, rangeLabels, fallbackCheck, rangeStats, clipGate, clippedLabels, type ClipRow, type FallbackCheck, type GridItem, type GridParams, type GridView, type LeagueSet, type MissSet, type MissGate, type ImpactSet, type ImpactGate
 } from '../utils/bbGridMath';
 import { WB_START, topLoss, BOX_FEATS, type BoxCoef } from '../utils/boxValue';
 import { rotation, strength } from '../utils/nbaImpact';
@@ -39,6 +39,10 @@ export type GridState = {
   params: GridParams; gate: Record<string, GroupGate>; stats: { mean: number[]; sd: number[] }; at: string; perLeague: Record<string, any>; live: any;
   /** fix238: per group, bb-v4 vs bb-v3 on the test season's games with a row out of range (on = such games shown with bb-v3) */
   fallback?: Record<string, FallbackCheck>;
+  /** fix288: each row's training range on the games where it is in play (the 3 sd rule and the clip read it; stats = the split's spread) */
+  range?: { mean: number[]; sd: number[]; n: number[] };
+  /** fix288: per row, is it clipped (its clip alone on the training games / the test season, log loss change) */
+  clipRows?: ClipRow[];
 };
 let gs: GridState | null = null;
 let ver = 0;
@@ -49,8 +53,10 @@ export const gridState = () => gs;
 /** The stored shared settings (or the code defaults), without any league's own settings. */
 export function sharedParams(): GridParams {
   const r = db.prepare(`SELECT params FROM bb_tuned WHERE id = 'live'`).get() as any;
-  if (r) { try { const p = JSON.parse(r.params) as GridParams; delete p.league; return p; } catch (e: any) { logger.warn(`bb_tuned: ${e.message}`); } }
-  return GRID_DEFAULT;
+  // fix288: with the clip of the last published state (every tune and fit reads the rows the way live does)
+  const clip = gs?.params.clip;
+  if (r) { try { const p = JSON.parse(r.params) as GridParams; delete p.league; if (clip) p.clip = clip; return p; } catch (e: any) { logger.warn(`bb_tuned: ${e.message}`); } }
+  return clip ? { ...GRID_DEFAULT, clip } : GRID_DEFAULT;
 }
 /** fix223: the shared settings a league fit was made on (a new shared tune makes the league settings stale) */
 export const baseKey = (p: GridParams) => `${p.version}|${p.fittedAt || ''}`;
@@ -152,17 +158,23 @@ export const inputsFor = (items: GridItem[], p: GridParams, mode: 'oracle' | 'bl
 const proxyBefore = () => storedMiss()?.before?.other ?? null;
 
 /** Gate + stats with the stored settings over every league's stored rows; published for every process. */
-export function publishGridState(items = loadRows(), p = storedParams()): GridState {
-  const live = gateInputs(items, p); // fix236: the gate and the tables on the inputs live has (NBA #4 = who played)
-  const train = live.filter(x => (p.train || GRID_TRAIN).includes(x.year));
+export function publishGridState(items = loadRows(), p0 = storedParams()): GridState {
+  const live = gateInputs(items, p0); // fix236: the gate and the tables on the inputs live has (NBA #4 = who played)
+  const train = live.filter(x => (p0.train || GRID_TRAIN).includes(x.year));
+  // fix288: rows held inside ± 3 sd of their training range before they enter the points (gate, tables, live) — each
+  // row whose clip does not make the training games worse (clipGate)
+  const range = rangeStats(train), cg = clipGate({ ...p0, clip: undefined }, train, live.filter(x => x.year === GRID_TEST), range);
+  const p: GridParams = { ...p0, clip: cg.clip };
   const s: GridState = {
-    params: p, gate: gridGate(live, p, { proxyBefore: proxyBefore() }), stats: rowStats(train), at: new Date().toISOString(),
+    params: p, gate: gridGate(live, p, { proxyBefore: proxyBefore() }), stats: rowStats(train), range, clipRows: cg.rows, at: new Date().toISOString(),
     perLeague: perLeague(live, p, y => y === GRID_TEST), live: perLeague(live, p, y => y >= GRID_LIVE_FROM)
   };
   // fix238: games with a row out of range — bb-v3 shown where it was at least as good on that group's test season
   s.fallback = {};
   for (const g of Object.keys(s.gate)) {
     const test = live.filter(x => x.year === GRID_TEST && groupOf(x.code) === g);
+    // (fix288: on the all-games spread, as before — measured on the in-play range the shown chances got worse on the test
+    // season: all 0.5969 → 0.5974, games 1–25 0.6056 → 0.6081; the wide flag sends unusual early-season games to bb-v3)
     s.fallback[g] = fallbackCheck(test, s.stats, code => groupParams(p, s.gate, code));
   }
   gs = s; ver++;
@@ -541,7 +553,7 @@ export function gridLive(code: string): boolean {
 /**
  * bb-v4 for an upcoming game from bb-v3's prediction (x.p: its chance before the injury points; home edges, rest; sigma) and, for the NBA, the injury report's lost impact (#4). null = not live for the league / no team values.
  */
-export function gridPredict(g: { code: string; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null }, x: { p: number; hca: number; haH?: number; haA?: number; b2bHome: boolean; b2bAway: boolean }, sigma: number, miss?: { home: number; away: number; homeTop?: number; awayTop?: number }): { pHome: number; margin: number; parts: number[]; view: GridView; off?: string[] } | null {
+export function gridPredict(g: { code: string; home_id: number; away_id: number; kickoff: string; season: string; week?: string | null }, x: { p: number; hca: number; haH?: number; haA?: number; b2bHome: boolean; b2bAway: boolean }, sigma: number, miss?: { home: number; away: number; homeTop?: number; awayTop?: number }): { pHome: number; margin: number; parts: number[]; view: GridView; off?: string[]; clipped?: string[] } | null {
   if (!gridLive(g.code) || !gs) return null;
   const r = liveRows(g, { p: x.p, sig: sigma, hca: x.hca, haH: x.haH || 0, haA: x.haA || 0, b2bH: x.b2bHome, b2bA: x.b2bAway }, miss, gs.params.impact);
   if (!r) return null;
@@ -551,12 +563,76 @@ export function gridPredict(g: { code: string; home_id: number; away_id: number;
   // fix238: a short rotation, or a row out of range where the group's test season says bb-v3 does better → `off`
   const out = rangeLabels(it, gs.stats);
   const off = [...r.rot, ...(out.length && fallbackOn(g.code) ? out : [])];
-  return { pHome: e.pHome, margin: e.margin, parts: e.parts, view: split1000(p, g.code, it, gs.stats.sd), ...(off.length ? { off } : {}) };
+  // fix288: the rows the clip held (data health lists them)
+  const clipped = clippedLabels(it, p.clip);
+  return { pHome: e.pHome, margin: e.margin, parts: e.parts, view: split1000(p, g.code, it, gs.stats.sd), ...(off.length ? { off } : {}), ...(clipped.length ? { clipped } : {}) };
 }
 /** fix238: bb-v3 shown for this league's out-of-range games (no check stored yet: yes, the safe side) */
 export function fallbackOn(code: string): boolean {
   if (String(process.env.BB_RANGE_FALLBACK || '').toLowerCase() === 'off') return false;
   return gs?.fallback?.[groupOf(code)]?.on ?? true;
+}
+
+/**
+ * fix288 — /api/bb/check30 (admin): the last `days` days' finished games of every league with bb-v4 rows. before = the
+ * chance we saved before tip-off (bb_predictions: what the site said), after = the walk-forward rows as this build makes
+ * them with the settings and clip live now (bb-v3's walk-forward chance where the group runs bb-v3), market = the
+ * consensus winner price (market_lines 'ml', the closing line when there is one; admin-only data). Same games for the
+ * three on the "with a market line" lines, so the gap between "after" and the market is what is left of the drop
+ * once the season's own surprises are taken out.
+ */
+export function check30(days = 30, now = Date.now()) {
+  if (!gs) return { error: 'no bb-v4 state yet (the next basketball model build publishes it)' };
+  const since = new Date(now - days * 86400000).toISOString(), until = new Date(now).toISOString();
+  const games = db.prepare(`SELECT g.game_id, g.code, g.hs, g.as_, p.p_home, p.p_raw FROM bb_games g LEFT JOIN bb_predictions p ON p.game_id = g.game_id
+    WHERE g.status IN ('FT','AOT') AND g.hs IS NOT NULL AND g.hs != g.as_ AND g.kickoff > ? AND g.kickoff <= ?`).all(since, until) as any[];
+  const byId = new Map(games.map(g => [g.game_id as number, g]));
+  const rows = gateInputs(loadRows().filter(x => byId.has(x.id)), gs.params);
+  const mkt = new Map<number, number>();
+  try {
+    for (const r of db.prepare(`SELECT game_id, closing, prices FROM market_lines WHERE sport = 'basketball' AND market = 'ml' AND kickoff > ? ORDER BY closing`).all(since) as any[]) {
+      const p = JSON.parse(r.prices)?.p || {}, h = p.home ?? p.Home;
+      if (typeof h === 'number' && h > 0 && h < 1) mkt.set(r.game_id, h); // (closing 1 read last: it wins)
+    }
+  } catch { /* no market table on this database */ }
+  // before = shown (after the calibration layer / market anchor), beforeRaw = the model's own saved chance (p_raw: what
+  // `after` compares with — neither has the layer); after follows the site's rules (bb-v3 where the group runs it, the
+  // fix238 fallback for a row out of range)
+  type G = { code: string; y: number; before: number | null; beforeRaw: number | null; after: number; market: number | null };
+  const list: G[] = rows.map(x => {
+    const g = byId.get(x.id)!;
+    const v4 = gridLive(x.code) && !(rowsOutOfRange(x, gs!.stats).length && fallbackOn(x.code));
+    const after = v4 ? gridEval(liveParams(x.code)!, x.code, x).pHome : x.v3;
+    const before = typeof g.p_home === 'number' ? g.p_home : null;
+    return { code: x.code, y: g.hs > g.as_ ? 1 : 0, before, beforeRaw: typeof g.p_raw === 'number' ? g.p_raw : before, after, market: mkt.get(x.id) ?? null };
+  });
+  const score = (l: G[], k: 'before' | 'beforeRaw' | 'after' | 'market') => {
+    const v = l.filter(x => x[k] !== null);
+    if (!v.length) return null;
+    let ll = 0, hit = 0;
+    for (const x of v) { const q = Math.min(0.995, Math.max(0.005, x[k]!)); ll -= x.y ? Math.log(q) : Math.log(1 - q); hit += (q >= 0.5 ? 1 : 0) === x.y ? 1 : 0; }
+    return { games: v.length, hitRate: Math.round((1000 * hit) / v.length) / 10, logLoss: Math.round((ll / v.length) * 1e4) / 1e4 };
+  };
+  const block = (l: G[]) => {
+    const m = l.filter(x => x.market !== null && x.before !== null);
+    return { games: l.length, before: score(l, 'before'), beforeRaw: score(l, 'beforeRaw'), after: score(l, 'after'), withMarket: { games: m.length, before: score(m, 'before'), beforeRaw: score(m, 'beforeRaw'), after: score(m, 'after'), market: score(m, 'market') } };
+  };
+  const codes = [...new Set(list.map(x => x.code))].sort();
+  return {
+    days, since, at: new Date().toISOString(), clip: clipSummary(),
+    note: 'before = saved pre-game chances as shown; beforeRaw = the saved model chance before the calibration layer; after = this build\'s walk-forward rows with the settings + clip live now (no layer); market = consensus winner price (admin only)',
+    nba: block(list.filter(x => x.code === 'NBA')), fec: block(list.filter(x => x.code === 'FEC')), all: block(list),
+    byLeague: Object.fromEntries(codes.map(c => [c, block(list.filter(x => x.code === c))]))
+  };
+}
+
+/** fix288: the data-health line of the clip — which rows are held at 3 sd, which are not and why */
+export function clipSummary(): string | null {
+  const rows = gs?.clipRows;
+  if (!rows?.length) return null;
+  const f = (x: number | null) => (x === null ? 'n/a' : `${x > 0 ? '+' : ''}${Math.round(x * 1e5) / 10}e-4`);
+  const on = rows.filter(r => r.on), off = rows.filter(r => !r.on);
+  return `Clip at 3 sd of training: ${on.length ? on.map(r => r.id).join(' ') : 'no row'}${off.length ? ` · not clipped (clipping made the training games worse): ${off.map(r => `${r.id} train ${f(r.train)} / test ${f(r.test)}`).join(', ')}` : ''}`;
 }
 
 /** Row sanity from the game-page views (the rows a live prediction used): see rowSanity. */
@@ -590,12 +666,17 @@ export function gridReportLines(now = Date.now()): string[] {
 
 /** Data health "Row sanity": upcoming games whose row differences drift more than 3 sd from the training spread. */
 export function rowSanity(rows: { label: string; hv: number[]; av: number[] }[]) {
-  if (!gs) return { checked: 0, bad: [] as string[] };
+  if (!gs) return { checked: 0, bad: [] as string[], loose: [] as string[] };
   const { mean, sd } = gs.stats;
   const bad: string[] = [];
   // (#6 rest and #11 motivation are flags: a back-to-back or a tanking team is a normal value, not a drift)
   for (const r of rows) if (rowsOutOfRange(r, { mean, sd }).length) for (const l of rangeLabels(r, { mean, sd })) bad.push(`${r.label}: ${l}`);
-  return { checked: rows.length, bad };
+  // fix288: the same against the range on the games where each row is in play (what the clip reads) — `loose` = such
+  // values on a row the clip leaves as it is (#1 / #3 / #4: their clip made the predictions worse)
+  const loose: string[] = [];
+  const range = gs.range, on = new Set((gs.clipRows || []).filter(c => c.on).map(c => c.id));
+  if (range) for (const r of rows) for (const i of rowsOutOfRange(r, range)) if (!on.has(GRID_ROWS[i].id)) loose.push(`${r.label}: ${rangeLabels(r, range, [i])[0]} — not clipped`);
+  return { checked: rows.length, bad, loose };
 }
 
 /* ---------- fix225: key players count more (box-score value blended with on/off, the star factor) ---------- */
