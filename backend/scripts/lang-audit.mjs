@@ -77,6 +77,9 @@ async function pageLines(browser, base, token, url) {
     const out = new Set();
     for (const el of document.querySelectorAll('main, header, nav')) for (const l of (el.innerText || '').split('\n')) { const x = l.replace(/[\u2066-\u2069]/g, '').trim(); if (x) out.add(x); }
     for (const el of document.querySelectorAll('main [title]')) { const x = el.getAttribute('title')?.trim(); if (x) out.add(x); }
+    // fix289: news stories are other sites' headlines in their own language (links out, target=_blank), not our text —
+    // the live feed's English headlines failed the audit on 31 Oct whenever the local server reached the news sources
+    for (const a of document.querySelectorAll('main a[target="_blank"][href^="http"]')) for (const l of (a.innerText || '').split('\n')) out.delete(l.replace(/[⁦-⁩]/g, '').trim());
     out.add(document.title);
     return [...out];
   }).catch(() => []);

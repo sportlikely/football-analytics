@@ -194,5 +194,7 @@ export function noteOf(e: PEvent, o: { tx: Tx; lang: string; tz: string; showPic
   const side = outsiderOf(s);
   const name = side === 'A' ? s.away : s.home;
   const chance = s.pre ? Math.round(side === 'A' ? s.pre.pa : s.pre.ph) : 0;
-  return { title: tx('Upset watch: {0}', s.sport === 'tennis' ? sets(s) : score(s)), body: tx('{0} is ahead. Before the game we gave them {1}%.', name, chance) };
+  // fix289: a team takes a plural verb ("Utah Jazz are ahead"), a tennis player the singular
+  return { title: tx('Upset watch: {0}', s.sport === 'tennis' ? sets(s) : score(s)),
+    body: s.sport === 'tennis' ? tx('{0} is ahead. Before the game we gave them {1}%.', name, chance) : tx('{0} are ahead. Before the game we gave them {1}%.', name, chance) };
 }

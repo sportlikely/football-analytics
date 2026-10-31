@@ -8,7 +8,8 @@ import { primeGame } from '../lib/gameBundle'
 import { useApiFresh } from '../lib/apiCache'
 import PageSkeleton from '../components/PageSkeleton'
 import { API_URL, socket } from '../lib/socket'
-import { modelInfo, isV3, score10, CONFIDENCE_LABEL, MATCH_TYPE_LABEL, pickOfPrediction, doubleChance, dcLabel, shortTeam, type DC, type Prediction } from '../lib/predict'
+import { modelInfo, isV3, score10, CONFIDENCE_LABEL, MATCH_TYPE_LABEL, pickOfPrediction, doubleChance, dcLabel, type DC, type Prediction } from '../lib/predict'
+import { fbPageNames } from '../lib/gameNames'
 import WinProbability from '../components/WinProbability'
 import { useReveal, justRevealed, hideMatch, guessFirstOn } from '../lib/reveal'
 import CountUp from '../components/CountUp'
@@ -781,7 +782,8 @@ function MatchDetail() {
                     )}
                     {/* fix281: the shared prediction tab — split bar, "Most sure first", topics as sub-paths, "Why we think so" behind a button */}
                     {(() => {
-                      const hn = shortTeam(home), an = shortTeam(away)
+                      // fix289: the hero's names (one style on the page), not shortTeam's three letters ("Man United" in the header, "MUN" in the bar)
+                      const { home: hn, away: an } = fbPageNames(home, away)
                       const sides = dc ? dc.sides : []
                       const win = (k: 'H' | 'D' | 'A') => (k === 'H' ? tt("{0} win", { 0: hn }) : k === 'A' ? tt("{0} win", { 0: an }) : tt("A draw"))
                       const dcText = dc ? (dc.code === '1X' ? tt("{0} win or draw", { 0: hn }) : dc.code === 'X2' ? tt("{0} win or draw", { 0: an }) : tt("No draw: one team wins")) : ''
@@ -1058,6 +1060,7 @@ function MatchDetail() {
     const h = team && x.pl?.id ? lineupHref(x.pl, team, m.competition?.code) : null
     if (h) scorerHref.set(x.pl.id, h)
   }
+  // fix289: one name style on the page (lib/gameNames.ts fbPageNames) — the same names in the bar and Your picks
   const side = (team: Team) => ({
     name: team.shortName || team.name,
     logo: <HeroLogo src={team.crest} />,
@@ -1073,7 +1076,7 @@ function MatchDetail() {
     <GamePage
       back={{ to: '/football/matches', label: tt("All matches") }}
       preview={lang === 'en' && details?.preview?.text ? <GamePreview text={details.preview.text} title="Match preview" /> : null}
-      picks={<YourPicks sport="fb" gameId={m.id} home={home.shortName || home.name} away={away.shortName || away.name} />}
+      picks={<YourPicks sport="fb" gameId={m.id} home={fbPageNames(home, away).home} away={fbPageNames(home, away).away} />}
       srTitle={tabTitle ? `${tabTitle}${m.competition?.name ? ` · ${m.competition.name}` : ''} ${tt("prediction")}` : undefined}
       league={{
         name: m.competition.name, href: leagueHref('football', m.competition.code, m.competition.name) || '/football', logo: m.competition.emblem || null, bits: roundBits,
@@ -1304,7 +1307,7 @@ function LockedPrediction({ pick, dc, home, away, matchId, status, autoUnlock = 
       <div className="flex flex-wrap items-center gap-2 text-sm mb-4">
         <span className="px-2.5 py-1 rounded-full text-xs font-bold border bg-surface2 text-ink border-line">{dc ? tt("Our pick") : tt("Model pick")}</span>
         {dc ? (
-          <span className="inline-flex items-center gap-2 min-w-0"><span className="font-display font-bold text-lg text-ink truncate">{dcLabel(dc, shortTeam(home), shortTeam(away))}</span></span>
+          <span className="inline-flex items-center gap-2 min-w-0"><span className="font-display font-bold text-lg text-ink truncate">{dcLabel(dc, fbPageNames(home, away).home, fbPageNames(home, away).away)}</span></span>
         ) : name ? (
           <span className={`font-display font-bold text-lg ${color}`}>{name}</span>
         ) : (
@@ -1536,7 +1539,7 @@ function H2H({ h2h, home, away }: { h2h: H2HData; home: Team; away: Team }) {
                 <CrestBox team={team} />
                 <span className="min-w-0 max-w-full">
                   <TeamName team={team} className="block font-display font-bold text-ink truncate" />
-                  <span className="block text-[11px] text-faint">{tt("{0} wins", { 0: s === 'H' ? hw : aw })}</span>
+                  <span className="block text-[11px] text-faint">{tt("{0} win", { 0: s === 'H' ? hw : aw })}</span>
                 </span>
               </div>
             )
@@ -1678,7 +1681,7 @@ function RestSummary({ home, away, h, a }: { home: Team; away: Team; h: TeamSche
   }
   for (const [t, s] of [[home, h], [away, a]] as const) {
     if (s.games14 >= 4) lines.push(tNodes("{0} played {1} games in the last 14 days.", { 0: <TeamName team={t} />, 1: s.games14 }))
-    if (s.next && s.next.days <= 4) lines.push(tNodes("{0} plays again {1} later ({2}).", { 0: <TeamName team={t} />, 1: daysText(s.next.days), 2: <NameLink to={hrefOf.league(s.next.competitionCode)}>{s.next.competition || ''}</NameLink> }))
+    if (s.next && s.next.days <= 4) lines.push(tNodes("{0} play again {1} later ({2}).", { 0: <TeamName team={t} />, 1: daysText(s.next.days), 2: <NameLink to={hrefOf.league(s.next.competitionCode)}>{s.next.competition || ''}</NameLink> }))
   }
   if (!lines.length) return null
   return (

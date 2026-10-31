@@ -143,6 +143,9 @@ const P: Record<string, Pair> = {
   'giannis antetokounmpo': ['יאניס אנטטוקומפו', 'يانيس أنتيتوكومبو'], 'kevin durant': ['קווין דוראנט', 'كيفن ديورانت'], 'deni avdija': ['דני אבדיה', 'ديني أفدييا'],
   'victor wembanyama': ['ויקטור וומבניאמה', 'فيكتور ويمبانياما'], 'jayson tatum': ['ג\'ייסון טייטום', 'جايسون تاتوم'], 'shai gilgeous-alexander': ['שיי גילג\'ס-אלכסנדר', 'شاي غيلجس ألكسندر'],
   'damian lillard': ['דמיאן לילארד', 'داميان ليلارد'], 'levante': ['לבאנטה', 'ليفانتي'], 'levante ud': ['לבאנטה', 'ليفانتي'],
+  // fix289: the 31 Oct review — the AI wrote Goztepe 'גזטפה' and West Virginia 'וסט'
+  'goztepe': ['גוזטפה', 'غوزتبه'], 'goztepe sk': ['גוזטפה', 'غوزتبه'], 'west virginia': ['ווסט וירג\'יניה', 'ويست فيرجينيا'],
+  'west virginia mountaineers': ['ווסט וירג\'יניה', 'ويست فيرجينيا'],
   'carlos alcaraz': ['קרלוס אלקראס', 'كارلوس ألكاراز'], 'jannik sinner': ['יאניק סינר', 'يانيك سينر'], 'novak djokovic': ['נובאק ג\'וקוביץ\'', 'نوفاك ديوكوفيتش'],
   'aryna sabalenka': ['ארינה סבלנקה', 'أرينا سابالينكا'], 'iga swiatek': ['איגה שוויונטק', 'إيغا شفيونتيك'], 'coco gauff': ['קוקו גאוף', 'كوكو غوف'], 'ons jabeur': ['אונס ג\'אבר', 'أنس جابر']
 };
@@ -439,7 +442,7 @@ function dict(lang: NameLang): Map<string, Set<string>> {
   return dictCache[lang];
 }
 
-export type NameFlag = 'dictionary' | 'final-inside' | 'triple' | 'initials-lost' | 'latin-left' | 'other-script' | 'empty';
+export type NameFlag = 'dictionary' | 'final-inside' | 'triple' | 'initials-lost' | 'latin-left' | 'other-script' | 'blocked' | 'empty';
 export const FLAG_TEXT: Record<NameFlag, string> = {
   dictionary: 'a dictionary / place word that is not this name',
   'final-inside': 'a final letter (ך ם ן ף ץ) inside a word',
@@ -447,6 +450,7 @@ export const FLAG_TEXT: Record<NameFlag, string> = {
   'initials-lost': 'an initial of the Latin name is missing',
   'latin-left': 'Latin letters left inside the name',
   'other-script': 'letters of another alphabet (Cyrillic, Greek, Arabic in Hebrew, Hebrew in Arabic …)',
+  blocked: 'a spelling a review found wrong (nameScript AI_BLOCKED)',
   empty: 'no letters of the language'
 };
 const INITIAL_RX = /(?<=^|[\s.])\p{L}\.(?=\s|\p{L}\.|$)/gu;
@@ -478,7 +482,23 @@ export function spellingFlags(latin: string, local: string, lang: NameLang, kind
   if (/[A-Za-z]/.test(rest)) out.push('latin-left');
   // fix286: "Brayden" came back "ברייдן" — a letter of any other alphabet (Latin is the check above)
   if (otherScript(s, lang)) out.push('other-script');
+  if (blockedWords(latin, s, lang).length) out.push('blocked');
   return out;
+}
+/**
+ * fix289: spellings a review found wrong — a Latin word (nameKey form) and the local word written for it that the press
+ * never uses. Any name with that Latin word and that local word is flagged 'blocked' (hidden, asked again with the press
+ * examples); add a line here and the right spelling to PRESS when a review finds another one.
+ */
+export const AI_BLOCKED: Record<NameLang, { latin: string; wrong: string; right: string }[]> = {
+  he: [{ latin: 'goztepe', wrong: 'גזטפה', right: 'גוזטפה' }, { latin: 'west', wrong: 'וסט', right: 'ווסט' }],
+  ar: []
+};
+/** fix289: the blocked words of a spelling (empty = none) */
+export function blockedWords(latin: string, local: string, lang: NameLang) {
+  const lat = new Set(nameKey(latin).split(' '));
+  const words = new Set(String(local || '').split(/[\s\-–־]+/).map(w => w.replace(/^["'׳״(]+|["'׳״).,]+$/g, '')).filter(Boolean));
+  return AI_BLOCKED[lang].filter(b => lat.has(b.latin) && words.has(b.wrong));
 }
 const OWN_SCRIPT: Record<NameLang, RegExp> = { he: /\p{Script=Hebrew}|\p{Script=Latin}/u, ar: /\p{Script=Arabic}|\p{Script=Latin}/u };
 /** fix286: a letter that is neither the language's own nor Latin (Cyrillic, Greek, Arabic in Hebrew, Hebrew in Arabic …) */
@@ -516,6 +536,22 @@ Answer with one line per input line and nothing else (no JSON, no notes): index|
 e.g. 0|ברנדון נייט|0.9|براندون نايت|0.85 — leave a spelling empty when you do not know it (0|||براندون نايت|0.6).`;
 /** fix286: asked again once when a spelling had letters of another alphabet */
 export const AI_RETRY_NOTE = 'Your last answer for these names had letters of another alphabet (Cyrillic, Greek …) inside a name. Hebrew spellings use Hebrew letters only, Arabic spellings Arabic letters only (Latin initials / acronyms as given may stay).';
+/** fix289: press spellings shown as examples when names are asked again (PRESS keys) */
+const RETRY_EXAMPLES = ['west ham', 'west virginia', 'goztepe', 'manchester united', 'atletico madrid', 'getafe', 'borussia monchengladbach', 'juventus',
+  'girona', 'bournemouth', 'nikola jokic', 'luka doncic', 'shai gilgeous-alexander', 'jayson tatum', 'novak djokovic', 'iga swiatek'];
+/**
+ * fix289: the note of the second ask — what was wrong (another alphabet; a blocked spelling: "גזטפה" for "goztepe") and
+ * the press list as examples of the spelling wanted
+ */
+export function aiRetryNote(o: { otherScript?: boolean; blocked?: { latin: string; wrong: string; right: string }[] } = {}): string {
+  const parts: string[] = [];
+  if (o.otherScript) parts.push(AI_RETRY_NOTE);
+  const bl = [...new Map((o.blocked || []).map(b => [b.wrong, b])).values()];
+  if (bl.length) parts.push(`Your last answer used spellings the press does not use: ${bl.map(b => `"${b.wrong}" for "${b.latin}" (the press writes "${b.right}")`).join(', ')}.`);
+  const ex = RETRY_EXAMPLES.filter(k => PRESS.he.has(k)).map(k => `${k} = ${PRESS.he.get(k)} | ${PRESS.ar.get(k)}`);
+  parts.push(`The spelling the press uses, for example (Latin = Hebrew | Arabic):\n${ex.join('\n')}`);
+  return parts.join('\n');
+}
 export function aiPrompt(items: AiItem[]): string {
   return items.map((it, i) => `${i}\t${it.sport || '-'}\t${it.kind}\t${it.name}${it.country ? `\tcountry: ${it.country}` : ''}${it.team ? `\tteam: ${it.team}` : ''}`).join('\n');
 }

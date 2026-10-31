@@ -20,6 +20,7 @@ import ModelParts, { type PartRow } from '../../components/sport/game/ModelParts
 import GamePreview from '../../components/sport/game/GamePreview'
 import { GamePicksSlot } from '../../components/sport/game/GameLayout'
 import YourPicks from '../../components/YourPicks'
+import { pairPageNames } from '../../lib/gameNames'
 import Highlights from '../../components/sport/game/Highlights'
 import PlayerPhoto from '../../components/sport/PlayerPhoto'
 import { PlayerName, SurfaceTag, FormList, DrawTab, type Played, type DrawRound } from './parts'
@@ -80,10 +81,12 @@ export default function TennisMatch() {
   const m = d.match
   const p = d.prediction
   const live = m.state === 'live', done = m.state === 'done'
-  const hs = surname(m.home), as = surname(m.away)
-  const side = (s: TMatch['home']) => ({
+  // fix289: one name style on the page — the hero, the prediction bar and Your picks show both surnames
+  const nm = pairPageNames(m.home, m.away, surname)
+  const hs = nm.home, as = nm.away
+  const side = (s: TMatch['home'], shown: string) => ({
     // fix211: the player's photo (flag as a badge); none: the flag as before
-    name: s.name, logo: <PlayerPhoto src={s.logo} name={s.name} flag={flagOf(s.country) || '🎾'} size={72} /> /* fix241: initials + flag unless the photo is official */, href: tennisHref.player(s.id, s.name) || '/tennis',
+    name: shown, logo: <PlayerPhoto src={s.logo} name={s.name} flag={flagOf(s.country) || '🎾'} size={72} /> /* fix241: initials + flag unless the photo is official */, href: tennisHref.player(s.id, s.name) || '/tennis',
     title: t('{0}: player page', { 0: s.name }), linkLabel: t('Player page →'), star: s.id ? <FavStar fav={tennisPlayerFav(s)} size="sm" /> : undefined,
     sub: s.rank ? t('World No. {0}', { 0: s.rank }) : null
   })
@@ -97,7 +100,7 @@ export default function TennisMatch() {
           <WinnerPrediction
             rid={tennisRid(m)} status={tennisRstatus(m)} p={p} home={{ name: m.home.name, logo: null }} away={{ name: m.away.name, logo: null }} upcoming={m.state === 'upcoming'}
             model={p?.model || 'tennis-v1'} sport="tennis" saved={t('Saved before the first serve')} updated={t('Updated until the first serve')}
-            more={{ sport: 'tennis', id: m.id }} topic={topic} onTopic={pickTopic} names={{ home: surname(m.home), away: surname(m.away) }}
+            more={{ sport: 'tennis', id: m.id }} topic={topic} onTopic={pickTopic} names={nm}
             middle={{ label: t('Total games'), value: g && typeof g.median === 'number' ? String(g.median) : '–' }}
             stats={[
               { label: t('Likely score'), value: sets[0] ? sets[0].score.replace('-', '–') : '–' },
@@ -132,13 +135,13 @@ export default function TennisMatch() {
     <GamePage
       back={{ to: '/tennis/matches', label: t('All matches') }}
       preview={lang === 'en' && d.writeup ? <GamePreview text={d.writeup} title="Match preview" /> : null}
-      picks={<YourPicks sport="tn" gameId={m.id} home={m.home.name} away={m.away.name} />}
+      picks={<YourPicks sport="tn" gameId={m.id} home={nm.home} away={nm.away} />}
       srTitle={`${m.home.name} vs ${m.away.name} · ${m.tournament.name} ${t('prediction')}`}
       league={{ name: m.tournament.name, href: tennisHref.tournament(m.tournament.key), star: <FavStar size="sm" fav={tennisTournamentFav(m.tournament)} />,
         bits: [tierLabel(m), surfaceName(m.tournament.surface, m.tournament.indoor), roundName(m), m.bestOf === 5 ? t('Best of 5') : ''].filter(Boolean) }}
       date={fmtGameDate(m.start)}
-      home={side(m.home)}
-      away={side(m.away)}
+      home={side(m.home, nm.home)}
+      away={side(m.away, nm.away)}
       score={m.score && m.state !== 'upcoming' ? { home: m.score.won[0], away: m.score.won[1] } : null}
       time={fmtGameTime(m.start)}
       status={{ kind: live ? 'live' : done ? 'done' : m.state === 'off' ? 'halted' : 'upcoming', text: statusText }}

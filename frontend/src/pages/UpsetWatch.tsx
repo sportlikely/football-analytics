@@ -44,7 +44,7 @@ function reasonText(r: Reason, fav: string, dog: string): string {
       : tt("{0} won {1} of the last {2}, {3} {4}", { 0: dog, 1: r.a ?? 0, 2: r.n ?? 5, 3: fav, 4: r.b ?? 0 })
     case 'rest': return r.grid
       ? tt("{0} played {1} games in {2} days, {3} {4}", { 0: fav, 1: r.a ?? 0, 2: r.n ?? 8, 3: dog, 4: r.b ?? 0 })
-      : tt("{0} is more rested: {1} days off vs {2}", { 0: dog, 1: r.b ?? 0, 2: r.a ?? 0 })
+      : tt("{0} are more rested: {1} days off vs {2}", { 0: dog, 1: r.b ?? 0, 2: r.a ?? 0 })
     case 'awayRecord': return typeof r.a === 'number' && typeof r.b === 'number'
       ? tt("{0} won {1} of their last {2} away games", { 0: fav, 1: r.a, 2: r.b })
       : tt("{0}'s away record is weaker than {1}'s home record", { 0: fav, 1: dog })
@@ -52,7 +52,7 @@ function reasonText(r: Reason, fav: string, dog: string): string {
       ? tt("{0} {1}–{2}, {3} {4}–{5} this season, but our numbers say it is closer", { 0: fav, 1: r.a ?? 0, 2: r.b ?? 0, 3: dog, 4: r.c, 5: r.d ?? 0 })
       : tt("Ranked {0} vs {1}, but closer than the ranking says", { 0: r.a ?? '–', 1: r.b ?? '–' })
     case 'h2h': return r.grid
-      ? tt("{0} has the edge in the last {1} meetings", { 0: dog, 1: r.n ?? 0 })
+      ? tt("{0} have the edge in the last {1} meetings", { 0: dog, 1: r.n ?? 0 })
       : tt("{0} won {1} of the last {2} meetings", { 0: dog, 1: r.a ?? 0, 2: r.n ?? 0 })
   }
 }

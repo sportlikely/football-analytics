@@ -112,7 +112,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
         const showRows = x.why.length > 0 && (!x.factors?.length || admin)
         const whyBlock = x.factors?.length || showRows || x.howCalc ? (
           <>
-            {x.factors && x.factors.length > 0 && <WhyPanel factors={x.factors} fav={pH > pA ? 'H' : pA > pH ? 'A' : null} home={x.home.name} away={x.away.name} favPct={Math.max(pH, pA)} otherPct={pH > pA ? pA : pA > pH ? pH : null} />}
+            {x.factors && x.factors.length > 0 && <WhyPanel factors={x.factors} fav={pH > pA ? 'H' : pA > pH ? 'A' : null} home={hn} away={an} favPct={Math.max(pH, pA)} otherPct={pH > pA ? pA : pA > pH ? pH : null} />}
             {(showRows || (x.howCalc && (!x.factors?.length || admin))) && (
               <div className={`rounded-2xl border border-line/60 bg-surface2/30 p-4 ${x.factors?.length ? 'mt-4' : ''}`}>
                 {x.factors?.length ? <div className="text-sm font-bold text-ink mb-2">{t('Factor by factor')}</div> : null}
@@ -146,7 +146,7 @@ export default function WinnerPrediction(x: WinnerPredictionProps) {
               onHide={guessFirstOn() && x.upcoming ? () => hideMatch(x.rid) : undefined}
               main={{
                 cells: [{ key: 'H', pct: pH, on: pick === 'H' }, { key: 'A', pct: pA, on: pick === 'A' }],
-                pick: { words: pick === 'H' ? x.home.name : x.away.name, pct: Math.round(topV) },
+                pick: { words: pick === 'H' ? hn : an, pct: Math.round(topV) },
                 items: [
                   { id: 'win-H', text: t('{0} win', { 0: hn }), pct: pH, hit: typeof p.hit === 'boolean' && pick === 'H' ? { text: p.hit ? hn : an, ok: p.hit } : null },
                   { id: 'win-A', text: t('{0} win', { 0: an }), pct: pA, hit: typeof p.hit === 'boolean' && pick === 'A' ? { text: p.hit ? an : hn, ok: p.hit } : null }

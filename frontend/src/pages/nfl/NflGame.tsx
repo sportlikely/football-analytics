@@ -17,6 +17,7 @@ import { useGameTopics } from '../../components/sport/prediction/topicTabs'
 import GameMeaning from '../../components/sport/forecast/GameMeaning'
 import GameExtras from '../../components/sport/game/GameExtras'
 import YourPicks from '../../components/YourPicks'
+import { pairPageNames } from '../../lib/gameNames'
 import { newerWinnerLive } from '../../lib/liveState'
 import { StatBars, LeagueSwitch, StandTable } from './parts'
 import GamePage, { GameNews, fmtGameDate, fmtGameTime, halfTimeOf, type GameTab } from '../../components/sport/game/GamePage'
@@ -115,8 +116,10 @@ export default function NflGame() {
   const q = g.quarters
   const ot = q && (q.home[4] != null || q.away[4] != null)
   const showQ = !!g.score && g.state !== 'upcoming' && q && q.home.some(x => x !== null)
-  const side = (team: NflSide) => ({
-    name: team.name, logo: <TeamLogo team={team} size={72} />, href: teamHref('american-football', team.id, team.name)!,
+  // fix289: one name style on the page — the hero, the prediction bar and Your picks show the nickname of both sides
+  const nm = pairPageNames(g.home.name, g.away.name, n => nick(n, g.league))
+  const side = (team: NflSide, shown: string) => ({
+    name: shown, logo: <TeamLogo team={team} size={72} />, href: teamHref('american-football', team.id, team.name)!,
     title: t('{0}: team page', { 0: team.name }), linkLabel: t('Team page →'), star: <FavStar fav={nflTeamFav(team)} size="sm" />
   })
   const hasPlayers = !!(d.players || d.injuries || d.starters)
@@ -130,7 +133,7 @@ export default function NflGame() {
           <WinnerPrediction
             rid={nflRid(g)} status={nflRstatus(g)} p={p} home={g.home} away={g.away} upcoming={g.state === 'upcoming'} model={nflModelOf(lg)} sport="american-football"
             saved={t('Saved before kick-off')} updated={t('Updated until kick-off')}
-            more={{ sport: 'nfl', id: g.id }} topic={topic} onTopic={pickTopic} names={{ home: nick(g.home.name, g.league), away: nick(g.away.name, g.league) }}
+            more={{ sport: 'nfl', id: g.id }} topic={topic} onTopic={pickTopic} names={nm}
             stats={[
               { label: t('Expected margin'), value: typeof p?.margin === 'number' ? t('{0} by {1}', { 0: nick((p.margin >= 0 ? g.home : g.away).name, g.league), 1: Math.abs(p.margin).toFixed(1) }) : '–' },
               { label: t('Predicted score'), value: typeof p?.homePts === 'number' ? `${Math.round(p.homePts)}–${Math.round(p.awayPts!)}` : '–' },
@@ -177,13 +180,13 @@ export default function NflGame() {
     <GamePage
       back={{ to: '/american-football/matches', label: t('All games') }}
       preview={lang === 'en' && d.writeup ? <GamePreview text={d.writeup} /> : null}
-      picks={<YourPicks sport="nfl" gameId={g.id} home={nick(g.home.name, g.league)} away={nick(g.away.name, g.league)} />}
+      picks={<YourPicks sport="nfl" gameId={g.id} home={nm.home} away={nm.away} />}
       top={<LeagueSwitch />}
       srTitle={`${g.home.name} vs ${g.away.name} · ${nflLeagueName(lg)} ${weekLabel(g.weekKey, g.league)}`}
       league={{ name: nflLeagueName(lg), href: leagueHref('american-football', String(lg))!, bits: [weekLabel(g.weekKey, g.league)] }}
       date={fmtGameDate(g.kickoff)}
-      home={side(g.home)}
-      away={side(g.away)}
+      home={side(g.home, nm.home)}
+      away={side(g.away, nm.away)}
       score={g.score && g.state !== 'upcoming' ? g.score : null}
       time={fmtGameTime(g.kickoff)}
       status={{

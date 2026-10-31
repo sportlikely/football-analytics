@@ -136,7 +136,7 @@ export function fromMore(sport: MoreSport, d: MoreData | null, n: Names): { item
   if (sport === 'basketball' || sport === 'nfl') {
     const win = p.info?.side === 'A' ? away : home, lose = p.info?.side === 'A' ? home : away
     const exp = p.info?.expected
-    bands('margin', t("By how much?"), l => (l === 'loser' ? t("{0} wins instead", { 0: lose }) : t("{0} by {1}", { 0: win, 1: l })), l => (l === 'loser' ? t("{0} win", { 0: lose }) : t("{0} win by {1} points", { 0: win, 1: l })))
+    bands('margin', t("By how much?"), l => (l === 'loser' ? t("{0} win instead", { 0: lose }) : t("{0} by {1}", { 0: win, 1: l })), l => (l === 'loser' ? t("{0} win", { 0: lose }) : t("{0} win by {1} points", { 0: win, 1: l })))
     const line = p.info?.line
     if (has('totalLine') && typeof line === 'number') {
       const s = sets.totalLine, po = s.p[s.labels.indexOf('over')] ?? 0, pu = 100 - po, over = po >= pu

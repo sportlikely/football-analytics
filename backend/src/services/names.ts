@@ -402,6 +402,24 @@ export async function namesTick(opts: { collect?: boolean; wd?: number; ai?: boo
       await inSlices(rows, r => { if (isNameLang(r.lang)) upd.run(spellingFlags(basisOf(r), r.name, r.lang, r.kind).join(',') || null, r.sport, r.kind, r.latin, r.lang); }, step);
       db.prepare(`INSERT OR REPLACE INTO names_meta (key, value, at) VALUES ('fix286', ?, ?)`).run(String(rows.length), new Date().toISOString());
     }
+    // fix289: once — the spellings a review blocked (nameScript AI_BLOCKED) get their flags; a name the press list now
+    // has (Goztepe, West Virginia) takes the press spelling; a blocked AI name without one is asked again
+    if (!meta('fix289')) {
+      const rows = all(`SELECT n.sport, n.kind, n.latin, n.lang, n.name, n.source, i.id, i.country, i.display FROM names n JOIN name_items i ON i.sport = n.sport AND i.kind = n.kind AND i.latin = n.latin WHERE n.source != 'admin' AND COALESCE(n.approved, 0) = 0`);
+      const upd = db.prepare(`UPDATE names SET flags = ? WHERE sport = ? AND kind = ? AND latin = ? AND lang = ?`);
+      const again = db.prepare(`DELETE FROM names_ai_tried WHERE sport = ? AND kind = ? AND latin = ?`);
+      const st = upsertName();
+      let n = 0;
+      await inSlices(rows, r => {
+        if (!isNameLang(r.lang)) return;
+        const flags = spellingFlags(basisOf(r), r.name, r.lang, r.kind);
+        upd.run(flags.join(',') || null, r.sport, r.kind, r.latin, r.lang);
+        const f = r.source !== 'press' ? fallbackName(basisOf(r), r.lang, r.kind, r.country) : null;
+        if (f?.source === 'press' && writeName(st, r, r.lang, f.name, 'press')) { written++; n++; }
+        else if (r.source === 'ai' && flags.includes('blocked')) { try { again.run(r.sport, r.kind, r.latin); } catch { /* no table yet */ } n++; }
+      }, step);
+      db.prepare(`INSERT OR REPLACE INTO names_meta (key, value, at) VALUES ('fix289', ?, ?)`).run(String(n), new Date().toISOString());
+    }
     // 2. press spelling / transliteration for names without a row (built from the first-last name)
     const st = upsertName();
     for (const lang of NAME_LANGS) {

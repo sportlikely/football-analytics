@@ -940,7 +940,7 @@ export function scoreMatch(state: GroupState, all: HistoryMatch[], home: string,
   for (const r of byEdge) reasons.push(`${r.name}: ${r.edge > 0 ? home : away} +${Math.abs(r.edge)}`);
   if (drawFactors > 8) reasons.push(`draw factors +${Math.round(drawFactors)} (${derby ? 'derby, ' : ''}draw-prone / league)`);
   if (lc) reasons.push(`league settings (${div}): ${describeLc(lc)}`);
-  for (const t of [h, a]) if (t.newcomer) reasons.unshift(`new to this league: ${t.name} has no games in it yet, so it starts from ${t.newcomer === 'promoted' ? 'the average of the teams promoted into it over the last 3 seasons' : t.newcomer === 'bottom3' ? 'the average of its bottom 3 teams' : 'the league average'}`);
+  for (const t of [h, a]) if (t.newcomer) reasons.unshift(`new to this league: ${t.name} have no games in it yet, so they start from ${t.newcomer === 'promoted' ? 'the average of the teams promoted into it over the last 3 seasons' : t.newcomer === 'bottom3' ? 'the average of its bottom 3 teams' : 'the league average'}`);
   if (guarded) reasons.push(`common-sense check: form (last 10: ${h.form10Pts} vs ${a.form10Pts} pts, season ${h.ppgSeason.toFixed(2)} vs ${a.ppgSeason.toFixed(2)} ppg) and the factors agree, so the weaker side is not the favourite`);
 
   const evidence = Math.min(h.played, a.played);

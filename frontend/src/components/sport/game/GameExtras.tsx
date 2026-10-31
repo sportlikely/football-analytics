@@ -22,7 +22,7 @@ interface Extras {
   indoor: boolean
   surface: string | null
   weather: { tempC: number | null; rainPct: number | null; rainMm: number | null; windKmh: number | null; notes: ('wind' | 'rain' | 'heat')[] | null; venue: string | null; city: string | null; start: string | null; at: string } | null
-  referee: { name: string | null; games: number | null; show: boolean; homeWin?: number | null; leagueHomeWin?: number; cards?: number | null; leagueCards?: number | null; pens?: number | null; leaguePens?: number | null } | null
+  referee: { name: string | null; games: number | null; min?: number; show: boolean; homeWin?: number | null; leagueHomeWin?: number; cards?: number | null; leagueCards?: number | null; pens?: number | null; leaguePens?: number | null } | null
   trends: TrendT[] | null
   difficulty: { home: Side | null; away: Side | null } | null
 }
@@ -208,7 +208,9 @@ function RefereeCard({ r }: { r: NonNullable<Extras['referee']> }) {
     { label: t('Home wins'), his: pc(r.homeWin), lg: pc(r.leagueHomeWin) }
   ] : []
   return (
-    <Section title={t('Referee')} note={t('{0} games this season', { 0: r.games ?? 0 })}>
+    // fix289: one count on the card — his games in this league this season (singular / plural), the same count the
+    // numbers come from; under the threshold the line says how many are needed and how many he has
+    <Section title={t('Referee')} note={t('{n, plural, one {# game} other {# games}} in this league this season', { n: r.games ?? 0 })}>
       <div className="font-semibold text-ink">{r.name}</div>
       {r.show ? (
         <table className="mt-3 w-full text-sm num">
@@ -216,7 +218,7 @@ function RefereeCard({ r }: { r: NonNullable<Extras['referee']> }) {
           <tbody>{rows.map(x => <tr key={x.label} className="border-t border-line"><td className="py-1.5 text-muted">{x.label}</td><td className="py-1.5 text-end font-bold text-ink">{x.his}</td><td className="py-1.5 text-end text-muted">{x.lg}</td></tr>)}</tbody>
         </table>
       ) : (
-        <p className="mt-2 text-xs text-muted">{t('His numbers show from 10 games in this league this season.')}</p>
+        <p className="mt-2 text-xs text-muted">{t('We show his numbers from {0} games in this league this season ({n, plural, one {# game} other {# games}} so far).', { 0: r.min ?? 10, n: r.games ?? 0 })}</p>
       )}
       <p className="mt-3 text-[11px] text-faint">{t('Pulled toward the league average until he has many games. Shown for interest: it does not change our prediction.')}</p>
     </Section>

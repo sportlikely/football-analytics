@@ -104,6 +104,10 @@ export const GEN: string[] = [
   g("favourites weaker (x{0})"),
   g("big favourites stronger (cube {0})"),
   g("no change"),
+  g("new to this league: {0} have no games in it yet, so they start from the average of the teams promoted into it over the last 3 seasons"),
+  g("new to this league: {0} have no games in it yet, so they start from the average of its bottom 3 teams"),
+  g("new to this league: {0} have no games in it yet, so they start from the league average"),
+  // fix289: the singular wording of reasons saved before fix289 (team subjects take a plural verb now)
   g("new to this league: {0} has no games in it yet, so it starts from the average of the teams promoted into it over the last 3 seasons"),
   g("new to this league: {0} has no games in it yet, so it starts from the average of its bottom 3 teams"),
   g("new to this league: {0} has no games in it yet, so it starts from the league average"),

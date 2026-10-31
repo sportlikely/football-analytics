@@ -20,7 +20,7 @@
  */
 import { db, DB_READ_ONLY } from '../db';
 import logger from '../utils/logger';
-import { AI_SYSTEM, AI_RETRY_NOTE, AI_VIEW_DAYS, aiPrompt, parseAi, personOrder, otherScript, NAME_LANGS, type AiItem, type NameLang } from '../utils/nameScript';
+import { AI_SYSTEM, AI_VIEW_DAYS, aiPrompt, aiRetryNote, blockedWords, parseAi, personOrder, otherScript, NAME_LANGS, type AiItem, type NameLang } from '../utils/nameScript';
 
 const KEY = () => process.env.ANTHROPIC_API_KEY || '';
 export const namesAiModel = () => process.env.NAMES_AI_MODEL || 'claude-opus-5-5';
@@ -155,15 +155,21 @@ export async function namesAiTick(opts: { batches?: number } = {}): Promise<{ wr
       addUsage({ in_tok: out.inTok, out_tok: out.outTok, usd, names: got.size, errors: out.refused ? 1 : 0 });
       // fix286: a spelling with letters of another alphabet ("ברייдן") — those names asked again once; still wrong =
       // written flagged ('other-script': the page keeps the Latin name, the row waits on the admin card)
-      const bad = [...got].filter(([, e]) => NAME_LANGS.some(l => e[l] && otherScript(e[l]!.name, l))).map(([i]) => i);
+      // fix289: a spelling a review blocked ("גזטפה" for Goztepe, "וסט" for West) too — asked again with the press examples
+      const wrong = (i: number, l: NameLang, name: string) => otherScript(name, l) || blockedWords(items[i].name, name, l).length > 0;
+      const bad = [...got].filter(([i, e]) => NAME_LANGS.some(l => e[l] && wrong(i, l, e[l]!.name))).map(([i]) => i);
       if (bad.length && usage().usd + callCeiling(model) <= namesAiCap()) {
         try {
-          const again = await ask(bad.map(i => items[i]), AI_RETRY_NOTE);
+          const note = aiRetryNote({
+            otherScript: bad.some(i => NAME_LANGS.some(l => { const e = got.get(i)?.[l]; return !!e && otherScript(e.name, l); })),
+            blocked: bad.flatMap(i => NAME_LANGS.flatMap(l => { const e = got.get(i)?.[l]; return e ? blockedWords(items[i].name, e.name, l) : []; }))
+          });
+          const again = await ask(bad.map(i => items[i]), note);
           addUsage({ in_tok: again.inTok, out_tok: again.outTok, usd: (again.inTok * pin + again.outTok * pout) / 1e6, names: 0, errors: again.refused ? 1 : 0 });
           const fixed = again.refused ? new Map() : parseAi(again.text, bad.length);
           for (const [k, e] of fixed) {
             const cur = got.get(bad[k]);
-            for (const l of NAME_LANGS) if (cur?.[l] && otherScript(cur[l]!.name, l) && e[l]) cur[l] = e[l];
+            for (const l of NAME_LANGS) if (cur?.[l] && wrong(bad[k], l, cur[l]!.name) && e[l]) cur[l] = e[l];
           }
         } catch (e: any) { addUsage({ in_tok: 0, out_tok: 0, usd: 0, names: 0, errors: 1 }); logger.warn(`names AI (again): ${e?.message || e}`); }
       }

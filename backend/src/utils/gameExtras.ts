@@ -60,6 +60,8 @@ export function refereeStats(games: RefGame[], league: RefLeague) {
   const show = n >= MIN_REF_GAMES;
   return {
     games: n,
+    // fix289: the games his numbers need (the card says "from 10 games … 1 game so far", never "1 games")
+    min: MIN_REF_GAMES,
     show,
     homeWinRaw: n ? hw / n : null,
     homeWin: show ? r2(shrink(hw, n, league.homeWin)) : null,
