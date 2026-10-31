@@ -709,7 +709,10 @@ function Shell() {
     const onDisconnect = () => setConnected(false)
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
-    if (!socket.connected) socket.connect()
+    // fix287: only when it is not already connecting — connect() while the transport is open but the server has not
+    // answered yet sends a second CONNECT, and socket.io closes the whole connection for it ("invalid state": the page's
+    // subscribe hit a closing WebSocket, "WebSocket is already in CLOSING or CLOSED state", and it reconnected 1 s later)
+    if (!socket.active) socket.connect()
     return () => {
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
