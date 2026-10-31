@@ -35,7 +35,7 @@ import { onState, publishState } from './shared';
 import { teamBox, NflGame } from './nflSite';
 import { rememberFirstPrediction } from './nflGameExtras';
 import { HIDE_OTHER, type LeagueId } from './nfl';
-import { calibrated, strongLineOf, collegeSeg, ncaaV2Live } from './afCalibState';
+import { calibrated, strongLineOf, collegeSeg, ncaaV2Live, labLive } from './afCalibState';
 import { anchorPoints } from './marketAnchor';
 import { nflFactors } from '../utils/whyFactors';
 
@@ -832,6 +832,8 @@ export function predictNfl(gameId: number): NflPred | null {
   if (league === 1) { const q = exps().v2Prob(g as any, pr as any); if (q !== null) { p = q; margin = marginFromP(q); model = exps().NFL_V2; } }
   // fix220: ncaa-v2 once it passed its gate (on ncaa-v1's Elo chance + its own numbers)
   if (league === 2 && ncaaV2Live()) { const q = afc().ncaaV2Prob(g.id, pr.p); if (q !== null) { p = q; margin = marginFromP(q); model = afc().NCAA_V2; } }
+  // fix292: the college lab's winner once it was promoted (on the chance above + its own rows)
+  if (league === 2 && labLive()) { const q = afc().collegeLabProb(g.id, p); if (q !== null) { p = q; margin = marginFromP(q); model = afc().COLLEGE_LAB_MODEL; } }
   // fix220: the calibration layer (honest percentages); the margin stays the model's (More predictions calibrates it)
   const pRaw = p;
   p = calibrated(league, p, league === 2 ? collegeSeg(g.h, g.a) : null, { h: g.h, a: g.a, neutral: g.neutral });
@@ -1117,7 +1119,10 @@ export async function nflModelTick(): Promise<void> {
       if (retrainedAny || A.afCalibStale() || !rep || Date.now() - Date.parse(rep.at) > 7 * DAY) {
         await heavy('af calibration', () => timed('af calibration', () => A.buildAfCalibration()));
       }
+      // fix292: the college layer refit on 2025 + 2026 every day as games settle
+      else if (A.refitDue()) await heavy('af college refit', () => timed('af college refit', () => A.refitCollegeLayer()));
       await A.refreshNcaaV2();
+      await A.refreshCollegeLab();
     } catch (e: any) { logger.warn(`af calibration: ${e.message}`); }
     const n = await saveNflPredictions();
     if (n) logger.info(`NFL / college: ${n} predictions saved`);

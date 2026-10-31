@@ -9,7 +9,7 @@ export type ModelSport = 'football' | 'basketball' | 'american-football' | 'tenn
 export const SL_MODELS: Record<ModelSport, { name: string; version: string; since: string | null; internal: string[] }> = {
   football: { name: 'SL Football', version: '3.0', since: '2026-10-19', internal: ['v3-mix', 'grid-v3', 'feat-v1', 'v3-weights', 'elo-intl', 'elo-euro', 'dc-history-v2', 'poisson-dc-v1', 'v3', 'v2', 'v1'] },
   basketball: { name: 'SL Basketball', version: '4.2', since: '2026-10-26', internal: ['bb-v4', 'bb-v3', 'bb-v2', 'bb-v1'] },
-  'american-football': { name: 'SL American Football', version: '1.1', since: '2026-10-25', internal: ['nfl-v1', 'nfl-v2', 'ncaa-v1', 'ncaa-v2'] },
+  'american-football': { name: 'SL American Football', version: '1.1', since: '2026-10-25', internal: ['nfl-v1', 'nfl-v2', 'ncaa-v1', 'ncaa-v2', 'ncaa-v3'] },
   tennis: { name: 'SL Tennis', version: '1.1', since: null, internal: ['tennis-v1'] },
   baseball: { name: 'SL Baseball', version: '1.0', since: null, internal: [] }
 };

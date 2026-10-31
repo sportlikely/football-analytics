@@ -153,3 +153,75 @@ stops it). Tests: `npm run test:fix291`.
   120-game record without its inputs; the record guard counts from 300 games, the server's 60 days hold ~3,000), draw model −0.0016 / −0.0006 (78% of resamples), goals / line-up not fitted (no xG / XI there). Engine on
   made-up seasons with a better market and draw-prone teams: anchor and draw model found; perfect champion (3 seeds):
   nothing promoted.
+
+## College football (FBS) lab (fix292, 31 Oct 2026)
+
+**Why (Yarin, 31 Oct).** Last 30 days: FBS picks right 59.0% on 117 games, 80%+ only 67.7% (31), 70%+ 65.6% (61);
+FCS 64.9% / 82.1% / 78.4%. The shown chances are too confident, most of all on FBS vs FBS games.
+
+### Part 1 — the college layer refit on 2025 + 2026 (live at once)
+
+`services/afCalibration.ts refitCollegeLayer()` (after every calibration build and once a day, job "af college refit"),
+maths in `utils/collegeLab.ts refitCollege()`, applied in `afCalibState.calibrated()`:
+- Rows: every settled college game of 2025 + 2026 — the live model's walk-forward chances (`calib|refitSrc`), and for 2026
+  the chance really saved before kick-off (`nfl_predictions.p_raw`) when the same model made it; the level settings
+  (fix223) applied first, as live.
+- Out of fold, 5 folds by week. Candidates: no layer, the fix220 layer as it is (fitted 2021–2025; in-sample on 2025,
+  unseen on 2026), one shared college Platt fit, a separate FBS Platt fit (FBS vs FBS games; the rest keep the shared fit).
+- Separate FBS layer only when it beats the shared layer on FBS games by 0.0005 log loss (out of fold); else shared.
+- The refit replaces the fix220 layer unless it is worse than it on the 2026 games (then "kept").
+- **Decision (Yarin, fix292): 2026 may be in this layer's fit** (out of fold). The fix220 layer and every model weight still
+  stop at 2025 (`assertCalibSeasons`, `assertLabFit`).
+- Admin: /american-football/past → "College layer refit 2025 + 2026" (out-of-fold LL · hit per group, FBS bands, why).
+
+### Part 2 — the lab
+
+`utils/collegeLab.ts` (pure) + `services/collegeLab.ts` (inputs), run inside the fix220 build after the ncaa-v2 test.
+Walk-forward: test seasons 2023, 2024, 2025, 2026 so far; for season S the Elo settings are tuned on the 4 seasons before
+it (never past 2025) and the combiners fitted on 2022 … S − 1 (the live model's walk-forward chances start in 2022). Every
+candidate is scored on the same games (the live model, ncaa-v1 and ncaa-v2 all have a walk-forward chance).
+
+| id | candidate |
+|---|---|
+| ncaa-v1 / ncaa-v2 | as they ran in their own walk-forward tests |
+| elo | margin rating in points: MOV capped, K higher for a team's first 4 games, home field, FCS start; pre-season = conference mean + carry × (last end − conference mean) + retW × returning production |
+| talent | elo + roster talent: the roster's last-season box-score value from any team (transfers count), weighted by level (P4 1, G5 0.8, FCS 0.5), z within the season; + talent × early-season weight |
+| home | elo + home field per team (home residuals shrunk with 15 games, × 0.7 a season) |
+| conf | elo + conference strength (cross-conference residuals shrunk with 20 games, half carried) + G5 vs P4 and FBS vs FCS explicit |
+| rows | logistic on all rows + the live model's chance |
+| trees | boosted trees (80 × depth 2, Platt) on the same rows — the shape of nflExperiments E7b (fix291's football lab uses the same small ensemble) |
+| market | closing line alone and an anchor (logistic on live model + closing line, walk-forward by week), games with a closing line only |
+
+- Returning production / talent: box-score value per player (key-players weights, fix224). The providers give no
+  historical rosters, so a season's roster = players with a box line for the team that season (+ the provider's roster for
+  the live season) — a pre-season roster proxy. Games started are not in our data (games with a box line instead).
+- Market: closing money lines exist from fix278 (feed of upcoming games); no older seasons, so the anchor is fitted on this
+  season as it grows (80+ earlier games). The live market anchor of the shown chance stays fix278's (its own gate).
+- **Promotion** (`pickWinner`): the best 2023–2025 log loss among the lab candidates, only if it beats the live model by
+  0.002, is not worse on FBS vs FBS, and not worse on 2026 so far (100+ games). Then model id **ncaa-v3** (public name stays
+  "SL American Football 1.1" — already 1.1 since fix220; bump to 1.2 in both modelNames files when the server promotes),
+  the fix220 layer and the refit are fitted on its walk-forward chances, and `predictNfl` uses `collegeLabProb`.
+- Admin: /american-football/past → "College lab" (per candidate: each season LL · hit, 2023–25 all and FBS vs FBS, vs
+  closing line; bands of the winner and the live model; the reason).
+
+### Results
+
+**Server: not known yet** (no American football in the local database copy). After deploy the build runs once (AF_VERSION
+fix292-1): log lines "college lab: …" and "af college refit (fix292): …". Paste the College lab table here.
+
+Pipeline check only (synthetic 40-team league, `npm run test:fix292`, 2025 + 2026 test seasons only — the fixture's
+seasons are too small for 2023 / 2024):
+
+| | 2025 LL · hit | 2026 so far | 2023–25 FBS vs FBS | vs closing line (LL / line, 160) |
+|---|---|---|---|---|
+| ncaa-v1 | 0.6107 · 65.4% | 0.5452 · 71.3% | 0.6795 | 0.5452 / 0.5340 |
+| ncaa-v2 (live) | 0.6199 · 66.3% | 0.5377 · 70.6% | 0.6854 | 0.5377 / 0.5340 |
+| elo | 0.6131 · 64.6% | 0.5432 · 68.8% | 0.6837 | 0.5432 / 0.5340 |
+| talent | 0.6188 · 64.2% | 0.5382 · 70.6% | 0.6845 | 0.5382 / 0.5340 |
+| home | 0.6066 · 63.8% | 0.5502 · 70.0% | 0.6815 | 0.5502 / 0.5340 |
+| conf | 0.6181 · 64.6% | 0.5396 · 69.4% | 0.6855 | 0.5396 / 0.5340 |
+| rows | 0.6068 · 64.2% | 0.5390 · 69.4% | 0.6700 | 0.5390 / 0.5340 |
+| trees | 0.6969 · 58.8% | 0.5929 · 63.1% | 0.7819 | 0.5929 / 0.5340 |
+
+Fixture verdict: "home" best on 2025 but worse on 2026 → ncaa-v2 stays; the refit was worse than the fix220 layer on 2026
+→ kept. Says only that the pipeline runs and the gates bite.

@@ -7,17 +7,20 @@
 import { db } from '../db';
 import { onState, publishState } from './shared';
 import { applyCalib, segOfTeams, type Calib, type Seg } from '../utils/afCalib';
+import { applyRefit, type Refit } from '../utils/collegeLab';
 import { applyUsed, type UsedProbSet } from '../utils/leagueSettings';
 import { POWER } from '../utils/ncaaV2';
 
 export type AfLeague = 1 | 2;
 export interface AfCalibState {
   at: string; version: string;
-  leagues: Record<AfLeague, { calib: Calib | null; strong: number | null; source: string; fitSeasons: number[] }>;
+  leagues: Record<AfLeague, { calib: Calib | null; strong: number | null; source: string; fitSeasons: number[]; refit?: Refit | null }>;
   /** ncaa-v2 passed its gate and is the live college model */
   ncaaV2: boolean;
   /** fix223: per-level settings (NFL / FBS / G5 / FCS: home edge + stretch) that beat the shared model, applied before the layer */
   settings?: Record<string, UsedProbSet>;
+  /** fix292: the college lab's winner is the live college model (ncaa-v3) */
+  lab?: boolean;
 }
 /** The lines before fix220 (and while no layer is fitted). */
 export const STRONG_DEFAULT: Record<AfLeague, number> = { 1: 0.7, 2: 0.75 };
@@ -47,6 +50,11 @@ export const afCalibState = () => cur();
 export function calibrated(league: AfLeague, p: number, seg?: Seg | null, game?: { h: number; a: number; neutral?: boolean } | null): number {
   const s = cur();
   const q = game && s?.settings ? applyUsed(s.settings, afLevel(league, game.h, game.a), p, !game.neutral) : p;
+  // fix292: college — the 2025 + 2026 refit (separate FBS layer or one shared college layer) replaces the fix220 layer
+  if (league === 2 && game) {
+    const t = collegeTeams(), r = applyRefit(s?.leagues?.[2]?.refit, q, t.get(game.h)?.level === 'FBS' && t.get(game.a)?.level === 'FBS');
+    if (r !== null) return r;
+  }
   const c = s?.leagues?.[league]?.calib;
   return c ? applyCalib(c, q, league === 2 ? seg : null) : q;
 }
@@ -60,6 +68,7 @@ export function levelOfTeams(h?: { conf: string | null; level: string | null } |
 export const afLevel = (league: AfLeague, home: number, away: number): AfLevel => (league === 1 ? 'NFL' : levelOfTeams(collegeTeams().get(home), collegeTeams().get(away)));
 export const strongLineOf = (league: AfLeague): number => cur()?.leagues?.[league]?.strong ?? STRONG_DEFAULT[league];
 export const ncaaV2Live = () => !!cur()?.ncaaV2;
+export const labLive = () => !!cur()?.lab;
 
 /** College teams' conference and level (10-minute copy). */
 let teamsAt = 0;

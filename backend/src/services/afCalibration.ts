@@ -18,12 +18,14 @@ import { db } from '../db';
 import logger from '../utils/logger';
 import { yieldLoop } from './perf';
 import { modelInternals as M, nflWalkForward, type NflG as G, type NflCtx, type Params } from './nflModel';
-import { setAfCalib, STRONG_DEFAULT, ncaaV2Live, levelOfTeams, afLevel, type AfCalibState, type AfLeague, type AfLevel } from './afCalibState';
+import { setAfCalib, afCalibState, STRONG_DEFAULT, ncaaV2Live, levelOfTeams, afLevel, type AfCalibState, type AfLeague, type AfLevel } from './afCalibState';
 import { probSettings, applyUsed, type ProbItem } from '../utils/leagueSettings';
 import { walkForwardCalib, fitCalib, applyCalib, scoreRows, pickBands, strongLine, segOfTeams, CALIB_FIRST, CALIB_LAST, type CalRow, type Seg } from '../utils/afCalib';
 import { buildRows, tuneV2, v2P, stateOf, POWER, V2_TEST_SEASON, V2_TRAIN_LAST, type V2Raw, type V2Params, type V2Team, type V2Box, type V2Passer } from '../utils/ncaaV2';
+import { refitCollege, LAB_MODEL, LAB_FIT_LAST, type RefitRow } from '../utils/collegeLab';
+import { runCollegeLab, refreshLab, labProb, type LabLive } from './collegeLab';
 
-export const AF_VERSION = 'fix223-1';
+export const AF_VERSION = 'fix292-1';
 export const NCAA_V2 = 'ncaa-v2';
 
 /* ---------- inputs ---------- */
@@ -99,7 +101,7 @@ async function ncaaV2Test() {
   const levelOf = (g: G): AfLevel => levelOfTeams(teams.get(g.h), teams.get(g.a));
   const byId = new Map(games.map(g => [g.id, g]));
   return {
-    pass, reason, live, rows, byId, segOf, levelOf,
+    pass, reason, live, rows, byId, segOf, levelOf, games, teams,
     report: { pass, reason, trainSeasons: range(CALIB_FIRST, V2_TEST_SEASON - 1), testSeason: V2_TEST_SEASON, test2025, season2026, perSeason, testParams, liveParams: live?.params || null },
     v2wf, v1wf
   };
@@ -157,7 +159,17 @@ export async function buildAfCalibration(): Promise<any> {
     const v2 = await ncaaV2Test();
     const segOfId = (h: number, a: number) => v2.segOf({ h, a } as G);
     const collegeRows: (CalRow & { g: G })[] = [];
-    const src2 = v2.pass ? v2.v2wf : v2.v1wf;
+    // fix292: the college lab (walk-forward 2023–2026); its winner replaces the live college model only when it beats it
+    // on games it never saw — then the layer is fitted on the winner's walk-forward chances
+    const liveId = v2.pass ? NCAA_V2 : 'ncaa-v1';
+    let lab: Awaited<ReturnType<typeof runCollegeLab>> | null = null;
+    try {
+      lab = await runCollegeLab({ games: v2.games, teams: v2.teams, base: v2.pass ? v2.v2wf : v2.v1wf, v1wf: v2.v1wf, v2wf: v2.v2wf, liveId: liveId as 'ncaa-v1' | 'ncaa-v2' });
+    } catch (e: any) { logger.warn(`college lab: ${e.message}`); }
+    M.sync('lab|live', lab?.live || null);
+    const promoted = !!lab?.live;
+    const src2 = promoted ? lab!.wf : v2.pass ? v2.v2wf : v2.v1wf;
+    const srcModel = promoted ? LAB_MODEL : liveId;
     for (const [id, p] of src2) { const g = v2.byId.get(id); if (g && g.done) collegeRows.push({ p, y: g.hs! > g.as! ? 1 : g.hs! < g.as! ? 0 : 0.5, season: g.season, seg: v2.segOf(g), g }); }
     // NFL: nfl-v2's test rows when it is adopted, else nfl-v1's
     const nflGames = new Map((await M.loadGamesAsync(1)).map(g => [g.id, g]));
@@ -175,7 +187,9 @@ export async function buildAfCalibration(): Promise<any> {
     const S = await probSettings(items, { groupOf: lv => (lv === 'NFL' ? null : 'College'), symmetric: false, pause: yieldLoop });
     const pre = (league: AfLeague) => (p: number, h: number, a: number) => applyUsed(S.used, afLevel(league, h, a), p);
     const adj = (league: AfLeague, list: (CalRow & { g: G })[]): CalRow[] => list.map(({ g, ...r }) => ({ ...r, p: applyUsed(S.used, levelOfRow(league, g), r.p, !g.neutral) }));
-    const L2 = leagueLayer(2, adj(2, collegeRows), v2.pass ? `${NCAA_V2} walk-forward` : 'ncaa-v1 walk-forward', segOfId, pre(2));
+    const L2 = leagueLayer(2, adj(2, collegeRows), `${srcModel} walk-forward`, segOfId, pre(2));
+    // fix292: the source chances of 2025 + 2026 for the out-of-fold refit (re-run daily as games settle)
+    M.sync('calib|refitSrc', { model: srcModel, rows: collegeRows.filter(r => r.season >= LAB_FIT_LAST).map(r => [r.g.id, r.p]) });
     await yieldLoop();
     const L1 = leagueLayer(1, adj(1, nflRows), Array.isArray(expWf) && expWf.length ? 'nfl-v2 walk-forward (experiments)' : 'nfl-v1 walk-forward', () => undefined, pre(1));
     // the nfl-v2 re-check on this season: nfl-v1 (E1) and the adopted variant, raw, from the experiments
@@ -183,21 +197,83 @@ export async function buildAfCalibration(): Promise<any> {
     const seasonRow = (id: string) => exp?.variants?.find((v: any) => v.id === id)?.perSeason?.find((s: any) => s.season > CALIB_LAST) || null;
     const nflV2Check = exp ? { adopted: !!exp.adopted, best: exp.best, e1: seasonRow('E1'), bestRow: seasonRow(exp.best), calibrated2026: L1.report.walkForward.seasons.find((s: any) => s.season > CALIB_LAST) || null } : null;
     const at = new Date().toISOString();
-    const state: AfCalibState = { at, version: AF_VERSION, leagues: { 1: L1.state, 2: L2.state }, ncaaV2: v2.pass, settings: S.used };
+    const state: AfCalibState = { at, version: AF_VERSION, leagues: { 1: L1.state, 2: L2.state }, ncaaV2: v2.pass, settings: S.used, lab: promoted };
     const settingsReport = { at, leagues: S.leagues, groups: S.groups, years: S.years, total: S.total, used: S.used };
     setAfCalib(state);
-    const report = { version: AF_VERSION, at, seconds: Math.round((Date.now() - t0) / 1000), nfl: { ...L1.report, nflV2Check }, college: L2.report, ncaaV2: v2.report, settings: settingsReport };
+    const report: any = { version: AF_VERSION, at, seconds: Math.round((Date.now() - t0) / 1000), nfl: { ...L1.report, nflV2Check }, college: L2.report, ncaaV2: v2.report, settings: settingsReport, lab: lab?.report || null };
     logger.info(`af level settings: ${S.leagues.map(l => `${l.league} ${l.used}`).join(', ')}; ${S.years.test} LL ${S.total.test.shared} → ${S.total.test.used}, untouched ${S.years.check} ${S.total.check.shared} → ${S.total.check.used}`);
     M.sync('calib|report', report);
+    // fix292: the college layer refit on every settled game of 2025 + 2026 (out of fold), live at once
+    await refitCollegeLayer();
     for (const [name, r] of [['NFL', L1.report], ['college', L2.report]] as [string, any][]) {
       const w = r.walkForward.total;
       logger.info(`af calibration ${name} (${r.source}): walk-forward LL ${w.raw.logLoss} → ${w.cal.logLoss}, strong line ${Math.round(r.strong * 100)}%; this season saved ${r.saved.games} games LL ${r.saved.raw.logLoss} → ${r.saved.cal.logLoss}`);
     }
     liveKey = ''; // the live college numbers again with the new weights
-    return report;
+    return afCalibReport();
   } finally { building = false; }
 }
 export const afCalibReport = () => M.readSync('calib|report');
+
+/**
+ * fix292 (Yarin, 31 Oct): the college layer refitted on every settled college game of 2025 + 2026 — the live model's
+ * walk-forward chances, and for 2026 the chance we really saved before kick-off when the same model made it — with the
+ * level settings applied first, as live. Out of fold (5 folds by week): a separate FBS layer only when it beats one shared
+ * college layer on FBS games; the refit replaces the fix220 layer unless it is worse on the 2026 games. 2026 in a fit is
+ * Yarin's decision for this layer only (the fix220 layer and every model weight still stop at 2025). Daily + every build.
+ */
+export async function refitCollegeLayer(): Promise<any> {
+  const st = afCalibState();
+  const src = M.readSync('calib|refitSrc');
+  const report = afCalibReport();
+  if (!st || !src?.rows || !report) return null;
+  const games = new Map((await M.loadGamesAsync(2)).map(g => [g.id, g]));
+  const T = collegeTeamsFull();
+  const levelOfGame = (h: number, a: number): RefitRow['level'] => {
+    const s = segOfTeams(T.get(h), T.get(a));
+    if (s === 'mismatch') return 'mismatch';
+    return T.get(h)?.level === 'FBS' && T.get(a)?.level === 'FBS' ? 'fbs' : 'fcs';
+  };
+  const pre = (p: number, g: G) => applyUsed(st.settings || {}, afLevel(2, g.h, g.a), p, !g.neutral);
+  const old = st.leagues[2]?.calib || null;
+  const byId = new Map<number, RefitRow>();
+  for (const [id, p] of src.rows as [number, number][]) {
+    const g = games.get(id);
+    if (!g || !g.done || g.season < LAB_FIT_LAST) continue;
+    const q = pre(p, g);
+    byId.set(id, { id, p: q, y: g.hs! > g.as! ? 1 : g.hs! < g.as! ? 0 : 0.5, season: g.season, t: g.t, level: levelOfGame(g.h, g.a), cur: applyCalib(old, q, segOfTeams(T.get(g.h), T.get(g.a))) });
+  }
+  // 2026: what we saved before kick-off, when the same model made it
+  for (const r of db.prepare(`SELECT p.game_id, p.p_raw, p.p_home, p.model FROM nfl_predictions p JOIN nfl_games g ON g.game_id = p.game_id
+    WHERE g.league = 2 AND p.season > ? AND p.made_at <= p.kickoff AND g.status IN ('FT','AOT') AND g.home_pts IS NOT NULL AND g.away_pts IS NOT NULL`).all(LAB_FIT_LAST) as any[]) {
+    const g = games.get(r.game_id);
+    if (!g || !g.done || r.model !== src.model) continue;
+    const q = pre(r.p_raw ?? r.p_home, g);
+    byId.set(g.id, { id: g.id, p: q, y: g.hs! > g.as! ? 1 : g.hs! < g.as! ? 0 : 0.5, season: g.season, t: g.t, level: levelOfGame(g.h, g.a), cur: applyCalib(old, q, segOfTeams(T.get(g.h), T.get(g.a))) });
+  }
+  const out = refitCollege([...byId.values()]);
+  const at = new Date().toISOString();
+  const refit = { ...out.refit, at };
+  setAfCalib({ ...st, leagues: { ...st.leagues, 2: { ...st.leagues[2], refit } } });
+  M.sync('calib|report', { ...report, college2026: { at, model: src.model, why: out.why, scores: out.scores, bandsFbs: out.bandsFbs, refit } });
+  logger.info(`af college refit (fix292): ${out.why}`);
+  return out;
+}
+export const refitDue = () => { const r = afCalibState()?.leagues?.[2]?.refit; return !r?.at || Date.now() - Date.parse(r.at) > 20 * 3600 * 1000; };
+function collegeTeamsFull() {
+  return new Map((db.prepare(`SELECT team_id, conference, level FROM nfl_teams WHERE league = 2`).all() as any[]).map(r => [r.team_id, { conf: r.conference || null, level: r.level || null }]));
+}
+
+/** fix292: the promoted lab model's numbers of upcoming college games (null when nothing was promoted). */
+export async function refreshCollegeLab(): Promise<void> {
+  const stored = afCalibState()?.lab ? (M.readSync('lab|live') as LabLive | null) : null;
+  if (!stored) { await refreshLab(null, [], new Map()); return; }
+  const games = await M.loadGamesAsync(2);
+  const teams = new Map((db.prepare(`SELECT team_id, conference, level FROM nfl_teams WHERE league = 2`).all() as any[]).map(r => [r.team_id, { conf: r.conference || null, level: r.level || null, power: POWER.test(r.conference || '') }]));
+  await refreshLab(stored, games, teams);
+}
+export const collegeLabProb = (gameId: number, base: number) => (afCalibState()?.lab ? labProb(gameId, base) : null);
+export const COLLEGE_LAB_MODEL = LAB_MODEL;
 export const afCalibStale = () => afCalibReport()?.version !== AF_VERSION;
 
 /* ---------- live ncaa-v2 (upcoming college games) ---------- */

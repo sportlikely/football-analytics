@@ -1,5 +1,7 @@
 # NFL model nfl-v1 (fix139, 16 Oct 2026) + college ncaa-v1 (fix142)
 
+**fix292 (31 Oct):** the college layer is refitted on 2025 + 2026 (out of fold, separate FBS layer only if better) and the college model lab (ncaa-v3 candidates) — see model-lab.md.
+
 ## fix220 (25 Oct 2026): honest percentages + ncaa-v2
 
 **Why.** Live 25 Oct, last 30 days: 237 games, 62% right; said 55.7 → 49.1% happened (57 games), 64.4 → 53.8 (65), 74.7 → 69.8 (53), 87.2 → 75.8 (62). 223 of 237 were college (63.2%; the backtest said 72–75%), NFL 6 / 14. Football and basketball had a calibration step; American football had none.
