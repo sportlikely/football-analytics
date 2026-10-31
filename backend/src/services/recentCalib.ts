@@ -54,12 +54,16 @@ export function footballRows(now = Date.now()): CRow[] {
   return out;
 }
 
-/** tennis: singles made with the season layer (p_raw saved), finished with a winner; [p1, 0, p2], y 0 / 2 */
+/**
+ * tennis: singles saved before the start, finished with a winner; [p1, 0, p2], y 0 / 2. The input = the chance before
+ * this layer (p_pre; saved before fix254: p1, which no recent layer had touched). fix293: every settled match since the
+ * launch (19 Oct) — the rows saved before the season layer's p_raw (25 Oct) count too (Yarin: "all 653").
+ */
 export function tennisRows(now = Date.now()): CRow[] {
   let rows: any[] = [];
   try {
     rows = db.prepare(`SELECT p.p1, p.p_pre, p.scheduled_at, m.winner FROM tennis_predictions p JOIN tennis_matches m ON m.id = p.match_id
-      WHERE p.scheduled_at >= ? AND p.scheduled_at < ? AND p.made_at <= p.scheduled_at AND p.p_raw IS NOT NULL AND COALESCE(p.cat, '') <> 'itf'
+      WHERE p.scheduled_at >= ? AND p.scheduled_at < ? AND p.made_at <= p.scheduled_at AND COALESCE(p.cat, '') <> 'itf'
         AND m.status = 'completed' AND m.winner IN (1, 2) AND COALESCE(m.outcome, '') NOT IN ('walkover', 'abandoned', 'unresolved')`)
       .all(horizon(now), new Date(now).toISOString()) as any[];
   } catch { return []; }
@@ -94,13 +98,13 @@ const lastPromotion = (sport: RecentSport, today: string) =>
   ((db.prepare(`SELECT date FROM recent_calib_log WHERE sport = ? AND decision = 'promote' AND date < ? ORDER BY date DESC LIMIT 1`).get(sport, today) as any)?.date as string) || null;
 
 /** one sport: decide, apply (promote / rollback), log */
-export async function runRecentCalibration(sport: RecentSport, now = Date.now()): Promise<RecentDecision> {
+export async function runRecentCalibration(sport: RecentSport, now = Date.now(), opts: { refit?: boolean } = {}): Promise<RecentDecision> {
   const today = new Date(now).toISOString().slice(0, 10);
   const rows = rowsOf(sport, now);
   await yieldLoop();
   const st = readRecentState(sport);
   // fix273: basketball and tennis (raw chances saved only since 25 Oct) under the young-sport rule while their sample is small
-  const d = decideRecent(rows, st?.layer ?? null, st?.since ?? null, lastPromotion(sport, today), now, undefined, undefined, RECENT_EDGES[sport], { young: sport !== 'football' });
+  const d = decideRecent(rows, st?.layer ?? null, st?.since ?? null, lastPromotion(sport, today), now, undefined, undefined, RECENT_EDGES[sport], { young: sport !== 'football', refit: !!opts.refit });
   await yieldLoop();
   if (d.decision === 'promote' || d.decision === 'rollback') {
     const next: RecentState = { at: new Date(now).toISOString(), layer: d.decision === 'promote' ? d.live : null, since: today, prev: st ? { layer: st.layer, since: st.since } : null };
@@ -113,12 +117,12 @@ export async function runRecentCalibration(sport: RecentSport, now = Date.now())
   }
   const c = d.candidate;
   const report = {
-    v: RECENT_RULE, mode: d.mode, rows: rows.length, fit: d.fit, test: d.test, bands: d.bands, verdict: d.verdict, guard: d.guard, kindWhy: d.kindWhy,
+    v: RECENT_RULE, ...(opts.refit ? { refit: REFIT_RULE } : {}), mode: d.mode, rows: rows.length, fit: d.fit, test: d.test, bands: d.bands, verdict: d.verdict, guard: d.guard, kindWhy: d.kindWhy,
     candidate: c ? { kind: c.kind, from: c.from, to: c.to, n: c.n, knots: c.x.length, a: c.a ?? null, b: c.b ?? null } : null
   };
   db.prepare(`INSERT OR REPLACE INTO recent_calib_log (date, sport, ran_at, decision, reason, report) VALUES (?, ?, ?, ?, ?, ?)`)
     .run(today, sport, new Date(now).toISOString(), d.decision, d.reason, JSON.stringify(report));
-  logger.info(`recent calibration (${sport}): ${d.decision} — ${d.reason} · ${bandsText(d)}`);
+  logger.info(`recent calibration (${sport})${opts.refit ? ' [fix293 refit on every settled match]' : ''}: ${d.decision} — ${d.reason} · ${bandsText(d)}`);
   return d;
 }
 
@@ -157,6 +161,15 @@ export function recentCalibLine(sport: RecentSport): string {
   } catch { return 'Recent layer: not run yet'; }
 }
 
+/** fix293: the one-time tennis refit on every settled match (out of fold), run on the first tick after the deploy */
+export const REFIT_RULE = 'fix293';
+export function refitDue(sport: RecentSport): boolean {
+  if (sport !== 'tennis') return false;
+  try {
+    return !(db.prepare(`SELECT 1 FROM recent_calib_log WHERE sport = ? AND report LIKE ? LIMIT 1`).get(sport, `%"refit":"${REFIT_RULE}"%`));
+  } catch { return false; }
+}
+
 let running = false;
 /** today's run with the current rule done? */
 const doneToday = (sport: RecentSport, today: string) => {
@@ -168,12 +181,15 @@ const doneToday = (sport: RecentSport, today: string) => {
 export function startRecentCalibScheduler() {
   const tick = async () => {
     const now = new Date();
-    if (running || now.getUTCHours() < 4 || (now.getUTCHours() === 4 && now.getUTCMinutes() < 30) || process.env.RECENT_CALIB === 'off') return;
+    if (running || process.env.RECENT_CALIB === 'off') return;
+    const early = now.getUTCHours() < 4 || (now.getUTCHours() === 4 && now.getUTCMinutes() < 30);
     const today = now.toISOString().slice(0, 10);
     for (const sport of RECENT_SPORTS) {
-      if (doneToday(sport, today)) continue;
+      // fix293: tennis's one-time refit does not wait for 04:30
+      const refit = refitDue(sport);
+      if (!refit && (early || doneToday(sport, today))) continue;
       running = true;
-      try { await heavy(`${sport} calibration`, () => timed(`${sport} calibration`, () => runRecentCalibration(sport))); }
+      try { await heavy(`${sport} calibration`, () => timed(`${sport} calibration`, () => runRecentCalibration(sport, Date.now(), { refit }))); }
       catch (e: any) { logger.warn(`recent calibration (${sport}): ${e?.message || e}`); }
       finally { running = false; }
     }

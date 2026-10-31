@@ -1,8 +1,10 @@
 # Tennis model tennis-v1 (fix190, 20 Oct 2026)
 
 Admin only: no pages, no public routes. Code: `backend/src/services/tennisModel.ts`. Data only from our own tables
-(`services/tennis.ts`, see `tennis-data.md`). **Singles only.** Market prices are **never a model input**: they are an
-admin benchmark only.
+(`services/tennis.ts`, see `tennis-data.md`). **Singles only.** Market prices are never a rating input and never shown;
+since fix293 (Yarin, 31 Oct) the closing price (`tennis_prices`) is blended into the shown winner chance as fix278's
+anchor (weight per tour × surface, walk-forward, kept only when better than the model and the market) — see
+`model-lab.md`, which also has the tennis lab (every model idea tested on 2025–26) and the calibration refit.
 
 Admin:
 - `GET /api/admin/tennis-model` returns the walk-forward report, the live settings, the progress of a running build, the

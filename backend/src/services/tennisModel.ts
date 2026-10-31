@@ -54,6 +54,8 @@ import { tournamentKey, tennisLiveBusy, fetchHistoryPrices } from './tennis';
 import { buildLayer, applyLayer, type LeagueLayer } from '../utils/sportCalib';
 import { calibrateTennis, recentState } from './recentCalibState';
 import { probSettings, applyUsed, type UsedProbSet, type LsYears } from '../utils/leagueSettings';
+import { anchorTennis, priceP1 } from './tennisAnchor';
+import { fitAnchor, ANCHOR_MIN_TRAIN } from '../utils/marketLines';
 
 export const TENNIS_MODEL = 'tennis-v1';
 const DAY = 86400000;
@@ -75,6 +77,8 @@ db.exec(`
 try { db.exec(`ALTER TABLE tennis_predictions ADD COLUMN p_raw REAL`); } catch { /* there already, or a read-only connection */ }
 // fix254: the chance before the recent calibration layer (services/recentCalibState.ts; null = saved before it: p1)
 try { db.exec(`ALTER TABLE tennis_predictions ADD COLUMN p_pre REAL`); } catch { /* there already, or a read-only connection */ }
+// fix293: the chance before the market anchor (services/tennisAnchor.ts; null = saved before it: p1)
+try { db.exec(`ALTER TABLE tennis_predictions ADD COLUMN p_anchor_pre REAL`); } catch { /* there already, or a read-only connection */ }
 /*
  * fix200: in the worker thread every write is collected (`sink`) and sent to the main thread, which applies them in one
  * transaction; what the worker stored itself is read back from `overlay` until then.
@@ -151,6 +155,11 @@ pur:pr:puerto rico bar:bb:barbados jam:jm:jamaica`.split(/\s+(?=[a-z]{3}:)/).map
 const CODE = new Map<string, string>();
 for (const [ioc, iso, name] of COUNTRIES) { CODE.set(ioc, ioc); CODE.set(iso, ioc); CODE.set(name, ioc); }
 for (const [a, b] of [['great britain', 'gbr'], ['england', 'gbr'], ['scotland', 'gbr'], ['usa', 'usa'], ['united states of america', 'usa'], ['czech republic', 'cze'], ['korea', 'kor'], ['the netherlands', 'ned'], ['holland', 'ned'], ['deutschland', 'ger'], ['türkiye', 'tur'], ['turkiye', 'tur'], ['uk', 'gbr']]) CODE.set(a, b);
+/** fix293: IOC code → continent (1 Europe, 2 North America + Caribbean, 3 South America, 4 Asia + Middle East, 5 Oceania, 6 Africa) */
+const CONTINENT = new Map<string, number>();
+for (const [k, list] of [[1, 'aut bel bih bul cro cyp cze den esp est fin fra gbr geo ger gre hun irl ita lat ltu lux mda mon ned nor pol por rou rus srb slo svk sui swe tur ukr blr mne mkd alb arm aze isl mlt'],
+  [2, 'can mex usa dom pur bar jam'], [3, 'arg bra chi col ecu par per uru ven'], [4, 'chn hkg ind ina jpn kaz kor phi qat tha uzb uae ksa tpe'], [5, 'aus nzl'], [6, 'egy mar rsa tun']] as [number, string][])
+  for (const c of list.split(' ')) CONTINENT.set(c, k);
 const ctry = (x: string | null | undefined): string | null => { if (!x) return null; const k = String(x).trim().toLowerCase(); return CODE.get(k) ?? (k.length === 3 ? k : null); };
 
 /* ------------------------------------------------------------------ */
@@ -167,12 +176,15 @@ class Reg {
   get size() { return this.pid.length; }
 }
 
-const F32 = ['a_pts', 'a_won', 'b_pts', 'b_won', 'cov', 'mins', 'games', 'r1', 'r2'] as const;
-const U8 = ['win', 'cat', 'lvl', 'surf', 'gen', 'bo', 'rule', 'ret', 'quali', 'indoor', 'ro', 'sets', 'sw1', 'sw2', 'lastA', 'lastB', 'h1', 'h2'] as const;
+// fix293: g1 = player 1's games, cl1 / cl2 = break points saved + converted above the usual (NaN unknown), tbp / tbw =
+// tiebreaks played / won by player 1, cont = the tournament's continent (0 unknown)
+const F32 = ['a_pts', 'a_won', 'b_pts', 'b_won', 'cov', 'mins', 'games', 'r1', 'r2', 'g1', 'cl1', 'cl2'] as const;
+const U8 = ['win', 'cat', 'lvl', 'surf', 'gen', 'bo', 'rule', 'ret', 'quali', 'indoor', 'ro', 'sets', 'sw1', 'sw2', 'lastA', 'lastB', 'h1', 'h2', 'tbp', 'tbw', 'cont'] as const;
 class Rows {
   n = 0;
   id: Float64Array; t: Float64Array; p1: Int32Array; p2: Int32Array; tk: Int32Array; month: Int16Array;
   a_pts!: Float32Array; a_won!: Float32Array; b_pts!: Float32Array; b_won!: Float32Array; cov!: Float32Array; mins!: Float32Array; games!: Float32Array; r1!: Float32Array; r2!: Float32Array;
+  g1!: Float32Array; cl1!: Float32Array; cl2!: Float32Array; tbp!: Uint8Array; tbw!: Uint8Array; cont!: Uint8Array;
   win!: Uint8Array; cat!: Uint8Array; lvl!: Uint8Array; surf!: Uint8Array; gen!: Uint8Array; bo!: Uint8Array; rule!: Uint8Array; ret!: Uint8Array; quali!: Uint8Array; indoor!: Uint8Array;
   ro!: Uint8Array; sets!: Uint8Array; sw1!: Uint8Array; sw2!: Uint8Array; lastA!: Uint8Array; lastB!: Uint8Array; h1!: Uint8Array; h2!: Uint8Array;
   constructor(cap: number) {
@@ -263,6 +275,18 @@ function parseInto(c: Ctx, R: Rows, r: any, live: boolean): boolean {
     R.a_pts[i] = ap; R.a_won[i] = Number(r.a_won); R.b_pts[i] = bp; R.b_won[i] = Number(r.b_won);
     R.cov[i] = r.a_c === 1 ? 1 : Math.min(1, Math.max(0.3, 1 - (Number(r.gaps) || 0) / (ap + bp)));
   } else { R.a_pts[i] = 0; R.a_won[i] = 0; R.b_pts[i] = 0; R.b_won[i] = 0; R.cov[i] = 0; }
+  // fix293: break points against the player's usual point rate (serve: saved vs serve points won; return: converted vs
+  // return points won), tiebreaks
+  const bpPart = (faced: number, saved: number, pts: number, won: number, serve: boolean) => {
+    if (!(faced >= 2) || !(saved >= 0) || saved > faced || !(pts > 0) || !(won >= 0)) return NaN;
+    return serve ? saved / faced - won / pts : (faced - saved) / faced - (pts - won) / pts;
+  };
+  const sumOk = (a: number, b: number) => (Number.isFinite(a) || Number.isFinite(b) ? (Number.isFinite(a) ? a : 0) + (Number.isFinite(b) ? b : 0) : NaN);
+  const af = Number(r.a_bpf), as_ = Number(r.a_bps), bf = Number(r.b_bpf), bs = Number(r.b_bps);
+  R.cl1[i] = sumOk(bpPart(af, as_, ap, Number(r.a_won), true), bpPart(bf, bs, bp, Number(r.b_won), false));
+  R.cl2[i] = sumOk(bpPart(bf, bs, bp, Number(r.b_won), true), bpPart(af, as_, ap, Number(r.a_won), false));
+  const tbp = Number(r.tbp), tbw = Number(r.tbw);
+  R.tbp[i] = tbp > 0 && tbw >= 0 && tbw <= tbp ? Math.min(7, tbp) : 0; R.tbw[i] = R.tbp[i] ? Math.min(R.tbp[i], tbw) : 0;
   let extra: any = null;
   if (r.extra) { try { extra = JSON.parse(r.extra); } catch { extra = null; } }
   R.mins[i] = r.dur > 0 ? r.dur / 60 : extra?.minutes > 0 ? extra.minutes : NaN;
@@ -272,9 +296,9 @@ function parseInto(c: Ctx, R: Rows, r: any, live: boolean): boolean {
   if (Array.isArray(g) && Array.isArray(g[0]) && Array.isArray(g[1]) && g[0].length) {
     let w1 = 0, w2 = 0;
     for (let s = 0; s < g[0].length; s++) { const a = Number(g[0][s]) || 0, b = Number(g[1][s]) || 0; if (a > b) w1++; else if (b > a) w2++; }
-    R.sets[i] = g[0].length; R.sw1[i] = w1; R.sw2[i] = w2; R.games[i] = sumArr(g[0]) + sumArr(g[1]);
+    R.sets[i] = g[0].length; R.sw1[i] = w1; R.sw2[i] = w2; R.games[i] = sumArr(g[0]) + sumArr(g[1]); R.g1[i] = sumArr(g[0]);
     R.lastA[i] = Math.min(255, Number(g[0][g[0].length - 1]) || 0); R.lastB[i] = Math.min(255, Number(g[1][g[1].length - 1]) || 0);
-  } else { R.sets[i] = 0; R.sw1[i] = 0; R.sw2[i] = 0; R.games[i] = NaN; R.lastA[i] = 0; R.lastB[i] = 0; }
+  } else { R.sets[i] = 0; R.sw1[i] = 0; R.sw2[i] = 0; R.games[i] = NaN; R.g1[i] = NaN; R.lastA[i] = 0; R.lastB[i] = 0; }
   // ranks: the archive's rank at the time, else the rank history (tennis_rankings) as of the match; live: current rank
   const ar1 = extra?.winner?.rank, ar2 = extra?.loser?.rank;
   if (r.source === 'archive') { if (ar1 > 0) addRank(c, p1, t - 1, ar1); if (ar2 > 0) addRank(c, p2, t - 1, ar2); }
@@ -288,6 +312,7 @@ function parseInto(c: Ctx, R: Rows, r: any, live: boolean): boolean {
   const tc = ctry(r.tcountry);
   R.h1[i] = tc && ctry(c.reg.country[p1]) === tc ? 1 : 0;
   R.h2[i] = tc && ctry(c.reg.country[p2]) === tc ? 1 : 0;
+  R.cont[i] = tc ? CONTINENT.get(tc) ?? 0 : 0;
   R.rule[i] = 0;
   R.n++;
   return true;
@@ -296,6 +321,7 @@ function parseInto(c: Ctx, R: Rows, r: any, live: boolean): boolean {
 const MATCH_SQL = `SELECT m.id, m.tournament_id, m.tournament, m.tour, m.tier, m.surface, m.indoor, m.round, m.round_code, m.is_qualifying, m.best_of,
     m.scheduled_at, m.status, m.p1_id, m.p1_name, m.p2_id, m.p2_name, m.games, m.winner, m.outcome, m.extra, m.source, m.updated_at,
     s1.svc_pts AS a_pts, s1.svc_won AS a_won, s1.complete AS a_c, s1.gaps AS gaps, s1.duration_s AS dur, s2.svc_pts AS b_pts, s2.svc_won AS b_won,
+    s1.bp_faced AS a_bpf, s1.bp_saved AS a_bps, s2.bp_faced AS b_bpf, s2.bp_saved AS b_bps, s1.tb_played AS tbp, s1.tb_won AS tbw,
     t.country AS tcountry
   FROM tennis_matches m INDEXED BY idx_tennis_matches_time LEFT JOIN tennis_match_stats s1 ON s1.match_id = m.id AND s1.player = 1
     LEFT JOIN tennis_match_stats s2 ON s2.match_id = m.id AND s2.player = 2 LEFT JOIN tennis_tournaments t ON t.id = m.tournament_id`;
@@ -524,18 +550,27 @@ class AEng {
       const pl = this.pullOf(p, t, rk);
       if (pl) { this.eO[p] += pl.w * (pl.target - this.eO[p]); for (let k = 0; k < 3; k++) this.eS[p * 3 + k] += pl.w * (pl.target - this.eS[p * 3 + k]); }
     }
-    const y = R.win[i] === 1 ? 1 : 0;
+    let y = R.win[i] === 1 ? 1 : 0;
+    // fix293 (lab, off unless promoted): margin of victory = a soft result from the share of games won
+    const mov = this.P.mov || 0;
+    if (mov > 0 && !R.ret[i] && R.games[i] > 0 && Number.isFinite(R.g1[i])) y = (1 - mov) * y + mov * Math.min(1, Math.max(0, 0.5 + 3 * (R.g1[i] / R.games[i] - 0.5)));
     const f = (R.bo[i] === 5 ? this.P.bo5 : 1) * LN10_400;
-    const m = this.P[`lv${R.lvl[i]}`] * (R.ret[i] ? this.P.ret : 1);
+    // fix293 (lab): an own K for the WTA (kW), bigger steps after a gap (decay: up to 1 + decay after 90 days away)
+    const m = this.P[`lv${R.lvl[i]}`] * (R.ret[i] ? this.P.ret : 1) * (R.gen[i] ? this.P.kW ?? 1 : 1);
+    const dk = this.P.decay || 0;
+    const gapK = (p: number) => (dk ? 1 + dk * (this.last[p] ? Math.min(1, (t - this.last[p]) / (90 * DAY)) : 1) : 1);
+    const g1 = gapK(p1), g2 = gapK(p2), bleed = this.P.bleed || 0;
     const k0 = this.P.k0, off = this.P.off, sh = this.P.shape;
     if (m > 0) {
       const pO = 1 / (1 + Math.exp(-(this.eO[p1] - this.eO[p2]) * f));
-      this.eO[p1] += (k0 / Math.pow(this.nO[p1] + off, sh)) * m * (y - pO);
-      this.eO[p2] -= (k0 / Math.pow(this.nO[p2] + off, sh)) * m * (y - pO);
+      this.eO[p1] += (k0 / Math.pow(this.nO[p1] + off, sh)) * m * g1 * (y - pO);
+      this.eO[p2] -= (k0 / Math.pow(this.nO[p2] + off, sh)) * m * g2 * (y - pO);
       const j1 = p1 * 3 + s, j2 = p2 * 3 + s;
       const pS = 1 / (1 + Math.exp(-(this.eS[j1] - this.eS[j2]) * f));
-      this.eS[j1] += (k0 / Math.pow(this.nS[j1] + off, sh)) * m * (y - pS);
-      this.eS[j2] -= (k0 / Math.pow(this.nS[j2] + off, sh)) * m * (y - pS);
+      const d1 = (k0 / Math.pow(this.nS[j1] + off, sh)) * m * g1 * (y - pS), d2 = (k0 / Math.pow(this.nS[j2] + off, sh)) * m * g2 * (y - pS);
+      this.eS[j1] += d1; this.eS[j2] -= d2;
+      // fix293 (lab): cross-surface bleed — the other surfaces' ratings take a share of the step
+      if (bleed) for (let k = 0; k < 3; k++) if (k !== s) { this.eS[p1 * 3 + k] += bleed * d1; this.eS[p2 * 3 + k] -= bleed * d2; }
     }
     this.nO[p1]++; this.nO[p2]++; this.nS[p1 * 3 + s]++; this.nS[p2 * 3 + s]++;
     this.last[p1] = t; this.last[p2] = t;
@@ -556,7 +591,9 @@ const clampP = (p: number) => Math.min(0.95, Math.max(0.2, p));
 class BEng {
   /** per player: [overall, hard, clay, grass] × [sum, weight, time] for serve (s) and return (r) */
   s: Float64Array; r: Float64Array; mu = Float64Array.from(MU0); kd: number;
-  constructor(public P: Rec, cap: number) { this.s = new Float64Array(cap * 12); this.r = new Float64Array(cap * 12); this.kd = Math.LN2 / (P.hl * DAY); }
+  /** fix293 (lab, off unless promoted): each new match also shrinks the older ones' weight by 1 − 1/nm ("the last nm matches") */
+  mf: number;
+  constructor(public P: Rec, cap: number) { this.s = new Float64Array(cap * 12); this.r = new Float64Array(cap * 12); this.kd = Math.LN2 / (P.hl * DAY); this.mf = P.nm > 1 ? 1 - 1 / P.nm : 1; }
   ensure(cap: number) {
     if (cap * 12 <= this.s.length) return;
     const g = (a: Float64Array) => { const b = new Float64Array(Math.max(cap * 12, a.length * 2)); b.set(a); return b; };
@@ -580,7 +617,7 @@ class BEng {
     return { pa: clampP(mu + ds1 - dr2), pb: clampP(mu + ds2 - dr1), mu, ds1, dr1, ds2, dr2 };
   }
   private add(a: Float64Array, j: number, t: number, w: number, x: number) {
-    const f = a[j + 1] ? Math.exp(-(t - a[j + 2]) * this.kd) : 0;
+    const f = a[j + 1] ? Math.exp(-(t - a[j + 2]) * this.kd) * this.mf : 0;
     a[j] = a[j] * f + w * x; a[j + 1] = a[j + 1] * f + w; a[j + 2] = t;
   }
   update(R: Rows, i: number) {
@@ -742,11 +779,29 @@ function gamesSummary(g: Float64Array, bo: number) {
 /* ------------------------------------------------------------------ */
 
 /** per feature, p1 minus p2 */
-const FEAT = ['m3', 'm7', 'm14', 'sets7', 'hours7', 'longYesterday', 'stoppage30', 'home', 'surfaceSwitch', 'rankTrend'] as const;
+const FEAT = ['m3', 'm7', 'm14', 'sets7', 'hours7', 'longYesterday', 'stoppage30', 'home', 'surfaceSwitch', 'rankTrend',
+  'restDays', 'travel', 'h2h', 'bpClutch', 'tiebreak'] as const;
 const GROUPS: Record<string, number[]> = { fatigue: [0, 1, 2, 3, 4, 5], stoppage: [6], home: [7], surfaceSwitch: [8], rankTrend: [9] };
+/**
+ * fix293: the lab's context groups (never tried by the report's own selection; in the blend only when the lab promoted
+ * them): days since the last match, a continent change within 10 days (time zones), head-to-head (shrunk), break
+ * points saved / converted above the player's usual point rate (last ~25 matches), the tiebreak record (shrunk), and
+ * style (big server vs a good returner: the serve × return interaction and the serve-minus-return profile, from B).
+ */
+const LAB_GROUPS: Record<string, number[]> = { rest: [10], travel: [11], h2h: [12], clutch: [13], tiebreak: [14] };
+const STYLE_COLS = ['styleClash', 'styleShape'] as const;
+/** the blend columns of a context group */
+const colsOfGroup = (g: string): string[] => (g === 'style' ? [...STYLE_COLS] : (GROUPS[g] ?? LAB_GROUPS[g] ?? []).map(k => FEAT[k] as string));
+/** style from the point model's four strengths (p1 minus p2, so swapping the players flips the sign) */
+const styleOf = (pr: { ds1: number; dr1: number; ds2: number; dr2: number }): [number, number] =>
+  [(pr.ds1 * pr.dr2 - pr.ds2 * pr.dr1) * 1000, ((pr.ds1 - pr.dr1) - (pr.ds2 - pr.dr2)) * 100];
+/** the running break-point / tiebreak memory decays by this per match (~25 matches) */
+const RUN_DECAY = 0.96;
 interface Past { t: number; s: number; sets: number; mins: number; won: boolean; retLost: boolean; opp: number }
 class FEng {
   hist = new Map<number, Past[]>(); lastSurf = new Map<number, Float64Array>(); h2h = new Map<string, number[]>();
+  /** fix293: last continent played on (and when), running break-point [sum, n] and tiebreak [won, played] memories */
+  lastCont = new Map<number, [number, number]>(); clutch = new Map<number, Float64Array>(); tbs = new Map<number, Float64Array>();
   constructor(public c: Ctx) {}
   one(p: number, t: number, s: number, rankNow: number, out: Float32Array, sign: number) {
     const h = this.hist.get(p) || [];
@@ -769,11 +824,31 @@ class FEng {
     const v = [m3, m7, m14, sets7, min7 / 60, longY, stop, 0, sw, trend];
     for (let k = 0; k < v.length; k++) if (k !== 7) out[k] += sign * v[k];
   }
+  /** fix293: the lab's features of one player (rest, travel, break points, tiebreaks) */
+  extra(p: number, t: number, cont: number, out: Float32Array, sign: number) {
+    const h = this.hist.get(p);
+    const last = h && h.length ? h[h.length - 1].t : NaN;
+    out[10] += sign * Math.log1p(Number.isFinite(last) && t >= last ? Math.min(60, (t - last) / DAY) : 14);
+    const lc = this.lastCont.get(p);
+    out[11] += sign * (lc && cont && lc[0] && lc[0] !== cont && t - lc[1] <= 10 * DAY ? 1 : 0);
+    const cl = this.clutch.get(p);
+    out[13] += sign * (cl ? (cl[0] / (cl[1] + 5)) * 10 : 0);
+    const tb = this.tbs.get(p);
+    out[14] += sign * (tb ? (2 * tb[0] - tb[1]) / (tb[1] + 6) : 0);
+  }
   pre(R: Rows, i: number): Float32Array {
     const out = new Float32Array(FEAT.length);
     this.one(R.p1[i], R.t[i], R.surf[i], R.r1[i], out, 1);
     this.one(R.p2[i], R.t[i], R.surf[i], R.r2[i], out, -1);
     out[7] = R.h1[i] - R.h2[i];
+    this.extra(R.p1[i], R.t[i], R.cont[i], out, 1);
+    this.extra(R.p2[i], R.t[i], R.cont[i], out, -1);
+    const lo = Math.min(R.p1[i], R.p2[i]), hi = Math.max(R.p1[i], R.p2[i]);
+    const meet = this.h2h.get(`${lo}-${hi}`);
+    if (meet && meet.length) {
+      const lowWins = meet.filter(x => x & 1).length, w1 = R.p1[i] === lo ? lowWins : meet.length - lowWins;
+      out[12] = (2 * w1 - meet.length) / (meet.length + 4);
+    }
     return out;
   }
   update(R: Rows, i: number) {
@@ -793,6 +868,16 @@ class FEng {
     l.push(s * 2 + winnerLow);
     if (l.length > 30) l.shift();
     this.h2h.set(k, l);
+    // fix293: continent, break points, tiebreaks
+    const run = (m: Map<number, Float64Array>, p: number, x: number, w: number) => {
+      let r = m.get(p);
+      if (!r) { r = new Float64Array(2); m.set(p, r); }
+      r[0] = r[0] * RUN_DECAY + x; r[1] = r[1] * RUN_DECAY + w;
+    };
+    if (R.cont[i]) { this.lastCont.set(R.p1[i], [R.cont[i], t]); this.lastCont.set(R.p2[i], [R.cont[i], t]); }
+    if (Number.isFinite(R.cl1[i])) run(this.clutch, R.p1[i], R.cl1[i], 1);
+    if (Number.isFinite(R.cl2[i])) run(this.clutch, R.p2[i], R.cl2[i], 1);
+    if (R.tbp[i] > 0) { run(this.tbs, R.p1[i], R.tbw[i], R.tbp[i]); run(this.tbs, R.p2[i], R.tbp[i] - R.tbw[i], R.tbp[i]); }
   }
 }
 
@@ -987,7 +1072,9 @@ export async function buildTennisReport(): Promise<any> {
     await replayB(R, p, cap, (i, pr) => { if (isEval(i)) { m.ll[R.month[i]] += llOf(winFast(pr.pa, pr.pb, R.bo[i], R.rule[i]), y(i)); m.n[R.month[i]]++; } }, 0);
   });
   const chosenA: Rec[] = [], chosenB: Rec[] = [];
-  let curA = { ...A_DEFAULT }, curB = { ...B_DEFAULT };
+  // fix293: what the lab promoted (Elo / point-model variants, context groups) is part of the model from here on
+  const promo = labPromoted();
+  let curA = { ...A_DEFAULT, ...(promo?.a || {}) }, curB = { ...B_DEFAULT, ...(promo?.b || {}) };
   for (const M of testMonths) {
     setPhase('tuning', `${monthName(M)} (Elo: ${memoA.size} settings tried, point model: ${memoB.size})`);
     const first = M === FIRST_TEST;
@@ -998,6 +1085,7 @@ export async function buildTennisReport(): Promise<any> {
   // the chosen settings' per-match numbers (months before 2024: the Jan 2024 settings, for the blend's training rows)
   setPhase('replaying the chosen settings');
   const eloL = new Float32Array(R.n).fill(NaN), bL = new Float32Array(R.n).fill(NaN), PA = new Float32Array(R.n), PB = new Float32Array(R.n);
+  const SC = new Float32Array(R.n), SS = new Float32Array(R.n);
   const settingOf = (arr: Rec[], m: number) => arr[Math.max(FIRST_TEST, Math.min(lastM, m))];
   for (const key of new Set(testMonths.map(m => cfgKey(chosenA[m], A_KEYS)))) {
     const p = testMonths.map(m => chosenA[m]).find(x => cfgKey(x, A_KEYS) === key)!;
@@ -1008,6 +1096,7 @@ export async function buildTennisReport(): Promise<any> {
     await replayB(R, p, cap, (i, pr) => {
       if (cfgKey(settingOf(chosenB, R.month[i]), B_KEYS) !== key) return;
       bL[i] = logit(winFast(pr.pa, pr.pb, R.bo[i], R.rule[i])); PA[i] = pr.pa; PB[i] = pr.pb;
+      const st = styleOf(pr); SC[i] = st[0]; SS[i] = st[1];
     }, 0);
   }
   // C: the context features (no settings)
@@ -1030,7 +1119,8 @@ export async function buildTennisReport(): Promise<any> {
   }
   const testIdx = testMonths.flatMap(m => Array.from(byMonth[m]));
   // D: walk-forward blend (refitted each month on the months before it)
-  const colsOf = (groups: string[]) => [{ name: 'elo', a: eloL }, { name: 'point', a: bL }, ...groups.flatMap(g => GROUPS[g].map(k => ({ name: FEAT[k], a: X[k] })))];
+  const colArr = (name: string) => (name === 'styleClash' ? SC : name === 'styleShape' ? SS : X[FEAT.indexOf(name as any)]);
+  const colsOf = (groups: string[]) => [{ name: 'elo', a: eloL }, { name: 'point', a: bL }, ...groups.flatMap(g => colsOfGroup(g).map(name => ({ name, a: colArr(name) })))];
   const sdOf = (a: Float32Array) => { let s = 0, n = 0; for (let m = 0; m < nm; m++) for (const i of byMonth[m]) { s += a[i] * a[i]; n++; } return Math.sqrt(s / Math.max(1, n)) || 1; };
   const yArr = new Uint8Array(R.n); for (let i = 0; i < R.n; i++) yArr[i] = y(i);
   const wf = async (groups: string[]) => {
@@ -1053,9 +1143,11 @@ export async function buildTennisReport(): Promise<any> {
     return { p, ll: ll / Math.max(1, testIdx.length) };
   };
   setPhase('blend', 'Elo + point model');
-  let best = await wf([]);
-  const kept: string[] = [], tried: { group: string; logLoss: number; kept: boolean }[] = [];
+  const forced = (promo?.groups || []).filter(g => GROUPS[g] || LAB_GROUPS[g] || g === 'style');
+  let best = await wf(forced);
+  const kept: string[] = [...forced], tried: { group: string; logLoss: number; kept: boolean }[] = forced.map(g => ({ group: `${g} (lab, fix293)`, logLoss: r4(best.ll), kept: true }));
   for (const g of Object.keys(GROUPS)) {
+    if (kept.includes(g)) continue;
     setPhase('blend', `+ ${g}`);
     const cand = await wf([...kept, g]);
     const keep = cand.ll < best.ll - 0.0003;
@@ -1161,7 +1253,7 @@ export async function buildTennisReport(): Promise<any> {
   const report = {
     model: TENNIS_MODEL, builtAt: new Date().toISOString(), minutes: r1((Date.now() - t0) / 60000),
     test: { from: monthName(FIRST_TEST), to: monthName(lastM), months: testMonths.length, matches: testIdx.length },
-    mode, walkForwardLogLoss: { eloOnly: r4(llA), pointModelOnly: r4(llB), blend: r4(best.ll) }, context: { tried, kept },
+    mode, walkForwardLogLoss: { eloOnly: r4(llA), pointModelOnly: r4(llB), blend: r4(best.ll) }, context: { tried, kept }, lab: labKey(promo),
     rankToElo: rmTest, tours, surfaces, strong, months, calibration: cal,
     settingsTried: { elo: memoA.size, pointModel: memoB.size },
     data: {
@@ -1197,13 +1289,15 @@ async function tuneLive(R: Rows, c: Ctx, cap: number, nm: number, startA: Rec, s
   if (mode === 'blend') {
     const eloL = new Float32Array(R.n).fill(NaN), bL = new Float32Array(R.n).fill(NaN);
     await replayA(R, a, rm, cap, (i, lg) => { if (R.month[i] >= 0) eloL[i] = lg; });
-    await replayB(R, b, cap, (i, pr) => { bL[i] = logit(winFast(pr.pa, pr.pb, R.bo[i], R.rule[i])); }, 0);
+    const SC = new Float32Array(R.n), SS = new Float32Array(R.n);
+    await replayB(R, b, cap, (i, pr) => { bL[i] = logit(winFast(pr.pa, pr.pb, R.bo[i], R.rule[i])); const st = styleOf(pr); SC[i] = st[0]; SS[i] = st[1]; }, 0);
     const X: Float32Array[] = FEAT.map(() => new Float32Array(R.n));
     const F = new FEng(c), slice = shared;
     for (let i = 0; i < R.n; i++) { if (R.month[i] >= 0) { const f = F.pre(R, i); for (let k = 0; k < FEAT.length; k++) X[k][i] = f[k]; } F.update(R, i); if ((i & 1023) === 0) await slice(); }
     const rows: number[] = [];
     for (let i = 0; i < R.n; i++) if (isEval(i) && Number.isFinite(eloL[i]) && Number.isFinite(bL[i])) rows.push(i);
-    const cols = [{ name: 'elo', a: eloL }, { name: 'point', a: bL }, ...groups.flatMap(g => GROUPS[g].map(k => ({ name: FEAT[k] as string, a: X[k] })))];
+    const colArr = (name: string) => (name === 'styleClash' ? SC : name === 'styleShape' ? SS : X[FEAT.indexOf(name as any)]);
+    const cols = [{ name: 'elo', a: eloL }, { name: 'point', a: bL }, ...groups.flatMap(g => colsOfGroup(g).map(name => ({ name, a: colArr(name) })))];
     const sd: number[] = [], Xs: Float32Array[] = [];
     for (const x of cols) {
       const v = Math.sqrt(rows.reduce((s, i) => s + x.a[i] * x.a[i], 0) / Math.max(1, rows.length)) || 1;
@@ -1234,6 +1328,266 @@ async function retuneLive() {
   const out = await tuneLive(R, c, cap, nm, s.a, s.b, rep.context?.kept || [], rep.mode || s.mode, rep.strong || s.strong);
   setPhase(null);
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* fix293: the tennis lab (admin only)                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * fix293 (Yarin, 31 Oct): every idea tried walk-forward on the stored archive + our feed, scored on log loss / Brier,
+ * hit rate per band and against the market, and the winner promoted only when it is better on matches it never saw.
+ *
+ * Fair test: one fixed starting point for every variant — the Elo / point-model settings the report chose for 2024-01
+ * (tuned on 2023 only) and its rank → Elo map; the blend of [Elo, point model, context] refitted every month on the
+ * months before it (as the report). Each idea's own setting is picked on 2024 (validation) only and kept when it lowers
+ * the 2024 log loss by 0.0003+ on top of what was kept before it; 2025 + 2026 (test, Jan 2025 → today) is never used to
+ * pick anything. The stack of kept ideas is promoted when on the test months it lowers the log loss by 0.0005+, is
+ * better in 2025 and in 2026 alike, and the hit rate is not down by more than 0.5 pp. Promoted = part of the live model
+ * (labPromoted: the report starts from it and keeps its context groups; then the report is rebuilt once).
+ * Market (tennis_market_bench archive prices + tennis_prices closing mids) on the test matches that have one: the
+ * anchor (fix278's walk-forward weight) and a learned combiner (logistic on model + market logits, refitted every 25
+ * matches on the ones before) against the model alone and the market alone — reported; live, the anchor of
+ * services/tennisAnchor.ts (fitted daily on the live predictions) is the one in use.
+ */
+export const LAB_VERSION = 'fix293';
+export interface LabStack { a: Rec; b: Rec; groups: string[] }
+export interface LabPromoted extends LabStack { version: string; at: string; why: string }
+const LAB_A_KEYS = ['bleed', 'mov', 'decay', 'kW'], LAB_B_KEYS = ['nm'];
+const VAL_FROM = 12, TEST_FROM = 24; // 2024-01, 2025-01
+/** the lab's promoted stack (null = nothing promoted: the model as before) */
+export function labPromoted(): LabPromoted | null {
+  const v = store.get('lab_promoted');
+  return v && v.version === LAB_VERSION ? v : null;
+}
+const labKey = (p: LabStack | null) => (p ? JSON.stringify({ a: p.a, b: p.b, g: [...p.groups].sort() }) : 'none');
+
+interface LabScore { val: number; test: any; years: Record<string, number | null>; market: { n: number; model: number | null; market: number | null } }
+interface LabFamily { family: string; label: string; cands: { setting: string; stack: Partial<LabStack> }[] }
+
+/** a small logistic fit on two columns, no intercept (the learned combiner) */
+function fit2(x1: number[], x2: number[], y: number[]): [number, number] {
+  let a = 1, b = 0;
+  for (let it = 0; it < 25; it++) {
+    let ga = -(a - 1) * 0.5, gb = -b * 0.5, haa = 0.5, hab = 0, hbb = 0.5;
+    for (let i = 0; i < y.length; i++) {
+      const q = sigma(a * x1[i] + b * x2[i]), e = y[i] - q, w = q * (1 - q);
+      ga += e * x1[i]; gb += e * x2[i]; haa += w * x1[i] * x1[i]; hab += w * x1[i] * x2[i]; hbb += w * x2[i] * x2[i];
+    }
+    const det = haa * hbb - hab * hab;
+    if (!(Math.abs(det) > 1e-12)) break;
+    const da = (hbb * ga - hab * gb) / det, db = (haa * gb - hab * ga) / det;
+    a += da; b += db;
+    if (Math.abs(da) + Math.abs(db) < 1e-7) break;
+  }
+  return [a, b];
+}
+
+export async function runTennisLab(): Promise<any> {
+  const t0 = Date.now();
+  const rep = store.get('report');
+  if (!rep) throw new Error('no report yet');
+  setPhase('lab', 'loading matches');
+  const { c, R } = await loadData();
+  const cap = c.reg.size + 10;
+  const curM = monthIdx(Date.now()), nm = Math.max(curM + 1, TEST_FROM + 1);
+  const m0 = (rep.months || []).find((m: any) => m.month === monthName(VAL_FROM));
+  const strip = (x: Rec, keys: string[]) => Object.fromEntries(Object.entries(x).filter(([k]) => !keys.includes(k)));
+  const a0: Rec = strip({ ...A_DEFAULT, ...(m0?.elo || {}) }, LAB_A_KEYS), b0: Rec = strip({ ...B_DEFAULT, ...(m0?.point || {}) }, LAB_B_KEYS);
+  const rm: RankMap = rep.rankToElo?.a ? rep.rankToElo : RM_DEFAULT;
+  const baseGroups: string[] = (rep.context?.kept || []).filter((g: string) => GROUPS[g]);
+  const y = (i: number) => (R.win[i] === 1 ? 1 : 0);
+  const yArr = new Uint8Array(R.n); for (let i = 0; i < R.n; i++) yArr[i] = y(i);
+  const isEval = (i: number) => TESTED(R.cat[i]) && R.month[i] >= 0 && R.month[i] < nm;
+  const byMonth: Int32Array[] = Array.from({ length: nm }, () => new Int32Array(0));
+  {
+    const lists: number[][] = Array.from({ length: nm }, () => []);
+    for (let i = 0; i < R.n; i++) if (isEval(i)) lists[R.month[i]].push(i);
+    lists.forEach((l, m) => { byMonth[m] = Int32Array.from(l); });
+  }
+  const months: number[] = []; for (let m = VAL_FROM; m <= curM; m++) months.push(m);
+  const valIdx = months.filter(m => m < TEST_FROM).flatMap(m => Array.from(byMonth[m]));
+  const testIdx = months.filter(m => m >= TEST_FROM).flatMap(m => Array.from(byMonth[m]));
+  const yearOf = (i: number) => new Date(R.t[i]).getUTCFullYear();
+  // the market where we have one: archive prices of tested matches (benchmark) and the closing mids of live ones
+  const mk = new Map<number, number>();
+  try { for (const r of db.prepare(`SELECT match_id, p1 FROM tennis_market_bench WHERE p1 IS NOT NULL`).all() as any[]) if (r.p1 > 0 && r.p1 < 1) mk.set(r.match_id, r.p1); } catch { /* none */ }
+  try { for (const r of db.prepare(`SELECT match_id, p1_mid, p2_mid FROM tennis_prices`).all() as any[]) { const q = priceP1(r.p1_mid, r.p2_mid); if (q != null) mk.set(r.match_id, q); } } catch { /* none */ }
+  const priced = testIdx.filter(i => R.id[i] > 0 && mk.has(R.id[i])).sort((p, q) => R.t[p] - R.t[q]);
+
+  // context features once (every column the lab may use)
+  setPhase('lab', 'context features');
+  const X: Float32Array[] = FEAT.map(() => new Float32Array(R.n));
+  {
+    const F = new FEng(c), slice = shared;
+    for (let i = 0; i < R.n; i++) {
+      if (R.month[i] >= 0) { const f = F.pre(R, i); for (let k = 0; k < FEAT.length; k++) X[k][i] = f[k]; }
+      F.update(R, i);
+      if ((i & 1023) === 0) await slice();
+    }
+  }
+  // replays, one per Elo / point-model setting
+  const eloMemo = new Map<string, Float32Array>(), bMemo = new Map<string, Float32Array[]>();
+  const eloOf = async (a: Rec) => {
+    const k = JSON.stringify(a);
+    let v = eloMemo.get(k);
+    if (v) return v;
+    await calm();
+    const arr = new Float32Array(R.n);
+    await replayA(R, a, rm, cap, (i, lg) => { if (R.month[i] >= 0) arr[i] = lg; });
+    eloMemo.set(k, arr);
+    return arr;
+  };
+  const pointOf = async (b: Rec) => {
+    const k = JSON.stringify(b);
+    let v = bMemo.get(k);
+    if (v) return v;
+    await calm();
+    const bl = new Float32Array(R.n), sc = new Float32Array(R.n), ss = new Float32Array(R.n);
+    await replayB(R, b, cap, (i, pr) => { bl[i] = logit(winFast(pr.pa, pr.pb, R.bo[i], R.rule[i])); const st = styleOf(pr); sc[i] = st[0]; ss[i] = st[1]; }, 0);
+    v = [bl, sc, ss];
+    bMemo.set(k, v);
+    return v;
+  };
+  // the walk-forward blend of one stack: refitted every month on the months before it
+  const blendOf = async (st: LabStack): Promise<Float32Array> => {
+    const el = await eloOf({ ...a0, ...st.a }), [bl, sc, ss] = await pointOf({ ...b0, ...st.b });
+    const arrs = [el, bl, ...[...baseGroups, ...st.groups.filter(g => !baseGroups.includes(g))].flatMap(g => colsOfGroup(g).map(n => (n === 'styleClash' ? sc : n === 'styleShape' ? ss : X[FEAT.indexOf(n as any)])))];
+    const Xs: Float32Array[] = [];
+    for (const a of arrs) {
+      let s2 = 0, n = 0;
+      for (let m = 0; m < nm; m++) for (const i of byMonth[m]) { s2 += a[i] * a[i]; n++; }
+      const sd = Math.sqrt(s2 / Math.max(1, n)) || 1, o = new Float32Array(R.n);
+      for (let m = 0; m < nm; m++) for (const i of byMonth[m]) o[i] = a[i] / sd;
+      Xs.push(o);
+      await shared();
+    }
+    const p = new Float32Array(R.n).fill(NaN);
+    let w: number[] | null = null;
+    for (const M of months) {
+      await calm();
+      w = await fitLogit(Xs, byMonth.slice(0, M), yArr, w, w ? 3 : 8);
+      for (const i of byMonth[M]) { let s = 0; for (let j = 0; j < Xs.length; j++) s += Xs[j][i] * w[j]; p[i] = sigma(s); }
+    }
+    return p;
+  };
+  const mean = (idx: number[], f: (i: number) => number) => (idx.length ? r4(idx.reduce((s, i) => s + f(i), 0) / idx.length) : null);
+  const scoreOf = (p: Float32Array): LabScore => ({
+    val: mean(valIdx, i => llOf(p[i], yArr[i])) ?? Infinity,
+    test: metrics(testIdx, i => p[i], y),
+    years: Object.fromEntries([2025, 2026].map(yr => [String(yr), mean(testIdx.filter(i => yearOf(i) === yr), i => llOf(p[i], yArr[i]))])),
+    market: { n: priced.length, model: mean(priced, i => llOf(p[i], yArr[i])), market: mean(priced, i => llOf(mk.get(R.id[i])!, yArr[i])) }
+  });
+  const merge = (s: LabStack, x: Partial<LabStack>): LabStack => ({ a: { ...s.a, ...(x.a || {}) }, b: { ...s.b, ...(x.b || {}) }, groups: [...new Set([...s.groups, ...(x.groups || [])])] });
+
+  const lam0 = b0.lam ?? 0.5;
+  const FAMILIES: LabFamily[] = [
+    { family: 'elo-bleed', label: 'Elo: surface ratings with cross-surface bleed', cands: [0.1, 0.25, 0.5].map(v => ({ setting: `bleed ${v}`, stack: { a: { bleed: v } } })) },
+    { family: 'elo-mov', label: 'Elo: margin of victory (share of games won)', cands: [0.2, 0.4].map(v => ({ setting: `weight ${v}`, stack: { a: { mov: v } } })) },
+    { family: 'elo-decay', label: 'Elo: time decay (bigger steps after a gap)', cands: [0.25, 0.5, 1].map(v => ({ setting: `+${v * 100}% after 90 days`, stack: { a: { decay: v } } })) },
+    { family: 'elo-tourK', label: 'Elo: own K per tour (WTA)', cands: [0.85, 1.15, 1.3].map(v => ({ setting: `WTA K × ${v}`, stack: { a: { kW: v } } })) },
+    { family: 'point-recent', label: 'Serve / return: recency by matches', cands: [10, 25].map(v => ({ setting: `last ${v} matches`, stack: { b: { nm: v } } })) },
+    { family: 'point-surface', label: 'Serve / return: surface split', cands: [0, 0.25, 0.5, 0.75, 1].filter(v => Math.abs(v - lam0) > 0.01 && Math.abs(v - lam0) <= 0.26).map(v => ({ setting: `surface share ${v} (was ${lam0})`, stack: { b: { lam: v } } })) },
+    { family: 'tiebreak', label: 'Serve / return: tiebreak record', cands: [{ setting: 'on', stack: { groups: ['tiebreak'] } }] },
+    { family: 'clutch', label: 'Serve / return: break points saved / converted', cands: [{ setting: 'on', stack: { groups: ['clutch'] } }] },
+    ...(baseGroups.includes('fatigue') ? [] : [{ family: 'fatigue', label: 'Fatigue: matches, sets, hours in the last 3–14 days', cands: [{ setting: 'on', stack: { groups: ['fatigue'] } }] }]),
+    { family: 'rest', label: 'Schedule: days since the last match', cands: [{ setting: 'on', stack: { groups: ['rest'] } }] },
+    { family: 'travel', label: 'Schedule: continent change (time zones)', cands: [{ setting: 'on', stack: { groups: ['travel'] } }] },
+    { family: 'h2h', label: 'Head-to-head (shrunk)', cands: [{ setting: 'on', stack: { groups: ['h2h'] } }] },
+    { family: 'style', label: 'Style: big server vs returner', cands: [{ setting: 'on', stack: { groups: ['style'] } }] }
+  ];
+  const row = (family: string, label: string, setting: string, sc: LabScore, kept: boolean | null, note: string) => ({
+    family, label, setting, kept, note,
+    val2024: sc.val === Infinity ? null : sc.val, test: { n: sc.test.n, logLoss: sc.test.logLoss ?? null, brier: sc.test.brier ?? null, hit: sc.test.hit ?? null, bands: sc.test.calibration || [] },
+    years: sc.years, market: sc.market
+  });
+  const rows: any[] = [];
+  const empty: LabStack = { a: {}, b: {}, groups: [] };
+  setPhase('lab', 'baseline');
+  const baseP = await blendOf(empty), base = scoreOf(baseP);
+  rows.push(row('baseline', 'Live model (settings of 2024-01, monthly blend)', baseGroups.length ? `context: ${baseGroups.join(', ')}` : 'Elo + point model', base, null, 'the bar every idea has to beat'));
+  let stack = empty, cur = base;
+  for (const F of FAMILIES) {
+    let bestC: { setting: string; stack: LabStack; sc: LabScore } | null = null;
+    for (const cand of F.cands) {
+      setPhase('lab', `${F.label}: ${cand.setting}`);
+      const st = merge(stack, cand.stack);
+      const sc = scoreOf(await blendOf(st));
+      if (!bestC || sc.val < bestC.sc.val) bestC = { setting: cand.setting, stack: st, sc };
+      await yieldLoop();
+    }
+    if (!bestC) continue;
+    const keep = bestC.sc.val < cur.val - 0.0003;
+    rows.push(row(F.family, F.label, bestC.setting, bestC.sc, keep, keep ? `2024 log loss ${cur.val} → ${bestC.sc.val}: kept` : `2024 log loss ${bestC.sc.val} vs ${cur.val} (needs 0.0003 lower): not kept`));
+    if (keep) { stack = bestC.stack; cur = bestC.sc; }
+  }
+  // the stack on the test months (never used to pick)
+  const changed = Object.keys(stack.a).length + Object.keys(stack.b).length + stack.groups.length > 0;
+  const finalP = changed ? await blendOf(stack) : baseP, fin = changed ? cur : base;
+  const dTest = (fin.test.logLoss ?? 1) - (base.test.logLoss ?? 1);
+  const yrsBetter = ['2025', '2026'].every(yr => fin.years[yr] == null || base.years[yr] == null || fin.years[yr]! < base.years[yr]!);
+  const hitDrop = (base.test.hit ?? 0) - (fin.test.hit ?? 0);
+  const promote = changed && dTest <= -0.0005 && yrsBetter && hitDrop <= 0.5;
+  const why = !changed ? 'no idea lowered the 2024 log loss enough: the model stays as it is'
+    : promote ? `test 2025–26 log loss ${base.test.logLoss} → ${fin.test.logLoss} (${dTest.toFixed(4)}), better in 2025 (${base.years['2025']} → ${fin.years['2025']}) and 2026 (${base.years['2026']} → ${fin.years['2026']}), hit ${base.test.hit}% → ${fin.test.hit}%: promoted`
+    : `test 2025–26 log loss ${base.test.logLoss} → ${fin.test.logLoss} (${dTest.toFixed(4)}; needs −0.0005, better in both years${yrsBetter ? '' : ' — not'}, hit ${base.test.hit}% → ${fin.test.hit}%): not promoted`;
+  rows.push(row('stack', 'All kept ideas together', changed ? [...Object.entries({ ...stack.a, ...stack.b }).map(([k, v]) => `${k} ${v}`), ...stack.groups].join(', ') : 'nothing kept', fin, promote, why));
+
+  // the market on the priced test matches: anchor (walk-forward weight) and the learned combiner
+  setPhase('lab', 'market');
+  const useP = promote ? finalP : baseP;
+  const mRows = priced.map(i => ({ t: R.t[i], model: useP[i], market: mk.get(R.id[i])!, actual: yArr[i] }));
+  const anc = fitAnchor('chance', mRows);
+  let comb: { n: number; logLoss: number | null; w: [number, number] | null } = { n: 0, logLoss: null, w: null };
+  if (mRows.length >= ANCHOR_MIN_TRAIN + 25) {
+    const L1 = mRows.map(r => logit(r.model)), L2 = mRows.map(r => logit(r.market)), Y = mRows.map(r => r.actual);
+    let w: [number, number] = [1, 0], s = 0, n = 0;
+    for (let i = ANCHOR_MIN_TRAIN; i < mRows.length; i++) {
+      if ((i - ANCHOR_MIN_TRAIN) % 25 === 0) w = fit2(L1.slice(0, i), L2.slice(0, i), Y.slice(0, i));
+      s += llOf(sigma(w[0] * L1[i] + w[1] * L2[i]), Y[i]); n++;
+    }
+    comb = { n, logLoss: r4(s / n), w: fit2(L1, L2, Y).map(r4) as [number, number] };
+  }
+  const oos = anc.oos;
+  const market = {
+    matches: mRows.length, sources: 'archive prices (benchmark sample) + closing exchange mids (tennis_prices)',
+    anchor: { kept: anc.kept, w: anc.w, why: anc.why, oos },
+    combiner: { ...comb, kept: !!(oos && comb.logLoss != null && comb.logLoss < oos.model - 1e-9 && comb.logLoss < oos.market - 1e-9), vs: oos ? { model: oos.model, market: oos.market, anchor: oos.blend } : null }
+  };
+  const lab = {
+    version: LAB_VERSION, builtAt: new Date().toISOString(), month: monthName(lastFullMonth()), minutes: r1((Date.now() - t0) / 60000),
+    split: { validation: `${monthName(VAL_FROM)} → ${monthName(TEST_FROM - 1)}`, test: `${monthName(TEST_FROM)} → ${monthName(curM)}`, validationMatches: valIdx.length, testMatches: testIdx.length, pricedTestMatches: priced.length },
+    start: { elo: a0, point: b0, rankToElo: rm, context: baseGroups },
+    rows, market, promoted: promote, why, stack
+  };
+  store.set('lab', lab);
+  const prev = labPromoted();
+  const next: LabPromoted | null = promote ? { ...stack, version: LAB_VERSION, at: lab.builtAt, why } : null;
+  store.set('lab_promoted', next);
+  logger.info(`${TENNIS_MODEL} lab: ${why}${labKey(prev) !== labKey(next) ? ' — the report is rebuilt with it' : ''}; market ${market.matches} matches, anchor ${anc.kept ? `w ${anc.w}` : 'model only'}, combiner ${comb.logLoss ?? '—'}`);
+  setPhase(null);
+  return lab;
+}
+/** the lab is due: never run with this version, or a new full month since */
+function labDue(): boolean {
+  if (process.env.TENNIS_LAB === 'off') return false;
+  const l = store.get('lab');
+  return !l || l.version !== LAB_VERSION || l.month !== monthName(lastFullMonth());
+}
+/** admin: the lab table (+ what is promoted) */
+export const tennisLab = () => ({ lab: store.get('lab'), promoted: labPromoted(), running: (remote && !workerOff ? remote : localState()).progress });
+/** the lab as plain text (Copy for Claude) */
+export function tennisLabText(l = store.get('lab')): string {
+  if (!l) return 'Tennis lab: not run yet.';
+  const out = [`Tennis lab (${l.version}, built ${String(l.builtAt).slice(0, 16)} UTC, ${l.minutes} min). Validation ${l.split.validation} (${l.split.validationMatches} matches), test ${l.split.test} (${l.split.testMatches}; ${l.split.pricedTestMatches} with a market price).`,
+    'idea | setting | 2024 LL | test LL | Brier | hit % | 2025 LL | 2026 LL | 60–70% said/happened | priced: model vs market LL | kept'];
+  for (const r of l.rows) {
+    const b = (r.test.bands || []).find((x: any) => x.band === '60-70');
+    out.push(`${r.label} | ${r.setting} | ${r.val2024 ?? '—'} | ${r.test.logLoss ?? '—'} | ${r.test.brier ?? '—'} | ${r.test.hit ?? '—'} | ${r.years['2025'] ?? '—'} | ${r.years['2026'] ?? '—'} | ${b ? `${b.said}/${b.happened} (${b.n})` : '—'} | ${r.market.model ?? '—'} vs ${r.market.market ?? '—'} (${r.market.n}) | ${r.kept == null ? '' : r.kept ? 'yes' : 'no'}`);
+  }
+  const m = l.market;
+  out.push(`Market (${m.matches} test matches with a price): anchor ${m.anchor.kept ? `weight ${m.anchor.w}` : 'model only'} — ${m.anchor.why}; learned combiner ${m.combiner.logLoss ?? '—'} on ${m.combiner.n} unseen (${m.combiner.kept ? 'better than both' : 'not better than both'}).`, `Decision: ${l.why}`);
+  return out.join('\n').slice(0, 11500);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1373,7 +1727,7 @@ export async function applyNewResults(): Promise<number> {
 }
 
 export interface TennisPred {
-  p1: number; p2: number; p1Raw: number; p1Pre: number; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
+  p1: number; p2: number; p1Raw: number; p1Pre: number; p1AnchorPre: number; anchored: boolean; pick: 1 | 2; strong: boolean; cat: string; model: string; firstSetP1: number;
   sets: Record<string, number>; games: ReturnType<typeof gamesSummary>; why: string[];
   numbers: { eloSurface: [number, number]; eloOverall: [number, number]; servePoint: [number, number]; pElo: number; pPoint: number; mode: string; bo?: number; rule?: number }
   /** fix282: the model's logit terms for player 1 (sum = the model's logit before the calibration layers) */
@@ -1387,7 +1741,8 @@ function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): 
   // fix282: each term's part of the logit ("Why we think so" ranks them by share)
   const terms: Record<string, number> = s.mode === 'point' ? { point: logit(pP) } : { elo: a.logit };
   if (s.mode === 'blend' && s.blend) {
-    const val = (name: string) => (name === 'elo' ? a.logit : name === 'point' ? logit(pP) : f[FEAT.indexOf(name as any)]);
+    const st = styleOf(b);
+    const val = (name: string) => (name === 'elo' ? a.logit : name === 'point' ? logit(pP) : name === 'styleClash' ? st[0] : name === 'styleShape' ? st[1] : f[FEAT.indexOf(name as any)]);
     for (const k of Object.keys(terms)) delete terms[k];
     s.blend.cols.forEach((name, j) => { terms[name] = (terms[name] || 0) + (val(name) / s.blend!.sd[j]) * s.blend!.w[j]; });
     p = sigma(Object.values(terms).reduce((acc, x) => acc + x, 0));
@@ -1400,12 +1755,16 @@ function predictRow(L: LiveState, R: Rows, i: number, names: [string, string]): 
   // fix254: then the recent layer (fitted nightly on the last months' matches, promoted by the model's rules)
   const pPre = p;
   p = calibrateTennis(p);
+  // fix293: last, the market anchor (the closing exchange price ~1 h before the start, weight per tour × surface; never shown)
+  const pAnc = p;
+  const an = anchorTennis(R.id[i], tennisSegment(cat, R.surf[i]), p);
+  p = an.p;
   const sc = rescale(b.pa, b.pb, R.bo[i], R.rule[i], p);
   const d = matchDist(sc.pa, sc.pb, R.bo[i], R.rule[i], true);
   const line = tennisStrongLine(cat) / 100;
   const pct = (x: number) => Math.round(x * 1000) / 10;
   return {
-    p1: pct(p), p2: pct(1 - p), p1Raw: pct(pRaw), p1Pre: pct(pPre), pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
+    p1: pct(p), p2: pct(1 - p), p1Raw: pct(pRaw), p1Pre: pct(pPre), p1AnchorPre: pct(pAnc), anchored: an.anchored, pick: p >= 0.5 ? 1 : 2, strong: TESTED(R.cat[i]) && Math.max(p, 1 - p) >= line, cat, model: TENNIS_MODEL,
     firstSetP1: pct(d.first), sets: Object.fromEntries(Object.entries(d.sets).sort().map(([k, v]) => [k, pct(v)])), games: gamesSummary(d.games!, R.bo[i]),
     why: whyLines(L, R, i, names, a, b, f),
     numbers: { eloSurface: [Math.round(a.a.s), Math.round(a.b.s)], eloOverall: [Math.round(a.a.o), Math.round(a.b.o)], servePoint: [pct(b.pa), pct(b.pb)], pElo: pct(pE), pPoint: pct(pP), mode: s.mode, bo: R.bo[i], rule: R.rule[i] },
@@ -1454,6 +1813,9 @@ export async function saveTennisPredictions(): Promise<number> {
   const rows = db.prepare(`${MATCH_SQL} WHERE m.status = 'upcoming' AND m.p1_id IS NOT NULL AND m.p2_id IS NOT NULL AND m.scheduled_at > ? AND m.scheduled_at < ?
     AND COALESCE(m.draw, 'singles') = 'singles' ORDER BY m.scheduled_at LIMIT 3000`).all(now.toISOString(), new Date(now.getTime() + 48 * 3600000).toISOString()) as any[];
   const madeAt = db.prepare(`SELECT made_at FROM tennis_predictions WHERE match_id = ?`);
+  // fix293: a price that arrived after the last save moves the prediction (the anchor)
+  let priceAt: Statement | null = null;
+  try { priceAt = db.prepare(`SELECT fetched_at FROM tennis_prices WHERE match_id = ?`); } catch { priceAt = null; }
   const slice = shared;
   const R = new Rows(rows.length);
   const names: [string, string][] = [];
@@ -1464,15 +1826,16 @@ export async function saveTennisPredictions(): Promise<number> {
     if (!parseInto(L.c, R, { ...r, winner: 0 }, true)) continue;
     const i = R.n - 1;
     const prev = Date.parse((madeAt.get(r.id) as any)?.made_at || '');
-    const moved = Math.max(L.builtAt, Date.parse(tennisCalib()?.at || '') || 0, Date.parse(recentState('tennis')?.at || '') || 0, L.changed.get(R.p1[i]) || 0, L.changed.get(R.p2[i]) || 0);
+    const pAt = priceAt ? Date.parse((priceAt.get(r.id) as any)?.fetched_at || '') || 0 : 0;
+    const moved = Math.max(L.builtAt, Date.parse(tennisCalib()?.at || '') || 0, Date.parse(recentState('tennis')?.at || '') || 0, L.changed.get(R.p1[i]) || 0, L.changed.get(R.p2[i]) || 0, pAt);
     if (Number.isFinite(prev) && prev > moved && now.getTime() - prev < 6 * 3600000) { R.n--; predsSkipped++; continue; } // unchanged
     names.push([r.p1_name || 'Player 1', r.p2_name || 'Player 2']);
   }
   applyRules(L.c, R);
   grow(L);
-  const UP = `INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at, p_raw, p_pre)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET model = excluded.model, scheduled_at = excluded.scheduled_at, cat = excluded.cat,
-    p1 = excluded.p1, p_raw = excluded.p_raw, p_pre = excluded.p_pre, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
+  const UP = `INSERT INTO tennis_predictions (match_id, model, scheduled_at, cat, p1, sets, games, first_set_p1, why, made_at, first_p1, first_at, p_raw, p_pre, p_anchor_pre)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_id) DO UPDATE SET model = excluded.model, scheduled_at = excluded.scheduled_at, cat = excluded.cat,
+    p1 = excluded.p1, p_raw = excluded.p_raw, p_pre = excluded.p_pre, p_anchor_pre = excluded.p_anchor_pre, sets = excluded.sets, games = excluded.games, first_set_p1 = excluded.first_set_p1, why = excluded.why, made_at = excluded.made_at
     WHERE tennis_predictions.scheduled_at IS NULL OR tennis_predictions.scheduled_at > excluded.made_at`;
   const out: { id: number; at: string; pr: TennisPred }[] = [];
   for (let i = 0; i < R.n; i++) {
@@ -1482,7 +1845,7 @@ export async function saveTennisPredictions(): Promise<number> {
   const at = new Date().toISOString();
   // a match that started while we were computing keeps the prediction it had at the start (and the SQL guard above)
   const params = (o: typeof out[number]) => [o.id, o.pr.model, o.at, o.pr.cat, o.pr.p1 / 100, JSON.stringify(o.pr.sets), JSON.stringify(o.pr.games), o.pr.firstSetP1 / 100,
-    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers, terms: o.pr.terms }), at, o.pr.p1 / 100, at, o.pr.p1Raw / 100, o.pr.p1Pre / 100];
+    JSON.stringify({ lines: o.pr.why, numbers: o.pr.numbers, terms: o.pr.terms, ...(o.pr.anchored ? { anchored: true } : {}) }), at, o.pr.p1 / 100, at, o.pr.p1Raw / 100, o.pr.p1Pre / 100, o.pr.p1AnchorPre / 100];
   if (sink) { for (const o of out) if (Date.parse(o.at) > Date.now()) sink.push({ sql: UP, params: params(o) }); return out.length; } // fix200: the worker
   const up = db.prepare(UP);
   for (let k = 0; k < out.length; k += 200) {
@@ -1559,7 +1922,7 @@ function israelNow() {
  * Heavy work (report / re-tune) in the background; then ratings + predictions. `force` = admin ?rebuild=1.
  * fix200: in the worker thread when it runs (else in-process, in the heavy() queue).
  */
-export async function tennisModelTick(force: 'report' | 'retune' | null = null): Promise<void> {
+export async function tennisModelTick(force: 'report' | 'retune' | 'lab' | null = null): Promise<void> {
   if (IN_WORKER) { await tickHere(force); return; }
   await pagesFirst(); // fix232: after the stored pages were rebuilt once
   if (useWorker()) {
@@ -1576,7 +1939,7 @@ export async function tennisModelTick(force: 'report' | 'retune' | null = null):
   await heavy('tennis model', () => timed('tennis model', async () => { if ((await tickHere(force)).reportBuilt) await runMarketBench().catch(() => undefined); }));
 }
 /** one tick here (in the worker, or in-process): returns whether the report was rebuilt */
-async function tickHere(force: 'report' | 'retune' | null): Promise<{ reportBuilt: boolean }> {
+async function tickHere(force: 'report' | 'retune' | 'lab' | null): Promise<{ reportBuilt: boolean }> {
   let reportBuilt = false;
   if (busy) return { reportBuilt };
   busy = true;
@@ -1586,7 +1949,9 @@ async function tickHere(force: 'report' | 'retune' | null): Promise<{ reportBuil
     const il = israelNow();
     const weekly = il.day === 'Mon' && il.hour >= 4 && (!settings || Date.now() - Date.parse(settings.at) > 5 * DAY);
     const newMonth = report && report.test?.to !== monthName(lastFullMonth());
-    if (force === 'report' || !report || !settings || (weekly && newMonth) || tennisCalib()?.version !== TENNIS_CALIB_VERSION) {
+    // fix293: the report is rebuilt once when the lab's promoted stack changed
+    const labMoved = !!report && (report.lab ?? 'none') !== labKey(labPromoted());
+    if (force === 'report' || !report || !settings || (weekly && newMonth) || tennisCalib()?.version !== TENNIS_CALIB_VERSION || labMoved) {
       await timed('tennis model report', buildTennisReport);
       reportBuilt = true; // fix200: the benchmark (provider calls) runs on the main thread after the write-back
     } else if (force === 'retune' || weekly) {
@@ -1597,6 +1962,10 @@ async function tickHere(force: 'report' | 'retune' | null): Promise<{ reportBuil
     const applied = await applyNewResults();
     const n = await saveTennisPredictions();
     lastTick = { at: new Date().toISOString(), info: `${applied} new results in the ratings, ${n} predictions saved (${predsSkipped} unchanged)${IN_WORKER ? ' · worker thread' : ''}` };
+    // fix293: the lab after the predictions (so they are never held up by it); once per version and full month
+    if (!reportBuilt && (force === 'lab' || labDue())) {
+      try { await timed('tennis lab', runTennisLab); } catch (e: any) { logger.warn(`${TENNIS_MODEL} lab: ${e.message}`); setPhase(null); }
+    }
     if (!IN_WORKER) refreshSnap();
   } catch (e: any) {
     progress.error = `${new Date().toISOString()}: ${e.message}`;
@@ -1742,7 +2111,7 @@ function onReply(m: Reply) {
   if (!w) return;
   if (m.ok) w.resolve(m); else w.reject(new Error(m.error || 'worker failed'));
 }
-function callWorker(msg: { cmd: 'tick'; force: 'report' | 'retune' | null } | { cmd: 'results' } | { cmd: 'snapshot'; t: number }): Promise<Reply> {
+function callWorker(msg: { cmd: 'tick'; force: 'report' | 'retune' | 'lab' | null } | { cmd: 'results' } | { cmd: 'snapshot'; t: number }): Promise<Reply> {
   const w = startWorker();
   if (!w) return Promise.reject(new Error('no worker'));
   const id = ++seq;

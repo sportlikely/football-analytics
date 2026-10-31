@@ -279,6 +279,26 @@ export function judgeYoung(rows: CRow[], view: (r: CRow) => P3, champ: (r: CRow)
 }
 
 /**
+ * fix293 (Yarin, 31 Oct: tennis 60–70% said 64.8%, happened 72.6% on 146): the one-time refit of a young sport on every
+ * settled match. Same out-of-fold test (every match scored by a fit on the other time blocks); it goes live when it is
+ * better on log loss over all of them and the hit rate is not down by more than 0.5 pp — the bootstrap / both-halves bar
+ * of the nightly young rule is not asked once (the nightly rule and its rollback guard take over the next night).
+ */
+export function judgeRefit(rows: CRow[], view: (r: CRow) => P3, champ: (r: CRow) => P3, R = DAILY_RULES, minTest = MIN_TEST): Verdict & { halves: [number, number] } {
+  const s = rows.slice().sort((a, b) => a.t - b.t), h = Math.floor(s.length / 2);
+  const pw = (sel: CRow[]) => paired(sel.map(r => ({ c: view(r), b: champ(r), y: r.y })));
+  const all = pw(s), A = pw(s.slice(0, h)), B = pw(s.slice(h));
+  const halves: [number, number] = [A.s.diff, B.s.diff];
+  const on = 'every settled match, out of fold (fix293 refit)';
+  if (all.s.n < minTest) return { pass: false, why: `${all.s.n} matches (< ${minTest})`, boot: null, gap: `needs ${minTest - all.s.n} more matches`, halves };
+  if (all.s.diff >= 0) return { pass: false, why: `not better on ${on} (${sg(all.s.diff)})`, boot: null, gap: `${sg(all.s.diff)}: needs below 0`, halves };
+  const hitDrop = Math.round((all.s.hitB - all.s.hitC) * 10) / 10;
+  if (hitDrop > R.maxHitDrop) return { pass: false, why: `hit rate ${all.s.hitC}% vs ${all.s.hitB}% (down more than ${R.maxHitDrop} pp)`, boot: null, gap: `hit rate down ${hitDrop.toFixed(1)} pp (max ${R.maxHitDrop})`, halves };
+  const boot = pairedBootstrap(all.d, R.resamples, 293);
+  return { pass: true, why: `${on} ${sg(all.s.diff)} per game over ${all.s.n} matches (earlier half ${sg(A.s.diff)}, later ${sg(B.s.diff)}), better in ${Math.round(boot.pBetter * 100)}% of resamples`, boot, gap: null, halves };
+}
+
+/**
  * The nightly decision for one sport. `champion` = the live layer (null = none), `championSince` = when it went live,
  * `lastPromotion` = the date of the last promotion (YYYY-MM-DD). `edges` = the report's bands (football: from 0).
  *  - walk-forward (MIN_FIT+ games before the last 30 days): the candidate is fitted on them, tested on the 30 days,
@@ -286,7 +306,7 @@ export function judgeYoung(rows: CRow[], view: (r: CRow) => P3, champ: (r: CRow)
  *  - cross-fit (fewer, but MIN_FIT+ settled games in all): tested out of fold on every game (crossFit); the layer that
  *    goes live is the Platt fit on all of them.
  */
-export function decideRecent(rows: CRow[], champion: IsoLayer | null, championSince: string | null, lastPromotion: string | null, now = Date.now(), R = DAILY_RULES, seed = 270, edges = [50, 60, 70, 80], opts: { young?: boolean } = {}): RecentDecision {
+export function decideRecent(rows: CRow[], champion: IsoLayer | null, championSince: string | null, lastPromotion: string | null, now = Date.now(), R = DAILY_RULES, seed = 270, edges = [50, 60, 70, 80], opts: { young?: boolean; refit?: boolean } = {}): RecentDecision {
   const day0 = Math.floor(now / DAY) * DAY;
   const T0 = day0 - TEST_DAYS * DAY;
   const d = (x: number) => new Date(x).toISOString().slice(0, 10);
@@ -341,7 +361,7 @@ export function decideRecent(rows: CRow[], champion: IsoLayer | null, championSi
     }
   }
   if (!cand) return { ...base, decision: 'keep', reason: `No change: ${settled.length} settled games (${MIN_FIT} needed to fit).`, verdict: null, guard };
-  const v = mode === 'young' && view ? judgeYoung(test, view, champ, R, seed) : judgeTest(pw, R, seed, MIN_TEST, on);
+  const v = mode === 'young' && view ? (opts.refit ? judgeRefit(test, view, champ, R) : judgeYoung(test, view, champ, R, seed)) : judgeTest(pw, R, seed, MIN_TEST, on);
   if (!v.pass) return { ...base, decision: 'keep', reason: `No change: ${v.why}.`, verdict: v, guard };
   // fix273: a young sport is re-tested and may move every night
   const wait = promotionWait(lastPromotion, d(day0), mode === 'young' ? { ...R, minDaysBetween: 1 } : R);

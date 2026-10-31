@@ -330,7 +330,7 @@ test('young rule: an honest model rarely gets a layer; a gain in one half only i
 test('the nightly run uses the young rule for basketball and tennis, and a fix270 run does not count as today\'s (src)', () => {
   const s = SRC('src/services/recentCalib.ts');
   assert.match(s, /RECENT_RULE = 'fix273'/);
-  assert.match(s, /\{ young: sport !== 'football' \}/);
+  assert.match(s, /\{ young: sport !== 'football'(, refit: !!opts\.refit)? \}/); // fix293: + the one-time refit
 });
 
 /* ---------- 4. names ---------- */

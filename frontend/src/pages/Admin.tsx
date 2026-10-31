@@ -15,6 +15,7 @@ import NamesAdminCard from '../components/NamesAdminCard'
 import BbGridCard from '../components/BbGridCard'
 import DiffViewCard from '../components/DiffViewCard'
 import MarketGapCard from '../components/MarketGapCard'
+import TennisLabCard from '../components/admin/TennisLabCard'
 import LeagueFixCard from '../components/LeagueFixCard'
 import { ChecksCard, DoneForYouCard, Explained, ForClaudeCard, NeedsYouCard, ResultsToCheck, SpeedCard, TabChecks, Tiles, type Ctx, type TileDef } from '../components/admin/AdminParts'
 import CopyForClaude from '../components/admin/CopyForClaude'
@@ -170,6 +171,7 @@ export default function Admin() {
           <Explained ctx={ctx} id="league-fix"><LeagueFixCard /></Explained>
           <Explained ctx={ctx} id="diff-view"><DiffViewCard /></Explained>
           <Explained ctx={ctx} id="market-gap"><MarketGapCard /></Explained>
+          <Explained ctx={ctx} id="tennis-lab"><TennisLabCard /></Explained>
           <Explained ctx={ctx} id="season-forecast"><SeasonForecastAdminCard /></Explained>
           <Explained ctx={ctx} id="calibration"><ChecksCard id="calibration" ctx={ctx} title="Do our percentages come true? (football, basketball)" /></Explained>
           <Explained ctx={ctx} id="backtest"><ChecksCard id="backtest" ctx={ctx} title="Leagues vs past seasons (basketball)" /></Explained>

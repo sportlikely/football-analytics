@@ -33,6 +33,7 @@ import {
   type MarketSport, type AnchorRow, type LevelRow, type AnchorKind, type Consensus
 } from '../utils/marketLines';
 import { readFeed, writeFeed, type FeedStatus, storeLines, storeAnchor, bumpMarketVer, anchorFits, levelStates, anchorGroup, marketNumber, oursOfExtras, gateGap, recentGap, overOf, bttsOf, type LevelState } from './marketAnchor';
+import { tennisAnchorRows, tennisPriced, clearTennisAnchorCache } from './tennisAnchor';
 
 
 const DAY = 86400000, HOUR = 3600000;
@@ -226,6 +227,8 @@ const mlHome = (p: Record<string, number>) => p.home ?? p.Home ?? null;
 
 /** the anchor rows of one sport × market (settled games with a closing line): model's own number, market, outcome */
 function anchorRows(sport: MarketSport, market: string, since: number): { kind: AnchorKind; rows: AnchorRow[] } {
+  // fix293: tennis winner — tennis_prices (the closing exchange mid) against the chance saved before the anchor, per tour × surface
+  if (sport === 'tennis') return { kind: 'chance', rows: market === 'ml' ? tennisAnchorRows().filter(r => r.t > since) : [] };
   const close = closingRows(sport, market, since);
   if (sport === 'basketball' || sport === 'nfl') {
     const out: AnchorRow[] = [];
@@ -272,13 +275,13 @@ function levelFit(sport: 'basketball' | 'nfl'): LevelState {
   return { test, shifts, k };
 }
 
-const ANCHOR_MARKETS: Record<MarketSport, string[]> = { basketball: ['total', 'spread', 'ml'], nfl: ['total', 'spread', 'ml'], football: ['ou2.5'], tennis: [] };
+const ANCHOR_MARKETS: Record<MarketSport, string[]> = { basketball: ['total', 'spread', 'ml'], nfl: ['total', 'spread', 'ml'], football: ['ou2.5'], tennis: ['ml'] };
 let lastFit: { at: string; out: Record<string, any> } | null = null;
 /** daily (worker, heavy queue): the anchor fits of every sport × market, the scoring levels, then the gates again */
 export async function runMarketFits(now = Date.now()): Promise<Record<string, any>> {
   const out: Record<string, any> = {};
   const since = now - 400 * DAY;
-  for (const sport of ['basketball', 'nfl', 'football'] as MarketSport[]) {
+  for (const sport of ['basketball', 'nfl', 'football', 'tennis'] as MarketSport[]) {
     for (const market of ANCHOR_MARKETS[sport]) {
       const { kind, rows } = anchorRows(sport, market, since);
       const fits = fitAnchorGroups(kind, rows);
@@ -286,6 +289,7 @@ export async function runMarketFits(now = Date.now()): Promise<Record<string, an
       out[`${sport} ${market}`] = Object.fromEntries(Object.entries(fits).map(([g, f]) => [g, `${f.kept ? `w ${f.w}` : 'model only'} (${f.why})`]));
       await yieldLoop();
     }
+    if (sport === 'tennis') clearTennisAnchorCache();
     if (sport === 'basketball' || sport === 'nfl') {
       const lv = levelFit(sport);
       storeAnchor(sport, 'level', lv);
@@ -303,7 +307,9 @@ export async function runMarketFits(now = Date.now()): Promise<Record<string, an
 export const lastMarketFit = () => lastFit;
 export function marketFitDue(now = Date.now()): boolean {
   const r = db.prepare(`SELECT MAX(at) AS at FROM market_anchor`).get() as any;
-  return !r?.at || now - Date.parse(r.at) > 20 * HOUR;
+  // fix293: the tennis winner fit runs on the first look after the deploy (then daily with the others)
+  const tn = db.prepare(`SELECT 1 FROM market_anchor WHERE sport = 'tennis' AND market = 'ml'`).get();
+  return !r?.at || !tn || now - Date.parse(r.at) > 20 * HOUR;
 }
 
 /* ---------- the gap report (Admin → Predictions & models → "Our lines vs the market") ---------- */
@@ -312,13 +318,18 @@ const REPORT_MARKETS: Record<MarketSport, { market: string; kind: AnchorKind; la
   basketball: [{ market: 'total', kind: 'line', label: 'Total points' }, { market: 'spread', kind: 'line', label: 'Spread (home margin)' }, { market: 'ml', kind: 'chance', label: 'Winner (home %)' }],
   nfl: [{ market: 'total', kind: 'line', label: 'Total points' }, { market: 'spread', kind: 'line', label: 'Spread (home margin)' }, { market: 'ml', kind: 'chance', label: 'Winner (home %)' }],
   football: [{ market: 'ou1.5', kind: 'chance', label: 'Over 1.5 goals %' }, { market: 'ou2.5', kind: 'chance', label: 'Over 2.5 goals %' }, { market: 'ou3.5', kind: 'chance', label: 'Over 3.5 goals %' }, { market: 'btts', kind: 'chance', label: 'Both teams score %' }, { market: 'ah', kind: 'line', label: 'Asian handicap (home goal margin)' }],
-  tennis: [{ market: 'total_games', kind: 'line', label: 'Total games' }]
+  tennis: [{ market: 'ml', kind: 'chance', label: 'Winner (player 1 %)' }, { market: 'total_games', kind: 'line', label: 'Total games' }]
 };
 interface Pair { id: number; league: string; ours: number; market: number; actual: number | null; why?: string | null; kickoff: string }
 
 /** our number of a game for a report market: basketball / NFL the saved prediction (shown), football / tennis the saved extras */
 function pairs(sport: MarketSport, market: string, from: number, to: number, settled: boolean): Pair[] {
   const out: Pair[] = [];
+  // fix293: tennis winner — the saved chance against tennis_prices (the closing exchange mid), not market_lines
+  if (sport === 'tennis' && market === 'ml') {
+    return tennisPriced(from, to, settled).map(r => ({ id: r.id, league: r.seg, ours: r.ours * 100, market: r.market * 100, actual: r.won == null ? null : r.won * 100, kickoff: r.kickoff,
+      why: Math.abs(r.ours - r.model) > 0.0005 ? `model ${Math.round(r.model * 1000) / 10}% before the anchor` : null }));
+  }
   const rows = db.prepare(`SELECT game_id, line, prices, closing, kickoff, league FROM market_lines WHERE sport = ? AND market = ? AND kickoff > ? AND kickoff < ? ORDER BY closing`)
     .all(sport, market, iso(from), iso(to)) as any[];
   const mk = new Map<number, any>();
@@ -465,6 +476,12 @@ export function marketHealth(publicOf: (sport: MarketSport, output: string) => b
       if (over && pub.length) level = 'fail';
       items.push(`${lim.label}: last 7 days median |gap| ${week.medianAbs ?? '—'} on ${week.n} games (limit ${lim.limit}${lim.unit === 'chance' ? ' points of chance' : ' points'}), 90 days ${all.medianAbs} on ${all.n}; public: ${pub.join(', ') || 'none'}${over && pub.length ? ' — over the limit' : ''}`);
     }
+    // fix293: tennis winner chance vs the closing exchange price (tennis_prices) and the anchor's fit
+    if (sport === 'tennis') {
+      const win = tennisWinnerHealth(now);
+      items.unshift(win.item);
+      if (win.warn && level === 'ok') level = 'warn';
+    }
     const f = readFeed(sport);
     rows.push({
       id: `market-close-${sport}`, label: `Close to the market (${SPORT_NAME[sport]})`, level,
@@ -473,4 +490,19 @@ export function marketHealth(publicOf: (sport: MarketSport, output: string) => b
     });
   }
   return rows;
+}
+
+/** fix293: the tennis winner line of "Close to the market (tennis)": settled matches with a price, the gap, the anchor */
+export function tennisWinnerHealth(now = Date.now()): { item: string; warn: boolean } {
+  const all = tennisPriced(now - 90 * DAY, now, true), week = all.filter(r => r.t > now - 7 * DAY);
+  const up = tennisPriced(now, now + WINDOW, false);
+  const fit = (anchorFits() as any).tennis?.ml as Record<string, any> | undefined;
+  const g = gapStats(all.map(r => ({ ours: r.ours * 100, market: r.market * 100 }))), gw = gapStats(week.map(r => ({ ours: r.ours * 100, market: r.market * 100 })));
+  const c = closerStats('chance', all.map(r => ({ ours: r.ours, market: r.market, actual: r.won! })));
+  const anchor = !fit ? 'anchor not fitted yet (daily job)' : Object.entries(fit).map(([k, f]: any) => `${k === 'all' ? 'all tours' : k}: ${f.kept ? `weight ${f.w}` : 'model only'} (${f.n} matches)`).join(', ');
+  if (!all.length) return { item: `winner chance: no settled match with a closing price yet (tennis_prices; ${up.length} upcoming priced) — ${anchor}`, warn: true };
+  return {
+    item: `winner chance: ${all.length} settled matches with a closing price in 90 days (last 7 days ${gw.n}, median |gap| ${gw.medianAbs ?? '—'} points of chance), median |gap| ${g.medianAbs} · log loss ours ${c?.oursLogLoss} vs market ${c?.marketLogLoss} · ${anchor}`,
+    warn: all.length < 300
+  };
 }

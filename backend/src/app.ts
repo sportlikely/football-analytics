@@ -124,7 +124,7 @@ import { noteNetworkRequest, noteWho, notePassed } from './services/proxyScraper
 import { quickCheckPage, qcLangOf } from './utils/quickCheck';
 import { shortName } from './utils/tennisNames';
 import { tennisProbe, tennisStatus, tennisSample, tennisDataCheck, tennisMovedId } from './services/tennis';
-import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel } from './services/tennisModel';
+import { tennisModelReport, tennisModelTick, tennisPredictions, tennisPlayerModel, tennisLab, tennisLabText } from './services/tennisModel';
 import { tennisPublic, tennisRid, tennisMatchesBetween, tennisLive, tennisRecent, withTennisPredictions, tennisMatch as tennisMatchB, tennisRecord, levelRank, tennisTournament as tennisTournamentB, tennisPlayer as tennisPlayerB, tennisRankings, tennisSearch, tennisAccuracy, tennisWriteup } from './services/tennisSite';
 import { geoCredit, countryOf } from './services/geo';
 import { bbGameFacts as bbGameFactsB, bbGameSeo, bbGamePath, bbFactsFreshMs } from './services/seo';
@@ -1718,6 +1718,12 @@ app.get('/api/admin/tennis-model', (req, res) => {
   // fix194: in the heavy-job queue like the scheduled ticks
   if (req.query.rebuild === '1' || req.query.retune === '1') { const f = req.query.rebuild === '1' ? 'report' : 'retune'; void tennisModelTick(f).catch(() => undefined); } // fix200: the worker thread (or the heavy() queue in-process)
   try { res.json({ data: tennisModelReport() }); } catch (e) { sendError(res, e, 'Tennis model report failed'); }
+});
+// fix293: the tennis lab (admin only): every idea walk-forward on 2025 + 2026, the market rows, what is promoted. ?run=1 runs it again
+app.get('/api/admin/tennis-lab', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (req.query.run === '1') void tennisModelTick('lab').catch(() => undefined);
+  try { const d = tennisLab(); res.json({ data: { ...d, text: tennisLabText(d.lab) } }); } catch (e) { sendError(res, e, 'Tennis lab failed'); }
 });
 // fix190: ?status=upcoming|done&tour=slam|atp|wta|challenger|itf&limit= — saved predictions with the outcome + the live record
 app.get('/api/admin/tennis/predictions', (req, res) => {
